@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"flag"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -60,7 +61,7 @@ func TestRunRejectsABugOutsideTheCatalog(t *testing.T) {
 	// reaching an API server.
 	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "no-such-kubeconfig"))
 
-	err := run([]string{"--bug=11"})
+	err := run([]string{"--bug=11"}, io.Discard)
 
 	if err == nil {
 		t.Fatal("run accepted --bug=11.")
@@ -71,7 +72,14 @@ func TestRunRejectsABugOutsideTheCatalog(t *testing.T) {
 }
 
 func TestRunPrintsTheUsageForHelp(t *testing.T) {
-	if err := run([]string{"--help"}); !errors.Is(err, flag.ErrHelp) {
+	printed := &strings.Builder{}
+
+	err := run([]string{"--help"}, printed)
+
+	if !errors.Is(err, flag.ErrHelp) {
 		t.Errorf("run returned %v for --help, want flag.ErrHelp so that main exits 0.", err)
+	}
+	if !strings.Contains(printed.String(), "-bug") {
+		t.Errorf("run printed %q for --help, want the usage.", printed.String())
 	}
 }

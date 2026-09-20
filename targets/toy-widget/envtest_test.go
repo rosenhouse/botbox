@@ -5,10 +5,11 @@ package main
 import (
 	"context"
 	"fmt"
-	"io"
 	"maps"
 	"slices"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/util/retry"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -32,84 +34,132 @@ const (
 	pollDeadline = 20 * time.Second
 )
 
-// TestWidgetLifecycle drives one Widget through the operations the harness
-// performs, sharing a control plane because each start costs seconds.
-func TestWidgetLifecycle(t *testing.T) {
+// TestWidgetController exercises the controller against one control plane,
+// because each start costs seconds.
+func TestWidgetController(t *testing.T) {
 	ctx := t.Context()
-	c := startController(t, ctx)
-	widget := createWidget(t, ctx, c, 3)
+	c, logs := startController(t, ctx)
 
-	t.Run("creates one owned ConfigMap per count", func(t *testing.T) {
-		requireChildren(t, ctx, c, widget, 3)
-		requireStatus(t, ctx, c, widget, 3)
-	})
+	// The lifecycle subtests share one Widget and run in order, driving it
+	// through the operations the harness performs.
+	t.Run("lifecycle", func(t *testing.T) {
+		widget := createWidget(t, ctx, c, 3)
 
-	t.Run("creates the missing children on scale up", func(t *testing.T) {
-		setCount(t, ctx, c, widget, 5)
-
-		requireChildren(t, ctx, c, widget, 5)
-		requireStatus(t, ctx, c, widget, 5)
-	})
-
-	t.Run("deletes the surplus children on scale down", func(t *testing.T) {
-		setCount(t, ctx, c, widget, 1)
-
-		requireChildren(t, ctx, c, widget, 1)
-		requireStatus(t, ctx, c, widget, 1)
-	})
-
-	t.Run("recreates a child deleted behind its back", func(t *testing.T) {
-		deleted := &corev1.ConfigMap{}
-		key := client.ObjectKey{Namespace: widget.Namespace, Name: widget.Name + "-0"}
-		if err := c.Get(ctx, key, deleted); err != nil {
-			t.Fatal(err)
-		}
-		if err := c.Delete(ctx, deleted); err != nil {
-			t.Fatal(err)
-		}
-
-		eventually(t, func() error {
-			recreated := &corev1.ConfigMap{}
-			if err := c.Get(ctx, key, recreated); err != nil {
-				return err
-			}
-			if recreated.UID == deleted.UID {
-				return fmt.Errorf("ConfigMap %s is still the deleted one", key.Name)
-			}
-			return nil
+		t.Run("creates one controlled ConfigMap per count", func(t *testing.T) {
+			requireChildren(t, ctx, c, widget, 3)
+			requireStatus(t, ctx, c, widget, 3)
 		})
-		requireChildren(t, ctx, c, widget, 1)
+
+		t.Run("creates the missing children on scale up", func(t *testing.T) {
+			setCount(t, ctx, c, widget, 5)
+
+			requireChildren(t, ctx, c, widget, 5)
+			requireStatus(t, ctx, c, widget, 5)
+		})
+
+		t.Run("deletes the surplus children on scale down", func(t *testing.T) {
+			setCount(t, ctx, c, widget, 1)
+
+			requireChildren(t, ctx, c, widget, 1)
+			requireStatus(t, ctx, c, widget, 1)
+		})
+
+		t.Run("recreates a child deleted behind its back", func(t *testing.T) {
+			deleted := &corev1.ConfigMap{}
+			key := client.ObjectKey{Namespace: widget.Namespace, Name: widget.Name + "-0"}
+			if err := c.Get(ctx, key, deleted); err != nil {
+				t.Fatal(err)
+			}
+			if err := c.Delete(ctx, deleted); err != nil {
+				t.Fatal(err)
+			}
+
+			eventually(t, func() error {
+				recreated := &corev1.ConfigMap{}
+				if err := c.Get(ctx, key, recreated); err != nil {
+					return err
+				}
+				if recreated.UID == deleted.UID {
+					return fmt.Errorf("ConfigMap %s is still the deleted one", key.Name)
+				}
+				return nil
+			})
+			requireChildren(t, ctx, c, widget, 1)
+		})
+
+		t.Run("holds no children at count zero", func(t *testing.T) {
+			setCount(t, ctx, c, widget, 0)
+
+			requireChildren(t, ctx, c, widget, 0)
+			requireStatus(t, ctx, c, widget, 0)
+			requireStatusFieldsExist(t, ctx, c, widget)
+		})
+
+		t.Run("deletes its children and itself on delete", func(t *testing.T) {
+			setCount(t, ctx, c, widget, 2)
+			requireChildren(t, ctx, c, widget, 2)
+
+			if err := c.Delete(ctx, widget); err != nil {
+				t.Fatal(err)
+			}
+
+			requireGone(t, ctx, c, widget)
+			requireChildren(t, ctx, c, widget, 0)
+		})
 	})
 
-	t.Run("holds no children at count zero", func(t *testing.T) {
-		setCount(t, ctx, c, widget, 0)
-
-		requireChildren(t, ctx, c, widget, 0)
-		requireStatus(t, ctx, c, widget, 0)
-		requireStatusFieldsExist(t, ctx, c, widget)
-	})
-
-	t.Run("deletes its children and itself on delete", func(t *testing.T) {
-		if err := c.Delete(ctx, widget); err != nil {
+	t.Run("controls only its own children", func(t *testing.T) {
+		namespace := createNamespace(t, ctx, c)
+		mine := createWidgetIn(t, ctx, c, namespace, "mine", 2)
+		theirs := createWidgetIn(t, ctx, c, namespace, "theirs", 3)
+		requireControlledChildren(t, ctx, c, mine, 2)
+		requireControlledChildren(t, ctx, c, theirs, 3)
+		requireStatus(t, ctx, c, theirs, 3)
+		undisturbed, err := controlledChildren(ctx, c, theirs)
+		if err != nil {
 			t.Fatal(err)
 		}
 
-		eventually(t, func() error {
-			err := c.Get(ctx, client.ObjectKeyFromObject(widget), &toyv1.Widget{})
-			if !apierrors.IsNotFound(err) {
-				return fmt.Errorf("the Widget is still there: %v", err)
-			}
-			return childrenMatch(ctx, c, widget, 0)
-		})
+		if err := c.Delete(ctx, mine); err != nil {
+			t.Fatal(err)
+		}
+
+		requireGone(t, ctx, c, mine)
+		requireChildren(t, ctx, c, theirs, 3)
+		requireStatus(t, ctx, c, theirs, 3)
+		intact, err := controlledChildren(ctx, c, theirs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !maps.Equal(intact, undisturbed) {
+			t.Errorf("The other Widget's ConfigMaps are now %v, want the untouched %v", intact, undisturbed)
+		}
+	})
+
+	t.Run("rejects a count above the maximum", func(t *testing.T) {
+		requireCountRejected(t, ctx, c, 11)
+	})
+
+	t.Run("rejects a negative count", func(t *testing.T) {
+		requireCountRejected(t, ctx, c, -1)
+	})
+
+	// A reconcile that conflicts with its own last write still converges, so
+	// only the log shows it.
+	t.Run("logs no reconcile error", func(t *testing.T) {
+		if logged := logs.String(); strings.Contains(logged, "Reconciler error") {
+			t.Errorf("The manager logged a reconcile error:\n%s", logged)
+		}
 	})
 }
 
 // startController brings up a control plane holding the Widget CRD, runs the
 // reconciler against it, and returns a client that bypasses the controller's
-// cache.
-func startController(t *testing.T, ctx context.Context) client.Client {
+// cache along with the manager's log.
+func startController(t *testing.T, ctx context.Context) (client.Client, *managerLog) {
 	t.Helper()
-	ctrl.SetLogger(zap.New(zap.WriteTo(io.Discard)))
+	logs := &managerLog{}
+	ctrl.SetLogger(zap.New(zap.WriteTo(logs)))
 
 	testCluster, err := cluster.Start(cluster.Options{CRDPaths: []string{"crds"}})
 	if err != nil {
@@ -132,7 +182,11 @@ func startController(t *testing.T, ctx context.Context) client.Client {
 	if err != nil {
 		t.Fatalf("Creating the manager failed: %v", err)
 	}
-	reconciler := &controller.Reconciler{Client: manager.GetClient(), Scheme: manager.GetScheme()}
+	reconciler := &controller.Reconciler{
+		Client:    manager.GetClient(),
+		APIReader: manager.GetAPIReader(),
+		Scheme:    manager.GetScheme(),
+	}
 	if err := reconciler.SetupWithManager(manager); err != nil {
 		t.Fatalf("Setting up the controller failed: %v", err)
 	}
@@ -149,26 +203,59 @@ func startController(t *testing.T, ctx context.Context) client.Client {
 	if err != nil {
 		t.Fatalf("Building a client failed: %v", err)
 	}
-	return uncached
+	return uncached, logs
 }
 
-func createWidget(t *testing.T, ctx context.Context, c client.Client, count int) *toyv1.Widget {
+// managerLog collects what the manager writes from its own goroutines.
+type managerLog struct {
+	mu      sync.Mutex
+	written strings.Builder
+}
+
+func (l *managerLog) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.written.Write(p)
+}
+
+func (l *managerLog) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.written.String()
+}
+
+func createNamespace(t *testing.T, ctx context.Context, c client.Client) string {
 	t.Helper()
 	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "widget-"}}
 	if err := c.Create(ctx, namespace); err != nil {
 		t.Fatalf("Creating a namespace failed: %v", err)
 	}
-	widget := &toyv1.Widget{
-		ObjectMeta: metav1.ObjectMeta{Namespace: namespace.Name, Name: "w"},
+	return namespace.Name
+}
+
+func widgetIn(namespace, name string, count int32) *toyv1.Widget {
+	return &toyv1.Widget{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
 		Spec:       toyv1.WidgetSpec{Count: count},
 	}
+}
+
+func createWidgetIn(t *testing.T, ctx context.Context, c client.Client, namespace, name string, count int32) *toyv1.Widget {
+	t.Helper()
+	widget := widgetIn(namespace, name, count)
 	if err := c.Create(ctx, widget); err != nil {
-		t.Fatalf("Creating a Widget failed: %v", err)
+		t.Fatalf("Creating the Widget %s failed: %v", name, err)
 	}
 	return widget
 }
 
-func setCount(t *testing.T, ctx context.Context, c client.Client, widget *toyv1.Widget, count int) {
+// createWidget puts a Widget in a namespace of its own.
+func createWidget(t *testing.T, ctx context.Context, c client.Client, count int32) *toyv1.Widget {
+	t.Helper()
+	return createWidgetIn(t, ctx, c, createNamespace(t, ctx, c), "w", count)
+}
+
+func setCount(t *testing.T, ctx context.Context, c client.Client, widget *toyv1.Widget, count int32) {
 	t.Helper()
 	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
 		if err := c.Get(ctx, client.ObjectKeyFromObject(widget), widget); err != nil {
@@ -182,14 +269,22 @@ func setCount(t *testing.T, ctx context.Context, c client.Client, widget *toyv1.
 	}
 }
 
-func requireChildren(t *testing.T, ctx context.Context, c client.Client, widget *toyv1.Widget, count int) {
+func requireCountRejected(t *testing.T, ctx context.Context, c client.Client, count int32) {
+	t.Helper()
+	widget := widgetIn(createNamespace(t, ctx, c), "w", count)
+	if err := c.Create(ctx, widget); !apierrors.IsInvalid(err) {
+		t.Errorf("Creating a Widget with count %d returned %v, want the API server to reject it.", count, err)
+	}
+}
+
+func requireChildren(t *testing.T, ctx context.Context, c client.Client, widget *toyv1.Widget, count int32) {
 	t.Helper()
 	eventually(t, func() error { return childrenMatch(ctx, c, widget, count) })
 }
 
 // childrenMatch reports whether the Widget's namespace holds exactly the
 // ConfigMaps its count requires.
-func childrenMatch(ctx context.Context, c client.Client, widget *toyv1.Widget, count int) error {
+func childrenMatch(ctx context.Context, c client.Client, widget *toyv1.Widget, count int32) error {
 	configMaps := &corev1.ConfigMapList{}
 	if err := c.List(ctx, configMaps, client.InNamespace(widget.Namespace)); err != nil {
 		return err
@@ -199,10 +294,7 @@ func childrenMatch(ctx context.Context, c client.Client, widget *toyv1.Widget, c
 		byName[configMap.Name] = configMap
 	}
 
-	want := make([]string, count)
-	for index := range count {
-		want[index] = fmt.Sprintf("%s-%d", widget.Name, index)
-	}
+	want := childNames(widget, count)
 	if got := slices.Sorted(maps.Keys(byName)); !slices.Equal(got, want) {
 		return fmt.Errorf("the namespace holds the ConfigMaps %v, want %v", got, want)
 	}
@@ -212,6 +304,47 @@ func childrenMatch(ctx context.Context, c client.Client, widget *toyv1.Widget, c
 		}
 	}
 	return nil
+}
+
+// requireControlledChildren waits until the Widget controls exactly the
+// ConfigMaps its count requires, whatever else shares the namespace.
+func requireControlledChildren(t *testing.T, ctx context.Context, c client.Client, widget *toyv1.Widget, count int32) {
+	t.Helper()
+	want := childNames(widget, count)
+	eventually(t, func() error {
+		controlled, err := controlledChildren(ctx, c, widget)
+		if err != nil {
+			return err
+		}
+		if got := slices.Sorted(maps.Keys(controlled)); !slices.Equal(got, want) {
+			return fmt.Errorf("the Widget %s controls the ConfigMaps %v, want %v", widget.Name, got, want)
+		}
+		return nil
+	})
+}
+
+func childNames(widget *toyv1.Widget, count int32) []string {
+	names := make([]string, count)
+	for index := range count {
+		names[index] = fmt.Sprintf("%s-%d", widget.Name, index)
+	}
+	return names
+}
+
+// controlledChildren returns the UIDs, by name, of the ConfigMaps the Widget
+// controls.
+func controlledChildren(ctx context.Context, c client.Client, widget *toyv1.Widget) (map[string]types.UID, error) {
+	configMaps := &corev1.ConfigMapList{}
+	if err := c.List(ctx, configMaps, client.InNamespace(widget.Namespace)); err != nil {
+		return nil, err
+	}
+	controlled := map[string]types.UID{}
+	for _, configMap := range configMaps.Items {
+		if owner := metav1.GetControllerOf(&configMap); owner != nil && owner.UID == widget.UID {
+			controlled[configMap.Name] = configMap.UID
+		}
+	}
+	return controlled, nil
 }
 
 func childMatches(child corev1.ConfigMap, widget *toyv1.Widget, index int) error {
@@ -233,7 +366,7 @@ func childMatches(child corev1.ConfigMap, widget *toyv1.Widget, index int) error
 	return nil
 }
 
-func requireStatus(t *testing.T, ctx context.Context, c client.Client, widget *toyv1.Widget, ready int) {
+func requireStatus(t *testing.T, ctx context.Context, c client.Client, widget *toyv1.Widget, ready int32) {
 	t.Helper()
 	eventually(t, func() error {
 		observed := &toyv1.Widget{}
@@ -274,6 +407,26 @@ func requireStatusFieldsExist(t *testing.T, ctx context.Context, c client.Client
 			t.Errorf("The stored status is %v, want it to carry %s.", status, field)
 		}
 	}
+}
+
+// requireGone waits for the Widget and every ConfigMap it controls to disappear.
+func requireGone(t *testing.T, ctx context.Context, c client.Client, widget *toyv1.Widget) {
+	t.Helper()
+	eventually(t, func() error {
+		err := c.Get(ctx, client.ObjectKeyFromObject(widget), &toyv1.Widget{})
+		if !apierrors.IsNotFound(err) {
+			return fmt.Errorf("the Widget %s is still there: %v", widget.Name, err)
+		}
+		left, err := controlledChildren(ctx, c, widget)
+		if err != nil {
+			return err
+		}
+		if len(left) > 0 {
+			return fmt.Errorf("the Widget %s still controls the ConfigMaps %v",
+				widget.Name, slices.Sorted(maps.Keys(left)))
+		}
+		return nil
+	})
 }
 
 // eventually polls check until it passes or the deadline expires.

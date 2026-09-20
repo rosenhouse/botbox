@@ -40,6 +40,7 @@ spec:
             properties:
               count:
                 description: Count is how many ConfigMaps the Widget requires.
+                format: int32
                 maximum: 10
                 minimum: 0
                 type: integer
@@ -55,6 +56,7 @@ spec:
                 type: integer
               ready:
                 description: Ready is how many of those ConfigMaps are present.
+                format: int32
                 type: integer
             type: object
         required:

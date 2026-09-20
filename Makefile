@@ -5,7 +5,7 @@ ENVTEST_K8S_VERSION ?= 1.37.0
 SETUP_ENVTEST_VERSION ?= v0.25.1
 CONTROLLER_GEN_VERSION ?= v0.22.0
 # The release index setup-envtest downloads from, pinned to a controller-tools tag.
-ENVTEST_INDEX_URL ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
+ENVTEST_INDEX_URL ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/$(CONTROLLER_GEN_VERSION)/envtest-releases.yaml
 
 # Project-local tool and asset directories. Both are git-ignored.
 LOCALBIN := $(CURDIR)/bin
@@ -57,7 +57,7 @@ generate:
 
 .PHONY: verify-generate
 verify-generate: generate
-	@stale=$$(git status --porcelain targets/); \
+	@stale=$$(git status --porcelain -- targets/toy-widget/api/v1/zz_generated.deepcopy.go targets/toy-widget/crds); \
 	if [ -n "$$stale" ]; then \
 		echo "Generated files are out of date. Run 'make generate' and commit the result:"; \
 		echo "$$stale"; \

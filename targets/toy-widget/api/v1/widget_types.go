@@ -21,13 +21,13 @@ type WidgetSpec struct {
 	// Count is how many ConfigMaps the Widget requires.
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=10
-	Count int `json:"count"`
+	Count int32 `json:"count"`
 }
 
 type WidgetStatus struct {
 	// Ready is how many of those ConfigMaps are present.
 	// +optional
-	Ready int `json:"ready"`
+	Ready int32 `json:"ready"`
 	// ObservedGeneration is the Widget generation the controller last acted on.
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration"`

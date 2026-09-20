@@ -51,8 +51,10 @@ setup: $(SETUP_ENVTEST)
 	@$(ENVTEST_USE) >/dev/null
 	@echo "The envtest control plane for Kubernetes $(ENVTEST_K8S_VERSION) is installed."
 
+# Silent, because assets-path must print the path and nothing else even when
+# this rule runs first.
 $(SETUP_ENVTEST):
-	GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)
+	@GOBIN=$(LOCALBIN) go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$(SETUP_ENVTEST_VERSION)
 
 .PHONY: assets-path
 assets-path: $(SETUP_ENVTEST)

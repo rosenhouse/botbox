@@ -1,7 +1,13 @@
+# NOTE: the Claude GitHub App runs only workflow files identical to the
+# default branch. This workflow is skipped, with a green check, on any PR
+# that changes it. It first runs on the next PR after such a change merges.
+#
 # PR review agent (DESIGN.md §12): checks every pull request against
 # DESIGN.md §6, §8 and §11 and posts one findings comment citing the
 # sections it applies. Uses inline comments only for line-specific issues.
 # Never edits files.
+# PRs are expected to come from branches of this repository. A PR from a fork gets no
+# secrets, so the review does not run for it.
 name: Claude Review
 
 on:
@@ -23,7 +29,6 @@ jobs:
       - uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          use_sticky_comment: true
           claude_args: |
             --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*)"
             --max-turns 40
@@ -39,7 +44,7 @@ jobs:
             3. Review the diff against those sections. Every finding must cite the section it applies, for example "§11 controller-runtime boundary".
 
             Check specifically:
-            - Any import of sigs.k8s.io/controller-runtime outside targets/toy-widget/ and pkg/cluster (§11).
+            - Any import of sigs.k8s.io/controller-runtime in the root module outside targets/toy-widget/ and pkg/cluster; the separate modules under docs/spikes/ are exempt (§11).
             - A README fenced block preceded by `<!-- embed: <path> -->` whose content differs from that file (§11).
             - The PR description names the milestone and the invariant/property IDs it touches, and has a "Design change" section if DESIGN.md changed (§11).
             - Any change to an invariant's meaning that is not accompanied by an edit to §6 in the same PR (§12).

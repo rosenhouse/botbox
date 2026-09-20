@@ -11,7 +11,7 @@ It checks generic invariants that need no per-controller configuration, plus opt
 
 ## Install
 
-Planned; not usable yet.
+botbox does not install yet.
 
 ```sh
 go install github.com/rosenhouse/botbox/cmd/botbox@latest
@@ -21,7 +21,7 @@ botbox also needs an envtest control plane: install `setup-envtest` and use it t
 
 ## Quickstart: cert-manager
 
-This section will hold the exact script CI runs, embedded from `examples/cert-manager/quickstart.sh` behind an HTML comment of the form `<!-- embed: examples/cert-manager/quickstart.sh -->`. A unit test checks the embedded block against that file byte-for-byte. That keeps the quickstart from ever drifting from what CI runs (DESIGN.md §11). It arrives in M4.
+Arrives in M4. This section will embed `examples/cert-manager/quickstart.sh`, the script CI runs, with a test checking the two byte-for-byte (DESIGN.md §11).
 
 cert-manager publishes no installable binary. The M4 example instead clones the pinned tag and runs `go build` ([DESIGN.md §8.1](DESIGN.md#81-targetyaml), [§10 M4](DESIGN.md#10-milestones)). The intended shape:
 
@@ -50,22 +50,6 @@ ready: >-                                     # CEL over metadata, spec, status;
   has(status.conditions) && status.conditions.exists(c,
     c.type == "Ready" && c.status == "True"
     && has(c.observedGeneration) && c.observedGeneration == metadata.generation)
-equalIgnore:                                  # dotted paths excluded from G5 equality (§6)
-  - status.renewalTime
-properties:                                   # optional per-target checks, IDs P1..Pn
-  - id: P1
-    description: A Certificate never owns more than one Secret.
-    cel: managed.filter(o, o.kind == "Secret").size() <= 1
-    when: checkpoint                          # always | checkpoint | end
-generate:
-  mutate:                                     # allowlist of paths; absent means every schema path
-    - spec.dnsNames
-    - spec.duration
-    - spec.privateKey.algorithm
-    - spec.privateKey.rotationPolicy
-  overlay:                                    # per-path schema tightening
-    spec.dnsNames: {minItems: 1, maxItems: 3}
-    spec.duration: {enum: ["1h", "24h", "2160h"]}
 launch:
   binary: bin/cert-manager-controller
   args:
@@ -73,16 +57,11 @@ launch:
     - --leader-elect=false
     - --enable-certificate-owner-ref=true
     - --metrics-listen-address=127.0.0.1:0
-timeouts:                                     # optional; defaults in §6
-  settle: 30s
-  stable: 10s
-  delete: 60s
 ```
 
 `primary` is the one CRD your sequences act on. `fixtures` are objects botbox applies once, before op 0, that generation never mutates, such as the Issuer a Certificate needs.
-`manages` lists the other kinds your controller owns, which drives attribution for the invariants. `ready` is a CEL expression over `metadata`, `spec` and `status` that must evaluate to a boolean.
-`properties` are optional per-target checks, also in CEL, evaluated against the primary CR and the list of `managed` objects.
-`launch` says how to exec your controller binary, with `$KUBECONFIG` substituted for the proxy's address.
+`manages` lists the other kinds your controller owns, which drives attribution for the invariants. `launch` says how to exec your controller binary, with `$KUBECONFIG` substituted for the proxy's address.
+The full example, including `properties`, `generate` and `timeouts`, is [DESIGN.md §8.1](DESIGN.md#81-targetyaml).
 
 ## Reading a report
 
@@ -91,7 +70,7 @@ The run directory also keeps `target.log`, `requests.jsonl` (the proxy log) and 
 
 ## Running in CI
 
-Planned. The shape below is the intended recipe for adopters once M4 and M6 land.
+The shape below is the intended recipe for adopters once M4 and M6 land.
 
 ```yaml
 - uses: actions/setup-go@v5
@@ -120,7 +99,7 @@ Six generic invariants apply to every target. See [DESIGN.md §6](DESIGN.md#6-ge
 
 ## Development
 
-- `make setup` — install the Go module cache, `setup-envtest`, and the envtest control-plane binaries.
+- `make setup` — download modules and install `setup-envtest` and the envtest control-plane binaries.
 - `make test` — unit tests; no API server.
 - `make test-envtest` — tests against a local envtest control plane; under 5 minutes in CI.
 - `make fmt` / `make vet` — `gofmt` and `go vet`.

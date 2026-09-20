@@ -27,9 +27,4 @@ in DESIGN.md §6 and implemented in `pkg/invariant`. Follow this procedure.
    regenerated `docs/bug-matrix.md` with a non-empty row for the new ID (§9.1, the
    M3/M6 acceptance criteria).
 
-5. **Never retry or sleep to make it pass.** Flakiness is a harness bug, not the
-   target's. If the invariant is unstable, tune its window instead of adding a retry
-   or a sleep (§5.6, §11).
-
-6. **Name the new ID in the PR description**, alongside the milestone and any other
-   invariant or property IDs the PR touches (§11).
+5. **Never retry or sleep to make it pass.** Tune the window instead (§5.6, §11).

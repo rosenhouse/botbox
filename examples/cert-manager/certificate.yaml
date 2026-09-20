@@ -1,0 +1,14 @@
+# The sample primary CR. commonName and dnsNames satisfy the webhook-only rule
+# that a Certificate names at least one identity (DESIGN.md §8.3).
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: example
+spec:
+  secretName: example-tls
+  commonName: example.test
+  dnsNames:
+    - example.test
+  issuerRef:
+    name: selfsigned
+    kind: Issuer

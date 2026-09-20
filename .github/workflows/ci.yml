@@ -89,3 +89,45 @@ jobs:
           key: envtest-${{ runner.os }}-${{ hashFiles('Makefile') }}
       - name: The bug matrix is current
         run: make verify-bug-matrix
+
+  # The cert-manager adoption example of DESIGN.md §10 (M4). §11 budgets the
+  # tier at ten minutes, and the timeout adds the cold clone and build of the
+  # controller, about 90 seconds, that a cache miss pays for.
+  example:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cache envtest control-plane binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin/envtest
+            bin/setup-envtest
+          key: envtest-${{ runner.os }}-${{ hashFiles('Makefile') }}
+      - name: Read the cert-manager pin
+        id: pin
+        run: echo "version=$(make --no-print-directory cert-manager-version)" >>"$GITHUB_OUTPUT"
+      # The clone is read only while building, so only the build's output is
+      # worth keeping. The stamp is what tells make the binary is current.
+      - name: Cache the cert-manager controller
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin/cert-manager-controller
+            bin/cert-manager-${{ steps.pin.outputs.version }}.built
+          key: cert-manager-${{ runner.os }}-${{ steps.pin.outputs.version }}
+      - name: The cert-manager example and its negative control
+        run: make test-example
+      # A failing run's evidence is the product of the failure (§5.7, §11).
+      - name: Keep the failing run's evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: botbox-out
+          path: botbox-out/
+          if-no-files-found: ignore

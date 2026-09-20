@@ -189,10 +189,14 @@ The Runner executes one sequence:
 
 1. Create a fresh namespace. Apply the target's fixtures. Start the target via the
    Launcher.
-2. Apply ops in order. After each op that mutates the CR, wait up to `T_settle` for
-   convergence (G4) unless the op sets `noSettle`. A settle wait that expires while no
-   fault is active records a G4 violation and ends the run at that op.
-3. Evaluate invariants and properties at each checkpoint (§4).
+2. Apply ops in order. After each op that mutates the CR or a managed object, wait up to
+   `T_settle` for convergence unless the op sets `noSettle`. The wait ends once the
+   `Ready` predicate holds and neither the CR nor a managed object has changed for
+   `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
+   that expires while no fault is active records a G4 violation.
+3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
+   violation. More than `N_objects` (default 500) managed objects in the namespace ends
+   the run as a harness limit, reported as such rather than as a finding.
 4. Tear down. Clear every active fault and wait `T_stable`. Delete the primary CR if it
    still exists and wait for the G3 window. Then force-remove any finalizer still present
    in the run namespace; each forced removal is recorded in the report and invalidates G3
@@ -245,8 +249,8 @@ nothing garbage-collects owned objects, namespaces never finish terminating, no 
 service accounts appear, and no pods run. Consequences:
 
 - **Garbage-collector emulation.** In envtest mode botbox runs a minimal collector over
-  the run namespace: it deletes a managed object once every owner in its
-  `ownerReferences` is gone. An owner is resolved by (apiVersion, kind, name) in the run
+  the run namespace: it deletes a managed object that has at least one ownerReference
+  once every owner in its `ownerReferences` is gone; an object with none is never touched. An owner is resolved by (apiVersion, kind, name) in the run
   namespace and then by UID; a name match with a different UID counts as gone. An owner of
   a kind botbox does not watch is treated as live, so the emulator never deletes an object
   whose owners it cannot resolve; it logs each unresolved reference once per run. The
@@ -264,8 +268,8 @@ real targets; the toy target sets much shorter ones (§9).
 
 | ID | Name | Statement | Signal |
 |---|---|---|---|
-| **G1** | Bounded reconciliation | With the CR spec unchanged and no faults active, the target's API request rate falls to zero (excluding watch requests and writes to `coordination.k8s.io` leases) within `T_settle` (default 30s) and stays there for `T_stable` (default 10s). | Proxy log |
-| **G2** | No churn | Once converged under a stable spec, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
+| **G1** | Bounded reconciliation | With the CR spec unchanged and no faults active, the target's API request rate falls to zero (excluding watch requests and writes to `coordination.k8s.io` leases) within `T_settle` (default 30s) and stays there for `T_stable` (default 10s): the window checked is `[T_settle, T_settle + T_stable]` after the last op. | Proxy log |
+| **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, and within `T_settle` after faults stop, the target's `Ready` predicate holds. This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
@@ -385,6 +389,8 @@ timeouts:                                     # optional; defaults in §6
   settle: 30s
   stable: 10s
   delete: 60s
+thresholds:                                   # optional; defaults in §6
+  errloop: 20                                 # N_errloop for G6
 ```
 
 `manages` names kinds as `group/version/Kind`, with `v1/Kind` for the core group. An
@@ -496,16 +502,16 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 
 | ID | Bug | Class | Should trip |
 |---|---|---|---|
-| B1 | Writes `status.ready = count` before creating children, and holds that state for 2 s so P1 trips deterministically | intermediate-state | P1 |
+| B1 | Writes `status.ready = count` before creating children, and holds that state for 3 s so P1 trips deterministically; the hold must satisfy `T_stable < hold < T_settle` | intermediate-state | P1 |
 | B2 | Uses `generateName` for children and never deletes surplus ones, so every reconcile adds duplicates | non-idempotent | G1, G2 |
 | B3 | Omits the ownerReference on child `<widget>-0` and counts children by name, so it converges and the orphan surfaces on deletion | orphan | G3 |
 | B4 | Reads `count` from `status.ready` instead of `spec.count` | stale-state | G4 |
 | B5 | Treats NotFound on child Get as an error and requeues forever. The Get is an uncached read (`mgr.GetAPIReader()`), so the failing request reaches the proxy | error loop | G6, G1 |
 | B6 | Writes a fresh `status.lastSyncTime` (microsecond precision, so consecutive writes differ) on every reconcile, so every write re-triggers the controller | churn | G1, G2 |
 | B7 | Does not delete children on `count` decrease | scale-down | G4 |
-| B8 | Does not `Own()` ConfigMaps, so a deleted child is never recreated | unobserved-state | G4 (after a `DeleteManaged` op removes a child) |
+| B8 | Does not `Own()` ConfigMaps, so a deleted child is never recreated. The toy's `ready` does not depend on the children, so G4 stays true | unobserved-state | P1 (at the checkpoint after a `DeleteManaged` op), G5 (after a `Restart` recreates the child) |
 | B9 | Removes the finalizer on the first deletion reconcile, before deleting children, and omits ownerReferences on every child, so no path cleans up | cleanup-ordering | G3 |
-| B10 | Writes status only from an in-memory flag set when it created children. After a `Restart` the flag is gone, so a later spec change converges the children but leaves `status` stale | intermediate-state | G4 |
+| B10 | Writes status only from an in-memory flag set when it created children. After a `Restart` the flag is gone, so a later scale-down converges the children but leaves `status` stale (a scale-up creates a child and re-arms the flag) | intermediate-state | G4 |
 
 Three of the classes are Sieve's bug patterns (§13): intermediate-state, stale-state,
 and unobserved-state. The other classes are this repo's own.
@@ -607,10 +613,11 @@ proxy; the `Image` launcher. Separate design addendum.
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `docs/`, and `bin/` for git-ignored
   build output.
-- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D]`;
+- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]...`;
   `botbox replay --target <yaml> [--deadline D] <sequence.json>`; `botbox version`.
   `--deadline` defaults to 4m; the shrinker stops at the deadline and reports the smallest
-  failing sequence found so far. `--kubeconfig` selects an existing cluster instead of
+  failing sequence found so far. `--launch-arg` appends to `launch.args` (repeatable; a
+  later flag wins), which is how the bug matrix selects `--bug=N`. `--kubeconfig` selects an existing cluster instead of
   envtest; `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
   harness error.
@@ -779,3 +786,8 @@ built from source and run as a black-box binary.
   directly.
 - **D22 The toy's P1 is evaluated at checkpoints.** Evaluated on every Observer event, a
   `DeleteManaged` op makes every controller violate it during its reaction time.
+- **D23 A settle wait ends on quiescence, G2 covers the primary CR, thresholds are
+  per target, the collector ignores ownerless objects, and `--launch-arg` selects a bug.**
+  Without these, the correct controller fails P1 after `DeleteManaged`, B6 escapes G2, B5
+  escapes G6 under controller-runtime's backoff, B3 and B9 lose their evidence, and the
+  bug matrix needs ten target files.

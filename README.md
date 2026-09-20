@@ -2,7 +2,7 @@
 
 A black-box property-based and fault-injection harness for Kubernetes controllers.
 
-**Status:** pre-alpha, milestone M0 (scaffold). The commands below are the intended interface and do not run yet. See [DESIGN.md §10](DESIGN.md#10-milestones) for the milestone plan.
+**Status:** pre-alpha, milestone M1 (toy target). The commands below are the intended interface and do not run yet. See [DESIGN.md §10](DESIGN.md#10-milestones) for the milestone plan.
 
 ## What botbox does
 

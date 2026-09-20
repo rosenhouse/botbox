@@ -24,3 +24,5 @@ timeouts:
   settle: 5s
   stable: 2s
   delete: 10s
+thresholds:
+  errloop: 5

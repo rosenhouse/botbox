@@ -48,8 +48,8 @@ it, so the next PR is its first live test.
 ### Right
 
 The toy converged in milliseconds and survived SIGKILL at the earliest reachable point.
-The CRD schema rejected every invalid count server-side. Mutation checks caught every
-seeded-bug branch and every review fix.
+The CRD schema rejected every invalid count server-side. Every seeded-bug branch has a
+test that fails when the branch is removed; a review still found one dead function.
 
 ### Wrong in the first draft
 
@@ -64,6 +64,10 @@ seeded-bug branch and every review fix.
 - B2 was unobservable unless it also kept surplus children.
 - P1 evaluated on every Observer event fails every controller after a `DeleteManaged`
   op (D22).
+- Four catalog rows named a check that could not fire: B5 needs a per-target `errloop`
+  threshold, B6 needs G2 to cover the primary CR, B8 is caught by P1 and G5 rather than
+  G4, and B10 only after a scale-down. A settle wait now requires quiescence, so a
+  checkpoint lands after the target's reaction.
 
 ### What fixed it
 

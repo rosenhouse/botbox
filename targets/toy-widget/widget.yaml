@@ -1,0 +1,6 @@
+apiVersion: toy.botbox/v1
+kind: Widget
+metadata:
+  name: widget
+spec:
+  count: 3

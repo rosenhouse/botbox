@@ -1,0 +1,343 @@
+package launch_test
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"fmt"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/rosenhouse/botbox/pkg/launch"
+)
+
+// forever keeps the shell alive without exec'ing away, so that it can still
+// handle signals.
+const forever = "while :; do sleep 0.1; done"
+
+type safeBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *safeBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *safeBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+// newBinary launches script through /bin/sh, with args as its positional
+// parameters.
+func newBinary(t *testing.T, grace time.Duration, script string, args ...string) (*launch.Binary, *safeBuffer) {
+	t.Helper()
+	log := &safeBuffer{}
+	binary := launch.NewBinary(launch.Options{
+		Path:        "/bin/sh",
+		Args:        append([]string{"-c", script, "sh"}, args...),
+		Log:         log,
+		GracePeriod: grace,
+	})
+	t.Cleanup(func() { _ = binary.Stop(context.Background()) })
+	return binary, log
+}
+
+// kubeconfigPath is a stand-in for the kubeconfig the proxy writes. The
+// launcher exports and substitutes the path without reading the file.
+func kubeconfigPath(t *testing.T) string {
+	t.Helper()
+	return filepath.Join(t.TempDir(), "kubeconfig")
+}
+
+func mustStart(t *testing.T, binary *launch.Binary) string {
+	t.Helper()
+	kubeconfig := kubeconfigPath(t)
+	if err := binary.Start(t.Context(), kubeconfig); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	return kubeconfig
+}
+
+func waitForLog(t *testing.T, log *safeBuffer, want string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(log.String(), want) {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("the target log never held %q; it holds %q.", want, log.String())
+}
+
+// waitForLogCount waits for want to appear in the log exactly count times.
+func waitForLogCount(t *testing.T, log *safeBuffer, want string, count int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Count(log.String(), want) >= count {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := strings.Count(log.String(), want); got != count {
+		t.Fatalf("the target log holds %q %d times, want %d; it holds %q.", want, got, count, log.String())
+	}
+}
+
+var pidLine = regexp.MustCompile(`pid=(\d+)`)
+
+func pidFromLog(t *testing.T, log *safeBuffer) int {
+	t.Helper()
+	waitForLog(t, log, "pid=")
+	match := pidLine.FindStringSubmatch(log.String())
+	pid, err := strconv.Atoi(match[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pid
+}
+
+func requireGone(t *testing.T, pid int) {
+	t.Helper()
+	if err := syscall.Kill(pid, 0); !errors.Is(err, syscall.ESRCH) {
+		t.Errorf("process %d was not reaped; signalling it reported %v.", pid, err)
+	}
+}
+
+func TestStartSendsOutputToTheLog(t *testing.T) {
+	binary, log := newBinary(t, 0, "echo to stdout; echo to stderr >&2; "+forever)
+
+	mustStart(t, binary)
+
+	waitForLog(t, log, "to stdout")
+	waitForLog(t, log, "to stderr")
+}
+
+func TestStartSubstitutesKubeconfig(t *testing.T) {
+	// ${KUBECONFIG} reads the environment; $KUBECONFIG in the argument is
+	// substituted before the target runs (DESIGN.md §5.1).
+	binary, log := newBinary(t, 0, `echo "arg=$1"; echo "env=${KUBECONFIG}"; `+forever, "--kubeconfig=$KUBECONFIG")
+
+	kubeconfig := mustStart(t, binary)
+
+	waitForLog(t, log, "arg=--kubeconfig="+kubeconfig)
+	waitForLog(t, log, "env="+kubeconfig)
+}
+
+func TestStopTerminatesGracefully(t *testing.T) {
+	binary, log := newBinary(t, 5*time.Second, `trap 'echo caught SIGTERM; exit 0' TERM; echo pid=$$; `+forever)
+	mustStart(t, binary)
+	pid := pidFromLog(t, log)
+
+	if err := binary.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	if !strings.Contains(log.String(), "caught SIGTERM") {
+		t.Errorf("Stop did not send SIGTERM first; the log holds %q.", log.String())
+	}
+	requireGone(t, pid)
+}
+
+func TestStopEscalatesToSIGKILL(t *testing.T) {
+	grace := 200 * time.Millisecond
+	binary, log := newBinary(t, grace, `trap "" TERM; echo pid=$$; `+forever)
+	mustStart(t, binary)
+	pid := pidFromLog(t, log)
+
+	start := time.Now()
+	if err := binary.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if elapsed < grace {
+		t.Errorf("Stop returned after %v, before the grace period of %v elapsed.", elapsed, grace)
+	}
+	if elapsed > grace+5*time.Second {
+		t.Errorf("Stop took %v, far beyond the grace period of %v.", elapsed, grace)
+	}
+	requireGone(t, pid)
+}
+
+func TestStopEscalatesWhenTheContextExpires(t *testing.T) {
+	// The grace period is the default, which outlasts the context.
+	binary, log := newBinary(t, 0, `trap "" TERM; echo pid=$$; `+forever)
+	mustStart(t, binary)
+	pid := pidFromLog(t, log)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	if err := binary.Stop(ctx); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	if elapsed := time.Since(start); elapsed >= launch.DefaultGracePeriod {
+		t.Errorf("Stop took %v; it waited out the grace period instead of the context.", elapsed)
+	}
+	requireGone(t, pid)
+}
+
+// TestStopWaitsTheDefaultGracePeriod covers Options.GracePeriod left unset.
+func TestStopWaitsTheDefaultGracePeriod(t *testing.T) {
+	binary, log := newBinary(t, 0, `trap "" TERM; echo pid=$$; `+forever)
+	mustStart(t, binary)
+	pid := pidFromLog(t, log)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- binary.Stop(ctx) }()
+
+	select {
+	case err := <-stopped:
+		t.Fatalf("Stop returned at once, with %v; the default grace period is %v.", err, launch.DefaultGracePeriod)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err := <-stopped; err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+	requireGone(t, pid)
+}
+
+func TestStopIsIdempotent(t *testing.T) {
+	binary, _ := newBinary(t, 0, forever)
+	mustStart(t, binary)
+
+	for i := range 2 {
+		if err := binary.Stop(t.Context()); err != nil {
+			t.Fatalf("Stop %d failed: %v", i, err)
+		}
+	}
+}
+
+func TestStopAfterTheTargetExits(t *testing.T) {
+	binary, log := newBinary(t, 0, "echo done")
+	mustStart(t, binary)
+	waitForLog(t, log, "done")
+
+	if err := binary.Stop(t.Context()); err != nil {
+		t.Errorf("Stop failed after the target exited on its own: %v", err)
+	}
+}
+
+// TestRestartWaitsForTheOldProcessToBeReaped proves the ordering DESIGN.md
+// §5.1 requires: the replacement starts only once the old process and whatever
+// it spawned are gone, so that a fixed port or lock file is free. The script
+// leaves a child holding the lock for half a second after the kill.
+func TestRestartWaitsForTheOldProcessToBeReaped(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "target.lock")
+	script := fmt.Sprintf(`
+if [ -e %[1]q ]; then echo predecessor=holds-the-lock; else echo predecessor=gone; fi
+: > %[1]q
+( sleep 0.5; rm -f %[1]q ) &
+echo pid=$$
+%s`, lock, forever)
+	binary, log := newBinary(t, 0, script)
+	mustStart(t, binary)
+	first := pidFromLog(t, log)
+
+	if err := binary.Restart(t.Context()); err != nil {
+		t.Fatalf("Restart failed: %v", err)
+	}
+
+	requireGone(t, first)
+	waitForLogCount(t, log, "predecessor=gone", 2)
+}
+
+// TestRestartCrashesTheTarget pins the Restart of DESIGN.md §5.1: SIGKILL, so
+// the target never runs its shutdown path.
+func TestRestartCrashesTheTarget(t *testing.T) {
+	binary, log := newBinary(t, 0, `trap 'echo shutting down; exit 0' TERM; echo pid=$$; `+forever)
+	mustStart(t, binary)
+	pidFromLog(t, log)
+
+	if err := binary.Restart(t.Context()); err != nil {
+		t.Fatalf("Restart failed: %v", err)
+	}
+
+	waitForLogCount(t, log, "pid=", 2)
+	if strings.Contains(log.String(), "shutting down") {
+		t.Errorf("Restart let the target shut down gracefully; the log holds %q.", log.String())
+	}
+}
+
+func TestRestartRunsTheTargetAgain(t *testing.T) {
+	binary, log := newBinary(t, 0, `echo "running with [${KUBECONFIG}]"; `+forever)
+	kubeconfig := mustStart(t, binary)
+	waitForLog(t, log, "running with ["+kubeconfig+"]")
+
+	if err := binary.Restart(t.Context()); err != nil {
+		t.Fatalf("Restart failed: %v", err)
+	}
+
+	waitForLogCount(t, log, "running with ["+kubeconfig+"]", 2)
+}
+
+func TestRestartBeforeStart(t *testing.T) {
+	binary, _ := newBinary(t, 0, forever)
+
+	if err := binary.Restart(t.Context()); err == nil {
+		t.Error("Restart started a target that had never been started.")
+	}
+}
+
+func TestStartTwice(t *testing.T) {
+	binary, _ := newBinary(t, 0, forever)
+	mustStart(t, binary)
+
+	if err := binary.Start(t.Context(), kubeconfigPath(t)); err == nil {
+		t.Error("Start ran a second process while the first was still running.")
+	}
+}
+
+func TestStartRejectsAMissingBinary(t *testing.T) {
+	binary := launch.NewBinary(launch.Options{Path: filepath.Join(t.TempDir(), "no-such-binary")})
+
+	err := binary.Start(t.Context(), kubeconfigPath(t))
+	if err == nil {
+		t.Fatal("Start accepted a binary that does not exist.")
+	}
+	if !strings.Contains(err.Error(), "no-such-binary") {
+		t.Errorf("Start reported %q, which does not name the binary.", err)
+	}
+}
+
+func TestRestartRejectsADoneContext(t *testing.T) {
+	binary, log := newBinary(t, 0, "echo started; "+forever)
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if err := binary.Restart(ctx); err == nil {
+		t.Error("Restart ran the target again although its context was already done.")
+	}
+	waitForLogCount(t, log, "started", 1)
+}
+
+func TestStartRejectsADoneContext(t *testing.T) {
+	binary, log := newBinary(t, 0, "echo started; "+forever)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	if err := binary.Start(ctx, kubeconfigPath(t)); err == nil {
+		t.Error("Start ran the target although its context was already done.")
+	}
+	if log.String() != "" {
+		t.Errorf("Start ran the target; its log holds %q.", log.String())
+	}
+}

@@ -5,3 +5,5 @@ botbox-out/
 # Go test artifacts.
 *.test
 *.out
+# Worktrees that subagents create for isolated work.
+.claude/worktrees/

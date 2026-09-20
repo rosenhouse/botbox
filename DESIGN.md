@@ -457,7 +457,8 @@ JSONPath is not supported anywhere.
 primary CR as dynamic maps; a missing field binds to an empty map. A property binds those
 three plus `managed`, the list of managed objects as dynamic maps, each carrying
 `apiVersion`, `kind`, `metadata` and the object's other top-level fields. The standard
-macros (`exists`, `all`, `has`, `map`, `filter`) and the string extensions are available.
+macros (`exists`, `all`, `has`, `map`, `filter`) and the string extensions are available. At a checkpoint the harness reads `managed` from the API server, not from the
+Observer cache, so cross-informer ordering cannot produce a false finding.
 
 A compile error or a non-boolean result is a configuration error (exit code 2, §11), never
 a finding. An expression is evaluated against objects that may not yet carry the fields it
@@ -486,7 +487,7 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 - The controller sets those ownerReferences **except** where a seeded bug says otherwise.
 - `ready`: `has(status.observedGeneration) && status.observedGeneration ==
   metadata.generation && has(status.ready) && status.ready == spec.count`.
-- `P1`, `when: always`: `status.ready` never exceeds the number of Widget-owned ConfigMaps
+- `P1`, `when: checkpoint`: `status.ready` never exceeds the number of Widget-owned ConfigMaps
   present. In CEL, `!has(status.ready) || status.ready <= managed.filter(o, o.kind ==
   "ConfigMap").size()`.
 - `timeouts: {settle: 5s, stable: 2s, delete: 10s}`. The toy converges in milliseconds.
@@ -594,7 +595,8 @@ proxy; the `Image` launcher. Separate design addendum.
   live in `go.mod` only: `k8s.io/{api,apimachinery,client-go}` v0.37.x,
   `sigs.k8s.io/controller-runtime` v0.25.x, `pgregory.net/rapid` v1.3.x,
   `github.com/google/cel-go` v0.30.x. Tool and target pins live in one Makefile variable
-  each: `ENVTEST_K8S_VERSION`, `SETUP_ENVTEST_VERSION`, `ENVTEST_INDEX_URL`, and, from
+  each: `ENVTEST_K8S_VERSION`, `SETUP_ENVTEST_VERSION`, `CONTROLLER_GEN_VERSION` (which
+  also pins the envtest release index), and, from
   M4, `CERT_MANAGER_VERSION`. Values live in the Makefile only. Bumps are their own PRs,
   never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
@@ -775,3 +777,5 @@ built from source and run as a black-box binary.
 - **D21 Equality is the §6 default plus `equalIgnore`, not a CEL expression.** A
   CEL expression would have to re-implement the per-path exemptions a path list states
   directly.
+- **D22 The toy's P1 is evaluated at checkpoints.** Evaluated on every Observer event, a
+  `DeleteManaged` op makes every controller violate it during its reaction time.

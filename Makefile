@@ -3,8 +3,9 @@
 
 ENVTEST_K8S_VERSION ?= 1.37.0
 SETUP_ENVTEST_VERSION ?= v0.25.1
+CONTROLLER_GEN_VERSION ?= v0.22.0
 # The release index setup-envtest downloads from, pinned to a controller-tools tag.
-ENVTEST_INDEX_URL ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
+ENVTEST_INDEX_URL ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/$(CONTROLLER_GEN_VERSION)/envtest-releases.yaml
 
 # Project-local tool and asset directories. Both are git-ignored.
 LOCALBIN := $(CURDIR)/bin
@@ -21,12 +22,17 @@ ENVTEST_USE := $(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --index $(ENVTEST_IND
 .PHONY: help
 help:
 	@echo "Targets:"
-	@echo "  setup         Download modules and install the envtest control plane."
-	@echo "  assets-path   Print the KUBEBUILDER_ASSETS directory and nothing else."
-	@echo "  test          Run the unit tier. No API server."
-	@echo "  test-envtest  Run the envtest tier."
-	@echo "  fmt           Fail if any file needs gofmt."
-	@echo "  vet           Run go vet over both tiers."
+	@echo "  setup             Download modules and install the envtest control plane."
+	@echo "  assets-path       Print the KUBEBUILDER_ASSETS directory and nothing else."
+	@echo "  build             Build bin/botbox and bin/toy-widget."
+	@echo "  generate          Write the toy target's deepcopy code and CRD YAML."
+	@echo "  verify-generate   Fail if a generated file is stale."
+	@echo "  bug-matrix        Write docs/bug-matrix.md from the toy's seeded bugs."
+	@echo "  verify-bug-matrix Fail if docs/bug-matrix.md is stale."
+	@echo "  test              Run the unit tier. No API server."
+	@echo "  test-envtest      Run the envtest tier."
+	@echo "  fmt               Fail if any file needs gofmt."
+	@echo "  vet               Run go vet over both tiers."
 
 .PHONY: setup
 setup: $(SETUP_ENVTEST)
@@ -40,6 +46,45 @@ $(SETUP_ENVTEST):
 .PHONY: assets-path
 assets-path: $(SETUP_ENVTEST)
 	@$(ENVTEST_USE)
+
+.PHONY: build
+build:
+	go build -o bin/botbox ./cmd/botbox
+	go build -o bin/toy-widget ./targets/toy-widget
+
+.PHONY: generate
+generate:
+	go run sigs.k8s.io/controller-tools/cmd/controller-gen@$(CONTROLLER_GEN_VERSION) \
+		object paths=./targets/toy-widget/api/... \
+		crd paths=./targets/toy-widget/api/... output:crd:artifacts:config=targets/toy-widget/crds
+
+.PHONY: verify-generate
+verify-generate: generate
+	@stale=$$(git status --porcelain -- targets/toy-widget/api/v1/zz_generated.deepcopy.go targets/toy-widget/crds); \
+	if [ -n "$$stale" ]; then \
+		echo "Generated files are out of date. Run 'make generate' and commit the result:"; \
+		echo "$$stale"; \
+		exit 1; \
+	fi
+
+# One run per seeded bug of DESIGN.md §9.1, under envtest. The deadline covers
+# every run of the invocation.
+.PHONY: bug-matrix
+bug-matrix: build setup
+	KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox matrix \
+		--target targets/toy-widget/target.yaml \
+		--sequences targets/toy-widget/sequences \
+		--out docs/bug-matrix.md \
+		--deadline 8m
+
+.PHONY: verify-bug-matrix
+verify-bug-matrix: bug-matrix
+	@stale=$$(git status --porcelain -- docs/bug-matrix.md); \
+	if [ -n "$$stale" ]; then \
+		echo "docs/bug-matrix.md is out of date. Run 'make bug-matrix' and commit the result:"; \
+		git --no-pager diff -- docs/bug-matrix.md; \
+		exit 1; \
+	fi
 
 .PHONY: test
 test:

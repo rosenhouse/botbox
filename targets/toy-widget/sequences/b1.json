@@ -1,0 +1,20 @@
+{
+  "seed": 20260920,
+  "target": "toy-widget",
+  "ops": [
+    {
+      "i": 0,
+      "t": "create",
+      "obj": {
+        "apiVersion": "toy.botbox/v1",
+        "kind": "Widget",
+        "metadata": {
+          "name": "widget"
+        },
+        "spec": {
+          "count": 3
+        }
+      }
+    }
+  ]
+}

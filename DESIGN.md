@@ -3,8 +3,7 @@
 A black-box property-based and fault-injection harness for Kubernetes controllers.
 
 This document is the governing design for the repo. Coding agents implement against it,
-the PR review agent reviews against it, and the triage agent reads it when explaining a
-failure. If the code and this document disagree, one of them is wrong and the PR must say
+and the reviewers it spawns review against it. If the code and this document disagree, one of them is wrong and the PR must say
 which. §15 records the decisions behind the design and the evidence for them.
 
 ---
@@ -189,10 +188,14 @@ The Runner executes one sequence:
 
 1. Create a fresh namespace. Apply the target's fixtures. Start the target via the
    Launcher.
-2. Apply ops in order. After each op that mutates the CR, wait up to `T_settle` for
-   convergence (G4) unless the op sets `noSettle`. A settle wait that expires while no
-   fault is active records a G4 violation and ends the run at that op.
-3. Evaluate invariants and properties at each checkpoint (§4).
+2. Apply ops in order. After each op that mutates the CR or a managed object, wait up to
+   `T_settle` for convergence unless the op sets `noSettle`. The wait ends once the
+   `Ready` predicate holds and neither the CR nor a managed object has changed for
+   `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
+   that expires while no fault is active records a G4 violation.
+3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
+   violation. More than `N_objects` (default 500) managed objects in the namespace ends
+   the run as a harness limit, reported as such rather than as a finding.
 4. Tear down. Clear every active fault and wait `T_stable`. Delete the primary CR if it
    still exists and wait for the G3 window. Then force-remove any finalizer still present
    in the run namespace; each forced removal is recorded in the report and invalidates G3
@@ -226,9 +229,6 @@ version timeline), the target and versions, the seed, and a one-line replay comm
 run directory also holds recordings of the run (§11), so a report can be re-examined without
 re-running.
 
-The triage agent reads `report.md` and proposes a root-cause hypothesis. Its output is
-advisory and goes in a PR comment, never in the report itself.
-
 ### 5.8 Test cluster
 
 botbox owns the API server a run executes against.
@@ -245,8 +245,8 @@ nothing garbage-collects owned objects, namespaces never finish terminating, no 
 service accounts appear, and no pods run. Consequences:
 
 - **Garbage-collector emulation.** In envtest mode botbox runs a minimal collector over
-  the run namespace: it deletes a managed object once every owner in its
-  `ownerReferences` is gone. An owner is resolved by (apiVersion, kind, name) in the run
+  the run namespace: it deletes a managed object that has at least one ownerReference
+  once every owner in its `ownerReferences` is gone; an object with none is never touched. An owner is resolved by (apiVersion, kind, name) in the run
   namespace and then by UID; a name match with a different UID counts as gone. An owner of
   a kind botbox does not watch is treated as live, so the emulator never deletes an object
   whose owners it cannot resolve; it logs each unresolved reference once per run. The
@@ -264,12 +264,21 @@ real targets; the toy target sets much shorter ones (§9).
 
 | ID | Name | Statement | Signal |
 |---|---|---|---|
-| **G1** | Bounded reconciliation | With the CR spec unchanged and no faults active, the target's API request rate falls to zero (excluding watch requests and writes to `coordination.k8s.io` leases) within `T_settle` (default 30s) and stays there for `T_stable` (default 10s). | Proxy log |
-| **G2** | No churn | Once converged under a stable spec, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
+| **G1** | Bounded reconciliation | With the CR spec unchanged and no faults active, the target's API request rate falls to zero (excluding watch requests and every request to `coordination.k8s.io` leases, since leader election reads as well as writes) within `T_settle` (default 30s) and stays there for `T_stable` (default 10s): the window checked is `[T_settle, T_settle + T_stable]` after the last op. | Proxy log |
+| **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, and within `T_settle` after faults stop, the target's `Ready` predicate holds. This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
 | **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. | Proxy log |
+
+**The teardown boundary.** No invariant window reaches past the instant the Runner
+begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
+namespace and the attribution below no longer holds. A window that would close after it
+is not judged, rather than judged early: judging early would hold the target to less than
+`T_settle`, and where the boundary falls would depend on harness timing. G3 is the
+exception, since §5.5 step 4 opens its window deliberately, and §4's teardown checkpoint
+still evaluates properties. A primary CR with a deletionTimestamp need not satisfy
+`Ready`: it is being deleted, so G3 judges it, not G4.
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
 namespace that is neither a fixture nor created by botbox. The namespace is private to one
@@ -385,6 +394,8 @@ timeouts:                                     # optional; defaults in §6
   settle: 30s
   stable: 10s
   delete: 60s
+thresholds:                                   # optional; defaults in §6
+  errloop: 20                                 # N_errloop for G6
 ```
 
 `manages` names kinds as `group/version/Kind`, with `v1/Kind` for the core group. An
@@ -392,8 +403,9 @@ optional `selector` (label selector) refines attribution (§6). Paths under `gen
 in `equalIgnore` are dotted paths into the object. A Go hook may replace the equality
 predicate as `equal: go:<name>` (§8.4).
 
-A property's `when` says where it is evaluated: `always` on every Observer event,
-`checkpoint` at each checkpoint (§4), `end` at the last checkpoint only.
+A property's `when` says where it is evaluated: `always` on every Observer event before
+the teardown boundary (§6), `checkpoint` at each checkpoint (§4), `end` at the last
+checkpoint only.
 
 cert-manager v1.21.2 binds its healthz server to a fixed `0.0.0.0:9403` with no
 command-line flag to move it, so runs against this target are sequential. Its metrics
@@ -457,7 +469,8 @@ JSONPath is not supported anywhere.
 primary CR as dynamic maps; a missing field binds to an empty map. A property binds those
 three plus `managed`, the list of managed objects as dynamic maps, each carrying
 `apiVersion`, `kind`, `metadata` and the object's other top-level fields. The standard
-macros (`exists`, `all`, `has`, `map`, `filter`) and the string extensions are available.
+macros (`exists`, `all`, `has`, `map`, `filter`) and the string extensions are available. At a checkpoint the harness reads `managed` from the API server, not from the
+Observer cache, so cross-informer ordering cannot produce a false finding.
 
 A compile error or a non-boolean result is a configuration error (exit code 2, §11), never
 a finding. An expression is evaluated against objects that may not yet carry the fields it
@@ -486,7 +499,7 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 - The controller sets those ownerReferences **except** where a seeded bug says otherwise.
 - `ready`: `has(status.observedGeneration) && status.observedGeneration ==
   metadata.generation && has(status.ready) && status.ready == spec.count`.
-- `P1`, `when: always`: `status.ready` never exceeds the number of Widget-owned ConfigMaps
+- `P1`, `when: checkpoint`: `status.ready` never exceeds the number of Widget-owned ConfigMaps
   present. In CEL, `!has(status.ready) || status.ready <= managed.filter(o, o.kind ==
   "ConfigMap").size()`.
 - `timeouts: {settle: 5s, stable: 2s, delete: 10s}`. The toy converges in milliseconds.
@@ -495,16 +508,16 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 
 | ID | Bug | Class | Should trip |
 |---|---|---|---|
-| B1 | Writes `status.ready = count` before creating children, and holds that state for 2 s so P1 trips deterministically | intermediate-state | P1 |
-| B2 | Uses `generateName` for children; re-reconcile creates duplicates | non-idempotent | G1, G2 |
-| B3 | Omits ownerReference on child `<widget>-0` | orphan | G3 |
+| B1 | Writes `status.ready = count` before creating children, and holds that state for 3 s so P1 trips deterministically; the hold must satisfy `T_stable < hold < T_settle` | intermediate-state | P1 |
+| B2 | Uses `generateName` for children and never deletes surplus ones, so every reconcile adds duplicates | non-idempotent | G1, G2 |
+| B3 | Omits the ownerReference on child `<widget>-0` and counts children by name, so it converges and the orphan surfaces on deletion | orphan | G3 |
 | B4 | Reads `count` from `status.ready` instead of `spec.count` | stale-state | G4 |
 | B5 | Treats NotFound on child Get as an error and requeues forever. The Get is an uncached read (`mgr.GetAPIReader()`), so the failing request reaches the proxy | error loop | G6, G1 |
-| B6 | Writes a fresh `status.lastSyncTime` on every reconcile, so every write re-triggers the controller | churn | G1, G2 |
+| B6 | Writes a fresh `status.lastSyncTime` (microsecond precision, so consecutive writes differ) on every reconcile, so every write re-triggers the controller | churn | G1, G2 |
 | B7 | Does not delete children on `count` decrease | scale-down | G4 |
-| B8 | Does not `Own()` ConfigMaps, so a deleted child is never recreated | unobserved-state | G4 (after a `DeleteManaged` op removes a child) |
+| B8 | Does not `Own()` ConfigMaps, so a deleted child is never recreated. The toy's `ready` does not depend on the children, so G4 stays true | unobserved-state | P1 (at the checkpoint after a `DeleteManaged` op), G5 (after a `Restart` recreates the child) |
 | B9 | Removes the finalizer on the first deletion reconcile, before deleting children, and omits ownerReferences on every child, so no path cleans up | cleanup-ordering | G3 |
-| B10 | Writes status only from an in-memory flag set when it created children. After a `Restart` the flag is gone, so a later spec change converges the children but leaves `status` stale | intermediate-state | G4 |
+| B10 | Writes status only from an in-memory flag set when it created children. After a `Restart` the flag is gone, so a later scale-down converges the children but leaves `status` stale (a scale-up creates a child and re-arms the flag) | intermediate-state | G4 |
 
 Three of the classes are Sieve's bug patterns (§13): intermediate-state, stale-state,
 and unobserved-state. The other classes are this repo's own.
@@ -532,13 +545,8 @@ span several PRs.
 - `README.md` in the §11 shape with a status line.
 - `docs/journal.md`.
 - One skill, `add-invariant`, documenting the procedure used from M3 on.
-- Claude Code PR review against this document.
-- A failure-triage workflow posting a comment.
 
-The review workflow cannot run on the PR that introduces it, because the Claude GitHub
-App only runs workflow files identical to the default branch. Acceptance: `make
-test-envtest` passes both in CI and in a fresh web session; on the first PR after M0
-merges, the review comment cites a section of this document.
+Acceptance: `make test-envtest` passes both in CI and in a fresh web session.
 
 **M1 — Toy target.** `Widget` CRD and controller built as `bin/toy-widget` with `--bug`
 and B1–B10 implemented behind it; `targets/toy-widget/target.yaml`. Plain envtest tests
@@ -579,9 +587,8 @@ failure to ≤ 3 ops without a hand-written sequence; the cert-manager example s
 generated runs, with fixed seeds on PRs and random seeds nightly.
 
 **M6 — Faults and report.** FaultSpec injection (Error, Delay, Drop); `report.json` and
-`report.md`; triage agent reads the report. Acceptance: a fault makes the toy fail an
-invariant it passes without the fault; a report from a seeded bug gets a triage comment
-with a correct root cause.
+`report.md`. Acceptance: a fault makes the toy fail an invariant it passes without the
+fault, and its report names the invariant, the minimized sequence and the evidence.
 
 **M7 (phase 2) — Second target.** A multi-cluster sync controller as `Binary` target,
 forcing two-API-server envtest and cross-cluster faults; watch-event dropping in the
@@ -594,21 +601,22 @@ proxy; the `Image` launcher. Separate design addendum.
   live in `go.mod` only: `k8s.io/{api,apimachinery,client-go}` v0.37.x,
   `sigs.k8s.io/controller-runtime` v0.25.x, `pgregory.net/rapid` v1.3.x,
   `github.com/google/cel-go` v0.30.x. Tool and target pins live in one Makefile variable
-  each: `ENVTEST_K8S_VERSION`, `SETUP_ENVTEST_VERSION`, `ENVTEST_INDEX_URL`, and, from
+  each: `ENVTEST_K8S_VERSION`, `SETUP_ENVTEST_VERSION`, `CONTROLLER_GEN_VERSION` (which
+  also pins the envtest release index), and, from
   M4, `CERT_MANAGER_VERSION`. Values live in the Makefile only. Bumps are their own PRs,
   never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
   import it. The rule covers the root module; the spike modules under `docs/spikes/` are
-  separate and exempt. Everything else uses client-go and apimachinery. The review agent flags
-  violations.
+  separate and exempt. Everything else uses client-go and apimachinery.
 - **Layout.** `cmd/botbox/`, `pkg/cluster`, `pkg/proxy`, `pkg/observe`,
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `docs/`, and `bin/` for git-ignored
   build output.
-- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D]`;
+- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]...`;
   `botbox replay --target <yaml> [--deadline D] <sequence.json>`; `botbox version`.
   `--deadline` defaults to 4m; the shrinker stops at the deadline and reports the smallest
-  failing sequence found so far. `--kubeconfig` selects an existing cluster instead of
+  failing sequence found so far. `--launch-arg` appends to `launch.args` (repeatable; a
+  later flag wins), which is how the bug matrix selects `--bug=N`. `--kubeconfig` selects an existing cluster instead of
   envtest; `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
   harness error.
@@ -647,18 +655,19 @@ proxy; the `Image` launcher. Separate design addendum.
   this document first. Works red/green: a failing test first, then the minimum code
   (CLAUDE.md). Does not change invariant definitions without a PR that edits §6 in the
   same change.
-- **Review agent (PR workflow):** checks the PR against §6, §8, §11. Must cite the
-  section it is applying. Flags any import of controller-runtime outside the two places
-  §11 allows, a README embed block that differs from its file, a post whose first line is
-  not `🤖 Created by Claude 🤖`, and a PR description that lacks the milestone, the IDs,
-  or the "Design change" section when this document changed.
-- **Triage agent (failure workflow):** reads `report.md` and the failing test output,
-  proposes one root-cause hypothesis and one next experiment. Never edits code.
+- **Reviewers (subagents):** before claiming a change is done, the coding agent spawns
+  at least one adversarial reviewer with fresh context, using the personas CLAUDE.md
+  lists. A reviewer reads the diff against §6, §8 and §11, citing the section it applies,
+  and it may run the code: start a cluster, drive the binary, mutate a function and check
+  that a test dies. It flags any import of controller-runtime outside the two places §11
+  allows, a README embed block that differs from its file, a post whose first line is not
+  `🤖 Created by Claude 🤖`, and a PR description that lacks the milestone, the IDs, or
+  the "Design change" section when this document changed. Reviewers never merge.
 - **Journal:** `docs/journal.md`, one entry per milestone, recording what the agents
   got right, what they got wrong, and which prompt, skill, or convention change fixed
   it. This is a first-class deliverable of the repo.
 
-**Autonomy.** Decided with the maintainer on 2026-09-20 (§15, D15–D16):
+**Autonomy.** Decided with the maintainer on 2026-09-20 (§15, D15, D16, D24):
 
 - The coding agent decides alone: package internals within the §11 layout; names; test
   structure; windows within the §6 defaults; CLI flags consistent with §11; patch and
@@ -670,10 +679,11 @@ proxy; the `Image` launcher. Separate design addendum.
 - The coding agent stops and asks before: changing the license, the module path or other
   public names; editing `CLAUDE.md`; changing CI secrets or permissions; publishing a
   release; replacing cert-manager as the adoption example.
-- **Merging.** The agent merges its own PR once CI is green on the head commit and a
-  review comment for that head commit exists and reports no blocking finding. A review
-  job that succeeds without posting a comment does not satisfy this; the agent says so
-  on the PR and leaves the merge to a human. It never force-pushes a shared branch.
+- **Merging.** The agent merges its own PR once CI is green on the head commit, with a
+  squash merge. Before it merges, the PR description must record the adversarial reviews
+  it ran, what they found and how each finding was addressed, so the trail is auditable
+  after the fact. An unaddressed blocking finding stops the merge. It never force-pushes
+  a shared branch.
 - **Continuation.** Work does not wait for a human. A scheduled Routine starts a fresh
   session every hour. Each session reads this document and the journal, then looks for an
   open Claude PR. If one exists and another session touched it within the last two hours,
@@ -753,10 +763,10 @@ built from source and run as a black-box binary.
 - **D14 B2 trips G1 and G2, not G3; B9 omits ownerReferences as well as ordering the
   finalizer wrongly.** Garbage collection removes owned duplicates and owned children, so
   G3 cannot see either bug otherwise.
-- **D15 The agent merges its own PR once CI is green and a review comment for that head
-  commit exists and reports no blocking finding; it amends this document in the same PR
-  when needed; a human is asked only for the items listed in §12.** Chosen by the
-  maintainer for unattended progress.
+- **D15 The agent merges its own PR once CI is green on the head commit and the PR
+  records the adversarial reviews it ran; it amends this document in the same PR when
+  needed; a human is asked only for the items listed in §12.** Chosen by the maintainer
+  for unattended progress, and amended by D24.
 - **D16 License Apache-2.0; continuation by scheduled sessions, continuous rather than
   throttled.** Chosen by the maintainer, with the instruction that spend is fine when well
   spent: subagents with fresh context and cheaper models where the task allows.
@@ -775,3 +785,20 @@ built from source and run as a black-box binary.
 - **D21 Equality is the §6 default plus `equalIgnore`, not a CEL expression.** A
   CEL expression would have to re-implement the per-path exemptions a path list states
   directly.
+- **D22 The toy's P1 is evaluated at checkpoints.** Evaluated on every Observer event, a
+  `DeleteManaged` op makes every controller violate it during its reaction time.
+- **D23 A settle wait ends on quiescence, G2 covers the primary CR, thresholds are
+  per target, the collector ignores ownerless objects, and `--launch-arg` selects a bug.**
+  Without these, the correct controller fails P1 after `DeleteManaged`, B6 escapes G2, B5
+  escapes G6 under controller-runtime's backoff, B3 and B9 lose their evidence, and the
+  bug matrix needs ten target files.
+- **D24 Every Claude GitHub workflow is removed, and the merge gate rests on
+  the adversarial reviews instead.** They ran eleven times across two PRs and posted
+  nothing, because the repository holds no API secret, leaving a red check on every
+  push. A reviewer that only reads a diff is also weaker than one that starts a
+  cluster and mutates the code, which is where every finding so far came from. The
+  `@claude` mention workflow went with them, so nothing in CI needs an API secret.
+- **D25 No invariant window reaches past the teardown boundary, and a CR under deletion
+  need not be `Ready`.** The rule was in the code for G1, G2 and G6 and in no document.
+  G4 and `always` properties lacked it, so the teardown's own delete made a correct
+  target read as unconverged: one bug-matrix row flapped between runs.

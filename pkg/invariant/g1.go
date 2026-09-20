@@ -1,0 +1,61 @@
+package invariant
+
+import (
+	"fmt"
+
+	"github.com/rosenhouse/botbox/pkg/proxy"
+)
+
+// leases are the objects a leader-electing target keeps writing however
+// quiet it is (DESIGN.md §6, G1).
+const leaseGroup, leaseResource = "coordination.k8s.io", "leases"
+
+// BoundedReconciliation is G1: with the spec unchanged and no fault active,
+// the target's API request rate falls to zero within T_settle and stays there
+// for T_stable (DESIGN.md §6).
+func BoundedReconciliation(in Input) (Result, error) {
+	out := Result{ID: "G1"}
+	for _, window := range in.quietWindows() {
+		noisy := in.requestsIn(window, reconciles)
+		if len(noisy) == 0 {
+			continue
+		}
+		out.violate(Violation{
+			Statement: fmt.Sprintf("the target made %d API requests in %s, which §6 requires to be quiet",
+				len(noisy), window),
+			At:       noisy[0].Start,
+			Requests: recent(noisy),
+		})
+	}
+	return out, nil
+}
+
+// requestsIn returns the requests keep accepts that the target started inside
+// the window.
+func (in Input) requestsIn(window quiet, keep func(proxy.Request) bool) []proxy.Request {
+	var inside []proxy.Request
+	for _, r := range in.Requests {
+		if r.Start.Before(window.start) || r.Start.After(window.end) || !keep(r) {
+			continue
+		}
+		inside = append(inside, r)
+	}
+	return inside
+}
+
+// reconciles reports whether a request counts towards the rate G1 bounds. A
+// watch is the target waiting, and a lease write is it holding leadership.
+func reconciles(r proxy.Request) bool {
+	if r.Watch || r.Verb == "watch" {
+		return false
+	}
+	return !(r.Group == leaseGroup && r.Resource == leaseResource && writes(r.Verb))
+}
+
+func writes(verb string) bool {
+	switch verb {
+	case "create", "update", "patch", "delete", "deletecollection":
+		return true
+	}
+	return false
+}

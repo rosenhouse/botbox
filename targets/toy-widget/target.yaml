@@ -1,0 +1,28 @@
+# The toy target (DESIGN.md §9), declared in the shape of DESIGN.md §8.1.
+name: toy-widget
+version: dev
+crds:
+  - crds/
+primary: toy.botbox/v1/Widget
+sample: widget.yaml
+manages:
+  - v1/ConfigMap
+ready: >-
+  has(status.observedGeneration) && status.observedGeneration == metadata.generation
+  && has(status.ready) && status.ready == spec.count
+properties:
+  - id: P1
+    description: status.ready never exceeds the number of ConfigMaps present.
+    cel: '!has(status.ready) || status.ready <= managed.filter(o, o.kind == "ConfigMap").size()'
+    when: checkpoint
+launch:
+  binary: bin/toy-widget
+  args:
+    - --kubeconfig=$KUBECONFIG
+    - --bug=0
+timeouts:
+  settle: 5s
+  stable: 2s
+  delete: 10s
+thresholds:
+  errloop: 5

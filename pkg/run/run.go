@@ -1,0 +1,309 @@
+// Package run brings the machinery of one run up and down (DESIGN.md §5.5): a
+// test cluster, a namespace private to the run, the proxy the target talks to,
+// the Observer, the garbage-collector emulation and the target process. The
+// Runner drives it; ops, invariants and shrinking are not here.
+package run
+
+import (
+	"context"
+	"crypto/rand"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/restmapper"
+
+	"github.com/rosenhouse/botbox/pkg/cluster"
+	"github.com/rosenhouse/botbox/pkg/launch"
+	"github.com/rosenhouse/botbox/pkg/observe"
+	"github.com/rosenhouse/botbox/pkg/proxy"
+	"github.com/rosenhouse/botbox/pkg/target"
+)
+
+// The run directory holds these files (DESIGN.md §11).
+const (
+	kubeconfigFile = "kubeconfig"
+	targetLogFile  = "target.log"
+	requestsFile   = "requests.jsonl"
+	objectsFile    = "objects.jsonl"
+	sequenceFile   = "sequence.json"
+)
+
+// namespacePrefix opens the name of a run namespace.
+const namespacePrefix = "botbox-run-"
+
+// Options configure one run.
+type Options struct {
+	// Dir receives the run's files: the target's kubeconfig and target.log,
+	// and the recordings Stop writes (DESIGN.md §11).
+	Dir string
+	// Seed drives the proxy's fault sampling, so that a replay faults the same
+	// requests. Run takes it from the sequence.
+	Seed int64
+	// Config reaches a control plane the caller already started. Runs share
+	// one, because the shrinker replays a sequence many times (DESIGN.md §5.5).
+	// A nil Config starts an envtest cluster for this run alone.
+	Config *rest.Config
+	// GarbageCollected says the cluster deletes owned objects itself. envtest
+	// does not, so botbox emulates the collector unless this is set
+	// (DESIGN.md §5.8).
+	GarbageCollected bool
+	// Check evaluates the invariants and properties at each checkpoint. Run
+	// requires it; Start does not use it.
+	Check Checker
+	// MaxManaged ends a run whose namespace holds more managed objects, as a
+	// harness limit rather than a finding. Zero takes the default of
+	// DESIGN.md §5.5.
+	MaxManaged int
+}
+
+func (o Options) maxManaged() int {
+	if o.MaxManaged > 0 {
+		return o.MaxManaged
+	}
+	return defaultMaxManaged
+}
+
+// Harness is one run's machinery.
+type Harness struct {
+	// Namespace is private to this run and never reused (DESIGN.md §5.5).
+	Namespace string
+	// Config reaches the API server directly. botbox's own writes never go
+	// through the proxy (DESIGN.md §5.3).
+	Config   *rest.Config
+	Proxy    *proxy.Proxy
+	Observer *observe.Observer
+	Launcher launch.Launcher
+
+	target *target.Target
+	dir    string
+	down   teardown
+}
+
+// Start brings the run up in the order DESIGN.md §5.5 requires and leaves the
+// target running. A failure takes back down whatever came up. The caller must
+// call Stop.
+func Start(ctx context.Context, t *target.Target, opts Options) (*Harness, error) {
+	if err := validate(t, opts); err != nil {
+		return nil, fmt.Errorf("starting the run: %w", err)
+	}
+	h := &Harness{target: t, dir: opts.Dir}
+	if err := h.start(ctx, opts); err != nil {
+		return nil, errors.Join(fmt.Errorf("starting the run: %w", err), h.down.run(ctx))
+	}
+	return h, nil
+}
+
+func validate(t *target.Target, opts Options) error {
+	if t == nil {
+		return errors.New("a target is required")
+	}
+	if opts.Dir == "" {
+		return errors.New("an output directory is required")
+	}
+	if opts.GarbageCollected && opts.Config == nil {
+		return errors.New("a garbage-collected cluster must come with a Config: botbox starts envtest, which collects nothing")
+	}
+	return nil
+}
+
+func (h *Harness) start(ctx context.Context, opts Options) error {
+	if err := os.MkdirAll(opts.Dir, 0o755); err != nil {
+		return fmt.Errorf("creating the run directory: %w", err)
+	}
+	targetLog, err := os.Create(filepath.Join(opts.Dir, targetLogFile))
+	if err != nil {
+		return fmt.Errorf("creating %s: %w", targetLogFile, err)
+	}
+	h.down.push("closing "+targetLogFile, func(context.Context) error { return targetLog.Close() })
+
+	if h.Config = opts.Config; h.Config == nil {
+		started, err := cluster.Start(cluster.Options{CRDPaths: h.target.CRDs})
+		if err != nil {
+			return err
+		}
+		h.down.push("stopping the test cluster", func(context.Context) error { return started.Stop() })
+		h.Config = started.Config()
+	}
+
+	core, err := kubernetes.NewForConfig(h.Config)
+	if err != nil {
+		return fmt.Errorf("building botbox's client: %w", err)
+	}
+	if err := h.createNamespace(ctx, core); err != nil {
+		return err
+	}
+	h.down.push("deleting the run namespace", func(ctx context.Context) error {
+		return deleteNamespace(ctx, core, h.Namespace)
+	})
+
+	if h.Proxy, err = proxy.Start(h.Config, proxy.Options{Seed: opts.Seed}); err != nil {
+		return err
+	}
+	h.down.push("stopping the proxy", func(context.Context) error { return h.Proxy.Stop() })
+	kubeconfig := filepath.Join(opts.Dir, kubeconfigFile)
+	if err := h.Proxy.Kubeconfig(kubeconfig); err != nil {
+		return err
+	}
+
+	h.Observer, err = observe.Start(h.Config, observe.Options{
+		Namespace: h.Namespace,
+		Primary:   h.target.Primary,
+		Manages:   h.target.Manages,
+		Selector:  h.target.Selector,
+	})
+	if err != nil {
+		return err
+	}
+	h.down.push("stopping the observer", func(context.Context) error { h.Observer.Stop(); return nil })
+	if err := h.Observer.WaitForSync(ctx); err != nil {
+		return err
+	}
+
+	if !opts.GarbageCollected {
+		collector, err := cluster.StartCollector(h.Config, cluster.CollectorOptions{
+			Namespace: h.Namespace,
+			Kinds:     watchedKinds(h.target),
+		})
+		if err != nil {
+			return err
+		}
+		h.down.push("stopping the collector", func(context.Context) error { collector.Stop(); return nil })
+	}
+
+	if err := h.applyFixtures(ctx); err != nil {
+		return err
+	}
+
+	h.Launcher = launch.NewBinary(launch.Options{
+		Path: h.target.Launch.Binary,
+		Args: h.target.Launch.Args,
+		Log:  targetLog,
+	})
+	if err := h.Launcher.Start(ctx, kubeconfig); err != nil {
+		return err
+	}
+	h.down.push("stopping the target", h.Launcher.Stop)
+	return nil
+}
+
+// Stop takes the run down in the reverse of the order Start brought it up, and
+// writes the run's recordings (DESIGN.md §5.7). Emptying the namespace is the
+// Runner's own step (§5.5).
+func (h *Harness) Stop(ctx context.Context) error {
+	return errors.Join(h.down.run(ctx), h.writeRecordings())
+}
+
+func (h *Harness) createNamespace(ctx context.Context, core kubernetes.Interface) error {
+	name := newNamespaceName()
+	namespace := &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}}
+	if _, err := core.CoreV1().Namespaces().Create(ctx, namespace, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("creating the run namespace: %w", err)
+	}
+	h.Namespace = name
+	return nil
+}
+
+func deleteNamespace(ctx context.Context, core kubernetes.Interface, name string) error {
+	err := core.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
+// newNamespaceName returns a name no other run takes (DESIGN.md §5.5), so that
+// a namespace left terminating by envtest is harmless.
+func newNamespaceName() string {
+	return namespacePrefix + strings.ToLower(rand.Text()[:8])
+}
+
+// watchedKinds are the kinds botbox watches: the primary CR and every managed
+// kind. The collector resolves an owner only among them (DESIGN.md §5.8), and
+// managed objects are commonly owned by the CR.
+func watchedKinds(t *target.Target) []schema.GroupVersionKind {
+	kinds := []schema.GroupVersionKind{t.Primary}
+	for _, gvk := range t.Manages {
+		if !slices.Contains(kinds, gvk) {
+			kinds = append(kinds, gvk)
+		}
+	}
+	return kinds
+}
+
+// applyFixtures creates the target's fixtures in the run namespace and tells
+// the Observer botbox created them, so that they never count as managed
+// (DESIGN.md §6).
+func (h *Harness) applyFixtures(ctx context.Context) error {
+	if len(h.target.Fixtures) == 0 {
+		return nil
+	}
+	client, err := dynamic.NewForConfig(h.Config)
+	if err != nil {
+		return fmt.Errorf("building botbox's dynamic client: %w", err)
+	}
+	mapper, err := restMapper(h.Config)
+	if err != nil {
+		return err
+	}
+	for _, declared := range h.target.Fixtures {
+		fixture := declared.DeepCopy()
+		fixture.SetNamespace(h.Namespace)
+		gvk := fixture.GroupVersionKind()
+		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+		if err != nil {
+			return fmt.Errorf("resolving the fixture %s %s: %w", gvk.Kind, fixture.GetName(), err)
+		}
+		if mapping.Scope.Name() != meta.RESTScopeNameNamespace {
+			return fmt.Errorf("the fixture %s %s is cluster-scoped, and a run owns one namespace", gvk.Kind, fixture.GetName())
+		}
+		created, err := client.Resource(mapping.Resource).Namespace(h.Namespace).
+			Create(ctx, fixture, metav1.CreateOptions{})
+		if err != nil {
+			return fmt.Errorf("creating the fixture %s %s: %w", gvk.Kind, fixture.GetName(), err)
+		}
+		h.Observer.MarkBotboxCreated(gvk, created.GetName())
+	}
+	return nil
+}
+
+// restMapper resolves a fixture's kind to the resource it is served at.
+func restMapper(config *rest.Config) (meta.RESTMapper, error) {
+	client, err := discovery.NewDiscoveryClientForConfig(config)
+	if err != nil {
+		return nil, fmt.Errorf("building botbox's discovery client: %w", err)
+	}
+	groups, err := restmapper.GetAPIGroupResources(client)
+	if err != nil {
+		return nil, fmt.Errorf("discovering the API resources: %w", err)
+	}
+	return restmapper.NewDiscoveryRESTMapper(groups), nil
+}
+
+func (h *Harness) writeRecordings() error {
+	return errors.Join(
+		writeFile(filepath.Join(h.dir, requestsFile), h.Proxy.WriteLog),
+		writeFile(filepath.Join(h.dir, objectsFile), h.Observer.WriteHistory),
+	)
+}
+
+func writeFile(path string, write func(io.Writer) error) error {
+	file, err := os.Create(path)
+	if err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return errors.Join(write(file), file.Close())
+}

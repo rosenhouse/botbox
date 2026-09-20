@@ -1,0 +1,75 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.22.0
+  name: widgets.toy.botbox
+spec:
+  group: toy.botbox
+  names:
+    kind: Widget
+    listKind: WidgetList
+    plural: widgets
+    singular: widget
+  scope: Namespaced
+  versions:
+  - name: v1
+    schema:
+      openAPIV3Schema:
+        description: Widget owns one ConfigMap per index below spec.count.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            properties:
+              count:
+                description: Count is how many ConfigMaps the Widget requires.
+                format: int32
+                maximum: 10
+                minimum: 0
+                type: integer
+            required:
+            - count
+            type: object
+          status:
+            properties:
+              lastSyncTime:
+                description: |-
+                  LastSyncTime is when the controller last reconciled. Only the seeded bug
+                  B6 writes it, and it holds microseconds so that every write lands as a
+                  change (DESIGN.md §9.1).
+                format: date-time
+                type: string
+              observedGeneration:
+                description: ObservedGeneration is the Widget generation the controller
+                  last acted on.
+                format: int64
+                type: integer
+              ready:
+                description: Ready is how many of those ConfigMaps are present.
+                format: int32
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

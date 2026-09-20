@@ -9,9 +9,8 @@ import (
 // violation carries into the report (DESIGN.md §5.7).
 const maxEvidence = 20
 
-// quiet is the window [T_settle, T_settle + T_stable] after an op, in which
-// DESIGN.md §6 requires the run to have converged and gone still. G1 and G2
-// both check it.
+// quiet is the T_stable that follows an op's settle wait, in which DESIGN.md
+// §6 requires the run to have gone still. G1 and G2 both check it.
 type quiet struct {
 	op         Op
 	start, end time.Time
@@ -25,13 +24,13 @@ func (w quiet) String() string {
 // end under an unchanged spec and no fault.
 func (in Input) quietWindows() []quiet {
 	var windows []quiet
-	timeouts := in.timeouts()
+	stable := in.timeouts().Stable
 	for i, op := range in.Ops {
-		w := quiet{
-			op:    op,
-			start: op.Time.Add(timeouts.Settle),
-			end:   op.Time.Add(timeouts.Settle + timeouts.Stable),
+		settled, ok := in.settleEnd(op.Index)
+		if !ok {
+			continue
 		}
+		w := quiet{op: op, start: settled, end: settled.Add(stable)}
 		if !in.observed(w.end) || in.faulted(op.Time, w.end) || in.tornDown(w.end) {
 			continue
 		}
@@ -41,6 +40,18 @@ func (in Input) quietWindows() []quiet {
 		windows = append(windows, w)
 	}
 	return windows
+}
+
+// settleEnd is when the op's settle wait ended, on convergence or on T_settle,
+// which is where §6's quiet window opens. An op the Runner did not settle
+// after, or whose wait the run did not reach the end of, has no window.
+func (in Input) settleEnd(op int) (time.Time, bool) {
+	for _, checkpoint := range in.Checkpoints {
+		if checkpoint.Op == op && checkpoint.Settle != NoSettle {
+			return checkpoint.Time, true
+		}
+	}
+	return time.Time{}, false
 }
 
 // tornDown reports whether botbox had started emptying the namespace by t, so

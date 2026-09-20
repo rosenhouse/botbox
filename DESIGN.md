@@ -196,13 +196,13 @@ The Runner executes one sequence:
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
-4. Tear down. Clear every active fault and wait `T_stable`. Delete the primary CR if it
-   still exists and wait for the G3 window. Then force-remove any finalizer still present
-   in the run namespace; each forced removal is recorded in the report and invalidates G3
-   for that run. Delete every remaining object in the namespace that botbox or the target
-   created. Stop the target if it was started for this run. Delete the namespace.
-   Namespace names are never reused, so a namespace that never finishes terminating
-   (envtest, §5.8) is harmless.
+4. Tear down. Clear every active fault and wait `T_stable`, which is the last quiet
+   window (§6). Delete the primary CR if it still exists and wait for the G3 window. Then
+   force-remove any finalizer still present in the run namespace; each forced removal is
+   recorded in the report and invalidates G3 for that run. Delete every remaining object
+   in the namespace that botbox or the target created. Stop the target if it was started
+   for this run. Delete the namespace. Namespace names are never reused, so a namespace
+   that never finishes terminating (envtest, §5.8) is harmless.
 
 Cleanup between runs never restarts the API server, because rapid's shrinker re-invokes
 the test function many times.
@@ -264,21 +264,27 @@ real targets; the toy target sets much shorter ones (§9).
 
 | ID | Name | Statement | Signal |
 |---|---|---|---|
-| **G1** | Bounded reconciliation | With the CR spec unchanged and no faults active, the target's API request rate falls to zero (excluding watch requests and every request to `coordination.k8s.io` leases, since leader election reads as well as writes) within `T_settle` (default 30s) and stays there for `T_stable` (default 10s): the window checked is `[T_settle, T_settle + T_stable]` after the last op. | Proxy log |
+| **G1** | Bounded reconciliation | With the CR spec unchanged and no faults active, the target's API request rate falls to zero (excluding watch requests and every request to `coordination.k8s.io` leases, since leader election reads as well as writes) within `T_settle` (default 30s) and stays there for `T_stable` (default 10s): the window checked is the `T_stable` that follows the op's settle wait. | Proxy log |
 | **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, and within `T_settle` after faults stop, the target's `Ready` predicate holds. This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
-| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. | Proxy log |
+| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on a write does not count. | Proxy log |
+
+**The quiet window.** G1 and G2 judge the `T_stable` that follows a settle wait, which
+ends where the run converged or, at the latest, `T_settle` after the op (§5.5). Measuring
+it from the op instead leaves it unjudged for a target that converges quickly, because the
+teardown begins one `T_stable` after the settle wait ends. A window a later op or a fault
+reaches into is not judged.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
 namespace and the attribution below no longer holds. A window that would close after it
-is not judged, rather than judged early: judging early would hold the target to less than
-`T_settle`, and where the boundary falls would depend on harness timing. G3 is the
-exception, since §5.5 step 4 opens its window deliberately, and §4's teardown checkpoint
-still evaluates properties. A primary CR with a deletionTimestamp need not satisfy
-`Ready`: it is being deleted, so G3 judges it, not G4.
+is not judged, rather than judged early: judging early would hold the target to a shorter
+window than §6 gives it, and where the boundary falls would depend on harness timing. G3
+is the exception, since §5.5 step 4 opens its window deliberately, and §4's teardown
+checkpoint still evaluates properties. A primary CR with a deletionTimestamp need not
+satisfy `Ready`: it is being deleted, so G3 judges it, not G4.
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
 namespace that is neither a fixture nor created by botbox. The namespace is private to one
@@ -293,9 +299,15 @@ ownerReference to the CR, and on finalizers that never clear.
 process. Reads served from a client-side cache are invisible, so a reconcile loop that
 makes no API calls is outside what botbox can detect.
 
-**Readiness.** G1, G2, G3 and G6 require nothing from the target except which resource
-kinds it manages. G4 needs a `Ready` predicate, and G5 depends on it through the settle
-waits it snapshots at. The default is
+**What G6 does not count.** A 409 Conflict on a write is the API server's
+optimistic-concurrency contract: the target is meant to re-read and write again, and
+controllers that share one object's status conflict constantly. G6 does count a failing
+watch, which G1 excludes: G1 ignores a watch because a watch that hangs is the target
+waiting, while a watch that fails returns at once and repeating it is a loop.
+
+**Readiness.** G3 and G6 require nothing from the target except which resource kinds it
+manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
+the settle wait, which the predicate ends. The default is
 `has(status.observedGeneration) && status.observedGeneration == metadata.generation`, and
 a target whose primary CR lacks that field must declare `ready` (§8.4).
 
@@ -407,9 +419,11 @@ A property's `when` says where it is evaluated: `always` on every Observer event
 the teardown boundary (§6), `checkpoint` at each checkpoint (§4), `end` at the last
 checkpoint only.
 
-cert-manager v1.21.2 binds its healthz server to a fixed `0.0.0.0:9403` with no
-command-line flag to move it, so runs against this target are sequential. Its metrics
-server does take a flag, and the ephemeral port above keeps it out of the way.
+cert-manager v1.21.2 binds its healthz server to `0.0.0.0:9403`. The one flag that moves
+it, `--internal-healthz-listen-address`, is hidden, and upstream says the prefix and the
+hiding are there to discourage overriding it and that the flag may be renamed or removed.
+botbox does not build on it, so runs against this target are sequential. Its metrics
+server does take a supported flag, and the ephemeral port above keeps it out of the way.
 
 ### 8.2 Go form
 
@@ -508,7 +522,7 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 
 | ID | Bug | Class | Should trip |
 |---|---|---|---|
-| B1 | Writes `status.ready = count` before creating children, and holds that state for 3 s so P1 trips deterministically; the hold must satisfy `T_stable < hold < T_settle` | intermediate-state | P1 |
+| B1 | Writes `status.ready = count` before creating children, and holds that state for 3 s so P1 trips deterministically; the hold must satisfy `T_stable < hold < 2 × T_stable`, which also lands the children in the quiet window | intermediate-state | P1 |
 | B2 | Uses `generateName` for children and never deletes surplus ones, so every reconcile adds duplicates | non-idempotent | G1, G2 |
 | B3 | Omits the ownerReference on child `<widget>-0` and counts children by name, so it converges and the orphan surfaces on deletion | orphan | G3 |
 | B4 | Reads `count` from `status.ready` instead of `spec.count` | stale-state | G4 |
@@ -723,7 +737,7 @@ proxy; the `Image` launcher. Separate design addendum.
 
 ## 15. Decision log
 
-All decisions below were taken on 2026-09-20, before M0. D1–D17 were made with the
+All decisions below were taken on 2026-09-20. D1–D17 were made with the
 maintainer and rest on a spike in this sandbox, written up in
 `docs/spikes/2026-09-20-cert-manager-envtest.md`: envtest 1.37.0, cert-manager v1.21.2
 built from source and run as a black-box binary.
@@ -802,3 +816,22 @@ built from source and run as a black-box binary.
   need not be `Ready`.** The rule was in the code for G1, G2 and G6 and in no document.
   G4 and `always` properties lacked it, so the teardown's own delete made a correct
   target read as unconverged: one bug-matrix row flapped between runs.
+- **D26 G1's and G2's quiet window follows the settle wait, not the op.** The window
+  `[T_settle, T_settle + T_stable]` after the op closes past the teardown boundary
+  whenever the target converges in less than `T_settle`, so neither invariant was judged
+  for a run that converged: the cert-manager example evaluated neither. The window now
+  opens where the settle wait ended, converged or expired, which is what G2 already said
+  in English. B1 gains G1 and G2 in the bug matrix, because it reports its children ready,
+  is judged converged on that, and only then creates them.
+- **D27 G6 ignores a 409 Conflict on a write and counts a failing watch.** Six
+  cert-manager controllers write one Certificate's status, which conflicted nine times in
+  one run against `N_errloop` 20. A conflict is the API server telling the target to
+  re-read, so counting it would fail a correct target. A watch is the other way round: G1
+  ignores one because a watch that hangs is the target waiting, while a watch that fails
+  returns at once and repeating it is a loop. envtest's flow control turned three watches
+  away with 429 in the same run, well under the threshold.
+- **D28 cert-manager's healthz port moves only under a hidden flag, so runs stay
+  sequential.** `--internal-healthz-listen-address` exists, and upstream hides it to
+  discourage overriding it and records that it may be renamed or removed. The spike tried
+  `--healthz-listen-address`, got "unknown flag", and read that as no flag at all. botbox
+  does not build on a flag upstream discourages.

@@ -102,11 +102,18 @@ func (r *run) op(opType invariant.OpType, when time.Duration) *run {
 	return r
 }
 
-func (r *run) checkpoint(when time.Duration, settled invariant.SettleResult) *run {
+func (r *run) checkpoint(when time.Duration, result invariant.SettleResult) *run {
 	r.in.Checkpoints = append(r.in.Checkpoints, invariant.Checkpoint{
-		Op: len(r.in.Ops) - 1, Time: at(when), Settle: settled,
+		Op: len(r.in.Ops) - 1, Time: at(when), Settle: result,
 	})
 	return r
+}
+
+// settled ends the last op's settle wait at when, which is where §6's quiet
+// window opens. The teardown follows one T_stable later, because §5.5 step 4
+// waits that long before it deletes.
+func (r *run) settled(when time.Duration, result invariant.SettleResult) *run {
+	return r.checkpoint(when, result).teardown(when + stableWindow + 100*time.Millisecond)
 }
 
 // teardown is when botbox began emptying the namespace (DESIGN.md §5.5).
@@ -293,6 +300,13 @@ func failedDelete(name string, status int) proxy.Request {
 	return failed
 }
 
+// failedUpdate is a write the API server turned away.
+func failedUpdate(name string, status int) proxy.Request {
+	failed := get(name)
+	failed.Verb, failed.Status = "update", status
+	return failed
+}
+
 func failedWidgetGet(status int) proxy.Request {
 	return proxy.Request{
 		Verb: "get", Group: widgetGVK.Group, Version: widgetGVK.Version, Resource: "widgets",
@@ -302,6 +316,13 @@ func failedWidgetGet(status int) proxy.Request {
 
 func watch() proxy.Request {
 	return proxy.Request{Verb: "watch", Version: "v1", Resource: "configmaps", Namespace: namespace, Watch: true, Status: 200}
+}
+
+// failedWatch is the watch envtest's flow control turned away.
+func failedWatch(status int) proxy.Request {
+	failed := watch()
+	failed.Status = status
+	return failed
 }
 
 func leaseUpdate() proxy.Request {

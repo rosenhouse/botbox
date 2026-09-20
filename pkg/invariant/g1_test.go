@@ -8,22 +8,27 @@ import (
 	"github.com/rosenhouse/botbox/pkg/invariant"
 )
 
+// G1 ignores a watch whether it hung or failed; G6 counts the one that failed.
 func TestG1PassesWhenOnlyWatchesAndLeaseWritesRemain(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
-		checkpoint(2*time.Second, invariant.Converged).
-		request(6*time.Second, watch()).
-		request(6500*time.Millisecond, leaseUpdate()).
-		through(8 * time.Second)
+		settled(2*time.Second, invariant.Converged).
+		request(3*time.Second, watch()).
+		request(3200*time.Millisecond, failedWatch(429)).
+		request(3500*time.Millisecond, leaseUpdate()).
+		through(14 * time.Second)
 
 	silent(t, invariant.BoundedReconciliation, in)
 }
 
+// The window opens where the settle wait ended, which for a target that
+// converges is well inside T_settle (DESIGN.md §6).
 func TestG1FiresOnARequestInTheQuietWindow(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
-		request(6*time.Second, get("w-0")).
-		through(8 * time.Second)
+		settled(2*time.Second, invariant.Converged).
+		request(3*time.Second, get("w-0")).
+		through(14 * time.Second)
 
 	violation := fired(t, invariant.BoundedReconciliation, in)
 
@@ -38,11 +43,36 @@ func TestG1FiresOnARequestInTheQuietWindow(t *testing.T) {
 	}
 }
 
-func TestG1IgnoresTrafficBeforeTheSettleTimeoutHasPassed(t *testing.T) {
+// A settle wait that expires ends T_settle after the op, and the window
+// follows it there.
+func TestG1FiresOnARequestAfterAnExpiredSettle(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
-		requests(0, time.Second, 5, get("w-0")).
-		through(8 * time.Second)
+		settled(settleTimeout, invariant.Expired).
+		request(settleTimeout+time.Second, get("w-0")).
+		through(14 * time.Second)
+
+	fired(t, invariant.BoundedReconciliation, in)
+}
+
+// A target still working towards convergence is not yet held to §6's quiet.
+func TestG1IgnoresTrafficBeforeTheSettleWaitEnded(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		requests(0, 400*time.Millisecond, 5, get("w-0")).
+		settled(2*time.Second, invariant.Converged).
+		through(14 * time.Second)
+
+	silent(t, invariant.BoundedReconciliation, in)
+}
+
+// T_settle after the op is not itself a window: a run whose settle wait has
+// not ended has nothing to judge.
+func TestG1JudgesNothingUntilASettleWaitEnds(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		request(settleTimeout+time.Second, get("w-0")).
+		through(14 * time.Second)
 
 	silent(t, invariant.BoundedReconciliation, in)
 }
@@ -50,8 +80,9 @@ func TestG1IgnoresTrafficBeforeTheSettleTimeoutHasPassed(t *testing.T) {
 func TestG1IgnoresAWindowTheRunDidNotReach(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
-		request(6*time.Second, get("w-0")).
-		through(6500 * time.Millisecond)
+		settled(2*time.Second, invariant.Converged).
+		request(3*time.Second, get("w-0")).
+		through(3500 * time.Millisecond)
 
 	silent(t, invariant.BoundedReconciliation, in)
 }
@@ -59,19 +90,23 @@ func TestG1IgnoresAWindowTheRunDidNotReach(t *testing.T) {
 func TestG1IgnoresAWindowAnotherOpCutShort(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
-		op(invariant.OpUpdate, 4*time.Second).
-		request(6*time.Second, get("w-0")).
-		through(12 * time.Second)
+		settled(2*time.Second, invariant.Converged).
+		op(invariant.OpUpdate, 3*time.Second).
+		request(3500*time.Millisecond, get("w-0")).
+		through(14 * time.Second)
 
 	silent(t, invariant.BoundedReconciliation, in)
 }
 
-func TestG1IgnoresAWindowAFaultReachedInto(t *testing.T) {
+// A fault anywhere between the op and the window's close makes the reaction
+// the fault's, not the target's.
+func TestG1IgnoresAWindowAFaultPreceded(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
-		fault(1*time.Second, 3*time.Second).
-		request(6*time.Second, get("w-0")).
-		through(8 * time.Second)
+		fault(1*time.Second, 1500*time.Millisecond).
+		settled(2*time.Second, invariant.Converged).
+		request(3*time.Second, get("w-0")).
+		through(14 * time.Second)
 
 	silent(t, invariant.BoundedReconciliation, in)
 }
@@ -79,8 +114,9 @@ func TestG1IgnoresAWindowAFaultReachedInto(t *testing.T) {
 func TestG1CountsEveryNonWatchRequestInTheWindow(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
-		requests(5*time.Second, 200*time.Millisecond, 10, get("w-0")).
-		through(8 * time.Second)
+		settled(2*time.Second, invariant.Converged).
+		requests(2100*time.Millisecond, 150*time.Millisecond, 10, get("w-0")).
+		through(14 * time.Second)
 
 	violation := fired(t, invariant.BoundedReconciliation, in)
 
@@ -92,9 +128,10 @@ func TestG1CountsEveryNonWatchRequestInTheWindow(t *testing.T) {
 func TestG1IgnoresAWindowTheTeardownReachedInto(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
-		teardown(5500*time.Millisecond).
-		request(6*time.Second, get("w-0")).
-		through(8 * time.Second)
+		checkpoint(2*time.Second, invariant.Converged).
+		teardown(3*time.Second).
+		request(3500*time.Millisecond, get("w-0")).
+		through(14 * time.Second)
 
 	silent(t, invariant.BoundedReconciliation, in)
 }

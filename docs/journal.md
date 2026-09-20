@@ -210,4 +210,11 @@ so the target never mutates `renewBefore` and pins `duration` to an enum.
 The embed check of §11 lives at the repository root, because it scans every Markdown file
 and no package owns it.
 
+### What fixed it
+
+D26 anchors G1's and G2's quiet window to the end of the settle wait, so a target that
+converges is judged at all. D27 stops G6 counting a 409 Conflict on a write. D28 records
+that cert-manager's healthz port moves only under a flag upstream hides, so runs against
+it stay sequential.
+
 M4 outcome: `make test-example` and the embed check run on every pull request.

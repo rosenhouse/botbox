@@ -50,6 +50,30 @@ func TestG6IgnoresRequestsThatSucceed(t *testing.T) {
 	silent(t, invariant.NoErrorLoop, in)
 }
 
+// cert-manager runs six controllers that write one Certificate's status, so
+// they conflict and re-read. That is the API server's optimistic-concurrency
+// contract, not an error loop (DESIGN.md §6).
+func TestG6IgnoresAConflictOnAWrite(t *testing.T) {
+	in := loop(errLoop+1, failedUpdate("w-0", 409)).through(8 * time.Second)
+
+	silent(t, invariant.NoErrorLoop, in)
+}
+
+// Only a write loses that race, so the exclusion reaches no further.
+func TestG6CountsAConflictOnARead(t *testing.T) {
+	in := loop(errLoop+1, failedGet("w-0", 409)).through(8 * time.Second)
+
+	fired(t, invariant.NoErrorLoop, in)
+}
+
+// G1 ignores a watch because a watch that hangs is the target waiting. A watch
+// that fails returns at once, and repeating it is a loop, so G6 counts it.
+func TestG6CountsAFailingWatch(t *testing.T) {
+	in := loop(errLoop+1, failedWatch(429)).through(8 * time.Second)
+
+	fired(t, invariant.NoErrorLoop, in)
+}
+
 func TestG6CountsOneRequestAtATime(t *testing.T) {
 	for _, differs := range []struct {
 		field string

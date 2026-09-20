@@ -77,8 +77,11 @@ Ready.
   Measured here: 2 s to clone, 91 s to build cold including module downloads, 0 s warm.
 - `deploy/crds/*.yaml` inside the Go module are marked "for reference, development and
   testing purposes only" by their README. Use the release asset instead.
-- v1.21.2 has `--metrics-listen-address` but no `--healthz-listen-address`; the first run
-  failed on the unknown flag.
+- v1.21.2 has `--metrics-listen-address`. `--healthz-listen-address` fails as an unknown
+  flag, which this spike first read as no flag at all. The healthz port does move, under
+  the hidden `--internal-healthz-listen-address` (`cmd/controller/app/options/options.go`);
+  upstream hides it to discourage overriding it and may rename or remove it. Runs stay
+  sequential rather than build on it (D28).
 - The Claude Code web sandbox reaches `proxy.golang.org` and `github.com` but not
   `quay.io`, so the controller image is not an option for local runs.
 

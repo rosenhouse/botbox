@@ -2,8 +2,7 @@
 # variable each; bumping one is its own pull request.
 
 ENVTEST_K8S_VERSION ?= 1.37.0
-# Tracks the controller-runtime minor version pinned in go.mod.
-SETUP_ENVTEST_VERSION ?= release-0.25
+SETUP_ENVTEST_VERSION ?= v0.25.1
 # The release index setup-envtest downloads from, pinned to a controller-tools tag.
 ENVTEST_INDEX_URL ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
 
@@ -52,7 +51,7 @@ test-envtest: setup
 
 .PHONY: fmt
 fmt:
-	@files=$$(gofmt -l . | grep -v '^bin/' || true); \
+	@files=$$(gofmt -l $$(git ls-files -co --exclude-standard '*.go')); \
 	if [ -n "$$files" ]; then \
 		echo "These files need gofmt:"; \
 		echo "$$files"; \

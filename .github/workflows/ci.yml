@@ -62,7 +62,5 @@ jobs:
           # Keyed on the Makefile, which pins ENVTEST_K8S_VERSION: a version
           # bump changes the Makefile's hash and so invalidates the cache.
           key: envtest-${{ runner.os }}-${{ hashFiles('Makefile') }}
-      - name: Install envtest tools
-        run: make setup
       - name: envtest tests
         run: make test-envtest

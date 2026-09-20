@@ -3,22 +3,43 @@
 package cluster_test
 
 import (
-	"context"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
-	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/kubernetes"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 )
 
-func TestStartServesAPI(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
+const thingCRD = `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: things.test.botbox
+spec:
+  group: test.botbox
+  names:
+    kind: Thing
+    plural: things
+  scope: Namespaced
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+`
 
-	c, err := cluster.Start(ctx, cluster.Options{})
+func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "thing.yaml"), []byte(thingCRD), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	c, err := cluster.Start(cluster.Options{CRDPaths: []string{dir}})
 	if err != nil {
 		t.Fatalf("Start returned an error: %v", err)
 	}
@@ -28,12 +49,11 @@ func TestStartServesAPI(t *testing.T) {
 		}
 	})
 
-	cfg := c.Config()
-	discoveryClient, err := discovery.NewDiscoveryClientForConfig(cfg)
+	dc, err := discovery.NewDiscoveryClientForConfig(c.Config())
 	if err != nil {
 		t.Fatalf("Building a discovery client failed: %v", err)
 	}
-	version, err := discoveryClient.ServerVersion()
+	version, err := dc.ServerVersion()
 	if err != nil {
 		t.Fatalf("Fetching the server version failed: %v", err)
 	}
@@ -41,11 +61,11 @@ func TestStartServesAPI(t *testing.T) {
 		t.Error("The server reported an empty GitVersion.")
 	}
 
-	clientset, err := kubernetes.NewForConfig(cfg)
+	groups, err := dc.ServerGroups()
 	if err != nil {
-		t.Fatalf("Building a clientset failed: %v", err)
+		t.Fatalf("Listing API groups failed: %v", err)
 	}
-	if _, err := clientset.CoreV1().Namespaces().Get(ctx, "default", metav1.GetOptions{}); err != nil {
-		t.Fatalf("Getting the default namespace failed: %v", err)
+	if !slices.ContainsFunc(groups.Groups, func(g metav1.APIGroup) bool { return g.Name == "test.botbox" }) {
+		t.Error("The CRD group test.botbox was not installed.")
 	}
 }

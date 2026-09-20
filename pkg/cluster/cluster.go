@@ -7,7 +7,6 @@
 package cluster
 
 import (
-	"context"
 	"fmt"
 	"os"
 
@@ -21,11 +20,12 @@ type Options struct {
 	CRDPaths []string
 }
 
-// Validate reports the first CRD path that is not readable.
+// Validate reports the first CRD path that cannot be stat'ed, so that a typo
+// fails before a control plane starts.
 func (o Options) Validate() error {
 	for _, path := range o.CRDPaths {
 		if _, err := os.Stat(path); err != nil {
-			return fmt.Errorf("CRD path %q is not readable: %w", path, err)
+			return fmt.Errorf("CRD path: %w", err)
 		}
 	}
 	return nil
@@ -38,19 +38,12 @@ type Cluster struct {
 }
 
 // Start brings up a control plane and installs the CRDs in opts. The caller
-// must call Stop. envtest's own start takes no context, so ctx only guards the
-// work before it.
-func Start(ctx context.Context, opts Options) (*Cluster, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("starting the test cluster: %w", err)
-	}
+// must call Stop.
+func Start(opts Options) (*Cluster, error) {
 	if err := opts.Validate(); err != nil {
 		return nil, fmt.Errorf("starting the test cluster: %w", err)
 	}
-	env := &envtest.Environment{
-		CRDDirectoryPaths:     opts.CRDPaths,
-		ErrorIfCRDPathMissing: true,
-	}
+	env := &envtest.Environment{CRDDirectoryPaths: opts.CRDPaths}
 	config, err := env.Start()
 	if err != nil {
 		return nil, fmt.Errorf("starting the envtest control plane: %w", err)

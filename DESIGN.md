@@ -268,7 +268,7 @@ real targets; the toy target sets much shorter ones (§9).
 
 | ID | Name | Statement | Signal |
 |---|---|---|---|
-| **G1** | Bounded reconciliation | With the CR spec unchanged and no faults active, the target's API request rate falls to zero (excluding watch requests and writes to `coordination.k8s.io` leases) within `T_settle` (default 30s) and stays there for `T_stable` (default 10s): the window checked is `[T_settle, T_settle + T_stable]` after the last op. | Proxy log |
+| **G1** | Bounded reconciliation | With the CR spec unchanged and no faults active, the target's API request rate falls to zero (excluding watch requests and every request to `coordination.k8s.io` leases, since leader election reads as well as writes) within `T_settle` (default 30s) and stays there for `T_stable` (default 10s): the window checked is `[T_settle, T_settle + T_stable]` after the last op. | Proxy log |
 | **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, and within `T_settle` after faults stop, the target's `Ready` predicate holds. This is ESR as a test. | Observer + target predicate |

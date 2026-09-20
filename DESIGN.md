@@ -497,11 +497,11 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 | ID | Bug | Class | Should trip |
 |---|---|---|---|
 | B1 | Writes `status.ready = count` before creating children, and holds that state for 2 s so P1 trips deterministically | intermediate-state | P1 |
-| B2 | Uses `generateName` for children; re-reconcile creates duplicates | non-idempotent | G1, G2 |
-| B3 | Omits ownerReference on child `<widget>-0` | orphan | G3 |
+| B2 | Uses `generateName` for children and never deletes surplus ones, so every reconcile adds duplicates | non-idempotent | G1, G2 |
+| B3 | Omits the ownerReference on child `<widget>-0` and counts children by name, so it converges and the orphan surfaces on deletion | orphan | G3 |
 | B4 | Reads `count` from `status.ready` instead of `spec.count` | stale-state | G4 |
 | B5 | Treats NotFound on child Get as an error and requeues forever. The Get is an uncached read (`mgr.GetAPIReader()`), so the failing request reaches the proxy | error loop | G6, G1 |
-| B6 | Writes a fresh `status.lastSyncTime` on every reconcile, so every write re-triggers the controller | churn | G1, G2 |
+| B6 | Writes a fresh `status.lastSyncTime` (microsecond precision, so consecutive writes differ) on every reconcile, so every write re-triggers the controller | churn | G1, G2 |
 | B7 | Does not delete children on `count` decrease | scale-down | G4 |
 | B8 | Does not `Own()` ConfigMaps, so a deleted child is never recreated | unobserved-state | G4 (after a `DeleteManaged` op removes a child) |
 | B9 | Removes the finalizer on the first deletion reconcile, before deleting children, and omits ownerReferences on every child, so no path cleans up | cleanup-ordering | G3 |

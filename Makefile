@@ -4,6 +4,8 @@
 ENVTEST_K8S_VERSION ?= 1.37.0
 # Tracks the controller-runtime minor version pinned in go.mod.
 SETUP_ENVTEST_VERSION ?= release-0.25
+# The release index setup-envtest downloads from, pinned to a controller-tools tag.
+ENVTEST_INDEX_URL ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
 
 # Project-local tool and asset directories. Both are git-ignored.
 LOCALBIN := $(CURDIR)/bin
@@ -15,7 +17,7 @@ GOTOOLCHAIN ?= auto
 export GOTOOLCHAIN
 
 # Prints the KUBEBUILDER_ASSETS directory for the pinned version.
-ENVTEST_USE := $(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --bin-dir $(ENVTEST_ASSETS_DIR) -p path
+ENVTEST_USE := $(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --index $(ENVTEST_INDEX_URL) --bin-dir $(ENVTEST_ASSETS_DIR) -p path
 
 .PHONY: help
 help:

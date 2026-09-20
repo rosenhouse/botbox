@@ -7,3 +7,5 @@ botbox-out/
 *.out
 # Worktrees that subagents create for isolated work.
 .claude/worktrees/
+# Build output of the spike module.
+docs/spikes/cert-manager-envtest/cert-manager-envtest

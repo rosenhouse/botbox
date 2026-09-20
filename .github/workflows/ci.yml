@@ -58,7 +58,7 @@ jobs:
       - name: Cache envtest control-plane binaries
         uses: actions/cache@v4
         with:
-          path: bin/envtest
+          path: bin
           # Keyed on the Makefile, which pins ENVTEST_K8S_VERSION: a version
           # bump changes the Makefile's hash and so invalidates the cache.
           key: envtest-${{ runner.os }}-${{ hashFiles('Makefile') }}

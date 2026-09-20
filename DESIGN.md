@@ -3,8 +3,7 @@
 A black-box property-based and fault-injection harness for Kubernetes controllers.
 
 This document is the governing design for the repo. Coding agents implement against it,
-the PR review agent reviews against it, and the triage agent reads it when explaining a
-failure. If the code and this document disagree, one of them is wrong and the PR must say
+and the reviewers it spawns review against it. If the code and this document disagree, one of them is wrong and the PR must say
 which. §15 records the decisions behind the design and the evidence for them.
 
 ---
@@ -229,9 +228,6 @@ the violated invariant or property with the concrete evidence (request log excer
 version timeline), the target and versions, the seed, and a one-line replay command. The
 run directory also holds recordings of the run (§11), so a report can be re-examined without
 re-running.
-
-The triage agent reads `report.md` and proposes a root-cause hypothesis. Its output is
-advisory and goes in a PR comment, never in the report itself.
 
 ### 5.8 Test cluster
 
@@ -539,13 +535,8 @@ span several PRs.
 - `README.md` in the §11 shape with a status line.
 - `docs/journal.md`.
 - One skill, `add-invariant`, documenting the procedure used from M3 on.
-- Claude Code PR review against this document.
-- A failure-triage workflow posting a comment.
 
-The review workflow cannot run on the PR that introduces it, because the Claude GitHub
-App only runs workflow files identical to the default branch. Acceptance: `make
-test-envtest` passes both in CI and in a fresh web session; on the first PR after M0
-merges, the review comment cites a section of this document.
+Acceptance: `make test-envtest` passes both in CI and in a fresh web session.
 
 **M1 — Toy target.** `Widget` CRD and controller built as `bin/toy-widget` with `--bug`
 and B1–B10 implemented behind it; `targets/toy-widget/target.yaml`. Plain envtest tests
@@ -586,9 +577,8 @@ failure to ≤ 3 ops without a hand-written sequence; the cert-manager example s
 generated runs, with fixed seeds on PRs and random seeds nightly.
 
 **M6 — Faults and report.** FaultSpec injection (Error, Delay, Drop); `report.json` and
-`report.md`; triage agent reads the report. Acceptance: a fault makes the toy fail an
-invariant it passes without the fault; a report from a seeded bug gets a triage comment
-with a correct root cause.
+`report.md`. Acceptance: a fault makes the toy fail an invariant it passes without the
+fault, and its report names the invariant, the minimized sequence and the evidence.
 
 **M7 (phase 2) — Second target.** A multi-cluster sync controller as `Binary` target,
 forcing two-API-server envtest and cross-cluster faults; watch-event dropping in the
@@ -607,8 +597,7 @@ proxy; the `Image` launcher. Separate design addendum.
   never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
   import it. The rule covers the root module; the spike modules under `docs/spikes/` are
-  separate and exempt. Everything else uses client-go and apimachinery. The review agent flags
-  violations.
+  separate and exempt. Everything else uses client-go and apimachinery.
 - **Layout.** `cmd/botbox/`, `pkg/cluster`, `pkg/proxy`, `pkg/observe`,
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `docs/`, and `bin/` for git-ignored
@@ -656,18 +645,19 @@ proxy; the `Image` launcher. Separate design addendum.
   this document first. Works red/green: a failing test first, then the minimum code
   (CLAUDE.md). Does not change invariant definitions without a PR that edits §6 in the
   same change.
-- **Review agent (PR workflow):** checks the PR against §6, §8, §11. Must cite the
-  section it is applying. Flags any import of controller-runtime outside the two places
-  §11 allows, a README embed block that differs from its file, a post whose first line is
-  not `🤖 Created by Claude 🤖`, and a PR description that lacks the milestone, the IDs,
-  or the "Design change" section when this document changed.
-- **Triage agent (failure workflow):** reads `report.md` and the failing test output,
-  proposes one root-cause hypothesis and one next experiment. Never edits code.
+- **Reviewers (subagents):** before claiming a change is done, the coding agent spawns
+  at least one adversarial reviewer with fresh context, using the personas CLAUDE.md
+  lists. A reviewer reads the diff against §6, §8 and §11, citing the section it applies,
+  and it may run the code: start a cluster, drive the binary, mutate a function and check
+  that a test dies. It flags any import of controller-runtime outside the two places §11
+  allows, a README embed block that differs from its file, a post whose first line is not
+  `🤖 Created by Claude 🤖`, and a PR description that lacks the milestone, the IDs, or
+  the "Design change" section when this document changed. Reviewers never merge.
 - **Journal:** `docs/journal.md`, one entry per milestone, recording what the agents
   got right, what they got wrong, and which prompt, skill, or convention change fixed
   it. This is a first-class deliverable of the repo.
 
-**Autonomy.** Decided with the maintainer on 2026-09-20 (§15, D15–D16):
+**Autonomy.** Decided with the maintainer on 2026-09-20 (§15, D15, D16, D24):
 
 - The coding agent decides alone: package internals within the §11 layout; names; test
   structure; windows within the §6 defaults; CLI flags consistent with §11; patch and
@@ -679,10 +669,11 @@ proxy; the `Image` launcher. Separate design addendum.
 - The coding agent stops and asks before: changing the license, the module path or other
   public names; editing `CLAUDE.md`; changing CI secrets or permissions; publishing a
   release; replacing cert-manager as the adoption example.
-- **Merging.** The agent merges its own PR once CI is green on the head commit and a
-  review comment for that head commit exists and reports no blocking finding. A review
-  job that succeeds without posting a comment does not satisfy this; the agent says so
-  on the PR and leaves the merge to a human. It never force-pushes a shared branch.
+- **Merging.** The agent merges its own PR once CI is green on the head commit, with a
+  squash merge. Before it merges, the PR description must record the adversarial reviews
+  it ran, what they found and how each finding was addressed, so the trail is auditable
+  after the fact. An unaddressed blocking finding stops the merge. It never force-pushes
+  a shared branch.
 - **Continuation.** Work does not wait for a human. A scheduled Routine starts a fresh
   session every hour. Each session reads this document and the journal, then looks for an
   open Claude PR. If one exists and another session touched it within the last two hours,
@@ -762,10 +753,10 @@ built from source and run as a black-box binary.
 - **D14 B2 trips G1 and G2, not G3; B9 omits ownerReferences as well as ordering the
   finalizer wrongly.** Garbage collection removes owned duplicates and owned children, so
   G3 cannot see either bug otherwise.
-- **D15 The agent merges its own PR once CI is green and a review comment for that head
-  commit exists and reports no blocking finding; it amends this document in the same PR
-  when needed; a human is asked only for the items listed in §12.** Chosen by the
-  maintainer for unattended progress.
+- **D15 The agent merges its own PR once CI is green on the head commit and the PR
+  records the adversarial reviews it ran; it amends this document in the same PR when
+  needed; a human is asked only for the items listed in §12.** Chosen by the maintainer
+  for unattended progress, and amended by D24.
 - **D16 License Apache-2.0; continuation by scheduled sessions, continuous rather than
   throttled.** Chosen by the maintainer, with the instruction that spend is fine when well
   spent: subagents with fresh context and cheaper models where the task allows.
@@ -791,3 +782,8 @@ built from source and run as a black-box binary.
   Without these, the correct controller fails P1 after `DeleteManaged`, B6 escapes G2, B5
   escapes G6 under controller-runtime's backoff, B3 and B9 lose their evidence, and the
   bug matrix needs ten target files.
+- **D24 The Claude review and triage workflows are removed, and the merge gate rests on
+  the adversarial reviews instead.** They ran eleven times across two PRs and posted
+  nothing, because the repository holds no API secret, leaving a red check on every
+  push. A reviewer that only reads a diff is also weaker than one that starts a
+  cluster and mutates the code, which is where every finding so far came from.

@@ -82,3 +82,38 @@ needed a human merge. Routines created from a session get no GitHub tools, so th
 continuation ran in the session itself.
 
 M1 outcome: PR #4.
+
+## M2 — 2026-09-20
+
+### Right
+
+Five packages were written in parallel by subagents with fresh context, against
+DESIGN.md alone, and wired together on the first try. The seams the design named held:
+the proxy's request log, the Observer's history, the target contract and the launcher
+met where §5 said they would.
+
+### Wrong in the first draft
+
+- The proxy completed a request's record after the client already had its response, so
+  the envtest assertions raced it. Four local runs passed; CI caught it. `Log` now
+  states the contract and the assertions wait.
+- The collector, given only the managed kinds, is a no-op for the ordinary ownership
+  shape: the children's owner is the primary CR, which `manages` does not list. It
+  watches the primary kind too.
+- Inferring envtest from a nil config would disable the collector on every run after the
+  first, because §5.5 reuses one control plane. The mode is explicit.
+
+### What fixed it
+
+Each package was mutation-checked before it was committed: 24 for the Observer, 27 for
+the proxy, 30 for the loader and launcher, 21 for the collector, 11 for the harness.
+Every one was killed by a named test.
+
+### Process notes
+
+Five agents ran at once on non-overlapping directories, with one owning go.mod. The only
+cross-package collision was a Snapshot type two packages would have defined; naming the
+owner in a message cost one line. Three packages each build their own RESTMapper, and
+two keep their own copy of the watched-kind list. Both are worth sharing in M3.
+
+M2 outcome: PR #4.

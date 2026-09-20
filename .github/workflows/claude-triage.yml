@@ -1,0 +1,52 @@
+# NOTE: workflow_run workflows always execute the copy of this file that is on
+# the repository's default branch, regardless of which branch or PR triggered
+# the originating run. This workflow therefore has no effect until the M0 PR
+# that adds it has merged into main.
+#
+# Triage agent (DESIGN.md §12): when CI fails on a pull request, reads the
+# failed logs and any report artifact, then posts one root-cause hypothesis
+# and one next experiment as a PR comment. Never edits code and never opens a
+# pull request.
+name: Claude Triage
+
+on:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+jobs:
+  triage:
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      actions: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          additional_permissions: |
+            actions: read
+          claude_args: |
+            --allowedTools "Bash(gh run view:*),Bash(gh run download:*),Bash(gh pr comment:*),Bash(gh pr view:*)"
+            --max-turns 30
+          prompt: |
+            RUN ID: ${{ github.event.workflow_run.id }}
+            PR NUMBER: ${{ github.event.workflow_run.pull_requests[0].number }}
+            HEAD SHA: ${{ github.event.workflow_run.head_sha }}
+
+            You are the triage agent for this repository (DESIGN.md §12). If PR NUMBER above is empty, stop now without posting anything: this run cannot be tied to a pull request.
+
+            Steps:
+            1. Fetch the failed logs with `gh run view <RUN ID> --log-failed`, using the RUN ID given above.
+            2. List and download any artifact from this run named like `botbox-report*` with `gh run download`. If it contains a `report.md`, read it.
+            3. Identify the failing job name(s) and test name(s) from the logs and/or report.
+            4. Post exactly one comment on PR NUMBER with `gh pr comment`. Its first line must be exactly `🤖 Created by Claude 🤖`, then a heading `## Triage`, the failing job and test names, ONE root-cause hypothesis together with the evidence line(s) from the logs or report that support it, ONE next experiment to try, and the DESIGN.md section it relates to (a §6 invariant ID or a §11 test tier).
+
+            Never modify files. Never open a pull request. Post only the one PR comment described above, and nothing else.

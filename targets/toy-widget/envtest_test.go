@@ -92,7 +92,7 @@ func TestWidgetController(t *testing.T) {
 
 			requireChildren(t, ctx, c, widget, 0)
 			requireStatus(t, ctx, c, widget, 0)
-			requireStatusFieldsExist(t, ctx, c, widget)
+			requireStatusFields(t, ctx, c, widget)
 		})
 
 		t.Run("deletes its children and itself on delete", func(t *testing.T) {
@@ -161,16 +161,7 @@ func startController(t *testing.T, ctx context.Context) (client.Client, *manager
 	logs := &managerLog{}
 	ctrl.SetLogger(zap.New(zap.WriteTo(logs)))
 
-	testCluster, err := cluster.Start(cluster.Options{CRDPaths: []string{"crds"}})
-	if err != nil {
-		t.Fatalf("Starting the test cluster failed: %v", err)
-	}
-	t.Cleanup(func() {
-		if err := testCluster.Stop(); err != nil {
-			t.Errorf("Stopping the test cluster failed: %v", err)
-		}
-	})
-
+	testCluster := startCluster(t)
 	scheme, err := controller.NewScheme()
 	if err != nil {
 		t.Fatal(err)
@@ -178,6 +169,7 @@ func startController(t *testing.T, ctx context.Context) (client.Client, *manager
 	manager, err := ctrl.NewManager(testCluster.Config(), ctrl.Options{
 		Scheme:  scheme,
 		Metrics: metricsserver.Options{BindAddress: "0"},
+		Logger:  zap.New(zap.WriteTo(logs)),
 	})
 	if err != nil {
 		t.Fatalf("Creating the manager failed: %v", err)
@@ -199,11 +191,36 @@ func startController(t *testing.T, ctx context.Context) (client.Client, *manager
 		}
 	})
 
-	uncached, err := client.New(testCluster.Config(), client.Options{Scheme: scheme})
+	return uncachedClient(t, testCluster), logs
+}
+
+// startCluster brings up a control plane holding the Widget CRD.
+func startCluster(t *testing.T) *cluster.Cluster {
+	t.Helper()
+	testCluster, err := cluster.Start(cluster.Options{CRDPaths: []string{"crds"}})
+	if err != nil {
+		t.Fatalf("Starting the test cluster failed: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := testCluster.Stop(); err != nil {
+			t.Errorf("Stopping the test cluster failed: %v", err)
+		}
+	})
+	return testCluster
+}
+
+// uncachedClient returns a client that bypasses every controller cache.
+func uncachedClient(t *testing.T, testCluster *cluster.Cluster) client.Client {
+	t.Helper()
+	scheme, err := controller.NewScheme()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, err := client.New(testCluster.Config(), client.Options{Scheme: scheme})
 	if err != nil {
 		t.Fatalf("Building a client failed: %v", err)
 	}
-	return uncached, logs
+	return c
 }
 
 // managerLog collects what the manager writes from its own goroutines.
@@ -388,10 +405,11 @@ func requireStatus(t *testing.T, ctx context.Context, c client.Client, widget *t
 	})
 }
 
-// requireStatusFieldsExist guards the ready predicate of DESIGN.md §9, which
-// reaches for status.ready and status.observedGeneration behind has(). A zero
-// that the API drops is a Widget that never becomes ready.
-func requireStatusFieldsExist(t *testing.T, ctx context.Context, c client.Client, widget *toyv1.Widget) {
+// requireStatusFields guards the ready predicate of DESIGN.md §9, which reaches
+// for status.ready and status.observedGeneration behind has(). A zero that the
+// API drops is a Widget that never becomes ready, and a field a seeded bug
+// writes does not belong here.
+func requireStatusFields(t *testing.T, ctx context.Context, c client.Client, widget *toyv1.Widget) {
 	t.Helper()
 	observed := &unstructured.Unstructured{}
 	observed.SetGroupVersionKind(toyv1.GroupVersion.WithKind("Widget"))
@@ -402,10 +420,9 @@ func requireStatusFieldsExist(t *testing.T, ctx context.Context, c client.Client
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, field := range []string{"ready", "observedGeneration"} {
-		if _, found := status[field]; !found {
-			t.Errorf("The stored status is %v, want it to carry %s.", status, field)
-		}
+	want := []string{"observedGeneration", "ready"}
+	if got := slices.Sorted(maps.Keys(status)); !slices.Equal(got, want) {
+		t.Errorf("The stored status holds the fields %v, want %v.", got, want)
 	}
 }
 

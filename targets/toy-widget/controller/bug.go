@@ -1,13 +1,32 @@
 package controller
 
-import "fmt"
-
-// MaxBug is the highest seeded bug ID in the catalog (DESIGN.md §9.1).
-const MaxBug = 10
+import (
+	"fmt"
+	"time"
+)
 
 // Bug selects the seeded bug the controller runs with. Zero is the correct
-// controller; the behaviour of B1 through B10 hooks in here.
+// controller; B1 through B10 are the catalog of DESIGN.md §9.1.
 type Bug int
+
+const (
+	B1 Bug = iota + 1
+	B2
+	B3
+	B4
+	B5
+	B6
+	B7
+	B8
+	B9
+	B10
+)
+
+// MaxBug is the highest seeded bug ID in the catalog.
+const MaxBug = int(B10)
+
+// B1Hold is how long B1 holds its premature status. Tests shorten it.
+var B1Hold = 2 * time.Second
 
 // ParseBug converts a --bug value into a Bug.
 func ParseBug(id int) (Bug, error) {

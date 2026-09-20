@@ -1,0 +1,68 @@
+# CI for botbox: lint, unit tests, and envtest tests on every PR and on push to
+# main. See DESIGN.md §10 (M0 acceptance) and §11 (test tiers, lint).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# One run per ref at a time. A new push to a PR cancels its in-flight CI run;
+# pushes to main never cancel a run in progress.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # gofmt and go vet (§11 "Lint").
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt check
+        run: make fmt
+      - name: go vet
+        run: make vet
+
+  # Unit tier: no API server (§11 "Test tiers").
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Unit tests
+        run: make test
+
+  # Envtest tier: must finish under 5 minutes on CI (§11); the 10-minute
+  # timeout only allows headroom for a cold envtest binary download on a
+  # cache miss.
+  envtest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cache envtest control-plane binaries
+        uses: actions/cache@v4
+        with:
+          path: bin/envtest
+          # Keyed on the Makefile, which pins ENVTEST_K8S_VERSION: a version
+          # bump changes the Makefile's hash and so invalidates the cache.
+          key: envtest-${{ runner.os }}-${{ hashFiles('Makefile') }}
+      - name: Install envtest tools
+        run: make setup
+      - name: envtest tests
+        run: make test-envtest

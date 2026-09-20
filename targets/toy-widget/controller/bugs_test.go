@@ -90,8 +90,6 @@ func setCount(t *testing.T, r *Reconciler, widget *toyv1.Widget, count int32) {
 }
 
 func TestB1ReportsTheChildrenReadyBeforeItCreatesThem(t *testing.T) {
-	defer func(hold time.Duration) { B1Hold = hold }(B1Hold)
-	B1Hold = 50 * time.Millisecond
 	widget := newWidget(3)
 	readyAtFirstChild := int32(-1)
 	watchCreates := interceptor.Funcs{
@@ -103,6 +101,7 @@ func TestB1ReportsTheChildrenReadyBeforeItCreatesThem(t *testing.T) {
 		},
 	}
 	r := fixture(t, B1, watchCreates, widget)
+	r.B1Hold = 50 * time.Millisecond
 
 	start := time.Now()
 	mustReconcile(t, r, widget)
@@ -111,8 +110,8 @@ func TestB1ReportsTheChildrenReadyBeforeItCreatesThem(t *testing.T) {
 		t.Errorf("status.ready was %d when the first child was created, want the whole count %d.",
 			readyAtFirstChild, widget.Spec.Count)
 	}
-	if held := time.Since(start); held < B1Hold {
-		t.Errorf("Reconcile took %v, want it to hold the premature status for %v.", held, B1Hold)
+	if held := time.Since(start); held < r.B1Hold {
+		t.Errorf("Reconcile took %v, want it to hold the premature status for %v.", held, r.B1Hold)
 	}
 }
 

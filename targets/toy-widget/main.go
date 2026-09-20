@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -66,6 +67,7 @@ func run(args []string, out io.Writer) error {
 		APIReader: manager.GetAPIReader(),
 		Scheme:    manager.GetScheme(),
 		Bug:       bug,
+		B1Hold:    3 * time.Second, // Exceeds the toy's T_stable of 2s (DESIGN.md §9.1).
 	}
 	if err := reconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("setting up the controller: %w", err)

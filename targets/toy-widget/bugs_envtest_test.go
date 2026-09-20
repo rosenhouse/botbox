@@ -39,11 +39,8 @@ func TestSeededBugs(t *testing.T) {
 	c := uncachedClient(t, testCluster)
 
 	t.Run("B1 reports its children ready before it creates them", func(t *testing.T) {
-		held := controller.B1Hold
-		t.Cleanup(func() { controller.B1Hold = held }) // Cleanups run last in, first out, so the manager stops first.
-		controller.B1Hold = time.Second
 		namespace := createNamespace(t, ctx, c)
-		runReconciler(t, testCluster, namespace, controller.B1)
+		runReconciler(t, testCluster, namespace, controller.B1, func(r *controller.Reconciler) { r.B1Hold = time.Second })
 
 		widget := createWidgetIn(t, ctx, c, namespace, "w", 3)
 
@@ -247,7 +244,7 @@ func TestSeededBugs(t *testing.T) {
 // runReconciler runs one seeded bug's reconciler over one namespace and returns
 // the manager's log. The manager stops when the subtest ends, or when the
 // returned function is called.
-func runReconciler(t *testing.T, testCluster *cluster.Cluster, namespace string, bug controller.Bug) (*managerLog, func()) {
+func runReconciler(t *testing.T, testCluster *cluster.Cluster, namespace string, bug controller.Bug, configure ...func(*controller.Reconciler)) (*managerLog, func()) {
 	t.Helper()
 	logs := &managerLog{}
 	scheme, err := controller.NewScheme()
@@ -270,6 +267,9 @@ func runReconciler(t *testing.T, testCluster *cluster.Cluster, namespace string,
 		APIReader: manager.GetAPIReader(),
 		Scheme:    manager.GetScheme(),
 		Bug:       bug,
+	}
+	for _, apply := range configure {
+		apply(reconciler)
 	}
 	if err := reconciler.SetupWithManager(manager); err != nil {
 		t.Fatalf("Setting up B%d failed: %v", bug, err)

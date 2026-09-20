@@ -5,7 +5,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -45,10 +44,13 @@ type Reconciler struct {
 	APIReader client.Reader
 	Scheme    *runtime.Scheme
 	Bug       Bug
+	// B1Hold is how long B1 holds its premature status; zero behaves as
+	// defaultB1Hold (DESIGN.md §9.1).
+	B1Hold time.Duration
 
-	mu sync.Mutex
 	// createdFor holds the Widgets this process created a child for. Only B10
-	// reads it, and a restart loses it.
+	// reads it, and a restart loses it. Reconciles run on one worker (the
+	// default MaxConcurrentReconciles), so nothing else touches it.
 	createdFor sets.Set[types.NamespacedName]
 }
 
@@ -117,10 +119,19 @@ func (r *Reconciler) claimChildrenEarly(ctx context.Context, widget *toyv1.Widge
 		return err
 	}
 	select {
-	case <-time.After(B1Hold):
+	case <-time.After(r.b1Hold()):
 	case <-ctx.Done():
+		return ctx.Err()
 	}
 	return nil
+}
+
+// b1Hold is r.B1Hold, or defaultB1Hold when that field is unset.
+func (r *Reconciler) b1Hold() time.Duration {
+	if r.B1Hold == 0 {
+		return defaultB1Hold
+	}
+	return r.B1Hold
 }
 
 func (r *Reconciler) patchStatus(ctx context.Context, widget *toyv1.Widget, status toyv1.WidgetStatus) error {
@@ -152,7 +163,13 @@ func desiredChildren(widget *toyv1.Widget, count int32) []corev1.ConfigMap {
 // from the one it carries now.
 func statusFor(widget *toyv1.Widget, ready int32) (toyv1.WidgetStatus, bool) {
 	status := toyv1.WidgetStatus{Ready: ready, ObservedGeneration: widget.Generation}
-	return status, status != widget.Status
+	current := widget.Status
+	// Field by field: LastSyncTime is a pointer, so struct equality would
+	// compare addresses rather than the times themselves.
+	changed := status.Ready != current.Ready ||
+		status.ObservedGeneration != current.ObservedGeneration ||
+		!status.LastSyncTime.Equal(current.LastSyncTime)
+	return status, changed
 }
 
 // syncChildren creates the ConfigMaps the spec requires, deletes the ones it
@@ -191,16 +208,14 @@ func (r *Reconciler) syncChildren(ctx context.Context, widget *toyv1.Widget) (in
 	}
 	if r.Bug == B3 {
 		// B3 (§9.1): the orphan counts by name, so only deletion reveals it.
-		return presentChildren(ctx, r.Client, widget, required)
+		return r.presentChildren(ctx, widget, required)
 	}
 	return ready, nil
 }
 
-// presentChildren returns how many of the required ConfigMaps exist, whoever
-// owns them.
-func presentChildren(ctx context.Context, reader client.Reader, widget *toyv1.Widget, required sets.Set[string]) (int32, error) {
+func (r *Reconciler) presentChildren(ctx context.Context, widget *toyv1.Widget, required sets.Set[string]) (int32, error) {
 	configMaps := &corev1.ConfigMapList{}
-	if err := reader.List(ctx, configMaps, client.InNamespace(widget.Namespace)); err != nil {
+	if err := r.List(ctx, configMaps, client.InNamespace(widget.Namespace)); err != nil {
 		return 0, fmt.Errorf("listing ConfigMaps: %w", err)
 	}
 	var present int32
@@ -212,8 +227,6 @@ func presentChildren(ctx context.Context, reader client.Reader, widget *toyv1.Wi
 	return present, nil
 }
 
-// keepsSurplusChildren reports whether a seeded bug leaves children the spec no
-// longer requires.
 func (r *Reconciler) keepsSurplusChildren() bool {
 	// B2 (§9.1) must keep its duplicates, which no name requires; B7 (§9.1) skips the scale-down delete.
 	return r.Bug == B2 || r.Bug == B7
@@ -249,15 +262,13 @@ func (r *Reconciler) ensureChild(ctx context.Context, widget *toyv1.Widget, inde
 	return nil
 }
 
-// orphans reports whether a seeded bug leaves the ownerReference off a child.
 func (r *Reconciler) orphans(index int) bool {
 	// B3 (§9.1) orphans child 0; B9 (§9.1) orphans every child.
 	return r.Bug == B9 || (r.Bug == B3 && index == 0)
 }
 
-// createGeneratedChild creates another ConfigMap under a generated name, which
-// no later reconcile recognises (B2, §9.1).
 func (r *Reconciler) createGeneratedChild(ctx context.Context, widget *toyv1.Widget, desired *corev1.ConfigMap) error {
+	// B2 (§9.1): the child gets a generated name, so no later reconcile recognises it.
 	child := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Namespace: desired.Namespace, GenerateName: desired.Name + "-"},
 		Data:       desired.Data,
@@ -272,23 +283,13 @@ func (r *Reconciler) createGeneratedChild(ctx context.Context, widget *toyv1.Wid
 }
 
 func (r *Reconciler) noteCreatedChildFor(widget *toyv1.Widget) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.createdFor == nil {
 		r.createdFor = sets.New[types.NamespacedName]()
 	}
 	r.createdFor.Insert(client.ObjectKeyFromObject(widget))
 }
 
-func (r *Reconciler) forgetCreatedChildFor(widget *toyv1.Widget) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.createdFor.Delete(client.ObjectKeyFromObject(widget))
-}
-
 func (r *Reconciler) createdChildFor(widget *toyv1.Widget) bool {
-	r.mu.Lock()
-	defer r.mu.Unlock()
 	return r.createdFor.Has(client.ObjectKeyFromObject(widget))
 }
 
@@ -328,7 +329,6 @@ func (r *Reconciler) cleanUp(ctx context.Context, widget *toyv1.Widget) error {
 }
 
 func (r *Reconciler) releaseWidget(ctx context.Context, widget *toyv1.Widget) error {
-	r.forgetCreatedChildFor(widget)
 	if !controllerutil.ContainsFinalizer(widget, Finalizer) {
 		return nil
 	}

@@ -25,8 +25,8 @@ const (
 // MaxBug is the highest seeded bug ID in the catalog.
 const MaxBug = int(B10)
 
-// B1Hold is how long B1 holds its premature status. Tests shorten it.
-var B1Hold = 2 * time.Second
+// defaultB1Hold is Reconciler.B1Hold's value when left unset.
+const defaultB1Hold = 3 * time.Second
 
 // ParseBug converts a --bug value into a Bug.
 func ParseBug(id int) (Bug, error) {

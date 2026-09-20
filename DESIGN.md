@@ -271,6 +271,15 @@ real targets; the toy target sets much shorter ones (§9).
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
 | **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. | Proxy log |
 
+**The teardown boundary.** No invariant window reaches past the instant the Runner
+begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
+namespace and the attribution below no longer holds. A window that would close after it
+is not judged, rather than judged early: judging early would hold the target to less than
+`T_settle`, and where the boundary falls would depend on harness timing. G3 is the
+exception, since §5.5 step 4 opens its window deliberately, and §4's teardown checkpoint
+still evaluates properties. A primary CR with a deletionTimestamp need not satisfy
+`Ready`: it is being deleted, so G3 judges it, not G4.
+
 **Attribution.** A managed object is any object of a declared managed kind in the run
 namespace that is neither a fixture nor created by botbox. The namespace is private to one
 run, so everything else in it came from the target. ownerReferences and the optional
@@ -394,8 +403,9 @@ optional `selector` (label selector) refines attribution (§6). Paths under `gen
 in `equalIgnore` are dotted paths into the object. A Go hook may replace the equality
 predicate as `equal: go:<name>` (§8.4).
 
-A property's `when` says where it is evaluated: `always` on every Observer event,
-`checkpoint` at each checkpoint (§4), `end` at the last checkpoint only.
+A property's `when` says where it is evaluated: `always` on every Observer event before
+the teardown boundary (§6), `checkpoint` at each checkpoint (§4), `end` at the last
+checkpoint only.
 
 cert-manager v1.21.2 binds its healthz server to a fixed `0.0.0.0:9403` with no
 command-line flag to move it, so runs against this target are sequential. Its metrics
@@ -788,3 +798,7 @@ built from source and run as a black-box binary.
   push. A reviewer that only reads a diff is also weaker than one that starts a
   cluster and mutates the code, which is where every finding so far came from. The
   `@claude` mention workflow went with them, so nothing in CI needs an API secret.
+- **D25 No invariant window reaches past the teardown boundary, and a CR under deletion
+  need not be `Ready`.** The rule was in the code for G1, G2 and G6 and in no document.
+  G4 and `always` properties lacked it, so the teardown's own delete made a correct
+  target read as unconverged: one bug-matrix row flapped between runs.

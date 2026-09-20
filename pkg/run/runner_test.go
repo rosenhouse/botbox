@@ -30,6 +30,11 @@ type fakeHarness struct {
 	count     int
 	forced    []string
 	fail      map[string]error
+
+	// deleteCRDelay holds the CR delete open, and deletedCRAt is when it began.
+	// Together they show whether the teardown was stamped before the delete.
+	deleteCRDelay time.Duration
+	deletedCRAt   time.Time
 }
 
 func newFakeHarness() *fakeHarness {
@@ -71,6 +76,8 @@ func (f *fakeHarness) patchCR(_ context.Context, name string, patch map[string]a
 }
 
 func (f *fakeHarness) deleteCR(_ context.Context, name string) error {
+	f.deletedCRAt = time.Now()
+	time.Sleep(f.deleteCRDelay)
 	return f.record("deleteCR " + name)
 }
 
@@ -717,5 +724,27 @@ func TestRunHoldsTheDeletionWindowOpenPastTDelete(t *testing.T) {
 	}
 	if window := result.Timeline.Deletion; !window.End.After(window.Start) {
 		t.Errorf("The deletion window is %+v, want one the teardown held open.", window)
+	}
+}
+
+// TestTheTeardownIsStampedBeforeItChangesAnything pins Timeline.Deletion.Start
+// to the instant before the CR delete. The invariants take it as the moment
+// botbox became the one changing the namespace (DESIGN.md §6), so a stamp taken
+// after the delete returns leaves a window in which the CR botbox is deleting is
+// judged against the target.
+func TestTheTeardownIsStampedBeforeItChangesAnything(t *testing.T) {
+	h := &fakeHarness{converged: true, clean: true, deleteCRDelay: 50 * time.Millisecond}
+	sequence := sequenceOf(Op{Type: OpCreate, Obj: widget("widget")})
+
+	result, err := runSequence(t.Context(), toyTarget, sequence, Options{Check: &fakeChecker{}}, h)
+	if err != nil {
+		t.Fatalf("the run returned an error: %v", err)
+	}
+	if h.deletedCRAt.IsZero() {
+		t.Fatal("the teardown never deleted the CR.")
+	}
+	if start := result.Timeline.Deletion.Start; start.After(h.deletedCRAt) {
+		t.Errorf("The teardown is stamped %v after the CR delete began; it must be stamped before it.",
+			start.Sub(h.deletedCRAt))
 	}
 }

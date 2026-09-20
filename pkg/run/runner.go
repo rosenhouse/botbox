@@ -437,11 +437,14 @@ func (r *runner) teardown(ctx context.Context) error {
 
 	r.clearFaults()
 	failures := []error{r.h.sleep(ctx, r.target.Timeouts.Stable)}
+
+	// Stamped before the delete, not after it: from here on botbox is the one
+	// changing the namespace, and no invariant window reaches past this instant
+	// (§6). The T_stable sleep above is still the target's to answer for.
+	r.timeline.Deletion.Start = r.now()
 	if r.cr != "" {
 		failures = append(failures, r.h.deleteCR(ctx, r.cr))
 	}
-
-	r.timeline.Deletion.Start = r.now()
 	clean, err := r.h.awaitClean(ctx, r.target.Timeouts.Delete+deletionMargin)
 	r.timeline.Deletion.End = r.now()
 	failures = append(failures, err)

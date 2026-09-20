@@ -164,3 +164,45 @@ func TestG4ReadsAHistoryTheObserverRecordedOutOfOrder(t *testing.T) {
 
 	fired(t, invariant.Convergence, in)
 }
+
+// The teardown's own delete bumps metadata.generation while
+// status.observedGeneration lags, so the CR botbox is deleting reads as not
+// ready (DESIGN.md §5.5, step 4).
+func TestG4IgnoresAWindowTheTeardownReachedInto(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1))).
+		teardown(4*time.Second).
+		record(4100*time.Millisecond, widget("11", spec(2), status(2, 1), generation(2),
+			finalizers(cleanup), deleting(4*time.Second))).
+		through(6 * time.Second)
+
+	silent(t, invariant.Convergence, in)
+}
+
+func TestG4FiresOnAWindowThatClosedBeforeTheTeardown(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(3), status(0, 1))).
+		teardown(6 * time.Second).
+		through(8 * time.Second)
+
+	fired(t, invariant.Convergence, in)
+}
+
+// TestG4IgnoresACRUnderDeletion pins §6: a CR whose deletion a mid-sequence op
+// requested need not be ready, because the finalizer it is waiting on is G3's
+// business. Its generation moves while observedGeneration lags, so without the
+// rule the delete itself reads as a convergence failure.
+func TestG4IgnoresACRUnderDeletion(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1))).
+		op(invariant.OpDelete, 2*time.Second).
+		record(2100*time.Millisecond, widget("11", spec(2), status(2, 1), generation(2),
+			finalizers(cleanup), deleting(2*time.Second))).
+		teardown(20 * time.Second).
+		through(22 * time.Second)
+
+	silent(t, invariant.Convergence, in)
+}

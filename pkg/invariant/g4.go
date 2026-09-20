@@ -14,12 +14,15 @@ func Convergence(in Input) (Result, error) {
 	out := Result{ID: "G4"}
 	for _, from := range in.convergeAnchors() {
 		deadline := from.at.Add(in.timeouts().Settle)
-		if !in.observed(deadline) || in.faulted(from.at, deadline) || in.respecified(from.at, deadline) {
+		if !in.observed(deadline) || in.faulted(from.at, deadline) || in.tornDown(deadline) || in.respecified(from.at, deadline) {
 			continue
 		}
 		cr, found := in.stateAt(deadline).cr(in.Target.Primary)
 		if !found {
 			continue // The run has no CR to be ready: it deleted it.
+		}
+		if cr.DeletionTimestamp != nil {
+			continue // A CR under deletion need not be ready; G3 judges it (§6).
 		}
 		ready, err := in.Target.Ready(cr.Object)
 		if ready && err == nil {

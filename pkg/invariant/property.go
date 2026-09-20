@@ -46,11 +46,16 @@ func read(cr observe.Version, found bool, managed []observe.Version) []observe.V
 }
 
 // evaluationPoints are the instants a property is evaluated at, in order.
+// DESIGN.md §4 counts the teardown's checkpoint, so `checkpoint` and `end`
+// keep it; the events the teardown itself caused are botbox's own doing.
 func (in Input) evaluationPoints(when target.PropertyWhen) []time.Time {
 	var points []time.Time
 	switch when {
 	case target.Always:
 		for _, v := range in.versions() {
+			if in.tornDown(v.Time) {
+				continue
+			}
 			points = append(points, v.Time)
 		}
 	case target.End:

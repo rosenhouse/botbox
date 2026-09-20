@@ -143,3 +143,25 @@ func TestEvaluateSurvivesARunWithNoHistory(t *testing.T) {
 		t.Fatalf("Evaluate reported %v, want the expired settle wait alone.", fired)
 	}
 }
+
+// The teardown deletes the children before the CR's finalizer clears, so a
+// property evaluated on every event sees a CR that outlived them
+// (DESIGN.md §5.5, step 4).
+func TestPropertyEvaluatedAlwaysIgnoresTheTeardownsOwnEvents(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1)), child("w-0", "11"), child("w-1", "12")).
+		teardown(4*time.Second).
+		remove(4100*time.Millisecond, child("w-0", "13"), child("w-1", "14")).
+		through(6 * time.Second)
+	in.Target.Properties = []target.Property{property(target.Always, readyCountsChildren)}
+
+	silent(t, invariant.Property(in.Target.Properties[0]), in)
+}
+
+func TestPropertyEvaluatedAlwaysFiresOnAnEventTheTeardownCameAfter(t *testing.T) {
+	in := claimed(target.Always)
+	in.Teardown = at(6 * time.Second)
+
+	fired(t, invariant.Property(in.Target.Properties[0]), in)
+}

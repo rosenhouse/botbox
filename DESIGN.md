@@ -782,8 +782,9 @@ built from source and run as a black-box binary.
   Without these, the correct controller fails P1 after `DeleteManaged`, B6 escapes G2, B5
   escapes G6 under controller-runtime's backoff, B3 and B9 lose their evidence, and the
   bug matrix needs ten target files.
-- **D24 The Claude review and triage workflows are removed, and the merge gate rests on
+- **D24 Every Claude GitHub workflow is removed, and the merge gate rests on
   the adversarial reviews instead.** They ran eleven times across two PRs and posted
   nothing, because the repository holds no API secret, leaving a red check on every
   push. A reviewer that only reads a diff is also weaker than one that starts a
-  cluster and mutates the code, which is where every finding so far came from.
+  cluster and mutates the code, which is where every finding so far came from. The
+  `@claude` mention workflow went with them, so nothing in CI needs an API secret.

@@ -79,9 +79,9 @@ with kubectl and found the 409s.
 
 The Claude Review workflow cannot run without a repository API secret, so PRs #3 and #4
 needed a human merge. Routines created from a session get no GitHub tools, so the
-continuation ran in the session itself. Both Claude workflows were removed at the end of
-the day (D24): they had posted nothing in eleven runs, and the reviews that found the
-bugs were subagents that ran the code.
+continuation ran in the session itself. Every Claude workflow was removed at the end of the
+day (D24): they had posted nothing in eleven runs, and the reviews that found the bugs
+were subagents that ran the code. CI now needs no API secret at all.
 
 M1 outcome: PR #4.
 

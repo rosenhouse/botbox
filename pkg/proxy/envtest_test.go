@@ -4,6 +4,7 @@ package proxy_test
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
@@ -23,6 +24,26 @@ func configMap(name string) *corev1.ConfigMap {
 	return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace}}
 }
 
+// recordsAfter waits for the count records the proxy appended after mark to
+// finish. The client sees its response before the proxy completes the record,
+// so a test that asserts on timing waits for it (see Proxy.Log).
+func recordsAfter(t *testing.T, p *proxy.Proxy, mark, count int) []proxy.Request {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		records := p.Log()[mark:]
+		if len(records) >= count && !slices.ContainsFunc(records, func(r proxy.Request) bool {
+			return r.Latency <= 0
+		}) {
+			return records
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("The proxy recorded %+v, want %d finished records.", records, count)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // requireRecords compares the recorded requests with want, ignoring the
 // timing fields, which it checks are set.
 func requireRecords(t *testing.T, got, want []proxy.Request) {
@@ -30,6 +51,7 @@ func requireRecords(t *testing.T, got, want []proxy.Request) {
 	if len(got) != len(want) {
 		t.Fatalf("The log holds %d requests, want %d: %+v", len(got), len(want), got)
 	}
+
 	for i, record := range got {
 		if record.Start.IsZero() || record.Latency <= 0 {
 			t.Errorf("Request %d is recorded without timing: %+v", i, record)
@@ -84,7 +106,7 @@ func TestProxyInFrontOfTheAPIServer(t *testing.T) {
 		}
 
 		const collection = "/api/v1/namespaces/default/configmaps"
-		requireRecords(t, p.Log()[mark:], []proxy.Request{
+		requireRecords(t, recordsAfter(t, p, mark, 2), []proxy.Request{
 			{Verb: "create", Version: "v1", Resource: "configmaps", Namespace: namespace,
 				Path: collection, Status: 201},
 			{Verb: "get", Version: "v1", Resource: "configmaps", Namespace: namespace, Name: "recorded",
@@ -139,7 +161,7 @@ func TestProxyInFrontOfTheAPIServer(t *testing.T) {
 		if want := "botbox fault: create /api/v1/namespaces/default/configmaps"; status.Status().Message != want {
 			t.Errorf("The target decoded the message %q, want %q.", status.Status().Message, want)
 		}
-		requireRecords(t, p.Log()[mark:], []proxy.Request{
+		requireRecords(t, recordsAfter(t, p, mark, 1), []proxy.Request{
 			{Verb: "create", Version: "v1", Resource: "configmaps", Namespace: namespace,
 				Path: "/api/v1/namespaces/default/configmaps", Status: 500, Fault: "error(500)"},
 		})
@@ -202,7 +224,7 @@ func TestProxyInFrontOfTheAPIServer(t *testing.T) {
 			t.Fatalf("Creating a ConfigMap after ClearFaults failed: %v", err)
 		}
 
-		requireRecords(t, p.Log()[mark:], []proxy.Request{
+		requireRecords(t, recordsAfter(t, p, mark, 1), []proxy.Request{
 			{Verb: "create", Version: "v1", Resource: "configmaps", Namespace: namespace,
 				Path: "/api/v1/namespaces/default/configmaps", Status: 201},
 		})

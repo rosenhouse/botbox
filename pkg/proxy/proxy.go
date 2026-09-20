@@ -105,7 +105,11 @@ func (p *Proxy) Kubeconfig(path string) error {
 	return nil
 }
 
-// Log copies the requests recorded so far.
+// Log copies the requests recorded so far. A request is appended when it
+// arrives and completed when its exchange ends, so a record whose exchange is
+// still in flight carries a zero Latency. The response reaches the client
+// before that completion, so a caller that needs finished records waits for
+// quiescence, as a settle wait does (DESIGN.md §5.5).
 func (p *Proxy) Log() []Request {
 	p.mu.Lock()
 	defer p.mu.Unlock()

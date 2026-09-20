@@ -24,7 +24,7 @@ help:
 	@echo "Targets:"
 	@echo "  setup            Download modules and install the envtest control plane."
 	@echo "  assets-path      Print the KUBEBUILDER_ASSETS directory and nothing else."
-	@echo "  build            Build bin/toy-widget."
+	@echo "  build            Build bin/botbox and bin/toy-widget."
 	@echo "  generate         Write the toy target's deepcopy code and CRD YAML."
 	@echo "  verify-generate  Fail if a generated file is stale."
 	@echo "  test             Run the unit tier. No API server."

@@ -4,11 +4,8 @@ A black-box property-based and fault-injection harness for Kubernetes controller
 
 This document is the governing design for the repo. Coding agents implement against it,
 the PR review agent reviews against it, and the triage agent reads it when explaining a
-failure. If the code and this document disagree, one of them is wrong and the PR must say which.
-
-The sections below always state the current design. §15 records the decisions that
-changed it, with dates and evidence, so a reader can tell what was decided from what was
-assumed.
+failure. If the code and this document disagree, one of them is wrong and the PR must say
+which. §15 records the decisions behind the design and the evidence for them.
 
 ---
 
@@ -32,15 +29,16 @@ The controller is a black box. If it talks to an API server, it can be tested.
 
 ## 2. Non-goals
 
-- Not a formal verifier. No proofs, no model checker.
-- Not a chaos platform for production clusters. Test clusters only (envtest, kind).
-- Not a conformance suite for the Kubernetes control plane itself.
-- Not a mocking framework for unit tests of reconcilers. Observation is always via the
-  API server.
-- Not opinionated about controller framework. controller-runtime, kube-rs, client-go
-  by hand, and operator-sdk targets are all equally valid.
-- Not a substitute for the target's admission webhook. botbox generates from the CRD
-  schema; rules that only a webhook enforces are constrained per target (§8.3).
+- botbox is not a formal verifier. It offers no proofs and no model checker.
+- botbox is not a chaos platform for production clusters. It runs against test clusters
+  only, envtest or kind.
+- botbox does not test the Kubernetes control plane itself.
+- botbox is not a mocking framework for reconciler unit tests. It observes only through
+  the API server.
+- botbox is not opinionated about controller framework. controller-runtime, kube-rs,
+  client-go by hand and operator-sdk targets are all equally valid.
+- botbox does not replace the target's admission webhook. It generates from the CRD
+  schema, so rules that only a webhook enforces are constrained per target (§8.3).
 
 ## 3. Provenance
 
@@ -63,10 +61,11 @@ open-source project, unmodified and pinned by version.
 | **Primary CR** | The one custom resource that a sequence's CR ops act on. Declared by the target. |
 | **Fixture** | An object botbox applies to the run namespace before op 0, such as an Issuer. Never mutated; not a managed object. |
 | **Managed object** | An object of a kind the target declares it manages, in the run namespace, that is neither a fixture nor created by botbox (§6). |
-| **Op** | One step in a test sequence. The ops on the primary CR are `Create`, `Update`, `Delete`, and `Recreate`; the control ops are `Restart`, `Fault`, `Settle`, and `DeleteManaged` (§5.4). `NoSettle` marks a CR op that skips the Runner's implicit settle wait (§5.5). |
+| **Op** | One step in a test sequence. The ops on the primary CR are `Create`, `Update`, `Delete` and `Recreate`; the control ops are `Restart`, `Fault`, `Settle` and `DeleteManaged` (§5.4). A CR op may set `noSettle` to skip the Runner's implicit settle wait (§5.5). |
 | **Sequence** | An ordered list of ops plus a seed. The unit of generation, replay, and shrinking. |
 | **Invariant** | A generic check that applies to every target. IDs `G1..Gn`. |
 | **Property** | A per-target check declared by the target. IDs `P1..Pn`. |
+| **Checkpoint** | A point at which invariants and properties are evaluated: when a settle wait ends, whether converged or expired; after each `Restart`, `Fault` and `DeleteManaged` op once the following settle ends; and once after the teardown deletion window. |
 | **Run** | Execution of one sequence against a clean namespace. |
 | **Report** | Machine- and human-readable output of a failing run. |
 
@@ -107,19 +106,22 @@ Implementations:
 - `Binary` — the primary launcher and the only one required through M6. Exec a local
   binary. botbox writes a kubeconfig whose server is the proxy URL, exports it as
   `KUBECONFIG`, and substitutes `$KUBECONFIG` in `launch.args`. The target's stdout and
-  stderr go to `target.log` in the run directory. botbox does not probe the target for
-  health; the settle wait after the first op absorbs startup.
-- `InProcess` — deferred. It duplicated the Binary path, its restart was a context cancel
-  rather than a crash, and it pulled controller-runtime into the harness. It may return if
-  envtest run time becomes the bottleneck (§14).
-- `Image` — run a container image against a kind cluster, proxy in-cluster or via
-  port-forward. Phase 2.
+  stderr go to `target.log` in the run directory. `Restart` sends SIGKILL, waits for the
+  process to be reaped, then execs again, so fixed ports and lock files are released.
+  botbox does not probe the target for health; the settle wait after the first op absorbs
+  startup.
+- `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
+- `Image` — run a container image against a kind cluster, with the proxy in-cluster or
+  reached by port-forward. Phase 2 (§10, M7).
 
 ### 5.2 Proxy
 
-An `httputil.ReverseProxy` in front of the test cluster. It listens on `127.0.0.1` over
-plain HTTP. The kubeconfig handed to the target carries no credentials; the proxy attaches
-the real ones (TLS and bearer token) upstream.
+The proxy is an `httputil.ReverseProxy` in front of the test cluster. It listens on
+`127.0.0.1` over plain HTTP, so the target's traffic is HTTP/1.1; client-go negotiates
+HTTP/2 only over TLS. The proxy's upstream transport comes from the test cluster's
+`rest.Config` via `rest.TransportFor`, so it carries whatever that cluster uses: a client
+certificate on envtest, a token or exec credential on a kubeconfig cluster. The proxy
+strips any inbound `Authorization` header.
 
 Responsibilities:
 
@@ -138,27 +140,25 @@ type FaultSpec struct {
 
 Two details that matter for any client-go based target:
 
-- Injected errors are returned as a JSON `Status` body with the requested code. client-go
-  picks its decoder from the response `Content-Type`, so this also works for the typed
-  clients that negotiate protobuf.
+- An injected error replaces the upstream response: the proxy sets `Content-Type:
+  application/json`, drops `Content-Length` and `Content-Encoding`, and writes a
+  `metav1.Status` body. client-go picks its decoder from the response `Content-Type`, so
+  this works for the typed clients that negotiate protobuf.
 - Requests carrying an `Upgrade` header (exec, port-forward, websocket) are passed through
   unrecorded and never faulted. Controllers do not use them.
 
 Watch-event dropping requires parsing the watch stream (chunked JSON, or length-delimited
-protobuf frames for typed clients) and filtering events. This is the hardest fault and is
-phase 2 (§14). Until then, `DeleteManaged` ops simulate a missed event by deleting an
-object behind the target's back.
-
-The proxy is the adoptability story: it works against any controller with zero
-changes to that controller.
+protobuf frames for typed clients) and filtering events. This is the hardest fault and
+lands in phase 2 (§10, M7). Until then, `DeleteManaged` ops simulate a missed event by
+deleting an object behind the target's back.
 
 ### 5.3 Observer
 
-Independent informers on the real API server (not through the proxy) for the target's
-CRD(s) and any resource kinds the target declares it manages. Records, per object:
-resourceVersion history with timestamps, generation vs observedGeneration where present,
-finalizers, ownerReferences, deletion timestamps, and the UID, which attribution (§6) and
-the garbage-collector emulation (§5.8) rely on.
+The Observer runs independent informers on the real API server, not through the proxy,
+for the target's CRD(s) and the resource kinds the target declares it manages. It records,
+per object: resourceVersion history with timestamps, generation vs observedGeneration
+where present, finalizers, ownerReferences, deletion timestamps, and the UID, on which
+attribution (§6) and the garbage-collector emulation (§5.8) rely.
 
 The Observer must never affect the target. It has its own credentials and never writes.
 Deleting a managed object behind the target's back is a Runner control op
@@ -166,14 +166,13 @@ Deleting a managed object behind the target's back is a Runner control op
 
 ### 5.4 Generator
 
-Built on `pgregory.net/rapid`. Produces a `Sequence`:
+The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
 
 - Ops on the primary CR: `Create`, `Update` (field-level mutation), `Delete`, `Recreate`.
 - Control ops: `Restart` (launcher), `Fault{FaultSpec}`, `Settle` (wait for convergence
   before continuing; used to make properties checkable mid-sequence), and
-  `DeleteManaged{ref}` (delete one managed object, identified by kind and name, behind
-  the target's back). The Runner issues `DeleteManaged` directly to the API server, as
-  it does the CR ops.
+  `DeleteManaged{kind, index}` (delete one managed object behind the target's back, §7).
+  The Runner issues `DeleteManaged` directly to the API server, as it does the CR ops.
 - **Schema-driven mutation** from the CRD's OpenAPI v3 schema: numeric ranges, enums,
   string patterns, optional-field presence, list length. Generic and works on any CRD.
 - Generation starts from the target's `sample` object. When the target declares
@@ -186,39 +185,46 @@ Every sequence is serializable to JSON (§7) so it can be replayed without rapid
 
 ### 5.5 Runner
 
-Executes one sequence:
+The Runner executes one sequence:
 
 1. Create a fresh namespace. Apply the target's fixtures. Start the target via the
-   Launcher (or reuse it if the target declares itself cluster-scoped and already running).
-2. Apply ops in order. After each op that mutates the CR, wait up to `settleTimeout` for
-   convergence (G4) unless the op is explicitly `NoSettle`.
-3. Evaluate invariants and properties at each checkpoint and at end of sequence.
-4. Tear down. Delete the primary CR if it still exists and wait for the G3 window. Delete
-   every remaining object in the namespace that botbox or the target created. Stop the
-   target if it was started for this run. Delete the namespace. Namespace names are never
-   reused, so a namespace that never finishes terminating (envtest, §5.8) is harmless.
+   Launcher.
+2. Apply ops in order. After each op that mutates the CR, wait up to `T_settle` for
+   convergence (G4) unless the op sets `noSettle`. A settle wait that expires while no
+   fault is active records a G4 violation and ends the run at that op.
+3. Evaluate invariants and properties at each checkpoint (§4).
+4. Tear down. Clear every active fault and wait `T_stable`. Delete the primary CR if it
+   still exists and wait for the G3 window. Then force-remove any finalizer still present
+   in the run namespace; each forced removal is recorded in the report and invalidates G3
+   for that run. Delete every remaining object in the namespace that botbox or the target
+   created. Stop the target if it was started for this run. Delete the namespace.
+   Namespace names are never reused, so a namespace that never finishes terminating
+   (envtest, §5.8) is harmless.
 
 Cleanup between runs never restarts the API server, because rapid's shrinker re-invokes
 the test function many times.
 
 **Shrinking** is sequence-level: rapid drives it, and additionally a custom pass removes
 ops one at a time and replays from clean state, keeping the shorter sequence if it still
-fails. Fault ops shrink toward "no fault" and shorter durations.
+fails. Fault ops shrink toward "no fault" and shorter durations. Shrinking stops at the
+run deadline (§11).
 
 ### 5.6 Invariant engine
 
-Consumes the Proxy request log and the Observer state history. Each invariant is a pure
-function over those two inputs plus the target's declaration. Invariants are
+The engine consumes the Proxy request log and the Observer state history. Each invariant
+is a pure function over those two inputs plus the target's declaration. Invariants are
 **eventual**: they have a window and a stability requirement to absorb Kubernetes'
-asynchrony. Flakiness is a bug in the harness, not the target; tune windows, don't retry.
+asynchrony. They are therefore blind to transient states; a transient state is caught by
+a property (§8.1) or made permanent by a `Restart` or `Fault`. Flakiness is a bug in the
+harness, not the target; tune windows, don't retry.
 
 ### 5.7 Report
 
 A failing run emits `report.json` and `report.md` containing: the minimized sequence,
-the violated invariant/property with the concrete evidence (request log excerpt, object
+the violated invariant or property with the concrete evidence (request log excerpt, object
 version timeline), the target and versions, the seed, and a one-line replay command. The
-run directory also holds `target.log`, the proxy log (`requests.jsonl`) and the Observer
-history (`objects.jsonl`), so a report can be re-examined without re-running.
+run directory also holds the raw inputs (§11), so a report can be re-examined without
+re-running.
 
 The triage agent reads `report.md` and proposes a root-cause hypothesis. Its output is
 advisory and goes in a PR comment, never in the report itself.
@@ -236,31 +242,33 @@ botbox owns the API server a run executes against.
 
 envtest runs only the API server and etcd. There is no `kube-controller-manager`, so
 nothing garbage-collects owned objects, namespaces never finish terminating, no default
-service accounts appear, and no pods run. Verified 2026-09-20 with cert-manager v1.21.2
-on Kubernetes 1.37.0 (§15, `docs/spikes/`). Consequences:
+service accounts appear, and no pods run. Consequences:
 
 - **Garbage-collector emulation.** In envtest mode botbox runs a minimal collector over
-  the run namespace: a managed object is deleted once every UID in its `ownerReferences`
-  no longer exists. This is background-deletion semantics; `blockOwnerDeletion`,
-  foreground and orphan policies are not modelled. Without it, no controller that relies
-  on ownerReferences can satisfy G3, `Delete` followed by `Recreate` collides with stale
-  children, and B3 (§9.1) is indistinguishable from correct behaviour. The emulation is
-  part of the test cluster, like the API server: its writes bypass the proxy and never
-  count as target traffic. On a kubeconfig cluster it is off.
+  the run namespace: it deletes a managed object once every owner in its
+  `ownerReferences` is gone. An owner is resolved by (apiVersion, kind, name) in the run
+  namespace and then by UID; a name match with a different UID counts as gone. An owner of
+  a kind botbox does not watch is treated as live, so the emulator never deletes an object
+  whose owners it cannot resolve; it logs each unresolved reference once per run. The
+  emulator is watch-driven and deletes within 1 s of the owner's deletion event. It does
+  not patch dangling ownerReferences off a dependent that still has a live owner.
+  `blockOwnerDeletion`, foreground and orphan policies are not modelled. Its writes bypass
+  the proxy and never count as target traffic. On a kubeconfig cluster it is off.
 - **Self-cleanup.** The Runner empties the run namespace itself (§5.5, step 4).
 - **No admission webhooks.** See §8.3.
 
 ## 6. Generic invariants
 
-All windows and thresholds are configurable per target; defaults below.
+All windows and thresholds are configurable per target. The defaults below are sized for
+real targets; the toy target sets much shorter ones (§9).
 
 | ID | Name | Statement | Signal |
 |---|---|---|---|
-| **G1** | Bounded reconciliation | With the CR spec unchanged and no faults active, the target's non-watch API request rate falls to zero (excluding periodic resync and leader-election traffic) within `T_settle` (default 30s) and stays there for `T_stable` (default 10s). | Proxy log |
-| **G2** | No churn | Once converged under a stable spec, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. | Observer |
-| **G3** | Clean deletion | After deleting the CR, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
-| **G4** | Convergence | Within `T_settle` after any spec change, and within `T_settle` after faults stop, the target's `Ready` predicate holds and `status.observedGeneration == metadata.generation` where the field exists. This is ESR as a test. | Observer + target predicate |
-| **G5** | Restart-stable | Restarting the target does not change converged state. Within one run: after a `Settle`, snapshot the CR and the managed objects; `Restart`; `Settle`; snapshot again. The two snapshots are equal under the target's equality predicate. | Observer |
+| **G1** | Bounded reconciliation | With the CR spec unchanged and no faults active, the target's API request rate falls to zero (excluding watch requests and writes to `coordination.k8s.io` leases) within `T_settle` (default 30s) and stays there for `T_stable` (default 10s). | Proxy log |
+| **G2** | No churn | Once converged under a stable spec, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
+| **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
+| **G4** | Convergence | Within `T_settle` after any spec change, and within `T_settle` after faults stop, the target's `Ready` predicate holds. This is ESR as a test. | Observer + target predicate |
+| **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
 | **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. | Proxy log |
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
@@ -272,12 +280,27 @@ selector refine attribution to a particular CR; they are not required for it.
 emulated on envtest, §5.8). G3 therefore fails on orphans, meaning children with no
 ownerReference to the CR, and on finalizers that never clear.
 
-G1, G2, G3, and G6 require nothing from the target except which resource kinds it
-manages. G4 and G5 need a `Ready` predicate; the default is
-`status.observedGeneration == metadata.generation`, and a target whose primary CR lacks
-that field must declare `ready` (§8.4). The default equality for G5 compares each object's
-content outside `metadata` plus its labels, annotations, ownerReferences and finalizers;
-resourceVersion, managedFields and timestamps are ignored.
+**What the proxy cannot see.** G1 and G6 observe only requests that leave the target
+process. Reads served from a client-side cache are invisible, so a reconcile loop that
+makes no API calls is outside what botbox can detect.
+
+**Readiness.** G1, G2, G3 and G6 require nothing from the target except which resource
+kinds it manages. G4 needs a `Ready` predicate, and G5 depends on it through the settle
+waits it snapshots at. The default is
+`has(status.observedGeneration) && status.observedGeneration == metadata.generation`, and
+a target whose primary CR lacks that field must declare `ready` (§8.4).
+
+**G5 evaluation.** G5 is evaluated once per `Restart`. The Runner snapshots whenever a
+settle wait converges, implicit or explicit. A `Restart` is compared against the last
+converged snapshot before it and the first converged snapshot after it. If either is
+missing, G5 is not evaluated for that `Restart` and the report says so. Snapshots are
+keyed by kind and name.
+
+**G5 equality.** The default ignores exactly `metadata.resourceVersion`, `metadata.uid`,
+`metadata.creationTimestamp`, `metadata.generation`, `metadata.managedFields`,
+`status.conditions[*].lastTransitionTime`, and any ownerReference whose owner no longer
+exists. It compares everything else, including labels, annotations, finalizers and the
+remaining ownerReferences. A target excludes further paths with `equalIgnore` (§8.1).
 
 ## 7. Sequence format
 
@@ -288,13 +311,23 @@ resourceVersion, managedFields and timestamps are ignored.
   "ops": [
     {"i": 0, "t": "create", "obj": {"apiVersion": "...", "kind": "Widget", "spec": {"count": 3}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps", "fraction": 0.5}, "action": {"error": 500}, "until": {"op": 3}}},
-    {"i": 2, "t": "update", "patch": {"spec": {"count": 5}}},
+    {"i": 2, "t": "update", "patch": {"spec": {"count": 5}}, "noSettle": true},
     {"i": 3, "t": "restart"},
     {"i": 4, "t": "settle"},
-    {"i": 5, "t": "delete"}
+    {"i": 5, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 6, "t": "delete"}
   ]
 }
 ```
+
+Details the example does not show:
+
+- Any CR op may carry `"noSettle": true`, which skips the Runner's implicit settle wait.
+- `update` applies `patch` as a JSON merge patch (RFC 7386).
+- `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
+- `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
+  then name. The index is resolved at execution time and the chosen object is recorded by
+  name in the report. An index that resolves to nothing is a harness error (§11, exit 2).
 
 `botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
 embed the minimized sequence in this format.
@@ -321,8 +354,16 @@ manages:
   - v1/Secret
   - cert-manager.io/v1/CertificateRequest
 ready: >-                                     # CEL over metadata, spec, status; must yield bool
-  status.conditions.exists(c, c.type == "Ready" && c.status == "True"
-    && c.observedGeneration == metadata.generation)
+  has(status.conditions) && status.conditions.exists(c,
+    c.type == "Ready" && c.status == "True"
+    && has(c.observedGeneration) && c.observedGeneration == metadata.generation)
+equalIgnore:                                  # dotted paths excluded from G5 equality (§6)
+  - status.renewalTime
+properties:                                   # optional per-target checks, IDs P1..Pn
+  - id: P1
+    description: A Certificate never owns more than one Secret.
+    cel: managed.filter(o, o.kind == "Secret").size() <= 1
+    when: checkpoint                          # always | checkpoint | end
 generate:
   mutate:                                     # allowlist of paths; absent means every schema path
     - spec.dnsNames
@@ -338,6 +379,7 @@ launch:
     - --kubeconfig=$KUBECONFIG
     - --leader-elect=false
     - --enable-certificate-owner-ref=true
+    - --metrics-listen-address=127.0.0.1:0
 timeouts:                                     # optional; defaults in §6
   settle: 30s
   stable: 10s
@@ -345,8 +387,16 @@ timeouts:                                     # optional; defaults in §6
 ```
 
 `manages` names kinds as `group/version/Kind`, with `v1/Kind` for the core group. An
-optional `selector` (label selector) refines attribution (§6). Paths under `generate` are
-dotted paths into the object.
+optional `selector` (label selector) refines attribution (§6). Paths under `generate` and
+in `equalIgnore` are dotted paths into the object. A Go hook may replace the equality
+predicate as `equal: go:<name>` (§8.4).
+
+A property's `when` says where it is evaluated: `always` on every Observer event,
+`checkpoint` at each checkpoint (§4), `end` at the last checkpoint only.
+
+cert-manager v1.21.2 binds its healthz server to a fixed `0.0.0.0:9403` with no flag to
+move it, so runs against this target are sequential. Its metrics server does take a flag,
+and the ephemeral port above keeps it out of the way.
 
 ### 8.2 Go form
 
@@ -360,14 +410,29 @@ type Target struct {
     Manages       []schema.GroupVersionKind
     Selector      labels.Selector
     Ready         func(*unstructured.Unstructured) bool // compiled from `ready`, or a hook
-    Equal         func(a, b Snapshot) bool              // default per §6
+    Equal         func(a, b Snapshot) bool              // §6 default plus `equalIgnore`, or a hook
+    Properties    []Property
     Generate      GenerateSpec
     Launch        LaunchSpec
     Timeouts      Timeouts
 }
+
+type Property struct {
+    ID, Description string
+    Eval            func(cr *unstructured.Unstructured, managed []*unstructured.Unstructured) bool
+    When            PropertyWhen // Always, Checkpoint, End
+}
+
+type Snapshot struct {
+    GVK    schema.GroupVersionKind
+    Name   string
+    Object *unstructured.Unstructured
+}
 ```
 
 `pkg/target` loads the YAML into this struct. Everything downstream consumes the struct.
+The Runner keys snapshots by kind and name, never by UID, so a recreated object compares
+against its predecessor.
 
 ### 8.3 Generation constraints and admission webhooks
 
@@ -383,52 +448,67 @@ rule that had to be encoded this way.
 
 ### 8.4 Predicates
 
-`ready` and `equal` are CEL expressions compiled with `cel-go`. The variables are
-`metadata`, `spec` and `status`, each bound to the corresponding top-level field of the
-object as a dynamic map; a missing field is bound to an empty map. The standard macros
-(`exists`, `all`, `has`, `map`, `filter`) and the string extensions are available. A
-compile error, an evaluation error or a non-boolean result is a configuration error
-(exit code 2, §11), never a finding. JSONPath is not supported.
+`ready` and each property's `cel` are CEL expressions compiled with `cel-go`. Equality is
+not CEL: it is the §6 default with the `equalIgnore` paths also ignored, or a Go hook.
+JSONPath is not supported anywhere.
+
+`ready` binds `metadata`, `spec` and `status` to the corresponding top-level fields of the
+primary CR as dynamic maps; a missing field binds to an empty map. A property binds those
+three plus `managed`, the list of managed objects as dynamic maps, each carrying
+`apiVersion`, `kind`, `metadata` and the object's other top-level fields. The standard
+macros (`exists`, `all`, `has`, `map`, `filter`) and the string extensions are available.
+
+A compile error or a non-boolean result is a configuration error (exit code 2, §11), never
+a finding. An expression is evaluated against objects that may not yet carry the fields it
+reads, so it must guard optional fields with `has()`. An evaluation error while polling
+for readiness means "not ready"; it becomes a G4 finding only if it persists past
+`T_settle`, and the report quotes the CEL error. An evaluation error in a property is a
+configuration error.
 
 A Go hook is a function registered under a name in `pkg/target` and referenced as
-`ready: go:<name>`. Hooks exist for in-repo targets only.
+`ready: go:<name>` or `equal: go:<name>`. Hooks exist for in-repo targets only.
 
 ## 9. Toy target: `Widget`
 
-Purpose: exercise every invariant and prove the harness catches known bugs. Deliberately
-boring. Built as the binary `bin/toy-widget` and declared in
+The toy exercises every invariant and proves that the harness catches known bugs. It is
+deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 `targets/toy-widget/target.yaml`; `--bug` is passed through `launch.args`.
 
-- `Widget.spec.count` (int, 0–10). The controller ensures exactly `count` ConfigMaps
-  named `<widget>-<i>` exist, owned by the Widget, each containing `index: i`.
-- `Widget.status.ready` (int) = number of ConfigMaps present; `status.observedGeneration`.
-- Finalizer `widget.botbox/cleanup` on the Widget; removed after children are gone.
-- Uses ownerReferences on children **except** where a seeded bug says otherwise.
-- `ready: status.observedGeneration == metadata.generation && status.ready == spec.count`.
+- `Widget.spec.count` (int, 0–10, required). The controller ensures exactly `count`
+  ConfigMaps named `<widget>-<i>` exist, owned by the Widget, each containing `index: i`.
+- `Widget.status.ready` (int) holds the number of ConfigMaps present. The controller also
+  sets `status.observedGeneration`.
+- The Widget carries the finalizer `widget.botbox/cleanup`. On deletion the controller
+  lists the children by ownerReference, deletes any that remain, and removes the finalizer
+  when none remain. Children also carry ownerReferences, so the collector and the
+  finalizer are two independent cleanup paths.
+- The controller sets those ownerReferences **except** where a seeded bug says otherwise.
+- `ready`: `has(status.observedGeneration) && status.observedGeneration ==
+  metadata.generation && has(status.ready) && status.ready == spec.count`.
+- `P1`, `when: always`: `status.ready` never exceeds the number of Widget-owned ConfigMaps
+  present. In CEL, `!has(status.ready) || status.ready <= managed.filter(o, o.kind ==
+  "ConfigMap").size()`.
+- `timeouts: {settle: 5s, stable: 2s, delete: 10s}`. The toy converges in milliseconds.
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 
 | ID | Bug | Class | Should trip |
 |---|---|---|---|
-| B1 | Writes `status.ready = count` before creating children | intermediate-state | G4 |
+| B1 | Writes `status.ready = count` before creating children, and holds that state for 2 s so P1 trips deterministically | intermediate-state | P1 |
 | B2 | Uses `generateName` for children; re-reconcile creates duplicates | non-idempotent | G1, G2 |
 | B3 | Omits ownerReference on child `<widget>-0` | orphan | G3 |
 | B4 | Reads `count` from `status.ready` instead of `spec.count` | stale-state | G4 |
-| B5 | Treats NotFound on child Get as an error and requeues forever | error loop | G6, G1 |
-| B6 | Updates status on every reconcile even when unchanged | churn | G2 |
+| B5 | Treats NotFound on child Get as an error and requeues forever. The Get is an uncached read (`mgr.GetAPIReader()`), so the failing request reaches the proxy | error loop | G6, G1 |
+| B6 | Writes a fresh `status.lastSyncTime` on every reconcile, so every write re-triggers the controller | churn | G1, G2 |
 | B7 | Does not delete children on `count` decrease | scale-down | G4 |
 | B8 | Does not `Own()` ConfigMaps, so a deleted child is never recreated | unobserved-state | G4 (after a `DeleteManaged` op removes a child) |
-| B9 | Removes the finalizer before deleting children. Under B9 the children carry no ownerReferences, so only the finalizer could have deleted them | intermediate-state | G3 |
-| B10 | Creates children then crashes before status write (only triggers under Restart op) | intermediate-state | G4, G5 |
+| B9 | Removes the finalizer on the first deletion reconcile, before deleting children, and omits ownerReferences on every child, so no path cleans up | cleanup-ordering | G3 |
+| B10 | Writes status only from an in-memory flag set when it created children. After a `Restart` the flag is gone, so a later spec change converges the children but leaves `status` stale | intermediate-state | G4 |
 
 Three of the classes are Sieve's bug patterns (§13): intermediate-state, stale-state,
 and unobserved-state. The other classes are this repo's own.
 
-B2 and B9 are stated relative to garbage collection: owned duplicates and owned children
-are collected once the Widget is gone, so G3 cannot see them, and B9 is only a bug when
-the finalizer is the sole cleanup path.
-
-Acceptance for M3 and M6: a matrix in `docs/bug-matrix.md` showing which invariant
+Acceptance for M3: a matrix in `docs/bug-matrix.md` showing which invariant or property
 catches each bug, generated by CI, with no empty rows. The README links to it.
 
 ## 10. Milestones
@@ -438,43 +518,50 @@ span several PRs.
 
 **M0 — Scaffold.** Go module `github.com/rosenhouse/botbox` on Go 1.26; `LICENSE`
 (Apache-2.0); `Makefile` with `setup`, `test`, `test-envtest`, `fmt`, `vet`;
-`setup-envtest` pinned through `ENVTEST_K8S_VERSION`; CI on PR running the unit and
-envtest tiers; a `.claude/settings.json` SessionStart hook that runs `make setup`, so a
-Claude Code web session can run envtest without manual steps; `README.md` in the §11
-shape with a status line; `docs/journal.md`; one skill, `add-invariant`; Claude Code PR
-review against this document; a failure-triage workflow posting a comment. Acceptance: a
-trivial PR gets a review comment that cites a section of this doc, and `make test-envtest`
-passes both in CI and in a fresh web session.
+`setup-envtest` pinned through `ENVTEST_K8S_VERSION` and `ENVTEST_INDEX_URL`;
+`pkg/cluster` starting and stopping an envtest control plane, with a unit test and an
+envtest-tagged smoke test that reads the server version, so the envtest tier is not empty;
+CI on PR running the unit and envtest tiers; a `.claude/settings.json` SessionStart hook
+that runs `make setup`, so a Claude Code web session can run envtest without manual steps;
+`README.md` in the §11 shape with a status line; `docs/journal.md`; one skill,
+`add-invariant`, documenting the procedure used from M3 on; Claude Code PR review against
+this document; a failure-triage workflow posting a comment. The review workflow cannot run
+on the PR that introduces it, because the Claude GitHub App only runs workflow files
+identical to the default branch. Acceptance: `make test-envtest` passes both in CI and in
+a fresh web session; on the first PR after M0 merges, the review comment cites a section
+of this document.
 
 **M1 — Toy target.** `Widget` CRD and controller built as `bin/toy-widget` with `--bug`
 and B1–B10 implemented behind it; `targets/toy-widget/target.yaml`. Plain envtest tests
 for the happy path. Acceptance: `--bug=0` passes happy-path tests; each `--bug=N` is
 reachable.
 
-**M2 — Proxy, Observer, Binary launcher, test cluster.** Reverse proxy with request log
-and streaming watches; Observer with version history; `Binary` launcher; `target.yaml`
-loader with CEL `ready`; `pkg/cluster` envtest start and stop; garbage-collector
-emulation. Acceptance: an envtest test starts the cluster, the proxy and the toy binary,
-creates a Widget from its sample, and asserts that the request log shows the reconcile and
-the Observer shows the ConfigMaps.
+**M2 — Proxy, Observer, Binary launcher.** Reverse proxy with request log and streaming
+watches; Observer with version history; `Binary` launcher; `target.yaml` loader with CEL
+`ready` and properties; `pkg/cluster` extended with garbage-collector emulation.
+Acceptance: an envtest test starts the cluster, the proxy and the toy binary, creates a
+Widget from its sample, and asserts that the request log shows the reconcile and the
+Observer shows the ConfigMaps.
 
-**M3 — Generic invariants and Runner.** G1–G6 implemented as pure functions with tests
-on recorded fixtures. Runner executes hand-written JSON sequences with `Create`, `Update`,
-`Delete`, `Recreate`, `Settle`, `Restart` and `DeleteManaged` (the `Restart` op is a
-launcher call, so it lands here; faults do not). `botbox replay`. Acceptance: every
-seeded bug that does not need faults (B1–B9) is caught by the invariant in §9.1;
-`docs/bug-matrix.md` is generated by CI.
+**M3 — Generic invariants and Runner.** G1–G6 and declared properties implemented as pure
+functions with tests on recorded fixtures. Runner executes hand-written JSON sequences
+with `Create`, `Update`, `Delete`, `Recreate`, `Settle`, `Restart` and `DeleteManaged`
+(the `Restart` op is a launcher call, so it lands here; faults do not). `botbox replay`.
+Acceptance: every seeded bug that needs no fault, B1–B10, is caught by the invariant or
+property named in §9.1; `docs/bug-matrix.md` is generated by CI.
 
-**M4 — Adoption: cert-manager.** `examples/cert-manager/` with `target.yaml`, the pinned
-CRD file, `issuer.yaml`, `certificate.yaml`, hand-written sequences, and a `Makefile`
-that obtains the controller by shallow-cloning the pinned tag and running `go build`
-(about 2 s to clone and 90 s to build cold; cached in CI). `make test-example` runs on
-every PR and covers two configurations: the default one must pass, and one with
-`--enable-certificate-owner-ref=false` must fail G3 naming the retained Secret, which
-proves the harness observes the target instead of passing vacuously. `README.md` is
-rewritten usage-first per §11, with the quickstart embedded from the same script CI runs.
-Acceptance: the example job is green; the README quickstart is byte-identical to what CI
-runs, enforced by the embed test; the journal records what an adopter has to supply.
+**M4 — Adoption: cert-manager.** `examples/cert-manager/` with `target.yaml`,
+`crds/cert-manager.crds.yaml` (the release asset for the pinned version; the in-tree
+`deploy/crds/*.yaml` are development-only), `issuer.yaml`, `certificate.yaml`,
+hand-written sequences, `quickstart.sh`, and a `Makefile` that obtains the controller by
+shallow-cloning the pinned tag and running `go build` (about 2 s to clone and 90 s to
+build cold; cached in CI). On every PR, `make test-example` runs `quickstart.sh`, which
+must pass, and then a negative control with `--enable-certificate-owner-ref=false`, which
+must fail G3 naming the retained Secret. The negative control proves the harness observes
+the target instead of passing vacuously. `README.md` is rewritten usage-first per §11 and
+embeds `quickstart.sh`. Acceptance: the example job is green; the embedded quickstart is
+byte-identical to the script, enforced by the embed test; the journal records what an
+adopter has to supply.
 
 **M5 — Generation and shrinking.** rapid-driven sequences; schema-driven mutation from
 CRD OpenAPI with `generate.mutate` and `generate.overlay`; sequence-level shrinker;
@@ -483,8 +570,9 @@ failure to ≤ 3 ops without a hand-written sequence; the cert-manager example s
 generated runs, with fixed seeds on PRs and random seeds nightly.
 
 **M6 — Faults and report.** FaultSpec injection (Error, Delay, Drop); `report.json` and
-`report.md`; triage agent reads the report. B10 caught. Acceptance: full bug matrix has
-no empty rows; a report from a seeded bug gets a triage comment with a correct root cause.
+`report.md`; triage agent reads the report. Acceptance: a fault makes the toy fail an
+invariant it passes without the fault; a report from a seeded bug gets a triage comment
+with a correct root cause.
 
 **M7 (phase 2) — Second target.** A multi-cluster sync controller as `Binary` target,
 forcing two-API-server envtest and cross-cluster faults; watch-event dropping in the
@@ -497,8 +585,11 @@ proxy; the `Image` launcher. Separate design addendum.
   live in `go.mod` only: `k8s.io/{api,apimachinery,client-go}` v0.37.x,
   `sigs.k8s.io/controller-runtime` v0.25.x, `pgregory.net/rapid` v1.3.x,
   `github.com/google/cel-go` v0.30.x. Tool and target pins live in one Makefile variable
-  each: `ENVTEST_K8S_VERSION=1.37.0`, `CERT_MANAGER_VERSION=v1.21.2`. Bumps are their own
-  PRs, never mixed with features.
+  each: `ENVTEST_K8S_VERSION=1.37.0`, `CERT_MANAGER_VERSION=v1.21.2`, and
+  `ENVTEST_INDEX_URL`, the setup-envtest release index, pinned to a tagged controller-tools
+  ref rather than `HEAD` (currently
+  `https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml`).
+  Bumps are their own PRs, never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
   import it. Everything else uses client-go and apimachinery. The review agent flags
   violations.
@@ -506,43 +597,53 @@ proxy; the `Image` launcher. Separate design addendum.
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `docs/`, and `bin/` for git-ignored
   build output.
-- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR]`;
-  `botbox replay --target <yaml> <sequence.json>`; `botbox version`. `--kubeconfig`
-  selects an existing cluster instead of envtest; `KUBEBUILDER_ASSETS` locates the
-  envtest binaries. Exit codes: 0, all runs passed; 1, an invariant or property failed and
-  a report was written; 2, configuration or harness error. Output goes to
-  `botbox-out/<timestamp>-<seed>/` with `report.json`, `report.md`, `sequence.json`,
-  `requests.jsonl`, `objects.jsonl` and `target.log`.
+- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D]`;
+  `botbox replay --target <yaml> [--deadline D] <sequence.json>`; `botbox version`.
+  `--deadline` defaults to 4m; the shrinker stops at the deadline and reports the smallest
+  failing sequence found so far. `--kubeconfig` selects an existing cluster instead of
+  envtest; `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
+  passed; 1, an invariant or property failed and a report was written; 2, configuration or
+  harness error.
+- **Output.** `--out` defaults to `botbox-out/`. Each invocation writes
+  `<out>/<timestamp>-<seed>/`; each failing run writes `run-<n>/` under it with
+  `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl` and
+  `target.log`. Passing runs are not persisted.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` = the cert-manager example under envtest, under 10
   minutes on CI including obtaining the binary (cached). All three run on every PR.
   `make test-kind` = kind, nightly or on demand.
-- **Network assumptions.** Every tier below kind needs only `proxy.golang.org` and
-  `github.com` (git and release assets). No tier assumes a container registry: the Claude
-  Code web sandbox cannot reach `quay.io`, and the agent must be able to run every PR
-  tier locally. External targets are obtained by shallow git clone at a tag plus
-  `go build`, or as a GitHub release asset, and are pinned.
-- **Lint.** `gofmt` and `go vet` in CI. golangci-lint may be added in its own PR.
+- **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
+  `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
+  hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
+  web sandbox cannot reach `quay.io`, and the agent must be able to run every PR tier
+  locally. External targets are obtained by shallow git clone at a tag plus `go build`, or
+  as a GitHub release asset, and are pinned.
+- **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
   (five lines); install; quickstart against cert-manager; writing `target.yaml` for your
   own controller; reading a report; a CI recipe for adopters; a one-line-per-invariant
   table linking to §6; a closing "Design and internals" link to this document and to
-  `docs/bug-matrix.md`. A fenced block preceded by `<!-- embed: <path> -->` must equal
-  that file; a unit test enforces it, so the quickstart is exactly what CI runs.
-- **PRs.** Every PR description names the milestone and the invariant/property IDs it
-  touches, and carries a "Design change" section whenever it edits this document.
+  `docs/bug-matrix.md`. A fenced block preceded by `<!-- embed: <path> -->` has content,
+  excluding the two fence lines, byte-identical to that file including its trailing
+  newline; `<path>` is relative to the repository root; `make test` enforces it.
+- **PRs.** Every PR description, issue, review and comment a Claude session posts begins
+  with the line `🤖 Created by Claude 🤖` (CLAUDE.md). The description then names the
+  milestone and the invariant/property IDs it touches, and carries a "Design change"
+  section whenever it edits this document.
 - **No flaky-test retries in CI.** A flaky harness test is a P0 bug in the harness.
 - **Seeds are always printed.** Every failure is reproducible from seed + sequence.
 
 ## 12. How agents work in this repo
 
 - **Coding agent (Claude Code):** implements one milestone sub-task per PR. Reads
-  this document first. Does not change invariant definitions without a PR that edits §6
-  in the same change.
+  this document first. Works red/green: a failing test first, then the minimum code
+  (CLAUDE.md). Does not change invariant definitions without a PR that edits §6 in the
+  same change.
 - **Review agent (PR workflow):** checks the PR against §6, §8, §11. Must cite the
   section it is applying. Flags any import of controller-runtime outside the two places
-  §11 allows, a README embed block that differs from its file, and a PR description that
-  lacks the milestone, the IDs, or the "Design change" section when this document changed.
+  §11 allows, a README embed block that differs from its file, a post whose first line is
+  not `🤖 Created by Claude 🤖`, and a PR description that lacks the milestone, the IDs,
+  or the "Design change" section when this document changed.
 - **Triage agent (failure workflow):** reads `report.md` and the failing test output,
   proposes one root-cause hypothesis and one next experiment. Never edits code.
 - **Journal:** `docs/journal.md`, one entry per milestone, recording what the agents
@@ -566,10 +667,11 @@ proxy; the `Image` launcher. Separate design addendum.
   and never merges with a red or unreported check.
 - **Continuation.** Work does not wait for a human. A scheduled Routine starts a fresh
   session every hour. Each session reads this document and the journal, then looks for an
-  open Claude PR: if one exists and another session touched it within the last two hours,
-  the new session stands down; otherwise it drives that PR to merge. Only then does it
-  take the next incomplete milestone sub-task, and it keeps going until the milestone is
-  done or its context is spent.
+  open Claude PR. If one exists and another session touched it within the last two hours,
+  the new session leaves that PR alone and starts the next independent sub-task on its own
+  branch; it stands down only when no independent sub-task exists. Otherwise it drives
+  that PR to merge, then takes the next incomplete milestone sub-task, and keeps going
+  until the milestone is done or its context is spent.
 - **Economy.** Spend is acceptable when it is well spent. A session delegates bounded
   sub-tasks and every adversarial review to subagents with fresh context, picks a cheaper
   model where the task allows (Sonnet for mechanical work, Opus for design-heavy work),
@@ -577,55 +679,49 @@ proxy; the `Image` launcher. Separate design addendum.
 - **Fallback.** If cert-manager cannot satisfy M4 under envtest for a reason on
   cert-manager's side, the agent records the blocker in the journal and asks before
   switching targets. external-secrets with its `fake` provider is the pre-vetted
-  alternative. The 2026-09-20 spike makes this unlikely.
+  alternative.
 
 ## 13. Prior art
 
-- Anvil / Welder (UIUC): formal liveness verification of controllers; ESR is the
-  property G4 approximates.
-- Acto (UIUC, SOSP'23): schema-driven operator testing; source of the generation
-  approach and oracle ideas.
-- Sieve (UIUC, OSDI'22): controller fault injection via instrumentation; source of the
-  intermediate-state, stale-state, and unobserved-state classes in §9.1. `botbox`
-  differs by injecting at the API boundary instead.
-- rapid: Go property-based testing with shrinking.
-- envtest, kind, kwok: test control planes.
+- Anvil / Welder (UIUC) verify controller liveness formally. ESR is the property G4
+  approximates.
+- Acto (UIUC, SOSP'23) tests operators from the CRD schema. It is the source of the
+  generation approach and the oracle ideas.
+- Sieve (UIUC, OSDI'22) injects controller faults by instrumenting the controller, and
+  names the intermediate-state, stale-state and unobserved-state classes used in §9.1.
+  `botbox` injects at the API boundary instead.
+- rapid gives Go property-based testing with shrinking.
+- envtest, kind and kwok provide test control planes.
 
 ## 14. Open questions
 
-Resolved on 2026-09-20 (details in §15): CEL rather than JSONPath for black-box
-predicates (D3); no scraping of controller-runtime metrics for G1 (D13); watch-event
-dropping is simulated with `DeleteManaged` until phase 2 (D13); phase 1 supports
-namespaced primary CRs only (D13).
-
-Still open:
-
-1. Whether G2 needs a per-target exemption list for controllers that write
-   heartbeat-style status fields. Decide when a real target trips it.
-2. Cluster-scoped primary CRs (ClusterIssuer-like) and how to isolate them per run.
-3. Whether to run the target's admission webhook in envtest in a later phase, so that
-   generation can be widened beyond `generate.mutate`.
-4. Whether `InProcess` is worth reviving for speed once envtest run time is measured.
+1. Does G2 need a per-target exemption list for controllers that write heartbeat-style
+   status fields? Decide when a real target trips it.
+2. How is a cluster-scoped primary CR (ClusterIssuer-like) isolated per run?
+3. Should a later phase run the target's admission webhook in envtest, so that generation
+   can widen beyond `generate.mutate`?
+4. Is `InProcess` worth reviving for speed once envtest run time is measured?
 
 ## 15. Decision log
 
-Decisions of 2026-09-20, made with the maintainer before M0. Evidence comes from a spike
-in this sandbox, written up in `docs/spikes/2026-09-20-cert-manager-envtest.md`: envtest
-1.37.0, cert-manager v1.21.2 built from source and run as a black-box binary.
+All decisions below were taken on 2026-09-20, before M0. D1–D17 were made with the
+maintainer and rest on a spike in this sandbox, written up in
+`docs/spikes/2026-09-20-cert-manager-envtest.md`: envtest 1.37.0, cert-manager v1.21.2
+built from source and run as a black-box binary. D18–D21 come from an adversarial review
+of this document.
 
 - **D1 Binary is the primary launcher; InProcess is deferred.** One code path from the
-  toy target onward, real crash restarts, and no controller-runtime in the harness. The
-  toy target is a binary like any other target.
+  toy target onward, real crash restarts, and no controller-runtime in the harness.
 - **D2 target.yaml is canonical.** The Go interface is the loaded form; hooks are
   optional and in-repo only.
-- **D3 CEL for `ready`.** cert-manager's Certificate carries `observedGeneration` only
-  inside conditions, so readiness needs a cross-field comparison JSONPath cannot express.
+- **D3 CEL for `ready` and for properties.** cert-manager's Certificate carries
+  `observedGeneration` only inside conditions, so readiness needs a cross-field comparison
+  JSONPath cannot express.
 - **D4 envtest is the default test cluster and botbox owns it.** `pkg/cluster` may
   import `controller-runtime/pkg/envtest`; re-implementing envtest would be waste.
 - **D5 Garbage-collector emulation and self-cleanup on envtest.** Spike: 10 s after a
   Certificate was deleted, its Secret and CertificateRequest were still present despite
-  ownerReferences, and the namespace stayed `Terminating`. G3 and namespace-per-run
-  cleanup as first written could not work on envtest.
+  ownerReferences, and the namespace stayed `Terminating`.
 - **D6 Attribution by namespace.** Everything in the run namespace that botbox or a
   fixture did not create is the target's.
 - **D7 G2 covers the set of managed objects; G5 is measured within one run.** G2 as
@@ -635,21 +731,20 @@ in this sandbox, written up in `docs/spikes/2026-09-20-cert-manager-envtest.md`:
   target contract.** A Certificate needs an Issuer to exist first and a valid `issuerRef`
   no schema can invent; webhook-only rules need an allowlist.
 - **D9 The cert-manager adoption milestone is M4, before generation.** Adoptability
-  problems surface while the black-box contract is still cheap to change. The README
-  first shows replay of scripted sequences, then generated runs once M5 lands.
+  problems surface while the black-box contract is still cheap to change.
 - **D10 External targets are obtained by shallow clone plus `go build`.** cert-manager's
   `cmd/controller` is a nested Go module with a `replace` directive and no separate tag,
   so `go install` refuses it; no standalone binary is published; the sandbox cannot reach
-  `quay.io`. Measured: 2 s clone, 91 s cold build, 0 s warm.
+  `quay.io`.
 - **D11 Pins.** Go 1.26.0; Kubernetes libraries 0.37.0; envtest 1.37.0; controller-runtime
   0.25.1; rapid 1.3.0; cel-go 0.30.0; cert-manager v1.21.2. All current on the decision
   date.
 - **D12 The `Restart` op lands in M3.** With the Binary launcher it is one call.
-- **D13 Open questions 2–4 of the first draft.** No metrics scraping (keeps the black box
-  pure); `DeleteManaged` before stream filtering; namespaced primaries only.
-- **D14 B2 is expected to trip G1 and G2, not G3; B9 is defined in finalizer-cleanup
-  mode.** Garbage collection removes owned duplicates and owned children, so G3 cannot
-  see either bug as first written.
+- **D13 No metrics scraping; `DeleteManaged` before watch-stream filtering; namespaced
+  primary CRs only.** Scraping controller-runtime metrics would break the black box.
+- **D14 B2 trips G1 and G2, not G3; B9 omits ownerReferences as well as ordering the
+  finalizer wrongly.** Garbage collection removes owned duplicates and owned children, so
+  G3 cannot see either bug otherwise.
 - **D15 The agent merges its own PRs when CI is green and the review agent has no
   blocking finding; it amends this document in the same PR when needed; a human is asked
   only for the items listed in §12.** Chosen by the maintainer for unattended progress.
@@ -659,11 +754,15 @@ in this sandbox, written up in `docs/spikes/2026-09-20-cert-manager-envtest.md`:
 - **D17 The cert-manager example ships a negative control.** With
   `--enable-certificate-owner-ref=false` the Secret is retained by design (cert-manager
   documents this), and botbox must report it as G3 because the target declares Secrets as
-  managed. CI asserting that failure proves the harness observes the target.
-
-Spike measurements behind D5, D9 and D10, cert-manager v1.21.2 on envtest 1.37.0 with
-no webhook installed: envtest up in 3–4 s; Certificate Ready 2.3 s after the controller
-started; re-issued 0.26 s after a `dnsNames` change; zero resourceVersion changes over
-20 s of stable spec; after SIGKILL and re-exec, the same revision, Secret and
-CertificateRequest; the issued Secret carries the label
-`controller.cert-manager.io/fao=true` and, with the owner-ref flag, an ownerReference.
+  managed.
+- **D18 `ENVTEST_INDEX_URL` pins the setup-envtest release index to a tagged
+  controller-tools ref.** The default index tracks `HEAD`, so a pinned
+  `ENVTEST_K8S_VERSION` alone does not make asset resolution reproducible.
+- **D19 Properties are declarable in `target.yaml`.** Invariants are eventual and cannot
+  see a transient state such as B1, so the toy needs P1 to catch it.
+- **D20 G2 counts no-op status writes from the proxy log.** The API server short-circuits
+  an update whose bytes are unchanged, so resourceVersion does not move and the Observer
+  sees nothing; B6 is restated as a write that does change content.
+- **D21 Equality is the §6 default plus `equalIgnore`, not a CEL expression.** A
+  CEL expression would have to re-implement the per-path exemptions a path list states
+  directly.

@@ -47,8 +47,16 @@ manages:
   - v1/Secret
   - cert-manager.io/v1/CertificateRequest
 ready: >-                                     # CEL over metadata, spec, status; must yield bool
-  status.conditions.exists(c, c.type == "Ready" && c.status == "True"
-    && c.observedGeneration == metadata.generation)
+  has(status.conditions) && status.conditions.exists(c,
+    c.type == "Ready" && c.status == "True"
+    && has(c.observedGeneration) && c.observedGeneration == metadata.generation)
+equalIgnore:                                  # dotted paths excluded from G5 equality (§6)
+  - status.renewalTime
+properties:                                   # optional per-target checks, IDs P1..Pn
+  - id: P1
+    description: A Certificate never owns more than one Secret.
+    cel: managed.filter(o, o.kind == "Secret").size() <= 1
+    when: checkpoint                          # always | checkpoint | end
 generate:
   mutate:                                     # allowlist of paths; absent means every schema path
     - spec.dnsNames
@@ -64,6 +72,7 @@ launch:
     - --kubeconfig=$KUBECONFIG
     - --leader-elect=false
     - --enable-certificate-owner-ref=true
+    - --metrics-listen-address=127.0.0.1:0
 timeouts:                                     # optional; defaults in §6
   settle: 30s
   stable: 10s
@@ -72,6 +81,7 @@ timeouts:                                     # optional; defaults in §6
 
 `primary` is the one CRD your sequences act on. `fixtures` are objects botbox applies once, before op 0, that generation never mutates, such as the Issuer a Certificate needs.
 `manages` lists the other kinds your controller owns, which drives attribution for the invariants. `ready` is a CEL expression over `metadata`, `spec` and `status` that must evaluate to a boolean.
+`properties` are optional per-target checks, also in CEL, evaluated against the primary CR and the list of `managed` objects.
 `launch` says how to exec your controller binary, with `$KUBECONFIG` substituted for the proxy's address.
 
 ## Reading a report
@@ -104,7 +114,7 @@ Six generic invariants apply to every target. See [DESIGN.md §6](DESIGN.md#6-ge
 | G1 | Bounded reconciliation | The API request rate reaches zero and stays there while the spec is unchanged |
 | G2 | No churn | Managed objects and their resourceVersions stop changing once converged |
 | G3 | Clean deletion | Deleting the CR removes everything it manages and clears its finalizers |
-| G4 | Convergence | The target's `Ready` predicate holds and `observedGeneration` matches `generation` |
+| G4 | Convergence | The target's `Ready` predicate holds within a bounded time after every spec change and after faults stop |
 | G5 | Restart-stable | Restarting the target does not change converged state |
 | G6 | No error loop | The target does not retry the same failing request more than a bounded number of times |
 

@@ -31,7 +31,7 @@ restart. See `docs/spikes/2026-09-20-cert-manager-envtest.md`.
 
 ### What fixed it
 
-Decisions D1 through D17 in DESIGN.md §15. The new §5.8 (test cluster) and §8.3
+Decisions D1 through D21 in DESIGN.md §15. The new §5.8 (test cluster) and §8.3
 (webhook-only rules). The network-assumptions convention in §11. The autonomy rules in
 §12: the agent merges once CI is green, amends the design in the same PR, starts a
 fresh session every hour, and hands bounded work to subagents with fresh context and

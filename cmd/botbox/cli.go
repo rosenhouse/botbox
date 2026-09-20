@@ -34,21 +34,13 @@ const usage = `botbox exercises a controller against the generic invariants of D
 
   botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]... <sequence.json>...
   botbox replay --target <yaml> [--out DIR] [--deadline D] [--launch-arg ARG]... <sequence.json>
+  botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D]
   botbox version
 `
 
 // generationArrivesInM5 is what botbox run says until it generates sequences
 // itself (DESIGN.md §10).
 const generationArrivesInM5 = "generated sequences arrive in M5; name the sequence files to execute"
-
-// checksNotice stands with noChecks, and both go when pkg/invariant is wired
-// in.
-const checksNotice = "botbox: no invariants are wired in yet, so a run can only fail on a harness error."
-
-// noChecks is the placeholder for pkg/invariant (DESIGN.md §5.6).
-type noChecks struct{}
-
-func (noChecks) Check(run.Input) []run.Violation { return nil }
 
 // cli is one invocation. Its writers and its test cluster are injected, so the
 // unit tier needs no API server.
@@ -60,7 +52,7 @@ type cli struct {
 // session executes sequences against one test cluster. Runs share it, because
 // starting a control plane costs seconds (DESIGN.md §5.5).
 type session interface {
-	execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string) (run.Result, error)
+	execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error)
 	close() error
 }
 
@@ -68,6 +60,7 @@ type session interface {
 type options struct {
 	command    string
 	target     string
+	sequences  string
 	out        string
 	kubeconfig string
 	deadline   time.Duration
@@ -86,9 +79,12 @@ func (c *cli) main(ctx context.Context, args []string) int {
 	if err != nil {
 		return c.fail(err)
 	}
-	if opts.command == "version" {
+	switch opts.command {
+	case "version":
 		fmt.Fprintf(c.stdout, "botbox %s\n", version())
 		return exitOK
+	case "matrix":
+		return c.bugMatrix(ctx, opts)
 	}
 	return c.exercise(ctx, opts, paths)
 }
@@ -107,7 +103,6 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	if err != nil {
 		return c.fail(err)
 	}
-	fmt.Fprintln(c.stderr, checksNotice)
 
 	s, err := c.open(opts, exercised)
 	if err != nil {
@@ -128,7 +123,7 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	for i, sequence := range sequences {
 		number := i + 1
 		fmt.Fprintf(c.stdout, "run %d: seed %d, sequence %s\n", number, sequence.Seed, paths[i])
-		result, err := s.execute(ctx, exercised, sequence, out.RunDir(number))
+		result, err := s.execute(ctx, exercised, sequence, out.RunDir(number), run.Engine{})
 		switch exitCode(result, err) {
 		case exitError:
 			return c.fail(err)
@@ -186,7 +181,7 @@ func parse(args []string) (options, []string, error) {
 	switch opts.command {
 	case "version":
 		return opts, nil, nil
-	case "run", "replay":
+	case "run", "replay", "matrix":
 	default:
 		return opts, nil, fmt.Errorf("%q is not a botbox command\n%s", opts.command, usage)
 	}
@@ -204,6 +199,14 @@ func parse(args []string) (options, []string, error) {
 	if opts.command == "replay" && len(sequences) != 1 {
 		return opts, nil, fmt.Errorf("botbox replay takes one sequence file, and %d were given", len(sequences))
 	}
+	if opts.command == "matrix" {
+		if opts.sequences == "" {
+			return opts, nil, errors.New("the --sequences flag is required: it holds one sequence per seeded bug")
+		}
+		if len(sequences) > 0 {
+			return opts, nil, fmt.Errorf("botbox matrix takes no sequence file, and %d were given: it runs the --sequences directory", len(sequences))
+		}
+	}
 	return opts, sequences, nil
 }
 
@@ -211,10 +214,15 @@ func (o *options) flags() *flag.FlagSet {
 	flags := flag.NewFlagSet("botbox "+o.command, flag.ContinueOnError)
 	flags.SetOutput(io.Discard) // The caller prints what Parse returns.
 	flags.StringVar(&o.target, "target", "", "the target.yaml to exercise")
-	flags.StringVar(&o.out, "out", defaultOut, "where failing runs are written")
 	flags.StringVar(&o.kubeconfig, "kubeconfig", "", "an existing cluster to run against, instead of envtest")
 	flags.DurationVar(&o.deadline, "deadline", defaultDeadline, "how long the invocation may take")
 	flags.Var((*stringList)(&o.launchArgs), "launch-arg", "append an argument to the target's launch.args (repeatable)")
+	if o.command == "matrix" {
+		flags.StringVar(&o.out, "out", defaultMatrix, "the Markdown file to write")
+		flags.StringVar(&o.sequences, "sequences", "", "the directory holding one b<id>.json per seeded bug")
+	} else {
+		flags.StringVar(&o.out, "out", defaultOut, "where failing runs are written")
+	}
 	if o.command == "run" {
 		flags.IntVar(&o.runs, "runs", 1, "how many generated sequences to run")
 		flags.Int64Var(&o.seed, "seed", 0, "the seed the output directory is named after")
@@ -270,12 +278,12 @@ func openSession(opts options, t *target.Target) (session, error) {
 	return &clusterSession{config: started.Config(), stop: started.Stop}, nil
 }
 
-func (s *clusterSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string) (run.Result, error) {
+func (s *clusterSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
 	return run.Run(ctx, t, sequence, run.Options{
 		Dir:              dir,
 		Config:           s.config,
 		GarbageCollected: s.collected,
-		Check:            noChecks{},
+		Check:            check,
 	})
 }
 

@@ -22,15 +22,17 @@ ENVTEST_USE := $(SETUP_ENVTEST) use $(ENVTEST_K8S_VERSION) --index $(ENVTEST_IND
 .PHONY: help
 help:
 	@echo "Targets:"
-	@echo "  setup            Download modules and install the envtest control plane."
-	@echo "  assets-path      Print the KUBEBUILDER_ASSETS directory and nothing else."
-	@echo "  build            Build bin/botbox and bin/toy-widget."
-	@echo "  generate         Write the toy target's deepcopy code and CRD YAML."
-	@echo "  verify-generate  Fail if a generated file is stale."
-	@echo "  test             Run the unit tier. No API server."
-	@echo "  test-envtest     Run the envtest tier."
-	@echo "  fmt              Fail if any file needs gofmt."
-	@echo "  vet              Run go vet over both tiers."
+	@echo "  setup             Download modules and install the envtest control plane."
+	@echo "  assets-path       Print the KUBEBUILDER_ASSETS directory and nothing else."
+	@echo "  build             Build bin/botbox and bin/toy-widget."
+	@echo "  generate          Write the toy target's deepcopy code and CRD YAML."
+	@echo "  verify-generate   Fail if a generated file is stale."
+	@echo "  bug-matrix        Write docs/bug-matrix.md from the toy's seeded bugs."
+	@echo "  verify-bug-matrix Fail if docs/bug-matrix.md is stale."
+	@echo "  test              Run the unit tier. No API server."
+	@echo "  test-envtest      Run the envtest tier."
+	@echo "  fmt               Fail if any file needs gofmt."
+	@echo "  vet               Run go vet over both tiers."
 
 .PHONY: setup
 setup: $(SETUP_ENVTEST)
@@ -62,6 +64,25 @@ verify-generate: generate
 	if [ -n "$$stale" ]; then \
 		echo "Generated files are out of date. Run 'make generate' and commit the result:"; \
 		echo "$$stale"; \
+		exit 1; \
+	fi
+
+# One run per seeded bug of DESIGN.md §9.1, under envtest. The deadline covers
+# every run of the invocation.
+.PHONY: bug-matrix
+bug-matrix: build setup
+	KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox matrix \
+		--target targets/toy-widget/target.yaml \
+		--sequences targets/toy-widget/sequences \
+		--out docs/bug-matrix.md \
+		--deadline 8m
+
+.PHONY: verify-bug-matrix
+verify-bug-matrix: bug-matrix
+	@stale=$$(git status --porcelain -- docs/bug-matrix.md); \
+	if [ -n "$$stale" ]; then \
+		echo "docs/bug-matrix.md is out of date. Run 'make bug-matrix' and commit the result:"; \
+		git --no-pager diff -- docs/bug-matrix.md; \
 		exit 1; \
 	fi
 

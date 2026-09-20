@@ -28,10 +28,15 @@ const teardownMargin = 30 * time.Second
 // window, which no op opened.
 const Teardown = -1
 
+// deletionMargin holds the run namespace open past T_delete, because G3's
+// window opens when the Observer recorded the deletion, which is after the
+// teardown asked for it.
+const deletionMargin = time.Second
+
 // Checker evaluates the invariants and the target's properties at a checkpoint
-// (DESIGN.md §5.6).
+// (DESIGN.md §5.6). Its error is a configuration error, never a finding.
 type Checker interface {
-	Check(Input) []Violation
+	Check(Input) ([]Violation, error)
 }
 
 // Input is what a check reads: the proxy's request log, the Observer's object
@@ -60,6 +65,9 @@ type Result struct {
 	// Violation is the first violation the run found, or nil. A run ends at
 	// its first violation.
 	Violation *Violation
+	// Recorded is the whole run as the checks read it, sampled once the
+	// teardown is done. A run that ended early recorded what it reached.
+	Recorded Input
 }
 
 // Timeline is what the run did, in order (DESIGN.md §4).
@@ -69,8 +77,11 @@ type Timeline struct {
 	Ops         []AppliedOp
 	Checkpoints []Checkpoint
 	// Deletion is the window G3 judges: it opens when the teardown deletes the
-	// primary CR and closes when the namespace is clean or T_delete expires.
+	// primary CR and closes when the namespace is clean or the window expires.
 	Deletion Window
+	// Faults are the windows the Runner had a fault op's spec injected in. An
+	// open window has no End: the fault outlived the run.
+	Faults []Window
 	// Forced names every object the teardown force-removed a finalizer from.
 	// One such removal invalidates G3 for the run (DESIGN.md §5.5).
 	Forced []string
@@ -201,6 +212,9 @@ type activeFault struct {
 	// until is the op index the fault ends at, or nil if only the proxy's own
 	// trigger ends it (DESIGN.md §5.2).
 	until *int
+	// window is the fault's place in Timeline.Faults, which closes when the
+	// Runner clears it.
+	window int
 }
 
 func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts Options, h harness) (Result, error) {
@@ -216,7 +230,7 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 	failure := r.applyOps(ctx)
 	r.failed = failure != nil
 	teardown := r.teardown(ctx)
-	return Result{Timeline: r.timeline, Violation: r.violation}, errors.Join(failure, teardown)
+	return Result{Timeline: r.timeline, Violation: r.violation, Recorded: r.input()}, errors.Join(failure, teardown)
 }
 
 // applyOps applies the sequence in order and stops at the first violation
@@ -345,7 +359,11 @@ func (r *runner) checkpoint(op int, converged bool) error {
 		return fmt.Errorf("the run namespace holds %d managed objects, over the harness limit of %d", count, r.limit)
 	}
 	r.timeline.Checkpoints = append(r.timeline.Checkpoints, Checkpoint{At: r.now(), Op: op, Converged: converged})
-	for _, violation := range r.check.Check(r.input()) {
+	violations, err := r.check.Check(r.input())
+	if err != nil {
+		return fmt.Errorf("evaluating the checks: %w", err)
+	}
+	for _, violation := range violations {
 		r.violate(violation)
 		break
 	}
@@ -362,9 +380,14 @@ func (r *runner) violate(violation Violation) {
 	}
 }
 
-// inject adds the op's fault to those the proxy applies.
+// inject adds the op's fault to those the proxy applies and opens its window.
 func (r *runner) inject(op Op) {
-	r.faults = append(r.faults, activeFault{spec: op.Fault.spec(), until: op.Fault.Until.Op})
+	r.timeline.Faults = append(r.timeline.Faults, Window{Start: r.now()})
+	r.faults = append(r.faults, activeFault{
+		spec:   op.Fault.spec(),
+		until:  op.Fault.Until.Op,
+		window: len(r.timeline.Faults) - 1,
+	})
 	r.setFaults()
 }
 
@@ -375,7 +398,9 @@ func (r *runner) expireFaults(op int) {
 	for _, fault := range r.faults {
 		if fault.until == nil || *fault.until > op {
 			kept = append(kept, fault)
+			continue
 		}
+		r.timeline.Faults[fault.window].End = r.now()
 	}
 	if len(kept) == len(r.faults) {
 		return
@@ -394,21 +419,30 @@ func (r *runner) setFaults() {
 
 func (r *runner) faultActive() bool { return len(r.faults) > 0 }
 
+// clearFaults takes every fault off the proxy and closes its window, which the
+// teardown does before it measures anything (DESIGN.md §5.5).
+func (r *runner) clearFaults() {
+	for _, fault := range r.faults {
+		r.timeline.Faults[fault.window].End = r.now()
+	}
+	r.faults = nil
+	r.h.setFaults(nil)
+}
+
 // teardown is step 4 of DESIGN.md §5.5. Every step runs even if one fails, and
 // the caller's deadline does not cut it short.
 func (r *runner) teardown(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.teardownBudget())
 	defer cancel()
 
-	r.faults = nil
-	r.h.setFaults(nil)
+	r.clearFaults()
 	failures := []error{r.h.sleep(ctx, r.target.Timeouts.Stable)}
 	if r.cr != "" {
 		failures = append(failures, r.h.deleteCR(ctx, r.cr))
 	}
 
 	r.timeline.Deletion.Start = r.now()
-	clean, err := r.h.awaitClean(ctx, r.target.Timeouts.Delete)
+	clean, err := r.h.awaitClean(ctx, r.target.Timeouts.Delete+deletionMargin)
 	r.timeline.Deletion.End = r.now()
 	failures = append(failures, err)
 	if r.violation == nil && !r.failed {

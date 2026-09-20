@@ -98,9 +98,12 @@ func (f *fakeHarness) forceFinalizers(context.Context) ([]string, error) {
 }
 
 func (f *fakeHarness) empty(context.Context) error { return f.record("empty") }
-func (f *fakeHarness) requests() []proxy.Request   { return nil }
 func (f *fakeHarness) objects() *observe.Store     { return nil }
 func (f *fakeHarness) stop(context.Context) error  { return f.record("stop") }
+
+// requests grows with the run, so that a log sampled late is longer than one
+// sampled at a checkpoint.
+func (f *fakeHarness) requests() []proxy.Request { return make([]proxy.Request, len(f.calls)) }
 
 func (f *fakeHarness) opCalls() []string       { return f.calls[:f.teardownStart()] }
 func (f *fakeHarness) teardownCalls() []string { return f.calls[f.teardownStart():] }
@@ -120,15 +123,19 @@ func (f *fakeHarness) teardownStart() int {
 // given.
 type fakeChecker struct {
 	violations [][]Violation
+	err        error
 	inputs     []Input
 }
 
-func (c *fakeChecker) Check(in Input) []Violation {
+func (c *fakeChecker) Check(in Input) ([]Violation, error) {
 	c.inputs = append(c.inputs, in)
-	if len(c.inputs) <= len(c.violations) {
-		return c.violations[len(c.inputs)-1]
+	if c.err != nil {
+		return nil, c.err
 	}
-	return nil
+	if len(c.inputs) <= len(c.violations) {
+		return c.violations[len(c.inputs)-1], nil
+	}
+	return nil, nil
 }
 
 var toyTarget = &target.Target{
@@ -437,7 +444,7 @@ func TestRunTearsDownInTheOrderTheDesignGives(t *testing.T) {
 		"setFaults 0",
 		"sleep " + testTimeouts.Stable.String(),
 		"deleteCR widget",
-		"awaitClean " + testTimeouts.Delete.String(),
+		"awaitClean " + (testTimeouts.Delete + deletionMargin).String(),
 		"forceFinalizers",
 		"empty",
 		"stop",
@@ -471,7 +478,7 @@ func TestRunCheckpointsAfterTheDeletionWindow(t *testing.T) {
 	if last.Op != Teardown || last.At.Before(window.End) {
 		t.Errorf("The last checkpoint is %+v, want one after the deletion window closed at %v.", last, window.End)
 	}
-	if forced := slices.Index(h.calls, "forceFinalizers"); forced < slices.Index(h.calls, "awaitClean "+testTimeouts.Delete.String()) {
+	if forced := slices.Index(h.calls, "forceFinalizers"); forced < slices.Index(h.calls, "awaitClean "+(testTimeouts.Delete+deletionMargin).String()) {
 		t.Errorf("The teardown forced finalizers before the deletion window: %v", h.calls)
 	}
 	if got := len(check.inputs); got != 2 {
@@ -618,4 +625,97 @@ func checkpointsAt(timeline Timeline) []int {
 		ops = append(ops, checkpoint.Op)
 	}
 	return ops
+}
+
+// The Runner knows when each fault op injected its spec and when the fault was
+// cleared, which is the window the checks ignore what happened in.
+func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
+	h := newFakeHarness()
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Drop: true}}},
+		Op{Type: OpSettle},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	faults := result.Timeline.Faults
+	if len(faults) != 2 {
+		t.Fatalf("The run recorded %d fault windows, want one per fault op.", len(faults))
+	}
+	ops := result.Timeline.Ops
+	if !between(faults[0].Start, ops[0].At, ops[1].At) || !between(faults[0].End, ops[1].At, ops[2].At) {
+		t.Errorf("The first fault was active %+v, want from op 0 until op 2 cleared it.", faults[0])
+	}
+	if !between(faults[1].Start, ops[1].At, ops[2].At) || !faults[1].End.After(ops[2].At) {
+		t.Errorf("The second fault was active %+v, want from op 1 until the teardown cleared it.", faults[1])
+	}
+}
+
+// between reports whether the run reached when in [from, to].
+func between(when, from, to time.Time) bool { return !when.Before(from) && !when.After(to) }
+
+// The recorded run is what the teardown left: the bug matrix and a report read
+// the whole of it, not the part the last checkpoint saw.
+func TestRunRecordsTheWholeRunTheTeardownLeftBehind(t *testing.T) {
+	h := newFakeHarness()
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if got, want := len(result.Recorded.Requests), len(h.calls); got != want {
+		t.Errorf("The run recorded %d requests, want the %d of the whole run: it was sampled after the teardown.",
+			got, want)
+	}
+	if last := result.Recorded.Timeline.Checkpoints; len(last) == 0 || last[len(last)-1].Op != Teardown {
+		t.Errorf("The recorded run holds the checkpoints %v, want the teardown's among them.", checkpointsAt(result.Recorded.Timeline))
+	}
+	if result.Recorded.Target != toyTarget {
+		t.Errorf("The recorded run names the target %v, want the run's.", result.Recorded.Target)
+	}
+}
+
+// A check that cannot be evaluated is a configuration error, so the run ends
+// as a harness error rather than as a finding (DESIGN.md §11).
+func TestRunEndsWhenACheckCannotBeEvaluated(t *testing.T) {
+	h := newFakeHarness()
+	check := &fakeChecker{err: errors.New("no such field: spec.nonesuch")}
+
+	result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err == nil || !strings.Contains(err.Error(), "spec.nonesuch") {
+		t.Fatalf("The run returned %v, want the evaluation error.", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %+v, want no finding: the check did not evaluate.", result.Violation)
+	}
+	if !slices.Contains(h.calls, "stop") {
+		t.Errorf("The run did %v, want it torn down anyway.", h.calls)
+	}
+}
+
+// G3's window opens when the Observer records the deletion, a moment after the
+// teardown asked for it, so the teardown holds the namespace open past
+// T_delete.
+func TestRunHoldsTheDeletionWindowOpenPastTDelete(t *testing.T) {
+	h := newFakeHarness()
+	h.clean = false
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	want := "awaitClean " + (testTimeouts.Delete + deletionMargin).String()
+	if got := h.teardownCalls(); !slices.Contains(got, want) {
+		t.Errorf("The teardown did %v, want %q.", got, want)
+	}
+	if window := result.Timeline.Deletion; !window.End.After(window.Start) {
+		t.Errorf("The deletion window is %+v, want one the teardown held open.", window)
+	}
 }

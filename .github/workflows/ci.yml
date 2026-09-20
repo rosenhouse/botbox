@@ -68,3 +68,24 @@ jobs:
           key: envtest-${{ runner.os }}-${{ hashFiles('Makefile') }}
       - name: envtest tests
         run: make test-envtest
+
+  # The bug matrix of DESIGN.md §9.1: one envtest run per seeded bug, which the
+  # committed docs/bug-matrix.md must match.
+  bug-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cache envtest control-plane binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin/envtest
+            bin/setup-envtest
+          key: envtest-${{ runner.os }}-${{ hashFiles('Makefile') }}
+      - name: The bug matrix is current
+        run: make verify-bug-matrix

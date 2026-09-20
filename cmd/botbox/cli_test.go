@@ -22,15 +22,17 @@ type fakeSession struct {
 	results   []run.Result
 	failures  []error
 	sequences []run.Sequence
+	checks    []run.Checker
 	dirs      []string
-	args      []string
+	args      [][]string
 	closed    bool
 }
 
-func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.Sequence, dir string) (run.Result, error) {
+func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
 	s.sequences = append(s.sequences, sequence)
 	s.dirs = append(s.dirs, dir)
-	s.args = t.Launch.Args
+	s.args = append(s.args, t.Launch.Args)
+	s.checks = append(s.checks, check)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return run.Result{}, err
 	}
@@ -242,7 +244,7 @@ func TestLaunchArgsAppendToTheTargetsInOrder(t *testing.T) {
 		t.Fatalf("botbox replay exited %d: %s", code, stderr)
 	}
 	want := append(slices.Clone(declared), "--bug=3", "--bug=7")
-	if !slices.Equal(session.args, want) {
+	if len(session.args) != 1 || !slices.Equal(session.args[0], want) {
 		t.Errorf("The target was launched with %v, want %v: a later flag wins.", session.args, want)
 	}
 }
@@ -336,4 +338,17 @@ func loadToyArgs(t *testing.T) []string {
 		t.Fatalf("Loading the toy target failed: %v", err)
 	}
 	return toy.Launch.Args
+}
+
+func TestARunEvaluatesTheInvariants(t *testing.T) {
+	session := &fakeSession{}
+
+	code, _, stderr := invoke(t, session, "replay", "--target", toyTargetYAML, "--out", t.TempDir(), writeSequence(t, 1))
+
+	if code != exitOK {
+		t.Fatalf("botbox replay exited %d: %s", code, stderr)
+	}
+	if len(session.checks) != 1 || session.checks[0] != (run.Engine{}) {
+		t.Errorf("The run checked with %v, want the invariant engine.", session.checks)
+	}
 }

@@ -47,6 +47,7 @@ assets-path: $(SETUP_ENVTEST)
 
 .PHONY: build
 build:
+	go build -o bin/botbox ./cmd/botbox
 	go build -o bin/toy-widget ./targets/toy-widget
 
 .PHONY: generate

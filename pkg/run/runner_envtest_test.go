@@ -1,0 +1,256 @@
+//go:build envtest
+
+package run_test
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"slices"
+	"testing"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+
+	"github.com/rosenhouse/botbox/pkg/run"
+)
+
+// toySequence drives the toy through every op the Runner executes in M3.
+const toySequence = `{
+  "seed": 20260920,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 3}}},
+    {"i": 1, "t": "update", "patch": {"spec": {"count": 5}}},
+    {"i": 2, "t": "settle"},
+    {"i": 3, "t": "restart"},
+    {"i": 4, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 5, "t": "delete"}
+  ]
+}`
+
+// checkpointState is what a check saw when it ran.
+type checkpointState struct {
+	op          int
+	converged   bool
+	managed     []string
+	ready       int64
+	widgetWatch int
+}
+
+// recordingChecker records what each checkpoint was given, and reports fail if
+// it is set.
+type recordingChecker struct {
+	fail        *run.Violation
+	checkpoints []checkpointState
+}
+
+func (c *recordingChecker) Check(in run.Input) []run.Violation {
+	last := in.Timeline.Checkpoints[len(in.Timeline.Checkpoints)-1]
+	state := checkpointState{op: last.Op, converged: last.Converged}
+	for _, managed := range in.Objects.Managed() {
+		state.managed = append(state.managed, managed.Name)
+	}
+	for _, cr := range in.Objects.Current(in.Target.Primary) {
+		state.ready, _, _ = unstructured.NestedInt64(cr.Object.Object, "status", "ready")
+	}
+	for _, request := range in.Requests {
+		if request.Verb == "watch" && request.Resource == "widgets" {
+			state.widgetWatch++
+		}
+	}
+	c.checkpoints = append(c.checkpoints, state)
+	if c.fail != nil {
+		return []run.Violation{*c.fail}
+	}
+	return nil
+}
+
+func (c *recordingChecker) at(op int) (checkpointState, bool) {
+	for _, state := range c.checkpoints {
+		if state.op == op {
+			return state, true
+		}
+	}
+	return checkpointState{}, false
+}
+
+func (c *recordingChecker) ops() []int {
+	var ops []int
+	for _, state := range c.checkpoints {
+		ops = append(ops, state.op)
+	}
+	return ops
+}
+
+func TestRunner(t *testing.T) {
+	ctx := t.Context()
+	binary := buildToy(t)
+	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
+
+	t.Run("drives the toy through a sequence and checkpoints where the design says", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		check := &recordingChecker{}
+		dir := t.TempDir()
+
+		result, err := run.Run(ctx, toy, readSequence(t, toySequence), run.Options{
+			Dir: dir, Config: testCluster.Config(), Check: check,
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %+v, want none: the toy runs without a bug.", result.Violation)
+		}
+		requireCheckpointsOfSection4(t, check, result)
+		requireOpsTookEffect(t, check, result)
+		requireNamespaceEmpty(t, ctx, testCluster.Config(), result.Timeline.Namespace)
+		if len(result.Timeline.Forced) > 0 {
+			t.Errorf("The teardown forced the finalizers off %v, want the toy to clear its own.", result.Timeline.Forced)
+		}
+	})
+
+	t.Run("stops at the first violation and leaves the evidence in run-1", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		failed := run.Violation{ID: "P1", Statement: "status.ready never exceeds the ConfigMaps present"}
+		check := &recordingChecker{fail: &failed}
+		out, err := run.OpenOutput(t.TempDir(), 20260920, time.Now())
+		if err != nil {
+			t.Fatalf("Opening the output directory failed: %v", err)
+		}
+
+		result, err := run.Run(ctx, toy, readSequence(t, toySequence), run.Options{
+			Dir: out.RunDir(1), Config: testCluster.Config(), Check: check,
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation == nil || result.Violation.ID != failed.ID {
+			t.Fatalf("The run reported %+v, want the violation the check gave it.", result.Violation)
+		}
+		if len(check.checkpoints) != 1 {
+			t.Errorf("The checks ran at %v, want the run to end at the first violation.", check.ops())
+		}
+		if len(result.Timeline.Ops) != 1 {
+			t.Errorf("The run applied %d ops, want it to stop after the first violation.", len(result.Timeline.Ops))
+		}
+		requireRunFiles(t, out.RunDir(1))
+		requireNamespaceEmpty(t, ctx, testCluster.Config(), result.Timeline.Namespace)
+	})
+}
+
+// requireCheckpointsOfSection4 asserts a checkpoint where each settle wait
+// ended and one after the teardown deletion window. The restart of op 3 is
+// checked at the settle that follows it.
+func requireCheckpointsOfSection4(t *testing.T, check *recordingChecker, result run.Result) {
+	t.Helper()
+	want := []int{0, 1, 2, 4, 5, run.Teardown}
+	if got := check.ops(); !slices.Equal(got, want) {
+		t.Errorf("The checks ran after the ops %v, want %v.", got, want)
+	}
+	if got := checkpointOps(result.Timeline); !slices.Equal(got, want) {
+		t.Errorf("The timeline holds checkpoints at %v, want %v.", got, want)
+	}
+	for _, state := range check.checkpoints {
+		if !state.converged {
+			t.Errorf("The checkpoint after op %d reports no convergence.", state.op)
+		}
+	}
+}
+
+// requireOpsTookEffect asserts what the cluster did: the update scaled the
+// children, the restart started a second process, the deleteManaged took the
+// first child and the delete emptied the namespace.
+func requireOpsTookEffect(t *testing.T, check *recordingChecker, result run.Result) {
+	t.Helper()
+	created, _ := check.at(0)
+	if len(created.managed) != 3 || created.ready != 3 {
+		t.Errorf("After the create the run held the ConfigMaps %v and status.ready %d, want 3 of each.",
+			created.managed, created.ready)
+	}
+	updated, _ := check.at(1)
+	if len(updated.managed) != 5 || updated.ready != 5 {
+		t.Errorf("After the update to count 5 the run held the ConfigMaps %v and status.ready %d, want 5 of each.",
+			updated.managed, updated.ready)
+	}
+	restarted, _ := check.at(4)
+	if before, _ := check.at(2); restarted.widgetWatch <= before.widgetWatch {
+		t.Errorf("The target watched widgets %d times before the restart and %d after, want the restart to open another.",
+			before.widgetWatch, restarted.widgetWatch)
+	}
+	if want := "widget-0"; result.Timeline.Ops[4].Resolved != want {
+		t.Errorf("The deleteManaged op took %q, want the first ConfigMap by creationTimestamp then name, %q.",
+			result.Timeline.Ops[4].Resolved, want)
+	}
+	if len(restarted.managed) != 5 {
+		t.Errorf("After the deleted child the run held the ConfigMaps %v, want the target to have made it again.",
+			restarted.managed)
+	}
+	deleted, _ := check.at(5)
+	if len(deleted.managed) != 0 {
+		t.Errorf("After the delete the run still held the ConfigMaps %v.", deleted.managed)
+	}
+}
+
+// requireNamespaceEmpty asserts what the teardown left: a namespace holding
+// none of the run's objects. envtest never finishes terminating one, so its
+// contents stay readable (DESIGN.md §5.8).
+func requireNamespaceEmpty(t *testing.T, ctx context.Context, config *rest.Config, namespace string) {
+	t.Helper()
+	if namespace == "" {
+		t.Fatal("The run recorded no namespace.")
+	}
+	client, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		t.Fatalf("Building a client failed: %v", err)
+	}
+	remaining, err := client.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("Listing what the run left failed: %v", err)
+	}
+	for _, configMap := range remaining.Items {
+		if configMap.DeletionTimestamp == nil {
+			t.Errorf("The run namespace still holds the ConfigMap %s.", configMap.Name)
+		}
+	}
+}
+
+// requireRunFiles asserts the run directory of DESIGN.md §11.
+func requireRunFiles(t *testing.T, dir string) {
+	t.Helper()
+	if filepath.Base(dir) != "run-1" {
+		t.Errorf("The failing run wrote to %s, want run-1.", dir)
+	}
+	for _, name := range []string{"sequence.json", "requests.jsonl", "objects.jsonl", "target.log"} {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if err != nil {
+			t.Errorf("The failing run wrote no %s: %v", name, err)
+			continue
+		}
+		if info.Size() == 0 {
+			t.Errorf("The failing run's %s is empty.", name)
+		}
+	}
+}
+
+func readSequence(t *testing.T, text string) run.Sequence {
+	t.Helper()
+	sequence, err := run.UnmarshalSequence([]byte(text))
+	if err != nil {
+		t.Fatalf("Reading the sequence failed: %v", err)
+	}
+	return sequence
+}
+
+func checkpointOps(timeline run.Timeline) []int {
+	var ops []int
+	for _, checkpoint := range timeline.Checkpoints {
+		ops = append(ops, checkpoint.Op)
+	}
+	return ops
+}

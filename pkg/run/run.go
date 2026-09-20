@@ -39,6 +39,7 @@ const (
 	targetLogFile  = "target.log"
 	requestsFile   = "requests.jsonl"
 	objectsFile    = "objects.jsonl"
+	sequenceFile   = "sequence.json"
 )
 
 // namespacePrefix opens the name of a run namespace.
@@ -50,7 +51,7 @@ type Options struct {
 	// and the recordings Stop writes (DESIGN.md §11).
 	Dir string
 	// Seed drives the proxy's fault sampling, so that a replay faults the same
-	// requests.
+	// requests. Run takes it from the sequence.
 	Seed int64
 	// Config reaches a control plane the caller already started. Runs share
 	// one, because the shrinker replays a sequence many times (DESIGN.md §5.5).
@@ -60,6 +61,20 @@ type Options struct {
 	// does not, so botbox emulates the collector unless this is set
 	// (DESIGN.md §5.8).
 	GarbageCollected bool
+	// Check evaluates the invariants and properties at each checkpoint. Run
+	// requires it; Start does not use it.
+	Check Checker
+	// MaxManaged ends a run whose namespace holds more managed objects, as a
+	// harness limit rather than a finding. Zero takes the default of
+	// DESIGN.md §5.5.
+	MaxManaged int
+}
+
+func (o Options) maxManaged() int {
+	if o.MaxManaged > 0 {
+		return o.MaxManaged
+	}
+	return defaultMaxManaged
 }
 
 // Harness is one run's machinery.

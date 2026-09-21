@@ -75,8 +75,12 @@ every run passed.
 A passing example proves little by itself, so the example also ships a configuration that must
 fail. With `--enable-certificate-owner-ref=false`, which `--launch-arg` appends to `launch.args`,
 cert-manager leaves the issued Secret behind, as upstream documents. The target declares
-`v1/Secret` as managed, so G3 has to report it. Seed 24 draws four ops, and botbox minimizes
-them to the one that still fails, then runs it again so the evidence matches:
+`v1/Secret` as managed, so G3 has to report it. Seed 24 draws four ops, so it also shows the
+minimizer: botbox cuts them to the one that still fails, then runs it again so the evidence matches.
+
+```sh
+examples/cert-manager/quickstart.sh --seed 24 --runs 1 --launch-arg --enable-certificate-owner-ref=false
+```
 
 ```
 run 1: seed 24, generated
@@ -86,8 +90,9 @@ run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was delete
   the sequence is 1 op, in botbox-out/20260921T042637Z-24/run-1/sequence.json
 ```
 
-`make test-example` runs both configurations on the seeds the Makefile fixes, and fails unless the
-first passes and the second fails on G3 naming that Secret. A nightly workflow draws its own seeds.
+`make test-example` runs this control on seed 23, the first seed it fixes, whose one drawn op is
+already minimal, and fails unless the default configuration passes and the control fails on G3
+naming that Secret. A nightly workflow draws its own seeds.
 
 ## Your own controller
 

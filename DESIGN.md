@@ -200,8 +200,9 @@ The Runner executes one sequence:
    the run as a harness limit, reported as such rather than as a finding.
 4. Tear down. Clear every active fault and wait `T_stable`, which is the last quiet
    window (§6). Delete the primary CR if it still exists and wait for the G3 window. Then
-   force-remove any finalizer still present in the run namespace; each forced removal is
-   recorded in the report and invalidates G3 for that run. Delete every remaining object
+   force-remove any finalizer still present in the run namespace; the report notes each one
+   (D37). G3 judged the deletion window, which closed before this. Delete every remaining
+   object
    in the namespace that botbox or the target created. Stop the target if it was started
    for this run. Delete the namespace. Namespace names are never reused, so a namespace
    that never finishes terminating (envtest, §5.8) is harmless.
@@ -269,7 +270,7 @@ real targets; the toy target sets much shorter ones (§9).
 | **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s), the target makes no further API request for `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io` leases, since leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
 | **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
-| **G4** | Convergence | Within `T_settle` after any spec change, and within `T_settle` after faults stop, the target's `Ready` predicate holds. This is ESR as a test. | Observer + target predicate |
+| **G4** | Convergence | Within `T_settle` after any spec change, and within `T_settle` after faults stop, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
 | **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
 
@@ -428,12 +429,18 @@ launch:
     - --enable-certificate-owner-ref=true
     - --metrics-listen-address=127.0.0.1:0
 timeouts:                                     # optional; defaults in §6
-  settle: 30s
+  settle: 30s                                 # stable has to be shorter than this
   stable: 10s
   delete: 60s
 thresholds:                                   # optional; defaults in §6
   errloop: 20                                 # N_errloop for G6
 ```
+
+A settle wait ends once the Ready predicate holds and nothing has changed for `stable`,
+within `settle` (§5.5), so the target has `settle - stable` to react before the quiet
+window has to open. A `stable` at least as wide as `settle` leaves it none, and every op
+that writes then expires. Loading such a target is a configuration error rather than a run
+that reports G4 against a target that did nothing wrong.
 
 `manages` names kinds as `group/version/Kind`, with `v1/Kind` for the core group. An
 optional `selector` (label selector) refines attribution (§6). Paths under `generate` and
@@ -946,6 +953,14 @@ built from source and run as a black-box binary.
   `objects.jsonl`. The report also carries what no check could judge, for D31's reason: a
   report that omits "G3 could not be judged" reads like one where G3 passed, and it is the
   artefact a human actually reads.
+- **D37 A forced finalizer is a note, not a reason to withhold G3.** §5.5 step 4 said each
+  forced removal invalidates G3 for the run, and nothing implemented it. Implementing it
+  literally would have thrown away true findings. The teardown stamps the end of the
+  deletion window and takes G3's checkpoint before it forces anything, and no check reads a
+  version recorded after that instant, so nothing botbox forced was ever credited to the
+  target. What was missing is visibility: an object no check judges — a fixture, or a child
+  born after the deletion — can hold a finalizer while G3 passes, and nothing said so. The
+  run notes what it forced.
 - **D36 A fault excuses the target over the window the proxy applied it in.** The Runner
   used to open a fault's window where it injected the spec and close it where it dropped
   the spec, and only an op-index trigger made it drop one. A `Count` or `For` trigger runs

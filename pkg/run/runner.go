@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -118,7 +119,8 @@ type Timeline struct {
 	// End: the fault outlived the run.
 	Faults []Window
 	// Forced names every object the teardown force-removed a finalizer from.
-	// One such removal invalidates G3 for the run (DESIGN.md §5.5).
+	// The run notes each one: G3 judged the deletion window, which closed
+	// before any of this (DESIGN.md §5.5, D37).
 	Forced []string
 }
 
@@ -243,8 +245,8 @@ type runner struct {
 	timeline  Timeline
 	violation *Violation
 	notes     []string
-	// skipped names what the run could not do, which no check can judge
-	// (DESIGN.md §6).
+	// skipped names what no check judged: what the run could not do, and what
+	// botbox did to the run namespace itself (DESIGN.md §6).
 	skipped []string
 	failed  bool
 	// cr is the primary CR the CR ops act on.
@@ -563,6 +565,13 @@ func (r *runner) teardown(ctx context.Context) error {
 
 	forced, err := r.h.forceFinalizers(ctx)
 	r.timeline.Forced = forced
+	if len(forced) > 0 {
+		// G3's window closed before this, so nothing forced here was ever
+		// credited to the target. What a reader would otherwise miss is that
+		// the namespace did not empty on its own (D37).
+		r.skipped = append(r.skipped, fmt.Sprintf("the teardown force-removed the finalizers of %s, so the run namespace did not empty on its own",
+			strings.Join(forced, ", ")))
+	}
 	failures = append(failures, err, r.h.empty(ctx), r.h.stop(ctx))
 	return errors.Join(failures...)
 }

@@ -127,7 +127,16 @@ launch:
   args:
     - --kubeconfig=$KUBECONFIG                # replaced with a kubeconfig for the proxy
     - --enable-certificate-owner-ref=true
+timeouts:                                     # optional; 30s, 10s and 60s by default
+  settle: 30s                                 # the whole budget for one spec change
+  stable: 10s                                 # the quiet it has to end in, carved out of settle
+  delete: 60s                                 # how long a deletion has to come clean
 ```
+
+A slow controller needs a wider `settle`, and a chatty one a narrower `stable`. The quiet
+window sits inside the settle budget, so the controller has `settle - stable` to stop
+writing. A `stable` at least as wide as `settle` leaves it none, so botbox refuses to load
+that target rather than reporting G4 against your controller.
 
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the

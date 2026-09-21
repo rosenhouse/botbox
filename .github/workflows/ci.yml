@@ -6,6 +6,9 @@ on:
   pull_request:
   push:
     branches: [main]
+  # A pull request opened through the API by a token GitHub will not let start
+  # a workflow has no run until something pushes to it. This is how to ask.
+  workflow_dispatch:
 
 # One run per ref at a time. A new push to a PR cancels its in-flight CI run;
 # pushes to main never cancel a run in progress.

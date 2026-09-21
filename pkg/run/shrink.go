@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"slices"
+	"time"
 )
 
 // Replay executes one candidate sequence from clean state, as Run does. An
@@ -26,30 +27,46 @@ func Shrink(ctx context.Context, failing Sequence, violation Violation, replay R
 func shrinkPass(ctx context.Context, s Sequence, violation Violation, replay Replay) (Sequence, bool) {
 	simplified := false
 	for i := 0; i < len(s.Ops) && ctx.Err() == nil; {
-		candidate, ok := simpler(ctx, s, i, violation, replay)
-		if !ok {
-			i++
+		// Removal first, because no fault is simpler than a short one
+		// (DESIGN.md §5.5). On success the next op has shifted into this
+		// position, so try it again.
+		if candidate, ok := reproducing(ctx, s, i, []Sequence{s.without(i)}, violation, replay); ok {
+			s, simplified = candidate, true
 			continue
 		}
-		// The op is gone or milder, so try the same position again.
-		s, simplified = candidate, true
+		// The op stays. Weaken it as far as it goes, and do not ask about
+		// removing it again: the sequence without it is the same whatever
+		// its fault carries, and each replay is a cluster (§11).
+		for ctx.Err() == nil {
+			candidate, ok := reproducing(ctx, s, i, milderThan(s, i), violation, replay)
+			if !ok {
+				break
+			}
+			s, simplified = candidate, true
+		}
+		i++
 	}
 	return s, simplified
 }
 
-// simpler returns the sequence with op i removed, or with its fault weakened,
-// whichever still reproduces. Removal comes first, because no fault is simpler
-// than a short one (DESIGN.md §5.5).
-func simpler(ctx context.Context, s Sequence, i int, violation Violation, replay Replay) (Sequence, bool) {
-	candidates := []Sequence{s.without(i)}
+// milderThan are the sequences with op i's fault weakened.
+func milderThan(s Sequence, i int) []Sequence {
+	var candidates []Sequence
 	for _, milder := range weakened(s.Ops[i]) {
 		candidates = append(candidates, s.with(i, milder))
 	}
+	return candidates
+}
+
+// reproducing returns the first candidate that still fails the same way.
+func reproducing(ctx context.Context, s Sequence, i int, candidates []Sequence,
+	violation Violation, replay Replay) (Sequence, bool) {
 	for _, candidate := range candidates {
 		// Simplifying an op can leave a sequence the format does not allow,
 		// such as one ending on a restart. It is not a reproducer, and
-		// replaying it would cost a run to learn so.
-		if candidate.Validate() != nil {
+		// replaying it would cost a run to learn so. A candidate that changed
+		// nothing is not one either, and accepting it would spin the pass.
+		if candidate.Validate() != nil || len(candidate.Ops) == len(s.Ops) && candidate.Ops[i].same(s.Ops[i]) {
 			continue
 		}
 		if reproduces(ctx, candidate, violation, replay) {
@@ -62,9 +79,16 @@ func simpler(ctx context.Context, s Sequence, i int, violation Violation, replay
 	return s, false
 }
 
+// minFaultDuration is where halving a fault's duration stops. Halving runs to
+// a nanosecond in thirty-two steps, and each step is a whole cluster (§11),
+// for a reproducer nobody can read: a fault delaying a request by a
+// nanosecond is indistinguishable from no fault, which removal already tries.
+const minFaultDuration = Duration(10 * time.Millisecond)
+
 // weakened are the milder faults to try in the op's place, each halving one
-// duration the fault carries (DESIGN.md §5.5). Halving stops short of zero,
-// which is not a milder fault but an endless one.
+// thing the fault carries (DESIGN.md §5.5). A count halves to 1, because a
+// zero Trigger never ends and is a stronger fault, not a milder one. A
+// duration halves to minFaultDuration.
 func weakened(op Op) []Op {
 	if op.Type != OpFault || op.Fault == nil {
 		return nil
@@ -73,13 +97,25 @@ func weakened(op Op) []Op {
 	if half := op.Fault.Until.Count / 2; half > 0 {
 		milder = append(milder, op.withFault(func(f *Fault) { f.Until.Count = half }))
 	}
-	if half := op.Fault.Until.For / 2; half > 0 {
+	if half, ok := halved(op.Fault.Until.For); ok {
 		milder = append(milder, op.withFault(func(f *Fault) { f.Until.For = half }))
 	}
-	if half := op.Fault.Action.Delay / 2; half > 0 {
+	if half, ok := halved(op.Fault.Action.Delay); ok {
 		milder = append(milder, op.withFault(func(f *Fault) { f.Action.Delay = half }))
 	}
 	return milder
+}
+
+// halved is the duration to try next, and whether there is one. A duration
+// already at the floor has nothing milder to offer.
+func halved(d Duration) (Duration, bool) {
+	if d <= minFaultDuration {
+		return d, false
+	}
+	if half := d / 2; half > minFaultDuration {
+		return half, true
+	}
+	return minFaultDuration, true
 }
 
 // withFault copies the op with its fault changed, so that a candidate never
@@ -89,6 +125,15 @@ func (o Op) withFault(change func(*Fault)) Op {
 	change(&fault)
 	o.Fault = &fault
 	return o
+}
+
+// same reports whether the ops carry the same fault, which is what weakening
+// changes. It is the guard against a candidate that simplifies nothing.
+func (o Op) same(other Op) bool {
+	if o.Fault == nil || other.Fault == nil {
+		return o.Fault == other.Fault
+	}
+	return *o.Fault == *other.Fault
 }
 
 // with returns the sequence with op i replaced.

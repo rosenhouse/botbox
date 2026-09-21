@@ -202,6 +202,52 @@ func TestShrinkPassesAgainOverWhatItLeft(t *testing.T) {
 	}
 }
 
+// A duration halves toward a floor, not toward zero. Each replay is a cluster,
+// and a fault delaying a request by a nanosecond reproduces nothing a reader
+// can act on (DESIGN.md §5.5, §11).
+func TestShrinkStopsHalvingADurationAtAFloor(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		fault Fault
+		of    func(Fault) Duration
+	}{
+		{name: "how long it lasts", of: func(f Fault) Duration { return f.Until.For },
+			fault: Fault{Action: Action{Error: 500}, Until: Trigger{For: Duration(8 * time.Second)}}},
+		{name: "how long it delays", of: func(f Fault) Duration { return f.Action.Delay },
+			fault: Fault{Action: Action{Delay: Duration(8 * time.Second)}, Until: Trigger{Count: 1}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			failing := sequenceOfTypes(OpFault, OpSettle)
+			failing.Ops[0].Fault = &test.fault
+			replay := &fakeReplay{violates: failsOn("G1", OpFault)}
+
+			shrunk := shrink(t, t.Context(), failing, "G1", replay)
+
+			// The floor exactly: below it the ladder ran too far, above it the
+			// ladder did not run at all.
+			if got := test.of(*shrunk.Ops[0].Fault); got != minFaultDuration {
+				t.Errorf("Shrink took it to %v, want the %v floor.",
+					time.Duration(got), time.Duration(minFaultDuration))
+			}
+			if len(replay.seen) > 12 {
+				t.Errorf("Shrink replayed %d candidates, want the handful a floor allows: each is a cluster.",
+					len(replay.seen))
+			}
+		})
+	}
+}
+
+// A candidate equal to the sequence it came from is no simplification, and
+// accepting one spins the pass without replaying anything.
+func TestShrinkRefusesACandidateThatSimplifiesNothing(t *testing.T) {
+	failing := sequenceOfTypes(OpFault, OpSettle)
+	failing.Ops[0].Fault = &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 1}}
+
+	if milder := weakened(failing.Ops[0]); len(milder) != 0 {
+		t.Errorf("weakened offered %+v for a fault already at its smallest.", milder)
+	}
+}
+
 // A fault that cannot go entirely shrinks toward a shorter duration
 // (DESIGN.md §5.5).
 func TestShrinkWeakensAFaultItCannotRemove(t *testing.T) {

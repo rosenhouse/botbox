@@ -37,11 +37,7 @@ func shrinkPass(ctx context.Context, s Sequence, violation Violation, replay Rep
 		// The op stays. Weaken it as far as it goes, and do not ask about
 		// removing it again: the sequence without it is the same whatever
 		// its fault carries, and each replay is a cluster (§11).
-		for ctx.Err() == nil {
-			candidate, ok := reproducing(ctx, s, i, milderThan(s, i), violation, replay)
-			if !ok {
-				break
-			}
+		if candidate, weakened := weaken(ctx, s, i, violation, replay); weakened {
 			s, simplified = candidate, true
 		}
 		i++
@@ -49,13 +45,28 @@ func shrinkPass(ctx context.Context, s Sequence, violation Violation, replay Rep
 	return s, simplified
 }
 
-// milderThan are the sequences with op i's fault weakened.
-func milderThan(s Sequence, i int) []Sequence {
-	var candidates []Sequence
-	for _, milder := range weakened(s.Ops[i]) {
-		candidates = append(candidates, s.with(i, milder))
+// weaken halves each thing op i's fault carries, one axis at a time and as far
+// as that axis goes. An axis the failure refuses stays refused however far
+// another halves, so weaken asks about it once: each replay is a cluster (§11).
+func weaken(ctx context.Context, s Sequence, i int, violation Violation, replay Replay) (Sequence, bool) {
+	weakened := false
+	if s.Ops[i].Type != OpFault || s.Ops[i].Fault == nil {
+		return s, false
 	}
-	return candidates
+	for _, halve := range halvings {
+		for ctx.Err() == nil {
+			milder, ok := halve(s.Ops[i])
+			if !ok {
+				break
+			}
+			candidate, ok := reproducing(ctx, s, i, []Sequence{s.with(i, milder)}, violation, replay)
+			if !ok {
+				break
+			}
+			s, weakened = candidate, true
+		}
+	}
+	return s, weakened
 }
 
 // reproducing returns the first candidate that still fails the same way.
@@ -85,25 +96,32 @@ func reproducing(ctx context.Context, s Sequence, i int, candidates []Sequence,
 // nanosecond is indistinguishable from no fault, which removal already tries.
 const minFaultDuration = Duration(10 * time.Millisecond)
 
-// weakened are the milder faults to try in the op's place, each halving one
-// thing the fault carries (DESIGN.md §5.5). A count halves to 1, because a
-// zero Trigger never ends and is a stronger fault, not a milder one. A
-// duration halves to minFaultDuration.
-func weakened(op Op) []Op {
-	if op.Type != OpFault || op.Fault == nil {
-		return nil
-	}
-	var milder []Op
-	if half := op.Fault.Until.Count / 2; half > 0 {
-		milder = append(milder, op.withFault(func(f *Fault) { f.Until.Count = half }))
-	}
-	if half, ok := halved(op.Fault.Until.For); ok {
-		milder = append(milder, op.withFault(func(f *Fault) { f.Until.For = half }))
-	}
-	if half, ok := halved(op.Fault.Action.Delay); ok {
-		milder = append(milder, op.withFault(func(f *Fault) { f.Action.Delay = half }))
-	}
-	return milder
+// halvings are the axes weakening halves, each returning the milder op to try
+// and whether that axis has anything left to give (DESIGN.md §5.5). A count
+// halves to 1, because a zero Trigger never ends and is a stronger fault, not
+// a milder one. A duration halves to minFaultDuration.
+var halvings = []func(Op) (Op, bool){
+	func(op Op) (Op, bool) {
+		half := op.Fault.Until.Count / 2
+		if half <= 0 {
+			return op, false
+		}
+		return op.withFault(func(f *Fault) { f.Until.Count = half }), true
+	},
+	func(op Op) (Op, bool) {
+		half, ok := halved(op.Fault.Until.For)
+		if !ok {
+			return op, false
+		}
+		return op.withFault(func(f *Fault) { f.Until.For = half }), true
+	},
+	func(op Op) (Op, bool) {
+		half, ok := halved(op.Fault.Action.Delay)
+		if !ok {
+			return op, false
+		}
+		return op.withFault(func(f *Fault) { f.Action.Delay = half }), true
+	},
 }
 
 // halved is the duration to try next, and whether there is one. A duration

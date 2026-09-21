@@ -239,12 +239,53 @@ func TestShrinkStopsHalvingADurationAtAFloor(t *testing.T) {
 
 // A candidate equal to the sequence it came from is no simplification, and
 // accepting one spins the pass without replaying anything.
+// An axis the failure refuses stays refused however far another one halves, so
+// a pass asks about it once and Shrink asks again only in the pass after.
+// Each replay is a cluster (§11).
+func TestShrinkAsksAboutARefusedWeakeningOncePerPass(t *testing.T) {
+	const needed = 64
+	failing := sequenceOfTypes(OpFault, OpSettle)
+	failing.Ops[0].Fault = &Fault{
+		Action: Action{Error: 500},
+		Until:  Trigger{Count: needed, For: Duration(8 * time.Second)},
+	}
+	// The failure needs every one of the refusals the count allows, so no
+	// smaller count reproduces it and the window is the only axis that gives.
+	replay := &fakeReplay{violates: func(candidate Sequence) string {
+		if fault := candidate.Ops[0].Fault; fault == nil || fault.Until.Count < needed {
+			return ""
+		}
+		return "G1"
+	}}
+
+	shrunk := shrink(t, t.Context(), failing, "G1", replay)
+
+	if got := shrunk.Ops[0].Fault.Until.For; got != minFaultDuration {
+		t.Errorf("Shrink took the window to %v, want the %v floor.",
+			time.Duration(got), time.Duration(minFaultDuration))
+	}
+	if got := shrunk.Ops[0].Fault.Until.Count; got != needed {
+		t.Errorf("Shrink took the count to %d, and the failure needs %d.", got, needed)
+	}
+	var refused int
+	for _, candidate := range replay.seen {
+		if fault := candidate.Ops[0].Fault; fault != nil && fault.Until.Count == needed/2 {
+			refused++
+		}
+	}
+	if refused > 2 {
+		t.Errorf("Shrink replayed the refused count of %d %d times, want one per pass.", needed/2, refused)
+	}
+}
+
 func TestShrinkRefusesACandidateThatSimplifiesNothing(t *testing.T) {
 	failing := sequenceOfTypes(OpFault, OpSettle)
 	failing.Ops[0].Fault = &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 1}}
 
-	if milder := weakened(failing.Ops[0]); len(milder) != 0 {
-		t.Errorf("weakened offered %+v for a fault already at its smallest.", milder)
+	for _, halve := range halvings {
+		if milder, ok := halve(failing.Ops[0]); ok {
+			t.Errorf("An axis offered %+v for a fault already at its smallest.", milder.Fault)
+		}
 	}
 }
 

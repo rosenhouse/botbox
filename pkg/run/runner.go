@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -138,7 +139,7 @@ func Run(ctx context.Context, t *target.Target, sequence Sequence, opts Options)
 	if err := validateRun(t, sequence, opts); err != nil {
 		return Result{}, fmt.Errorf("running the sequence: %w", err)
 	}
-	if err := writeRunSequence(opts.Dir, sequence); err != nil {
+	if err := WriteRunSequence(opts.Dir, sequence); err != nil {
 		return Result{}, err
 	}
 	opts.Seed = sequence.Seed
@@ -166,9 +167,9 @@ func validateRun(t *target.Target, sequence Sequence, opts Options) error {
 	return sequence.Validate()
 }
 
-// writeRunSequence puts the sequence in the run directory, so that a failing
+// WriteRunSequence puts the sequence in the run directory, so that a failing
 // run carries what it executed (DESIGN.md §11).
-func writeRunSequence(dir string, sequence Sequence) error {
+func WriteRunSequence(dir string, sequence Sequence) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating the run directory: %w", err)
 	}
@@ -220,7 +221,10 @@ type runner struct {
 	timeline  Timeline
 	violation *Violation
 	notes     []string
-	failed    bool
+	// skipped names what the run could not do, which no check can judge
+	// (DESIGN.md §6).
+	skipped []string
+	failed  bool
 	// cr is the primary CR the CR ops act on.
 	cr     string
 	faults []activeFault
@@ -251,7 +255,9 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 	failure := r.applyOps(ctx)
 	r.failed = failure != nil
 	teardown := r.teardown(ctx)
-	result := Result{Timeline: r.timeline, Violation: r.violation, Notes: r.notes, Recorded: r.input()}
+	// The run's own notes come before the last checkpoint's.
+	notes := slices.Concat(r.skipped, r.notes)
+	result := Result{Timeline: r.timeline, Violation: r.violation, Notes: notes, Recorded: r.input()}
 	return result, errors.Join(failure, teardown)
 }
 
@@ -339,7 +345,11 @@ func (r *runner) haveCR() error {
 }
 
 // applyDeleteManaged resolves the op's index against the managed objects and
-// deletes the one it names, behind the target's back (DESIGN.md §5.4).
+// deletes the one it names, behind the target's back (DESIGN.md §5.4). How
+// many objects the target manages is its own doing, so an index that resolves
+// to nothing skips the op and is reported as a note. A kind the target does
+// not manage is still a configuration error: no run of that sequence can
+// resolve it.
 func (r *runner) applyDeleteManaged(ctx context.Context, op Op) (string, error) {
 	gvk, err := managedKind(r.target, op.Kind)
 	if err != nil {
@@ -347,7 +357,9 @@ func (r *runner) applyDeleteManaged(ctx context.Context, op Op) (string, error) 
 	}
 	names := r.h.managedObjects(gvk)
 	if *op.Nth >= len(names) {
-		return "", fmt.Errorf("index %d resolves to nothing: the run holds %d managed %s", *op.Nth, len(names), op.Kind)
+		r.skipped = append(r.skipped, fmt.Sprintf("op %d (deleteManaged) deleted nothing: index %d resolves to nothing, and the run holds %d managed %s",
+			op.Index, *op.Nth, len(names), op.Kind))
+		return "", nil
 	}
 	name := names[*op.Nth]
 	return name, r.h.deleteManaged(ctx, gvk, name)

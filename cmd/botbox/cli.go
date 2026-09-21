@@ -6,6 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math/rand/v2"
+	"os"
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -28,25 +31,51 @@ const (
 const (
 	defaultOut      = "botbox-out"
 	defaultDeadline = 4 * time.Minute
+	defaultRuns     = 10
 )
 
 const usage = `botbox exercises a controller against the generic invariants of DESIGN.md §6.
 
-  botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]... <sequence.json>...
+  botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]... [<sequence.json>...]
   botbox replay --target <yaml> [--out DIR] [--deadline D] [--launch-arg ARG]... <sequence.json>
   botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D]
   botbox version
 `
 
-// generationArrivesInM5 is what botbox run says until it generates sequences
-// itself (DESIGN.md §10).
-const generationArrivesInM5 = "generated sequences arrive in M5; name the sequence files to execute"
+const (
+	// shrinkDir holds the replays of a shrink pass, which the run directory
+	// keeps none of (DESIGN.md §11).
+	shrinkDir = "shrink"
+	// sequenceFile is what run.WriteRunSequence writes.
+	sequenceFile = "sequence.json"
+)
 
-// cli is one invocation. Its writers and its test cluster are injected, so the
-// unit tier needs no API server.
+// Generator draws a sequence from a seed, deterministically, for the target it
+// was built for (DESIGN.md §5.4).
+type Generator func(seed int64) (run.Sequence, error)
+
+// sampleGenerator draws the one sequence botbox has without pkg/generate: a
+// create of the target's sample, which generation starts from (DESIGN.md
+// §5.4).
+func sampleGenerator(t *target.Target) (Generator, error) {
+	return func(seed int64) (run.Sequence, error) {
+		return run.Sequence{
+			Seed:   seed,
+			Target: t.Name,
+			Ops:    []run.Op{{Type: run.OpCreate, Obj: t.Sample}},
+		}, nil
+	}, nil
+}
+
+// cli is one invocation. Its writers, its generator and its test cluster are
+// injected, so the unit tier needs no API server.
 type cli struct {
 	stdout, stderr io.Writer
 	open           func(options, *target.Target) (session, error)
+	// newGenerator builds the generator the invocation draws from, once, as
+	// pkg/generate's does: reading the target's CRDs costs I/O, drawing does
+	// not.
+	newGenerator func(*target.Target) (Generator, error)
 }
 
 // session executes sequences against one test cluster. Runs share it, because
@@ -66,6 +95,7 @@ type options struct {
 	deadline   time.Duration
 	launchArgs []string
 	runs       int
+	runsGiven  bool
 	seed       int64
 	seedGiven  bool
 }
@@ -89,17 +119,18 @@ func (c *cli) main(ctx context.Context, args []string) int {
 	return c.exercise(ctx, opts, paths)
 }
 
-// exercise executes every named sequence and stops at the first that fails.
+// exercise executes the sequences the caller named, or the ones botbox draws
+// from the seed, and stops at the first that fails.
 func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
-	if opts.command == "run" && (len(paths) == 0 || opts.runs != 1) {
-		return c.fail(errors.New(generationArrivesInM5))
-	}
 	exercised, err := target.Load(opts.target)
 	if err != nil {
 		return c.fail(err)
 	}
 	exercised.Launch.Args = append(exercised.Launch.Args, opts.launchArgs...)
-	sequences, err := readSequences(paths)
+	if len(paths) == 0 && !opts.seedGiven {
+		opts.seed = newSeed()
+	}
+	runs, err := c.plan(opts, exercised, paths)
 	if err != nil {
 		return c.fail(err)
 	}
@@ -108,22 +139,26 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	if err != nil {
 		return c.fail(err)
 	}
-	defer func() {
-		if err := s.close(); err != nil {
-			fmt.Fprintln(c.stderr, "botbox:", err)
-		}
-	}()
-	out, err := run.OpenOutput(opts.out, opts.invocationSeed(sequences), time.Now())
+	defer func() { c.warn(s.close()) }()
+	out, err := run.OpenOutput(opts.out, opts.invocationSeed(runs[0].sequence), time.Now())
 	if err != nil {
 		return c.fail(err)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
-	for i, sequence := range sequences {
+	for i, planned := range runs {
+		// The deadline is the invocation's budget (DESIGN.md §11): a run that
+		// began keeps its own, and the next does not start. The first always
+		// runs, so an invocation is never vacuously green.
+		if i > 0 && ctx.Err() != nil {
+			fmt.Fprintf(c.stdout, "the deadline stopped the invocation after %d runs.\n", i)
+			break
+		}
 		number := i + 1
-		fmt.Fprintf(c.stdout, "run %d: seed %d, sequence %s\n", number, sequence.Seed, paths[i])
-		result, err := s.execute(ctx, exercised, sequence, out.RunDir(number), run.Engine{})
+		fmt.Fprintf(c.stdout, "run %d: seed %d, %s\n", number, planned.sequence.Seed, planned.source())
+		dir := out.RunDir(number)
+		result, err := s.execute(ctx, exercised, planned.sequence, dir, run.Engine{})
 		for _, note := range result.Notes {
 			fmt.Fprintf(c.stdout, "run %d: %s\n", number, note)
 		}
@@ -131,8 +166,7 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		case exitError:
 			return c.fail(err)
 		case exitViolation:
-			c.report(number, *result.Violation, out.RunDir(number))
-			return exitViolation
+			return c.reportFailure(ctx, s, exercised, planned, *result.Violation, number, dir)
 		}
 		if err := out.Discard(number); err != nil {
 			return c.fail(err)
@@ -141,6 +175,111 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	fmt.Fprintln(c.stdout, "every run passed.")
 	return exitOK
 }
+
+// planned is one run's sequence and the file it was read from. botbox drew
+// the sequences of a run that names no file.
+type planned struct {
+	sequence run.Sequence
+	path     string
+}
+
+func (p planned) generated() bool { return p.path == "" }
+
+func (p planned) source() string {
+	if p.generated() {
+		return "generated"
+	}
+	return "sequence " + p.path
+}
+
+// plan reads the sequences the caller named, or draws one per run from
+// consecutive seeds, so that each run replays from its own.
+func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, error) {
+	if len(paths) > 0 {
+		sequences, err := readSequences(paths)
+		if err != nil {
+			return nil, err
+		}
+		runs := make([]planned, len(sequences))
+		for i, sequence := range sequences {
+			runs[i] = planned{sequence: sequence, path: paths[i]}
+		}
+		return runs, nil
+	}
+	draw, err := c.newGenerator(t)
+	if err != nil {
+		return nil, err
+	}
+	runs := make([]planned, opts.runs)
+	for i := range runs {
+		sequence, err := draw(opts.seed + int64(i))
+		if err != nil {
+			return nil, fmt.Errorf("generating run %d: %w", i+1, err)
+		}
+		runs[i] = planned{sequence: sequence}
+	}
+	return runs, nil
+}
+
+// reportFailure minimizes a sequence botbox drew and leaves it in the run
+// directory with the evidence of a run of it (DESIGN.md §5.5). A sequence the
+// caller wrote is reported as it was written.
+func (c *cli) reportFailure(ctx context.Context, s session, t *target.Target,
+	failed planned, violation run.Violation, number int, dir string) int {
+	if !failed.generated() {
+		c.report(number, violation, dir)
+		return exitViolation
+	}
+	shrunk := run.Shrink(ctx, failed.sequence, violation, func(ctx context.Context, candidate run.Sequence) (run.Result, error) {
+		return s.execute(ctx, t, candidate, filepath.Join(dir, shrinkDir), run.Engine{})
+	})
+	if len(shrunk.Ops) < len(failed.sequence.Ops) && ctx.Err() == nil {
+		if found := c.rerun(ctx, s, t, shrunk, dir); found != nil {
+			violation = *found
+		}
+	}
+	// What the pass replayed is nobody's evidence (DESIGN.md §11).
+	c.warn(os.RemoveAll(filepath.Join(dir, shrinkDir)))
+	c.warn(run.WriteRunSequence(dir, shrunk))
+	// The violation is reported once the directory holds the run it belongs to.
+	c.report(number, violation, dir)
+	fmt.Fprintf(c.stdout, "  the sequence is %s, in %s\n", ops(shrunk), filepath.Join(dir, sequenceFile))
+	return exitViolation
+}
+
+// rerun executes the minimized sequence into the run directory, so that the
+// recordings there are of the sequence the run reports, and returns what that
+// run found. A run that reproduced nothing says so: the directory then holds
+// a run that passed.
+func (c *cli) rerun(ctx context.Context, s session, t *target.Target, shrunk run.Sequence, dir string) *run.Violation {
+	result, err := s.execute(ctx, t, shrunk, dir, run.Engine{})
+	switch {
+	case err != nil:
+		c.warn(err)
+	case result.Violation == nil:
+		c.warn(fmt.Errorf("the minimized sequence passed when it ran again, so %s holds that run", dir))
+	}
+	return result.Violation
+}
+
+// warn reports what went wrong beside a finding, which stands whether or not
+// the run directory could be tidied (DESIGN.md §11).
+func (c *cli) warn(err error) {
+	if err != nil {
+		fmt.Fprintln(c.stderr, "botbox:", err)
+	}
+}
+
+func ops(s run.Sequence) string {
+	if len(s.Ops) == 1 {
+		return "1 op"
+	}
+	return fmt.Sprintf("%d ops", len(s.Ops))
+}
+
+// newSeed is the seed of a run the caller gave none for. Every run prints its
+// seed, so that the failure is reproducible from it (DESIGN.md §11).
+func newSeed() int64 { return rand.Int64() }
 
 func (c *cli) report(number int, violation run.Violation, dir string) {
 	fmt.Fprintf(c.stdout, "run %d: %s %s\n", number, violation.ID, violation.Statement)
@@ -169,11 +308,11 @@ func exitCode(result run.Result, err error) int {
 
 // invocationSeed names the output directory: the seed the caller gave, or the
 // first sequence's, so that the directory is reproducible from it.
-func (o options) invocationSeed(sequences []run.Sequence) int64 {
-	if o.seedGiven || len(sequences) == 0 {
+func (o options) invocationSeed(first run.Sequence) int64 {
+	if o.seedGiven {
 		return o.seed
 	}
-	return sequences[0].Seed
+	return first.Seed
 }
 
 func parse(args []string) (options, []string, error) {
@@ -193,11 +332,19 @@ func parse(args []string) (options, []string, error) {
 	if err := flags.Parse(args[1:]); err != nil {
 		return opts, nil, err
 	}
-	flags.Visit(func(f *flag.Flag) { opts.seedGiven = opts.seedGiven || f.Name == "seed" })
+	flags.Visit(func(f *flag.Flag) {
+		opts.seedGiven = opts.seedGiven || f.Name == "seed"
+		opts.runsGiven = opts.runsGiven || f.Name == "runs"
+	})
 
 	sequences := flags.Args()
 	if opts.target == "" {
 		return opts, nil, errors.New("the --target flag is required")
+	}
+	if opts.command == "run" {
+		if err := opts.validateRuns(len(sequences)); err != nil {
+			return opts, nil, err
+		}
 	}
 	if opts.command == "replay" && len(sequences) != 1 {
 		return opts, nil, fmt.Errorf("botbox replay takes one sequence file, and %d were given", len(sequences))
@@ -211,6 +358,18 @@ func parse(args []string) (options, []string, error) {
 		}
 	}
 	return opts, sequences, nil
+}
+
+// validateRuns holds --runs to the sequences botbox draws itself: named
+// sequence files are what they are.
+func (o options) validateRuns(named int) error {
+	switch {
+	case o.runs < 1:
+		return fmt.Errorf("--runs is %d, and an invocation runs at least one sequence", o.runs)
+	case named > 0 && o.runsGiven:
+		return errors.New("--runs draws sequences, and naming sequence files runs those: give one or the other")
+	}
+	return nil
 }
 
 func (o *options) flags() *flag.FlagSet {
@@ -227,8 +386,8 @@ func (o *options) flags() *flag.FlagSet {
 		flags.StringVar(&o.out, "out", defaultOut, "where failing runs are written")
 	}
 	if o.command == "run" {
-		flags.IntVar(&o.runs, "runs", 1, "how many generated sequences to run")
-		flags.Int64Var(&o.seed, "seed", 0, "the seed the output directory is named after")
+		flags.IntVar(&o.runs, "runs", defaultRuns, "how many sequences to draw and run")
+		flags.Int64Var(&o.seed, "seed", 0, "the seed the first sequence is drawn from, which the output directory is named after")
 	}
 	return flags
 }

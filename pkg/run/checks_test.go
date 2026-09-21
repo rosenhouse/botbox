@@ -42,7 +42,7 @@ func checkTarget() *target.Target {
 // history is the run's object history, which the tests record into.
 func history() *observe.Store {
 	store := observe.NewStore(observe.Options{
-		Namespace: "botbox-run-test",
+		Namespace: fakeNamespace,
 		Primary:   widgetKind,
 		Manages:   []schema.GroupVersionKind{configMapKind},
 	})
@@ -57,6 +57,7 @@ func recordWidget(store *observe.Store, when time.Time, resourceVersion string, 
 		"status": map[string]any{"ready": ready},
 	}}
 	cr.SetGroupVersionKind(widgetKind)
+	cr.SetNamespace(fakeNamespace)
 	cr.SetName("widget")
 	cr.SetResourceVersion(resourceVersion)
 	store.Record(widgetKind, cr, when)
@@ -67,6 +68,7 @@ func recordWidget(store *observe.Store, when time.Time, resourceVersion string, 
 func recordChild(store *observe.Store, when time.Time, name, resourceVersion string) *unstructured.Unstructured {
 	child := &unstructured.Unstructured{Object: map[string]any{}}
 	child.SetGroupVersionKind(configMapKind)
+	child.SetNamespace(fakeNamespace)
 	child.SetName(name)
 	child.SetResourceVersion(resourceVersion)
 	store.Record(configMapKind, child, when)
@@ -170,6 +172,7 @@ func deletedRun(clean bool) Input {
 		Target:  checkTarget(),
 		Objects: store,
 		Timeline: Timeline{
+			Namespace:   fakeNamespace,
 			Ops:         []AppliedOp{appliedOp(0, OpCreate, at(0))},
 			Checkpoints: []Checkpoint{{At: at(2.1), Op: 0, Converged: true}},
 			Quiet:       Window{Start: at(8), End: at(10)},
@@ -182,6 +185,7 @@ func deletedRun(clean bool) Input {
 		"spec": map[string]any{"count": int64(1)}, "status": map[string]any{"ready": int64(1)},
 	}}
 	deleting.SetGroupVersionKind(widgetKind)
+	deleting.SetNamespace(fakeNamespace)
 	deleting.SetName("widget")
 	deleting.SetResourceVersion("13")
 	store.RecordDeletion(widgetKind, deleting, at(10.1))
@@ -189,6 +193,43 @@ func deletedRun(clean bool) Input {
 		store.RecordDeletion(configMapKind, child, at(11))
 	}
 	return in
+}
+
+// A deleteManaged op inside the deletion window takes the object out of the
+// target's hands, so G3 credits the target with no cleanup it did not do
+// (DESIGN.md §5.4, D38). The Runner is the only one that knows which object
+// the op resolved to.
+func TestTheChecksDoNotCreditACleanupBotboxPerformed(t *testing.T) {
+	in := deletedRun(true)
+	in.Timeline.Ops = append(in.Timeline.Ops, AppliedOp{
+		Op: Op{Index: 1, Type: OpDeleteManaged, Kind: "v1/ConfigMap"}, At: at(11), Resolved: "widget-0",
+	})
+
+	g3 := resultOf(t, in, "G3")
+
+	if len(g3.Violations) != 0 {
+		t.Errorf("G3 reported %v, and the target still had until its deadline.", g3.Violations)
+	}
+	if len(g3.Notes) != 1 || !strings.Contains(g3.Notes[0], "widget-0") {
+		t.Errorf("G3 noted %v, want one note naming the child botbox deleted.", g3.Notes)
+	}
+}
+
+// An op whose index resolved to nothing deleted nothing, so it names no
+// object for G3 to read (DESIGN.md §5.4).
+func TestTheChecksCarryNoObjectForAnOpThatResolvedToNothing(t *testing.T) {
+	timeline := Timeline{
+		Namespace: fakeNamespace,
+		Ops: []AppliedOp{{
+			Op: Op{Index: 0, Type: OpDeleteManaged, Kind: "v1/ConfigMap"}, At: at(1),
+		}},
+	}
+
+	ops := engineOps(checkTarget(), timeline)
+
+	if got := ops[0].Deleted; got != (observe.Key{}) {
+		t.Errorf("The op names the object %+v, and its index resolved to nothing.", got)
+	}
 }
 
 // The Runner sees the checks through one Checker, so the engine hands it the
@@ -296,6 +337,7 @@ func TestTheChecksJudgeTheTeardownDeletionWindow(t *testing.T) {
 		"spec": map[string]any{"count": int64(1)}, "status": map[string]any{"ready": int64(1)},
 	}}
 	deleting.SetGroupVersionKind(widgetKind)
+	deleting.SetNamespace(fakeNamespace)
 	deleting.SetName("widget")
 	deleting.SetResourceVersion("13")
 	store.RecordDeletion(widgetKind, deleting, at(10.1))

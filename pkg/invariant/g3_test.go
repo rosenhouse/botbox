@@ -154,3 +154,100 @@ func TestG3StillFiresOnAnOrphanTheRunRecreatedTheCRPast(t *testing.T) {
 		t.Errorf("The statement is %q, want it to name the orphan the first CR left.", violation.Statement)
 	}
 }
+
+// A deleteManaged op takes the object out of the target's hands, so whether
+// the target would have cleaned it is nobody's to say (DESIGN.md §5.4, D38).
+func TestG3DoesNotCreditACleanupBotboxPerformed(t *testing.T) {
+	in := deletedRun().
+		record(time.Second, child("w-0", "12", orphaned)).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		deletedManaged(13*time.Second, "w-0").
+		remove(13*time.Second, child("w-0", "15", orphaned)).
+		cleaned(13 * time.Second).
+		through(21 * time.Second)
+
+	result := evaluate(t, invariant.CleanDeletion, in)
+
+	if len(result.Violations) != 0 {
+		t.Errorf("G3 reported %+v, and the target still had until its deadline.", result.Violations)
+	}
+	note := strings.Join(result.Notes, "\n")
+	want := "for the deletion of w: op 1 (deleteManaged) deleted v1/ConfigMap w-0 inside its 10s window"
+	if !strings.Contains(note, want) {
+		t.Errorf("G3 noted %q, want it to contain %q.", note, want)
+	}
+}
+
+// The window is the deletion's own. An op before the CR went, or after its
+// deadline, says nothing about whether the target cleaned up (D38).
+func TestG3NotesOnlyWhatBotboxTookInsideTheWindow(t *testing.T) {
+	for _, taken := range []struct {
+		name  string
+		when  time.Duration
+		notes int
+	}{
+		{"before the CR was deleted", 5 * time.Second, 0},
+		{"at the instant the CR went", 10 * time.Second, 0},
+		{"at the deadline", 20 * time.Second, 1},
+		{"after the deadline", 21 * time.Second, 0},
+	} {
+		t.Run(taken.name, func(t *testing.T) {
+			in := deletedRun().
+				record(time.Second, child("w-0", "12", orphaned)).
+				deletedManaged(taken.when, "w-0").
+				record(taken.when+time.Second, child("w-0", "13", orphaned)).
+				remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+				through(22 * time.Second)
+
+			result := evaluate(t, invariant.CleanDeletion, in)
+
+			if len(result.Notes) != taken.notes {
+				t.Errorf("G3 noted %v, want %d: the op fell %s.", result.Notes, taken.notes, taken.name)
+			}
+			if len(result.Violations) != 1 {
+				t.Errorf("G3 reported %d violations, want the orphan still there at the deadline.", len(result.Violations))
+			}
+		})
+	}
+}
+
+// An object the run recreated carries the same name and a new UID. botbox
+// taking that one says nothing about the CR that went before it (D38), and
+// this is the shape generation reaches: it draws deleteManaged only while a
+// CR is live, which a recreate makes true again.
+func TestG3DoesNotNoteAnObjectTheRunRecreated(t *testing.T) {
+	in := deletedRun().
+		record(time.Second, child("w-0", "12", orphaned)).
+		remove(11*time.Second, child("w-0", "13", orphaned)).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		record(13*time.Second, child("w-0", "15", orphaned, uid("uid-w-0-again"))).
+		deletedManaged(14*time.Second, "w-0").
+		remove(14*time.Second, child("w-0", "16", orphaned, uid("uid-w-0-again"))).
+		cleaned(15 * time.Second).
+		through(21 * time.Second)
+
+	result := evaluate(t, invariant.CleanDeletion, in)
+
+	if len(result.Notes) != 0 {
+		t.Errorf("G3 noted %v, and botbox took the object that came after this CR.", result.Notes)
+	}
+	if len(result.Violations) != 0 {
+		t.Errorf("G3 reported %v, and the CR's own child went on time.", result.Violations)
+	}
+}
+
+// G3 notes only the objects the CR itself had when it went.
+func TestG3NotesOnlyTheObjectsTheCRHad(t *testing.T) {
+	in := deletedRun().
+		record(time.Second, child("w-0", "12", orphaned)).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		op(invariant.OpRecreate, 13*time.Second).
+		deletedManaged(14*time.Second, "w-9").
+		through(22 * time.Second)
+
+	result := evaluate(t, invariant.CleanDeletion, in)
+
+	if len(result.Notes) != 0 {
+		t.Errorf("G3 noted %v, and the CR never had the object botbox took.", result.Notes)
+	}
+}

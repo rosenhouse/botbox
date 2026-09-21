@@ -19,6 +19,7 @@ func CleanDeletion(in Input) (Result, error) {
 	out := Result{ID: "G3"}
 	for _, deleted := range in.crDeletions() {
 		deadline := deleted.at.Add(in.timeouts().Delete)
+		out.noteWhatBotboxTook(in, deleted, deadline)
 		switch {
 		case in.cleanedBy(deadline): // The namespace emptied, so nothing was left.
 		case in.faulted(deleted.at, deadline):
@@ -30,6 +31,44 @@ func CleanDeletion(in Input) (Result, error) {
 		}
 	}
 	return out, nil
+}
+
+// noteWhatBotboxTook records the objects botbox deleted inside the window
+// after the CR went. A deleteManaged op takes an object out of the target's
+// hands (DESIGN.md §5.4), and the target had until the deadline, so whether
+// it would have cleaned that object is nobody's to say (D38). Judging it
+// either way would be a guess; a silent pass reads as cleanup that happened.
+func (out *Result) noteWhatBotboxTook(in Input, deleted deletion, deadline time.Time) {
+	had := in.stateAt(deleted.at)
+	for _, op := range in.Ops {
+		// Only a DeleteManaged op names an object it took (DESIGN.md §5.4).
+		was, hadIt := had.version(op.Deleted)
+		if !hadIt {
+			continue
+		}
+		if !op.Time.After(deleted.at) || op.Time.After(deadline) {
+			continue
+		}
+		// An object the run recreated carries the same name and a new UID, so
+		// botbox took the one that came after and not the one this CR left.
+		if took, found := in.versionAt(op.Deleted, op.Time); !found || took.UID != was.UID {
+			continue
+		}
+		out.note("for the deletion of %s: %s deleted %s %s inside its %s window, so the target never got the chance to clean it up",
+			deleted.key.Name, describe(op), kindName(op.Deleted.GVK), op.Deleted.Name, in.timeouts().Delete)
+	}
+}
+
+// versionAt is the object as the Observer last saw it at or before t.
+func (in Input) versionAt(key observe.Key, t time.Time) (observe.Version, bool) {
+	var latest observe.Version
+	var found bool
+	for _, v := range in.History.History(key) {
+		if !v.Time.After(t) {
+			latest, found = v, true
+		}
+	}
+	return latest, found
 }
 
 // cleanedBy reports whether botbox saw the run namespace empty by t, which

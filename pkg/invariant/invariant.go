@@ -44,6 +44,10 @@ type Op struct {
 	Index int
 	Type  OpType
 	Time  time.Time
+	// Deleted is the object a DeleteManaged op removed. Every other op carries
+	// the zero Key, and so does a DeleteManaged op whose index resolved to
+	// nothing (DESIGN.md §5.4).
+	Deleted observe.Key
 }
 
 // SettleResult is how the settle wait a checkpoint follows ended (DESIGN.md §5.5).

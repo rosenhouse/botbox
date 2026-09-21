@@ -85,29 +85,37 @@ func (in Input) tornDown(t time.Time) bool {
 	return !in.Teardown.IsZero() && t.After(in.Teardown)
 }
 
+// Excerpt is bounded evidence and how many entries it was chosen from. The
+// bound is D35's; the count is what lets a report say it quoted a part.
+type Excerpt[T any] struct {
+	Quoted []T
+	Total  int
+}
+
 // excerpt caps a list of evidence at its first MaxEvidence entries.
-func excerpt[T any](evidence []T) []T {
+func excerpt[T any](evidence []T) Excerpt[T] {
 	if len(evidence) > MaxEvidence {
-		return evidence[:MaxEvidence]
+		return Excerpt[T]{Quoted: evidence[:MaxEvidence], Total: len(evidence)}
 	}
-	return evidence
+	return Excerpt[T]{Quoted: evidence, Total: len(evidence)}
 }
 
 // Recent caps a timeline of evidence at the MaxEvidence entries nearest the
-// violation, which are its last. The Runner bounds the evidence of a violation
-// it raises itself the same way (DESIGN.md §5.7).
-func Recent[T any](evidence []T) []T {
+// violation, which are its last (DESIGN.md §5.7, D35). The Runner bounds the
+// evidence of a violation it raises itself the same way.
+func Recent[T any](evidence []T) Excerpt[T] {
 	if len(evidence) > MaxEvidence {
-		return evidence[len(evidence)-MaxEvidence:]
+		return Excerpt[T]{Quoted: evidence[len(evidence)-MaxEvidence:], Total: len(evidence)}
 	}
-	return evidence
+	return Excerpt[T]{Quoted: evidence, Total: len(evidence)}
 }
 
 // Readiness is what a violation of the CR's readiness quotes: the state of the
 // objects the target managed at the verdict, and the versions nearest it
 // beside them. Neither side takes more than half the bound where the other can
-// use the rest (D39).
-func Readiness(history, managed []observe.Version) []observe.Version {
+// use the rest, so the excerpt is not the nearest entries and its total counts
+// both pools (D39).
+func Readiness(history, managed []observe.Version) Excerpt[observe.Version] {
 	children := sample(managed)
 	// A managed object's state is quoted once. Where the history holds that
 	// same version, the state is the row to keep, and the object's earlier
@@ -123,7 +131,7 @@ func Readiness(history, managed []observe.Version) []observe.Version {
 	keepRest, keepChildren := fairShare(len(rest), len(children))
 	quoted := append(rest[len(rest)-keepRest:], children[:keepChildren]...)
 	slices.SortStableFunc(quoted, byTime)
-	return quoted
+	return Excerpt[observe.Version]{Quoted: quoted, Total: len(rest) + len(children)}
 }
 
 // byTime orders evidence the way the report's table reads it, down the run.

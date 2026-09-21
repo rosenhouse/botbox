@@ -27,12 +27,14 @@ func (Engine) Check(in Input) (Findings, error) {
 	for _, result := range results {
 		for _, violation := range result.Violations {
 			found.Violations = append(found.Violations, Violation{
-				ID:        violation.ID,
-				Statement: violation.Statement,
-				Evidence:  evidence(violation),
-				Requests:  violation.Requests,
-				Versions:  violation.Versions,
-				Managed:   violation.Managed,
+				ID:            violation.ID,
+				Statement:     violation.Statement,
+				Evidence:      evidence(violation),
+				Requests:      violation.Requests,
+				RequestsTotal: violation.RequestsTotal,
+				Versions:      violation.Versions,
+				VersionsTotal: violation.VersionsTotal,
+				Managed:       violation.Managed,
 			})
 		}
 		found.Notes = append(found.Notes, result.Notes...)
@@ -115,6 +117,15 @@ func engineFaults(windows []Window) []invariant.FaultWindow {
 	return faults
 }
 
+// part writes how much of the evidence the line quotes, which is less than the
+// check chose from wherever the bound of D35 cut it.
+func part(shown, total int, noun string) string {
+	if shown < total {
+		return fmt.Sprintf("%d of %s", shown, count(total, noun))
+	}
+	return count(shown, noun)
+}
+
 // count writes a number of things, in the singular where there is one.
 func count(n int, noun string) string {
 	if n == 1 {
@@ -129,11 +140,11 @@ func evidence(violation invariant.Violation) string {
 	quoted := []string{"at " + violation.At.Format(time.RFC3339Nano)}
 	if requests := violation.Requests; len(requests) > 0 {
 		quoted = append(quoted, fmt.Sprintf("%s, the first %s %s %d",
-			count(len(requests), "request"), requests[0].Verb, requests[0].Path, requests[0].Status))
+			part(len(requests), violation.RequestsTotal, "request"), requests[0].Verb, requests[0].Path, requests[0].Status))
 	}
 	if versions := violation.Versions; len(versions) > 0 {
 		quoted = append(quoted, fmt.Sprintf("%s, the first %s %s",
-			count(len(versions), "version"), kindName(versions[0].GVK), versions[0].Name))
+			part(len(versions), violation.VersionsTotal, "version"), kindName(versions[0].GVK), versions[0].Name))
 	}
 	if violation.Managed != nil {
 		quoted = append(quoted, managedClause(*violation.Managed))

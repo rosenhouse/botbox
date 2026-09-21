@@ -49,10 +49,12 @@ type Report struct {
 	// how many it holds. A run that ended at its violation reached fewer
 	// (DESIGN.md §5.5).
 	Applied, Ops int
-	// Requests and Versions are the evidence the check quoted. The report
-	// bounds each excerpt and says how many there were.
-	Requests []proxy.Request
-	Versions []observe.Version
+	// Requests and Versions are the evidence the check quoted, and
+	// RequestsTotal and VersionsTotal how many entries it chose them from. A
+	// caller that names no total is read as having quoted everything it saw.
+	Requests                     []proxy.Request
+	Versions                     []observe.Version
+	RequestsTotal, VersionsTotal int
 }
 
 // Check is the invariant or property the run broke (DESIGN.md §6).
@@ -124,9 +126,9 @@ func (r Report) document() document {
 		Applied:       r.Applied,
 		Ops:           r.Ops,
 		Requests:      recent(r.Requests),
-		RequestsTotal: len(r.Requests),
+		RequestsTotal: max(r.RequestsTotal, len(r.Requests)),
 		Versions:      timeline(r.Versions),
-		VersionsTotal: len(r.Versions),
+		VersionsTotal: max(r.VersionsTotal, len(r.Versions)),
 	}
 }
 

@@ -84,8 +84,7 @@ func (out *Result) differs(in Input, op Op, v observe.Version, how string) {
 	out.violate(Violation{
 		Statement: fmt.Sprintf("the %s %s %s the Restart at %s", kindName(v.GVK), v.Name, how, describe(op)),
 		At:        op.Time,
-		Versions:  Recent(in.History.History(v.Key)),
-	})
+	}.quotingVersions(Recent(in.History.History(v.Key))))
 }
 
 func union(was, is map[objectKey]observe.Version) []objectKey {

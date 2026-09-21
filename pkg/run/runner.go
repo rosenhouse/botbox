@@ -75,9 +75,25 @@ type Violation struct {
 	// report quotes (DESIGN.md §5.7).
 	Requests []proxy.Request
 	Versions []observe.Version
+	// RequestsTotal and VersionsTotal are what the check chose each excerpt
+	// from (pkg/invariant).
+	RequestsTotal, VersionsTotal int
 	// Managed is how many objects the target managed at the violation
 	// (DESIGN.md §5.7).
 	Managed *int
+}
+
+// quotingRequests carries an excerpt of the request log into the violation
+// with the number it was chosen from, so that the two cannot disagree.
+func (v Violation) quotingRequests(e invariant.Excerpt[proxy.Request]) Violation {
+	v.Requests, v.RequestsTotal = e.Quoted, e.Total
+	return v
+}
+
+// quotingVersions does the same for a timeline of object versions.
+func (v Violation) quotingVersions(e invariant.Excerpt[observe.Version]) Violation {
+	v.Versions, v.VersionsTotal = e.Quoted, e.Total
+	return v
 }
 
 // String is the violation in one line. A message that prints one wants the
@@ -428,10 +444,9 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 					op.Index, op.Type),
 				Evidence: fmt.Sprintf("in %v of T_settle the target never held its Ready predicate with %v of quiet behind it; %s",
 					r.target.Timeouts.Settle, r.target.Timeouts.Stable, managedClause(count)),
-				Requests: invariant.Recent(r.h.requests()),
-				Versions: invariant.Readiness(r.h.objects().HistoryOf(r.target.Primary, r.cr), managed),
-				Managed:  &count,
-			})
+				Managed: &count,
+			}.quotingRequests(invariant.Recent(r.h.requests())).
+				quotingVersions(invariant.Readiness(r.h.objects().HistoryOf(r.target.Primary, r.cr), managed)))
 		}
 	}
 	return r.checkpoint(op.Index, converged)

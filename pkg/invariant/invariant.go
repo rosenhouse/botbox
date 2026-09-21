@@ -114,6 +114,12 @@ type Violation struct {
 	At        time.Time         `json:"at"`
 	Requests  []proxy.Request   `json:"requests,omitempty"`
 	Versions  []observe.Version `json:"versions,omitempty"`
+	// RequestsTotal and VersionsTotal are how many entries each excerpt above
+	// was chosen from, which a report needs to say what the bound left out
+	// (DESIGN.md §5.7). The quotingRequests and quotingVersions methods set
+	// each pair together.
+	RequestsTotal int `json:"requestsTotal,omitempty"`
+	VersionsTotal int `json:"versionsTotal,omitempty"`
 	// Managed is how many objects the target managed at At, which the checks
 	// that judge the CR's readiness count (DESIGN.md §5.7). A check that did
 	// not ask leaves it nil, because a count of zero is a finding.
@@ -154,6 +160,19 @@ func Evaluate(in Input) ([]Result, error) {
 		results = append(results, result)
 	}
 	return results, nil
+}
+
+// quotingRequests carries an excerpt of the request log into the violation
+// with the number it was chosen from, so that the two cannot disagree.
+func (v Violation) quotingRequests(e Excerpt[proxy.Request]) Violation {
+	v.Requests, v.RequestsTotal = e.Quoted, e.Total
+	return v
+}
+
+// quotingVersions does the same for a timeline of object versions.
+func (v Violation) quotingVersions(e Excerpt[observe.Version]) Violation {
+	v.Versions, v.VersionsTotal = e.Quoted, e.Total
+	return v
 }
 
 // violate appends a violation carrying the result's ID.

@@ -18,17 +18,15 @@ func NoChurn(in Input) (Result, error) {
 			out.violate(Violation{
 				Statement: fmt.Sprintf("the target changed %d objects in %s, where §6 requires none",
 					len(moved), window),
-				At:       moved[0].Time,
-				Versions: Recent(moved),
-			})
+				At: moved[0].Time,
+			}.quotingVersions(Recent(moved)))
 		}
 		if written := in.requestsIn(window, writesStatus); len(written) > 0 {
 			out.violate(Violation{
 				Statement: fmt.Sprintf("the target made %d status writes in %s, which §6 counts as churn",
 					len(written), window),
-				At:       written[0].Start,
-				Requests: Recent(written),
-			})
+				At: written[0].Start,
+			}.quotingRequests(Recent(written)))
 		}
 	}
 	return out, nil

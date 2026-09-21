@@ -2,6 +2,7 @@ package invariant_test
 
 import (
 	"net/http"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -419,4 +420,13 @@ func statements(result invariant.Result) []string {
 		out[i] = v.Statement
 	}
 	return out
+}
+
+// managed renders a violation's count of managed objects for a message, and
+// "no" where the check counted none.
+func managed(v invariant.Violation) string {
+	if v.Managed == nil {
+		return "no"
+	}
+	return strconv.Itoa(*v.Managed)
 }

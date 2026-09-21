@@ -2,6 +2,7 @@ package run
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -450,5 +451,48 @@ func TestEvaluateReturnsOneResultPerCheck(t *testing.T) {
 	want := []string{"G1", "G2", "G3", "G4", "G5", "G6", "P1"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("The engine returned the results %v, want %v.", got, want)
+	}
+}
+
+// The count is over the kinds the target declares, and zero is the finding (#13).
+func TestTheChecksSayHowManyObjectsTheTargetManaged(t *testing.T) {
+	for _, c := range []struct {
+		children int
+		want     string
+	}{
+		{0, "the target managed 0 objects of the kinds it declares"},
+		{1, "the target managed 1 object of the kinds it declares"},
+	} {
+		t.Run(c.want, func(t *testing.T) {
+			store := history()
+			recordWidget(store, at(0.1), "11", 0)
+			for i := range c.children {
+				recordChild(store, at(0.2), fmt.Sprintf("widget-%d", i), "12")
+			}
+			in := Input{
+				Target:  checkTarget(),
+				Objects: store,
+				Timeline: Timeline{
+					Ops:         []AppliedOp{appliedOp(0, OpCreate, at(0))},
+					Checkpoints: []Checkpoint{{At: at(5), Op: 0, Converged: false}},
+				},
+			}
+
+			violations := checked(t, in)
+
+			if len(violations) == 0 || violations[0].ID != "G4" {
+				t.Fatalf("The checks reported %v, want G4 first: the CR never became ready.", ids(violations))
+			}
+			first := violations[0]
+			if !strings.Contains(first.Evidence, c.want) {
+				t.Errorf("G4's evidence is %q, want it to say %q.", first.Evidence, c.want)
+			}
+			if got := strings.Count(first.Evidence, "the target managed"); got != 1 {
+				t.Errorf("G4's evidence says what the target managed %d times: %q", got, first.Evidence)
+			}
+			if first.Managed == nil || *first.Managed != c.children {
+				t.Errorf("G4 carried out no count of %d, and its evidence quotes one.", c.children)
+			}
+		})
 	}
 }

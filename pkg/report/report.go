@@ -60,6 +60,10 @@ type Check struct {
 	ID        string `json:"id"`
 	Statement string `json:"statement"`
 	Evidence  string `json:"evidence,omitempty"`
+	// Managed is how many objects the target managed at the violation
+	// (DESIGN.md §5.7). A violation that did not count them leaves it nil,
+	// because a count of zero is a finding.
+	Managed *int `json:"managed,omitempty"`
 }
 
 // Target is the controller the run exercised (DESIGN.md §8.1).

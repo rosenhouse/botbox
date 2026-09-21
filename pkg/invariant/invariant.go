@@ -114,6 +114,10 @@ type Violation struct {
 	At        time.Time         `json:"at"`
 	Requests  []proxy.Request   `json:"requests,omitempty"`
 	Versions  []observe.Version `json:"versions,omitempty"`
+	// Managed is how many objects the target managed at At, which the checks
+	// that judge the CR's readiness count (DESIGN.md §5.7). A check that did
+	// not ask leaves it nil, because a count of zero is a finding.
+	Managed *int `json:"managed,omitempty"`
 }
 
 // Result is what one check found.

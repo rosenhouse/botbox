@@ -75,6 +75,9 @@ type Violation struct {
 	// report quotes (DESIGN.md §5.7).
 	Requests []proxy.Request
 	Versions []observe.Version
+	// Managed is how many objects the target managed at the violation
+	// (DESIGN.md §5.7).
+	Managed *int
 }
 
 // String is the violation in one line. A message that prints one wants the
@@ -415,14 +418,16 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 			return r.targetStopped(status)
 		}
 		if !r.faultActive() {
+			managed := r.h.managedCount()
 			r.violate(Violation{
 				ID: "G4",
 				Statement: fmt.Sprintf("the settle wait after op %d (%s) expired with no fault active",
 					op.Index, op.Type),
-				Evidence: fmt.Sprintf("in %v of T_settle the target never held its Ready predicate with %v of quiet behind it",
-					r.target.Timeouts.Settle, r.target.Timeouts.Stable),
+				Evidence: fmt.Sprintf("in %v of T_settle the target never held its Ready predicate with %v of quiet behind it; %s",
+					r.target.Timeouts.Settle, r.target.Timeouts.Stable, managedClause(managed)),
 				Requests: invariant.Recent(r.h.requests()),
 				Versions: invariant.Recent(r.h.objects().HistoryOf(r.target.Primary, r.cr)),
+				Managed:  &managed,
 			})
 		}
 	}

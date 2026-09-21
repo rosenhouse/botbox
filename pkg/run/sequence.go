@@ -188,8 +188,11 @@ func (s Sequence) Validate() error {
 	}
 	// The teardown's quiet window is the only one such a sequence would be
 	// judged on, and the teardown does not wait for convergence before it opens
-	// that window (DESIGN.md §5.6).
-	if len(s.Ops) == 0 || !s.Ops[len(s.Ops)-1].Settles() {
+	// that window (DESIGN.md §6).
+	if len(s.Ops) == 0 {
+		return fmt.Errorf("the sequence holds no ops; want at least the create it opens with")
+	}
+	if !s.Ops[len(s.Ops)-1].Settles() {
 		return fmt.Errorf("the sequence does not end with an op that settles")
 	}
 	return nil

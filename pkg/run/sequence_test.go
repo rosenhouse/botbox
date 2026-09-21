@@ -223,7 +223,7 @@ func TestSequenceAcceptsTheOpsTheRunnerExecutes(t *testing.T) {
 	}
 }
 
-// DESIGN.md §5.6: the teardown does not wait for convergence before it opens
+// DESIGN.md §6: the teardown does not wait for convergence before it opens
 // its quiet window, so a sequence that ends while the target is still working
 // is judged on that work. Every sequence ends with an op that settles.
 func TestSequenceRequiresALastOpThatSettles(t *testing.T) {
@@ -231,20 +231,47 @@ func TestSequenceRequiresALastOpThatSettles(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		ops  string
+		want string
 	}{
-		{name: "no ops at all", ops: ``},
-		{name: "a last op that skips its settle", ops: `{"i": 0, "t": "create", "obj": {"kind": "Widget"}, "noSettle": true}`},
-		{name: "a trailing restart", ops: create + `, {"i": 1, "t": "restart"}`},
-		{name: "a trailing fault", ops: create + `, {"i": 1, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 3}}}`},
+		{name: "no ops at all", ops: ``, want: "no ops"},
+		{name: "a last op that skips its settle", want: "settle",
+			ops: `{"i": 0, "t": "create", "obj": {"kind": "Widget"}, "noSettle": true}`},
+		{name: "a trailing restart", ops: create + `, {"i": 1, "t": "restart"}`, want: "settle"},
+		{name: "a trailing fault", want: "settle",
+			ops: create + `, {"i": 1, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 3}}}`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := UnmarshalSequence([]byte(`{"seed": 1, "target": "t", "ops": [` + test.ops + `]}`))
 
 			if err == nil {
-				t.Fatalf("The ops %s were accepted, want an error naming the settle they lack.", test.ops)
+				t.Fatalf("The ops %s were accepted, want an error naming %q.", test.ops, test.want)
 			}
-			if !strings.Contains(err.Error(), "settle") {
-				t.Errorf("The ops %s were rejected with %q, want the error to name the settle.", test.ops, err)
+			if !strings.Contains(err.Error(), test.want) {
+				t.Errorf("The ops %s were rejected with %q, want the error to name %q.", test.ops, err, test.want)
+			}
+		})
+	}
+}
+
+// OnCR says which ops carry noSettle (DESIGN.md §4), which is what lets
+// generation draw one.
+func TestOnlyTheOpsOnThePrimaryCRActOnIt(t *testing.T) {
+	for _, test := range []struct {
+		opType OpType
+		want   bool
+	}{
+		{opType: OpCreate, want: true},
+		{opType: OpUpdate, want: true},
+		{opType: OpDelete, want: true},
+		{opType: OpRecreate, want: true},
+		{opType: OpSettle},
+		{opType: OpRestart},
+		{opType: OpFault},
+		{opType: OpDeleteManaged},
+	} {
+		t.Run(string(test.opType), func(t *testing.T) {
+			if got := test.opType.OnCR(); got != test.want {
+				t.Errorf("A %s op acts on the CR: %t, want %t.", test.opType, got, test.want)
 			}
 		})
 	}

@@ -48,16 +48,13 @@ func shrinkPass(ctx context.Context, s Sequence, violation Violation, replay Rep
 // not a smaller reproducer of this one. A candidate the Runner cannot execute,
 // such as an update whose create is gone, reproduces nothing either.
 //
-// The statement decides alongside the ID, because one check states itself more
-// than one way: G4 holds after a spec change and again after faults stop
-// (DESIGN.md §6). The evidence does not, since it quotes op indexes that
-// removing an op moves.
+// The ID is all that can decide it. A check states itself with the op it
+// anchors to, and G1 and G2 with a request count as well, so comparing the
+// statement would reject every candidate that removes an op before the failing
+// one, which is most of them.
 func reproduces(ctx context.Context, candidate Sequence, violation Violation, replay Replay) bool {
 	result, err := replay(ctx, candidate)
-	if err != nil || result.Violation == nil {
-		return false
-	}
-	return result.Violation.ID == violation.ID && result.Violation.Statement == violation.Statement
+	return err == nil && result.Violation != nil && result.Violation.ID == violation.ID
 }
 
 // without returns the sequence with op i removed, renumbered so that it is

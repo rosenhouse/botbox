@@ -362,8 +362,8 @@ remaining ownerReferences. A target excludes further paths with `equalIgnore` (�
 Details the example does not show:
 
 - Any CR op may carry `"noSettle": true`, which skips the Runner's implicit settle wait.
-  The last op is not one of them: a sequence ends with an op that settles, or nothing
-  judges the state it leaves behind (§5.6, D33).
+- A sequence ends with an op that settles, or nothing judges the state it leaves behind
+  (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
 - `update` applies `patch` as a JSON merge patch (RFC 7386).
 - `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
@@ -661,7 +661,8 @@ proxy; the `Image` launcher. Separate design addendum.
 - **Output.** `--out` defaults to `botbox-out/`. Each invocation writes
   `<out>/<timestamp>-<seed>/`; each failing run writes `run-<n>/` under it with
   `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl` and
-  `target.log`. Passing runs are not persisted.
+  `target.log`, plus `sequence.shrunk.json` where the deadline ended the shrink pass
+  before its result could be run there. Passing runs are not persisted.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` = the cert-manager example under envtest, under 10
   minutes on CI including obtaining the binary (cached). All three run on every PR.
@@ -899,7 +900,12 @@ built from source and run as a black-box binary.
   `restart` or nothing at all: roughly half of them, each judged on a window that opens
   while the target is still working, so a correct target failed G4. `Sequence.Validate`
   rejects that shape now, which also keeps the shrink pass from proposing it, and
-  generation appends the settle a drawn op needs. A `restart` gets one too, since §6
-  checks a restart only once the settle after it ends. `Options.MaxOps` therefore bounds
-  the ops a draw makes rather than the sequence's length. A `noSettle` in the middle of a
+  generation appends the settle a drawn op needs. A `noSettle` in the middle of a
   sequence stands: skipping that wait is what it is for.
+
+  Generation also wraps every drawn `restart` in settle waits, because G5 compares the
+  converged state either side of one: a change before it leaves G5 nothing to compare,
+  and a change after it is blamed on the restart. That is a rule for generation, not for
+  the format, because a hand-written sequence may mean to restart and change the spec at
+  once — `b0.json` and `b10.json` both do. `Options.MaxOps` therefore bounds the ops a
+  draw makes, not the sequence's length: at most two settles join each drawn op.

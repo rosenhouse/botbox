@@ -129,9 +129,9 @@ func TestMatrixWritesBugAgainstCheck(t *testing.T) {
 	}
 }
 
-// DESIGN.md §6 and D31: a check that judged nothing reads like a passing one
+// DESIGN.md §6 and D31: a check that could not judge reads like a passing one
 // from outside, so the matrix says which cell is which.
-func TestMatrixMarksACheckThatJudgedNothing(t *testing.T) {
+func TestMatrixMarksACheckThatLeftSomethingUnjudged(t *testing.T) {
 	// The control is the row D31 is about: it reads as empty either way.
 	session := &fakeSession{results: []run.Result{recordedWithAnUnjudgedRestart(t), recorded(t, false)}}
 	out := matrixFile(t)
@@ -146,7 +146,7 @@ func TestMatrixMarksACheckThatJudgedNothing(t *testing.T) {
 	if !strings.Contains(written, "| B0 |  |  |  |  | ? |  |  |") {
 		t.Errorf("The matrix is\n%s\nwant B0's G5 cell to say it judged nothing.", written)
 	}
-	if !strings.Contains(written, "judged nothing") {
+	if !strings.Contains(written, "left something unjudged") {
 		t.Errorf("The matrix is\n%s\nwant it to say what the mark means.", written)
 	}
 	if !strings.Contains(stdout, "G5 is not evaluated") {

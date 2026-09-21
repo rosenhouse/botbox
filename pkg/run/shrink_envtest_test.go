@@ -47,6 +47,10 @@ func TestShrinkingAGeneratedFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Drawing a sequence failed: %v", err)
 	}
+	if len(drawn.Ops) <= 3 {
+		t.Fatalf("Seed %d draws %d ops, so shrinking to three proves nothing. Re-pin the seed.",
+			theSeedThatDrawsAB2Reproducer, len(drawn.Ops))
+	}
 	found, err := execute(ctx, &buggy, drawn)
 	if err != nil {
 		t.Fatalf("The generated run failed: %v", err)

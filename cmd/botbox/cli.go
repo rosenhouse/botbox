@@ -49,6 +49,9 @@ const (
 	shrinkDir = "shrink"
 	// sequenceFile is what run.WriteRunSequence writes.
 	sequenceFile = "sequence.json"
+	// shrunkFile holds a minimized sequence the deadline left unrun, which no
+	// recording in the directory is of (DESIGN.md §11).
+	shrunkFile = "sequence.shrunk.json"
 )
 
 // Generator draws a sequence from a seed, deterministically, for the target it
@@ -236,10 +239,12 @@ func (c *cli) reportFailure(ctx context.Context, s session, t *target.Target,
 		if ctx.Err() != nil {
 			// The deadline ended the pass before the smaller sequence could be
 			// run into the directory, which still holds the run of the sequence
-			// botbox drew. The directory reports the sequence its evidence is of.
-			c.warn(fmt.Errorf("the deadline ended the shrink pass at %s, so %s reports the sequence as drawn",
-				ops(shrunk), dir))
+			// botbox drew. The directory reports the sequence its evidence is
+			// of, and keeps the smaller one beside it.
 			reported = failed.sequence
+			c.warn(run.WriteSequence(filepath.Join(dir, shrunkFile), shrunk))
+			c.warn(fmt.Errorf("the deadline ended the shrink pass with %s, left unrun in %s",
+				ops(shrunk), filepath.Join(dir, shrunkFile)))
 		} else if found := c.rerun(ctx, s, t, shrunk, dir); found != nil {
 			violation = *found
 		}

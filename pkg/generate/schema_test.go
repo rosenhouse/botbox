@@ -95,7 +95,11 @@ func TestOverlayWinsOverTheSchema(t *testing.T) {
 	if dnsNames.MaxItems == nil || float64(*dnsNames.MaxItems) != wanted["maxItems"] {
 		t.Errorf("spec.dnsNames has maxItems %v, want the overlay's %v.", dnsNames.MaxItems, wanted["maxItems"])
 	}
-	if want := wanted["items"].(map[string]any)["pattern"]; dnsNames.Items.Pattern != want {
+	items, ok := wanted["items"].(map[string]any)
+	if !ok {
+		t.Fatalf("The overlay's spec.dnsNames carries items %v, want an object.", wanted["items"])
+	}
+	if want := items["pattern"]; dnsNames.Items.Pattern != want {
 		t.Errorf("spec.dnsNames items have pattern %q, want the overlay's %q.", dnsNames.Items.Pattern, want)
 	}
 	if dnsNames.Items.Type != "string" {

@@ -325,6 +325,16 @@ func TestADeadlineDuringTheShrinkPassLeavesTheDrawnSequence(t *testing.T) {
 	if !strings.Contains(stdout, ops(written)) {
 		t.Errorf("botbox run printed %q, want the %s the directory holds.", stdout, ops(written))
 	}
+	// §11: the shrinker reports the smallest failing sequence it found, which
+	// no recording here is of, so it keeps its own file.
+	smaller, err := run.ReadSequence(filepath.Join(session.dirs[0], shrunkFile))
+	if err != nil {
+		t.Fatalf("The pass found a smaller sequence and left no %s: %v", shrunkFile, err)
+	}
+	if len(smaller.Ops) >= len(written.Ops) {
+		t.Errorf("%s holds %d ops, want fewer than the drawn sequence's %d.",
+			shrunkFile, len(smaller.Ops), len(written.Ops))
+	}
 }
 
 // The run directory holds the minimized sequence's own run, so a run of it

@@ -22,7 +22,8 @@ const defaultMaxOps = 6
 type Options struct {
 	// MaxOps bounds the ops a draw makes, counting the create it opens with.
 	// Generation adds the settle waits that leave those ops judged (DESIGN.md
-	// §6), so a sequence can be longer. Zero takes the default.
+	// §6), at most two per drawn op, so a sequence holds at most 3*MaxOps.
+	// Zero takes the default.
 	MaxOps int
 }
 
@@ -75,29 +76,35 @@ func (g *Generator) sequence(t *rapid.T) run.Sequence {
 	return run.Sequence{Target: g.target.Name, Ops: checkpointed(ops)}
 }
 
-// checkpointed inserts the settle waits that leave the drawn ops judged.
-// Invariants are evaluated where a settle wait ends (DESIGN.md §6), so a
-// restart nothing waits on is never checked, and a sequence that ends without
-// one is judged on work still in flight (§5.6). A noSettle in the middle is
-// left alone: skipping that wait is what it is for.
+// checkpointed inserts the settle waits that leave the drawn ops judged
+// (DESIGN.md §6). A restart is wrapped in them: G5 compares the converged
+// state either side of a restart, so a change on either side is blamed on the
+// restart. The last op takes one because nothing else judges the state the run
+// ends in. A noSettle elsewhere is left alone.
 func checkpointed(ops []run.Op) []run.Op {
-	judged := make([]run.Op, 0, len(ops)+1)
-	for i, op := range ops {
+	judged := make([]run.Op, 0, 3*len(ops))
+	settled := false
+	emit := func(op run.Op) {
+		op.Index = len(judged)
 		judged = append(judged, op)
+		settled = op.Settles()
+	}
+	for i, op := range ops {
+		if op.Type == run.OpRestart && !settled {
+			emit(run.Op{Type: run.OpSettle})
+		}
+		emit(op)
 		var next run.Op
 		last := i == len(ops)-1
 		if !last {
 			next = ops[i+1]
 		}
-		if op.Settles() || next.Settles() {
-			continue
+		switch {
+		case op.Type == run.OpRestart && next.Type != run.OpSettle:
+			emit(run.Op{Type: run.OpSettle})
+		case last && !settled:
+			emit(run.Op{Type: run.OpSettle})
 		}
-		if last || op.Type == run.OpRestart {
-			judged = append(judged, run.Op{Type: run.OpSettle})
-		}
-	}
-	for i := range judged {
-		judged[i].Index = i
 	}
 	return judged
 }

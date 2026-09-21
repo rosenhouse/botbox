@@ -78,9 +78,9 @@ func TestSequencesAreLegalToReplay(t *testing.T) {
 				if sequence.Target != loaded.Name {
 					rt.Fatalf("The sequence names the target %q, want %q.", sequence.Target, loaded.Name)
 				}
-				// checkpointed adds at most one settle per drawn op.
-				if len(sequence.Ops) > 2*maxOps {
-					rt.Fatalf("The sequence holds %d ops, over the %d drawn and the settle each may need.",
+				// checkpointed adds at most two settles per drawn op.
+				if len(sequence.Ops) > 3*maxOps {
+					rt.Fatalf("The sequence holds %d ops, over the %d drawn and the settles each may need.",
 						len(sequence.Ops), maxOps)
 				}
 				if sequence.Ops[0].Type != run.OpCreate {
@@ -130,12 +130,21 @@ func TestEveryDrawnOpIsFollowedByTheSettleThatJudgesIt(t *testing.T) {
 			rapid.Check(t, func(rt *rapid.T) {
 				ops := g.sequence(rt).Ops
 				if last := ops[len(ops)-1]; !last.Settles() {
-					rt.Fatalf("The sequence ends with a %s, so only the teardown judges it (§5.6).", last.Type)
+					rt.Fatalf("The sequence ends with a %s, so only the teardown judges it (§6).", last.Type)
 				}
 				for i, op := range ops {
-					if op.Type == run.OpRestart && !ops[i+1].Settles() {
-						rt.Fatalf("Op %d restarts the target and op %d waits for nothing, so G5 sees neither.",
-							i, i+1)
+					if op.Type != run.OpRestart {
+						continue
+					}
+					// G5 compares the converged state either side of the
+					// restart, so a change on either side is blamed on it.
+					if before := ops[i-1]; !before.Settles() {
+						rt.Fatalf("Op %d restarts the target after a %s that waits for nothing, so G5 has no state to compare.",
+							i, before.Type)
+					}
+					if after := ops[i+1]; after.Type != run.OpSettle {
+						rt.Fatalf("Op %d restarts the target and op %d is a %s, so G5 blames the restart for it.",
+							i, i+1, after.Type)
 					}
 				}
 			})

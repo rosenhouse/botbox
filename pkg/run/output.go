@@ -14,13 +14,32 @@ const stamp = "20060102T150405Z"
 // run-<n>/ per run. Passing runs are not persisted (DESIGN.md §11).
 type Output struct{ dir string }
 
-// OpenOutput creates the invocation's directory under root.
+// sameSecond is how many invocations of one seed can open a directory in the
+// same second before botbox gives up naming them apart.
+const sameSecond = 100
+
+// OpenOutput creates the invocation's directory under root. A second
+// invocation of the same seed in the same second takes the next name rather
+// than the same directory: two runs' recordings in one directory would leave
+// each reader pointed at the other's evidence.
 func OpenOutput(root string, seed int64, at time.Time) (*Output, error) {
-	dir := filepath.Join(root, fmt.Sprintf("%s-%d", at.UTC().Format(stamp), seed))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(root, 0o755); err != nil {
 		return nil, fmt.Errorf("creating the output directory: %w", err)
 	}
-	return &Output{dir: dir}, nil
+	named := filepath.Join(root, fmt.Sprintf("%s-%d", at.UTC().Format(stamp), seed))
+	for n := 1; n <= sameSecond; n++ {
+		dir := named
+		if n > 1 {
+			dir = fmt.Sprintf("%s-%d", named, n)
+		}
+		switch err := os.Mkdir(dir, 0o755); {
+		case err == nil:
+			return &Output{dir: dir}, nil
+		case !os.IsExist(err):
+			return nil, fmt.Errorf("creating the output directory: %w", err)
+		}
+	}
+	return nil, fmt.Errorf("creating the output directory: %s and its next %d names are taken", named, sameSecond-1)
 }
 
 // Dir is the invocation's directory.

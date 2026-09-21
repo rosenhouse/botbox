@@ -24,6 +24,33 @@ func TestOutputNamesTheInvocationByTimestampAndSeed(t *testing.T) {
 	}
 }
 
+// Two invocations of the same seed in the same second would otherwise write
+// into one directory, and each would tell its reader the other's evidence is
+// theirs (DESIGN.md §11).
+func TestOutputNeverSharesADirectoryWithAnotherInvocation(t *testing.T) {
+	// The root is what --out names, which a first run creates.
+	root := filepath.Join(t.TempDir(), "botbox-out")
+	at := time.Date(2026, 9, 20, 18, 45, 30, 0, time.UTC)
+
+	first, err := OpenOutput(root, 1, at)
+	if err != nil {
+		t.Fatalf("OpenOutput failed: %v", err)
+	}
+	second, err := OpenOutput(root, 1, at)
+	if err != nil {
+		t.Fatalf("The second OpenOutput failed: %v", err)
+	}
+
+	if first.Dir() == second.Dir() {
+		t.Fatalf("Both invocations wrote to %s.", first.Dir())
+	}
+	for _, dir := range []string{first.Dir(), second.Dir()} {
+		if _, err := os.Stat(dir); err != nil {
+			t.Errorf("The invocation directory is missing: %v", err)
+		}
+	}
+}
+
 func TestOutputKeepsAFailingRunAndDiscardsAPassingOne(t *testing.T) {
 	out, err := OpenOutput(t.TempDir(), 1, time.Now())
 	if err != nil {

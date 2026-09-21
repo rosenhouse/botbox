@@ -681,8 +681,9 @@ proxy; the `Image` launcher. Separate design addendum.
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
   harness error.
 - **Output.** `--out` defaults to `botbox-out/`. Each invocation writes
-  `<out>/<timestamp>-<seed>/`; each failing run writes `run-<n>/` under it with
-  `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl`,
+  `<out>/<timestamp>-<seed>/`, taking the next free name where a second invocation of one
+  seed opens a directory in the same second. Each failing run writes `run-<n>/` under it
+  with `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl`,
   `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
   where the deadline ended the shrink pass before its result could be run there. Passing
   runs are not persisted.

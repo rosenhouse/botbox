@@ -28,6 +28,8 @@ func (Engine) Check(in Input) (Findings, error) {
 				ID:        violation.ID,
 				Statement: violation.Statement,
 				Evidence:  evidence(violation),
+				Requests:  violation.Requests,
+				Versions:  violation.Versions,
 			})
 		}
 		found.Notes = append(found.Notes, result.Notes...)

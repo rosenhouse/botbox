@@ -63,8 +63,12 @@ type Violation struct {
 	ID string
 	// Statement is what the check requires and the run broke.
 	Statement string
-	// Evidence quotes what the run did, for the report (DESIGN.md §5.7).
+	// Evidence quotes what the run did, in one line.
 	Evidence string
+	// Requests and Versions are what the check named, which a report quotes
+	// (DESIGN.md §5.7). A violation the Runner raises itself carries neither.
+	Requests []proxy.Request
+	Versions []observe.Version
 }
 
 // Result is one run's outcome. An error alongside it is a configuration or

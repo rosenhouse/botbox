@@ -313,7 +313,7 @@ func TestRunEndsAtTheFirstViolation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("The run failed: %v", err)
 	}
-	if result.Violation == nil || *result.Violation != first {
+	if result.Violation == nil || result.Violation.ID != first.ID {
 		t.Errorf("The run reported %+v, want the first violation %+v.", result.Violation, first)
 	}
 	if got := h.opCalls(); slices.Contains(got, "deleteCR widget") {

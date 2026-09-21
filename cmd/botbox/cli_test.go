@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rosenhouse/botbox/pkg/report"
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
@@ -334,6 +335,35 @@ func TestADeadlineDuringTheShrinkPassLeavesTheDrawnSequence(t *testing.T) {
 	if len(smaller.Ops) >= len(written.Ops) {
 		t.Errorf("%s holds %d ops, want fewer than the drawn sequence's %d.",
 			shrunkFile, len(smaller.Ops), len(written.Ops))
+	}
+}
+
+// DESIGN.md §11: each failing run writes report.json and report.md beside the
+// recordings they describe (§5.7).
+func TestAFailingRunWritesItsReport(t *testing.T) {
+	violation := run.Violation{ID: "G4", Statement: "the target converges", Evidence: "the settle wait expired"}
+	note := "G3 is not evaluated for the deletion of widget"
+	session := &fakeSession{results: []run.Result{{Violation: &violation, Notes: []string{note}}}}
+
+	code, _, stderr := invokeWith(t, session, countingGenerator(nil),
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	for _, name := range []string{report.JSONFile, report.MarkdownFile} {
+		if _, err := os.Stat(filepath.Join(session.dirs[0], name)); err != nil {
+			t.Fatalf("The run directory holds no %s: %v", name, err)
+		}
+	}
+	written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{violation.ID, violation.Statement, note, "botbox replay --target " + toyTargetYAML} {
+		if !strings.Contains(string(written), want) {
+			t.Errorf("The report is\n%s\nwant it to carry %q.", written, want)
+		}
 	}
 }
 

@@ -9,7 +9,8 @@ It then checks six generic invariants that need no per-controller configuration,
 target declares. If your controller talks to an API server, botbox can test it.
 
 **Status:** M0–M5 are merged. `botbox run` draws sequences, runs them, and minimizes the first
-failure; `botbox replay` re-executes one. Faults and `report.md` arrive in M6 ([DESIGN.md §10](DESIGN.md#10-milestones)).
+failure; `botbox replay` re-executes one. A failing run writes a report naming what broke and
+how to see it again ([DESIGN.md §5.7](DESIGN.md#57-report)).
 
 ## Install
 
@@ -158,13 +159,16 @@ A run that violates an invariant prints the ID, what it saw and where the eviden
 exits 1. A configuration or harness error exits 2, so your CI can tell a find from a broken
 target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 
+- `report.md` — what failed, the command that reproduces it, the sequence and the evidence.
+- `report.json` — the same, for a machine.
 - `sequence.json` — the sequence the rest of the directory is evidence of.
 - `sequence.shrunk.json` — a smaller sequence the deadline left unrun. Present only then.
 - `requests.jsonl` — every request the target made, as the proxy saw it.
 - `objects.jsonl` — every version of every object the Observer saw.
 - `target.log` — the target's own output.
 
-Passing runs are not kept. `report.md` and `report.json` arrive in M6 ([DESIGN.md §5.7](DESIGN.md#57-report)).
+The report quotes the first twenty requests and object versions the check named, and says how
+many there were. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-report)).
 
 ## Running in CI
 

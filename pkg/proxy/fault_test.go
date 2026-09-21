@@ -286,3 +286,45 @@ func TestUpgradeRequestsAreNeverFaulted(t *testing.T) {
 		t.Errorf("An upgrade request got %d, want the upstream's 200.", resp.StatusCode)
 	}
 }
+
+// The Runner reads Windows to bound a fault's excuse: it runs from the first
+// request the proxy faulted to the one that spent the trigger (§5.2, §6).
+func TestWindowsNameWhatTheProxyDidWithEachFault(t *testing.T) {
+	p := faultedProxy(t, 0,
+		proxy.FaultSpec{
+			Match:  proxy.RequestMatcher{Resource: "configmaps"},
+			Action: proxy.Error{Code: http.StatusInternalServerError},
+			Until:  proxy.Trigger{Count: 1},
+		},
+		proxy.FaultSpec{
+			Match:  proxy.RequestMatcher{Resource: "secrets"},
+			Action: proxy.Error{Code: http.StatusInternalServerError},
+			Until:  proxy.Trigger{For: 50 * time.Millisecond},
+		},
+		proxy.FaultSpec{
+			Match:  proxy.RequestMatcher{Resource: "widgets"},
+			Action: proxy.Error{Code: http.StatusInternalServerError},
+		},
+	)
+
+	if windows := p.Windows(); len(windows) != 3 || !windows[0].First.IsZero() {
+		t.Fatalf("Windows says %v before any request, and no fault has been applied yet.", windows)
+	}
+	spent := time.Now()
+	do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil)
+	time.Sleep(60 * time.Millisecond)
+
+	windows := p.Windows()
+	if windows[0].First.Before(spent) || windows[0].Retired.Before(spent) {
+		t.Errorf("The count-of-1 fault ran %+v, want it applied and spent on the request after %v.", windows[0], spent)
+	}
+	if !windows[1].First.IsZero() {
+		t.Errorf("The fault matching secrets was applied at %v, and the request was for configmaps.", windows[1].First)
+	}
+	if windows[1].Retired.IsZero() || windows[1].Retired.After(time.Now()) {
+		t.Errorf("The 50ms fault retired at %v, want the moment its window closed.", windows[1].Retired)
+	}
+	if !windows[2].First.IsZero() || !windows[2].Retired.IsZero() {
+		t.Errorf("The fault with no trigger ran %+v, and no request matched it.", windows[2])
+	}
+}

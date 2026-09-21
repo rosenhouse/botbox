@@ -89,12 +89,26 @@ func settleResult(checkpoint Checkpoint) invariant.SettleResult {
 	}
 }
 
+// engineFaults hands over the windows the proxy applied a fault in. A fault
+// that matched no request has no window: it changed nothing about the run, so
+// it excuses nothing (DESIGN.md §6, D36).
 func engineFaults(windows []Window) []invariant.FaultWindow {
-	faults := make([]invariant.FaultWindow, len(windows))
-	for i, window := range windows {
-		faults[i] = invariant.FaultWindow{Start: window.Start, End: window.End}
+	var faults []invariant.FaultWindow
+	for _, window := range windows {
+		if window.Start.IsZero() {
+			continue
+		}
+		faults = append(faults, invariant.FaultWindow{Start: window.Start, End: window.End})
 	}
 	return faults
+}
+
+// count writes a number of things, in the singular where there is one.
+func count(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
 }
 
 // evidence is the line the CLI prints under a violation. The whole request
@@ -102,12 +116,12 @@ func engineFaults(windows []Window) []invariant.FaultWindow {
 func evidence(violation invariant.Violation) string {
 	quoted := []string{"at " + violation.At.Format(time.RFC3339Nano)}
 	if requests := violation.Requests; len(requests) > 0 {
-		quoted = append(quoted, fmt.Sprintf("%d requests, the first %s %s %d",
-			len(requests), requests[0].Verb, requests[0].Path, requests[0].Status))
+		quoted = append(quoted, fmt.Sprintf("%s, the first %s %s %d",
+			count(len(requests), "request"), requests[0].Verb, requests[0].Path, requests[0].Status))
 	}
 	if versions := violation.Versions; len(versions) > 0 {
-		quoted = append(quoted, fmt.Sprintf("%d versions, the first %s %s",
-			len(versions), kindName(versions[0].GVK), versions[0].Name))
+		quoted = append(quoted, fmt.Sprintf("%s, the first %s %s",
+			count(len(versions), "version"), kindName(versions[0].GVK), versions[0].Name))
 	}
 	return strings.Join(quoted, "; ")
 }

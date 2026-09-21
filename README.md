@@ -140,10 +140,13 @@ proxy refuse, delay or drop the requests it matches:
            "action": {"error": 500}, "until": {"count": 30}}}
 ```
 
-An invariant ignores any window a fault reached into, so what a fault tests is how the
-controller behaves once the fault stops ([DESIGN.md §5.2](DESIGN.md#52-proxy)). Field values come from the CRD's own schema: its numeric ranges, enums,
-patterns and list lengths. A schema that says only `type: string` yields a random word, so the
-schema is not a safety net. Where it allows more than your controller does, `generate.mutate`
+An invariant ignores any window the proxy applied a fault in, so what a fault tests is how
+the controller behaves once the fault stops. A fault that matches no request changes nothing
+and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
+
+Field values come from the CRD's own schema: its numeric ranges, enums, patterns and list
+lengths. A schema that says only `type: string` yields a random word, so the schema is not a
+safety net. Where it allows more than your controller does, `generate.mutate`
 lists the only paths a sequence changes and `generate.overlay` tightens one path's schema, as
 `examples/cert-manager/target.yaml` does. Naming a path botbox cannot draw from is a
 configuration error, not a silent skip ([DESIGN.md §8.3](DESIGN.md#83-generation-constraints-and-admission-webhooks)).

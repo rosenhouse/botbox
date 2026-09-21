@@ -193,7 +193,8 @@ The Runner executes one sequence:
    `T_settle` for convergence unless the op sets `noSettle`. The wait ends once the
    `Ready` predicate holds and neither the CR nor a managed object has changed for
    `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
-   that expires while no fault is active records a G4 violation.
+   that expires while no fault is active records a G4 violation, where a fault counts as
+   active once the proxy has applied it and until the proxy stops (D36).
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
@@ -280,7 +281,9 @@ waits before it deletes is a window of its own, closing at the teardown boundary
 step 4). A run judges one window per op whose settle wait it saw end, plus the teardown's:
 a sequence whose last op does not settle has only the teardown's, and where the last op
 did settle the two overlap, so traffic in the overlap breaks both. A window a later op or
-a fault reaches into is not judged. The teardown clears every fault as its window opens,
+a fault reaches into is not judged, where a fault's window runs from the first request the
+proxy faulted with it to the request or the instant its trigger ran out (D36). The
+teardown clears every fault as its window opens,
 so a fault it cleared did not reach into it; it does not wait for convergence first, so a
 sequence ends with an op that settles.
 
@@ -944,3 +947,13 @@ built from source and run as a black-box binary.
   `objects.jsonl`. The report also carries what no check could judge, for D31's reason: a
   report that omits "G3 could not be judged" reads like one where G3 passed, and it is the
   artefact a human actually reads.
+- **D36 A fault excuses the target over the window the proxy applied it in.** The Runner
+  used to open a fault's window where it injected the spec and close it where it dropped
+  the spec, and only an op-index trigger made it drop one. A `Count` or `For` trigger runs
+  out inside the proxy, so the Runner went on excusing the target for the rest of the run:
+  one fault op left G1 to G4 and G6 unjudged from then on, and a fault matching a resource
+  the target never touches did the same. The proxy now reports what it did with each
+  fault, and the window runs from the first request it faulted to the request or the
+  instant the trigger ran out. A fault that matched no request has no window: it changed
+  nothing, so it excuses nothing. This is the vacuity §9.1's control row exists to catch,
+  one layer up: a run that reports nothing because nothing was judged.

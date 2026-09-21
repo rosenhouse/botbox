@@ -28,8 +28,22 @@ type fakeHarness struct {
 
 	converged bool
 	clean     bool
+	// specs are the faults the harness was last given, as the proxy holds
+	// them, so that its windows line up with the Runner's own bookkeeping.
+	specs []proxy.FaultSpec
+	// faulting makes the harness answer as a proxy that applies every fault
+	// the moment it is given it, and retires none.
+	faulting bool
+	applied  map[proxy.FaultSpec]time.Time
 	// store is the version history the checks and the report read.
-	store   *observe.Store
+	store *observe.Store
+	// logged are the requests the harness answers with before the run's own,
+	// so that a test can drive the log past what a violation quotes.
+	logged []proxy.Request
+	// applying is what the harness says the proxy did with each fault it was
+	// given, in that order. Its zero value is a fault that matched nothing.
+	applying []proxy.FaultWindow
+
 	managed map[schema.GroupVersionKind][]string
 	count   int
 	forced  []string
@@ -52,6 +66,7 @@ func newFakeHarness() *fakeHarness {
 		store:     observe.NewStore(observe.Options{Namespace: fakeNamespace, Primary: widgetKind, Manages: []schema.GroupVersionKind{configMapKind}}),
 		managed:   map[schema.GroupVersionKind][]string{configMapKind: {"widget-0", "widget-1"}},
 		fail:      map[string]error{},
+		applied:   map[proxy.FaultSpec]time.Time{},
 	}
 }
 
@@ -75,7 +90,29 @@ func (f *fakeHarness) sleep(_ context.Context, d time.Duration) error {
 func (f *fakeHarness) restart(context.Context) error { return f.record("restart") }
 
 func (f *fakeHarness) setFaults(specs []proxy.FaultSpec) {
+	f.specs = specs
+	if f.faulting {
+		for _, spec := range specs {
+			if _, held := f.applied[spec]; !held {
+				f.applied[spec] = time.Now()
+			}
+		}
+	}
 	_ = f.record(fmt.Sprintf("setFaults %d", len(specs)))
+}
+
+// faultWindows answers as the proxy does, one window per spec it was last
+// given and in that order. A test either says what the proxy did with the
+// first of them, or has it apply every fault as it is given.
+func (f *fakeHarness) faultWindows() []proxy.FaultWindow {
+	windows := make([]proxy.FaultWindow, len(f.specs))
+	copy(windows, f.applying)
+	for i, spec := range f.specs {
+		if first, applied := f.applied[spec]; applied && windows[i].First.IsZero() {
+			windows[i].First = first
+		}
+	}
+	return windows
 }
 
 func (f *fakeHarness) createCR(_ context.Context, obj *unstructured.Unstructured) (string, error) {
@@ -128,11 +165,11 @@ func (f *fakeHarness) objects() *observe.Store     { return f.store }
 func (f *fakeHarness) stop(context.Context) error  { return f.record("stop") }
 
 // requests grows with the run, so that a log sampled late is longer than one
-// sampled at a checkpoint. Each entry names the call it followed.
+// sampled at a checkpoint. Each entry the run adds names the call it followed.
 func (f *fakeHarness) requests() []proxy.Request {
-	log := make([]proxy.Request, len(f.calls))
-	for i, call := range f.calls {
-		log[i] = proxy.Request{Path: call}
+	log := slices.Clone(f.logged)
+	for _, call := range f.calls {
+		log = append(log, proxy.Request{Path: call})
 	}
 	return log
 }
@@ -298,6 +335,7 @@ func TestRunCheckpointsWhereTheDesignSaysSo(t *testing.T) {
 func TestRunCheckpointsWhenTheSettleExpires(t *testing.T) {
 	h := newFakeHarness()
 	h.converged = false
+	h.faulting = true
 	sequence := sequenceOf(Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}}, Op{Type: OpSettle})
 
 	result, err := runFake(t, h, nil, sequence)
@@ -373,6 +411,7 @@ func TestTheG4OfAnExpiredWaitCarriesTheEvidence(t *testing.T) {
 	h.converged = false
 	for i := range 25 {
 		h.recordCR("widget", strconv.Itoa(10+i))
+		h.logged = append(h.logged, proxy.Request{Path: "before-" + strconv.Itoa(i)})
 	}
 
 	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
@@ -391,8 +430,31 @@ func TestTheG4OfAnExpiredWaitCarriesTheEvidence(t *testing.T) {
 		t.Errorf("The versions end at resourceVersion %s, want the CR's latest, 34.", last)
 	}
 	requests := result.Violation.Requests
-	if len(requests) == 0 || requests[len(requests)-1].Path != "settle" {
-		t.Errorf("The violation carries the requests %v, want the log as the expired wait left it.", requests)
+	if len(requests) != 20 {
+		t.Fatalf("The violation carries %d requests, want the 20 a report quotes.", len(requests))
+	}
+	if last := requests[19].Path; last != "settle" {
+		t.Errorf("The requests end at %q, want the settle the wait expired in.", last)
+	}
+	if first := requests[0].Path; first != "before-7" {
+		t.Errorf("The requests open at %q, want the 20 nearest the expiry, from before-7.", first)
+	}
+}
+
+// A message that prints a violation wants the finding. The evidence behind one
+// runs to thousands of characters, and the recordings hold it.
+func TestAViolationPrintsAsOneLine(t *testing.T) {
+	carrying := Violation{
+		ID: "G4", Statement: "the target converges", Evidence: "the settle wait expired",
+		Versions: []observe.Version{{ResourceVersion: "12"}},
+	}
+	bare := Violation{ID: "G1", Statement: "the target falls quiet"}
+
+	if got, want := fmt.Sprintf("%+v", carrying), "G4 the target converges; the settle wait expired"; got != want {
+		t.Errorf("A violation prints as %q, want %q.", got, want)
+	}
+	if got, want := fmt.Sprintf("%v", bare), "G1 the target falls quiet"; got != want {
+		t.Errorf("A violation carrying no evidence prints as %q, want %q.", got, want)
 	}
 }
 
@@ -416,6 +478,7 @@ func TestRunKeepsTheViolationTheExpiredSettleFoundFirst(t *testing.T) {
 func TestRunLeavesTheExpiredSettleToTheChecksWhileAFaultIsActive(t *testing.T) {
 	h := newFakeHarness()
 	h.converged = false
+	h.faulting = true
 	sequence := sequenceOf(
 		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(3)}}},
 		Op{Type: OpCreate, Obj: widget("widget")},
@@ -432,6 +495,55 @@ func TestRunLeavesTheExpiredSettleToTheChecksWhileAFaultIsActive(t *testing.T) {
 	}
 	if got := checkpointsAt(result.Timeline); !slices.Equal(got, []int{1, 2, Teardown}) {
 		t.Errorf("The run checkpointed at the ops %v.", got)
+	}
+}
+
+// A fault excuses the target over the window the proxy applied it in, so a
+// fault whose own trigger has run out excuses nothing after it
+// (DESIGN.md §5.2, D36).
+func TestRunStopsExcusingTheTargetWhereTheProxyRetiredTheFault(t *testing.T) {
+	h := newFakeHarness()
+	h.converged = false
+	applied, retired := time.Now(), time.Now().Add(time.Millisecond)
+	h.applying = []proxy.FaultWindow{{First: applied, Retired: retired}}
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 1}}},
+		Op{Type: OpCreate, Obj: widget("widget")},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || result.Violation.ID != "G4" {
+		t.Errorf("The run reported %v, want a G4: the proxy had stopped applying the fault.", result.Violation)
+	}
+	if got := result.Timeline.Faults; len(got) != 1 || !got[0].Start.Equal(applied) || !got[0].End.Equal(retired) {
+		t.Errorf("The fault's window is %+v, want the %v to %v the proxy applied it in.", got, applied, retired)
+	}
+}
+
+// A fault op whose fault matches no request changes nothing, so it leaves the
+// run as judged as one with no fault op at all (DESIGN.md §6, D36).
+func TestRunJudgesARunWhoseFaultMatchedNothing(t *testing.T) {
+	h := newFakeHarness()
+	h.converged = false
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: "secrets"}, Action: Action{Error: 500}, Until: Trigger{Count: 1}}},
+		Op{Type: OpCreate, Obj: widget("widget")},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || result.Violation.ID != "G4" {
+		t.Errorf("The run reported %v, want a G4: the proxy never applied the fault.", result.Violation)
+	}
+	if got := result.Timeline.Faults; len(got) != 1 || !got[0].Start.IsZero() {
+		t.Errorf("The fault's window is %+v, want no window: the proxy applied nothing.", got)
 	}
 }
 
@@ -713,6 +825,7 @@ func checkpointsAt(timeline Timeline) []int {
 // cleared, which is the window the checks ignore what happened in.
 func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 	h := newFakeHarness()
+	h.faulting = true
 	sequence := sequenceOf(
 		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
 		Op{Type: OpFault, Fault: &Fault{Action: Action{Drop: true}}},

@@ -74,6 +74,8 @@ func (l *liveRun) restart(ctx context.Context) error { return l.h.Launcher.Resta
 
 func (l *liveRun) setFaults(specs []proxy.FaultSpec) { l.h.Proxy.SetFaults(specs) }
 
+func (l *liveRun) faultWindows() []proxy.FaultWindow { return l.h.Proxy.Windows() }
+
 // createCR creates the op's object as the primary CR and tells the Observer
 // botbox created it, so that it never counts as managed (DESIGN.md §6).
 func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error) {

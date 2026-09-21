@@ -411,3 +411,29 @@ func sameJSON(t *testing.T, a, b string) bool {
 }
 
 func ptr[T any](v T) *T { return &v }
+
+// A run ends at its first violation, so the sequence a report carries can hold
+// ops that never ran. A reader who attributes the finding to all of them has
+// been told the wrong thing (DESIGN.md §5.7).
+func TestReportSaysHowManyOpsTheRunApplied(t *testing.T) {
+	for _, run := range []struct {
+		name         string
+		applied, ops int
+		says         bool
+	}{
+		{name: "a run that ended early", applied: 1, ops: 6, says: true},
+		{name: "a run that applied every op", applied: 6, ops: 6, says: false},
+	} {
+		t.Run(run.name, func(t *testing.T) {
+			failure := failingRun()
+			failure.Applied, failure.Ops = run.applied, run.ops
+
+			md, _ := write(t, failure)
+
+			want := fmt.Sprintf("applied %d of the sequence's %d ops", run.applied, run.ops)
+			if says := strings.Contains(md, want); says != run.says {
+				t.Errorf("The report is\n%s\nand %s.", md, run.name)
+			}
+		})
+	}
+}

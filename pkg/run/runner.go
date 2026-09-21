@@ -32,6 +32,10 @@ const teardownMargin = 30 * time.Second
 // window, which no op opened.
 const Teardown = -1
 
+// maxTail is how much of the target's output the harness reads to quote its
+// last line.
+const maxTail = 4096
+
 // deletionMargin holds the run namespace open past T_delete, because G3's
 // window opens when the Observer recorded the deletion, which is after the
 // teardown asked for it.
@@ -408,8 +412,7 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		// A target that is gone cannot converge, so that is the harness's
 		// failure to report, not the target's to answer for.
 		if status := r.h.targetStatus(); !status.Running {
-			return fmt.Errorf("the target is no longer running: %v; its output is in %s",
-				status.Exit, filepath.Join(r.dir, targetLogFile))
+			return r.targetStopped(status)
 		}
 		if !r.faultActive() {
 			r.violate(Violation{
@@ -424,6 +427,74 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		}
 	}
 	return r.checkpoint(op.Index, converged)
+}
+
+// targetStopped is the harness error for a target that is no longer running.
+// A target that rejects its own flags writes one line and exits, and that line
+// is what its reader acts on.
+func (r *runner) targetStopped(status launch.Status) error {
+	log := filepath.Join(r.dir, targetLogFile)
+	if said := whyItStopped(log); said != "" {
+		return fmt.Errorf("the target is no longer running: %v; it wrote %q, and the rest of its output is in %s",
+			status.Exit, said, log)
+	}
+	return fmt.Errorf("the target is no longer running: %v; its output is in %s", status.Exit, log)
+}
+
+// panicked opens the report a Go runtime writes on the way out. The lines
+// after it are the stack, so the last line of such a log is a frame.
+var panicked = []string{"panic: ", "fatal error: "}
+
+// whyItStopped is what the target said as it stopped: the line a panic opens
+// with, or the last whole line it wrote. It is empty where the log holds
+// neither, which leaves the reader the file itself.
+func whyItStopped(path string) string {
+	said := tailLines(path)
+	for _, line := range said {
+		if slices.ContainsFunc(panicked, func(opener string) bool { return strings.HasPrefix(line, opener) }) {
+			return line
+		}
+	}
+	if len(said) == 0 {
+		return ""
+	}
+	return said[len(said)-1]
+}
+
+// tailLines are the whole lines at the end of the file, trimmed, innermost
+// last. A line longer than maxTail has no whole form to quote, and a file
+// botbox cannot read has nothing.
+func tailLines(path string) []string {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil
+	}
+	tail := make([]byte, min(info.Size(), maxTail))
+	if _, err := file.ReadAt(tail, info.Size()-int64(len(tail))); err != nil {
+		return nil
+	}
+	body := strings.TrimRight(string(tail), "\n")
+	// A tail shorter than the file begins mid-line, so its first line is a
+	// fragment: klog puts the level and the message at the front.
+	if int64(len(tail)) < info.Size() {
+		cut := strings.IndexByte(body, '\n')
+		if cut < 0 {
+			return nil
+		}
+		body = body[cut+1:]
+	}
+	var lines []string
+	for _, line := range strings.Split(body, "\n") {
+		if trimmed := strings.TrimSpace(line); trimmed != "" {
+			lines = append(lines, trimmed)
+		}
+	}
+	return lines
 }
 
 // checkpoint evaluates the checks and keeps the first violation.

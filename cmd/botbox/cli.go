@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -166,7 +167,7 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		}
 		switch exitCode(result, err) {
 		case exitError:
-			return c.fail(err)
+			return c.fail(opts.named(ctx, err))
 		case exitViolation:
 			return c.reportFailure(ctx, opts, s, exercised, planned, result, number, dir)
 		}
@@ -239,9 +240,9 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 		return s.execute(ctx, t, candidate, filepath.Join(dir, shrinkDir), run.Engine{})
 	})
 	reported := shrunk
-	smaller := len(shrunk.Ops) < len(failed.sequence.Ops)
+	simplified := simpler(shrunk, failed.sequence)
 	switch {
-	case ctx.Err() != nil && smaller:
+	case ctx.Err() != nil && simplified:
 		// The deadline ended the pass before the smaller sequence could be
 		// run into the directory, which still holds the run of the sequence
 		// botbox drew. The directory reports the sequence its evidence is
@@ -258,10 +259,12 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 		// never got to a smaller one (D31).
 		result.Notes = append(result.Notes,
 			"the deadline ended minimization before it found a smaller sequence: this is the sequence botbox drew")
-	case smaller:
-		if again := c.rerun(ctx, s, t, shrunk, dir); again.Violation != nil {
+	case simplified:
+		if again := c.rerun(ctx, opts, s, t, shrunk, dir); again.Violation != nil {
 			result, violation = again, *again.Violation
 		} else {
+			// The recordings are of the rerun, so the report counts its ops.
+			result.Timeline = again.Timeline
 			// The directory now holds a run of the minimized sequence that
 			// found nothing. The finding stands, and the report says which
 			// run these recordings are of rather than leaving a reader to
@@ -285,11 +288,11 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 // recordings there are of the sequence the run reports, and returns what that
 // run found. A run that reproduced nothing says so: the directory then holds
 // a run that passed.
-func (c *cli) rerun(ctx context.Context, s session, t *target.Target, shrunk run.Sequence, dir string) run.Result {
+func (c *cli) rerun(ctx context.Context, opts options, s session, t *target.Target, shrunk run.Sequence, dir string) run.Result {
 	result, err := s.execute(ctx, t, shrunk, dir, run.Engine{})
 	switch {
 	case err != nil:
-		c.warn(err)
+		c.warn(opts.named(ctx, err))
 	case result.Violation == nil:
 		c.warn(fmt.Errorf("the minimized sequence passed when it ran again, so %s holds that run", dir))
 	}
@@ -330,6 +333,8 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 		Notes:    result.Notes,
 		Replay:   opts.replayCommand(replay),
 		Sequence: encoded,
+		Applied:  len(result.Timeline.Ops),
+		Ops:      len(sequence.Ops),
 		Requests: violation.Requests,
 		Versions: violation.Versions,
 	})
@@ -377,6 +382,32 @@ func exitCode(result run.Result, err error) int {
 	default:
 		return exitOK
 	}
+}
+
+// named blames the --deadline for a run its own budget cut short. §11 makes
+// this exit 2, which a reader has to be able to tell from a broken target. The
+// context botbox built from the flag is what it asks: the teardown runs on a
+// budget of its own, and that one is nobody's flag (DESIGN.md §5.5).
+func (o options) named(ctx context.Context, err error) error {
+	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return err
+	}
+	return fmt.Errorf("the --deadline of %s ended the run: %w", o.deadline, err)
+}
+
+// simpler reports whether the shrink pass changed the sequence at all. It
+// removes ops and weakens faults, and a sequence the report carries has to be
+// the one the directory holds a run of, however the pass simplified it.
+func simpler(shrunk, failing run.Sequence) bool {
+	was, err := failing.Marshal()
+	if err != nil {
+		return false
+	}
+	now, err := shrunk.Marshal()
+	if err != nil {
+		return false
+	}
+	return !bytes.Equal(was, now)
 }
 
 // invocationSeed names the output directory: the seed the caller gave, or the

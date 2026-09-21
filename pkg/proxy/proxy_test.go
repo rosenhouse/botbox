@@ -511,3 +511,30 @@ func TestRecordsACanceledRequestWithoutAStatus(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// An open request carries no latency, so a report sampled mid-run does not
+// contradict requests.jsonl (DESIGN.md §5.7).
+func TestAnOpenRequestMarshalsWithNoLatency(t *testing.T) {
+	open := proxy.Request{Verb: "watch", Watch: true, Status: http.StatusOK}
+	done := open
+	done.Latency = time.Millisecond
+
+	for _, request := range []struct {
+		name    string
+		request proxy.Request
+		carries bool
+	}{
+		{"a watch still open", open, false},
+		{"a request that finished", done, true},
+	} {
+		t.Run(request.name, func(t *testing.T) {
+			encoded, err := json.Marshal(request.request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if carries := strings.Contains(string(encoded), "latencyNs"); carries != request.carries {
+				t.Errorf("%s marshals as %s.", request.name, encoded)
+			}
+		})
+	}
+}

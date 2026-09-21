@@ -366,7 +366,7 @@ Details the example does not show:
 - `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
   then name. The index is resolved at execution time and the chosen object is recorded by
-  name in the report. An index that resolves to nothing is a harness error (§11, exit 2).
+`deleteManaged` skips an index that resolves to nothing and reports it as a note, since a target that manages fewer objects than the sequence expected is behaving, not failing; a kind the target does not declare in `manages` is a configuration error.
 
 `botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
 embed the minimized sequence in this format.

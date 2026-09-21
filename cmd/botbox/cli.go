@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
+	"github.com/rosenhouse/botbox/pkg/generate"
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
@@ -54,17 +55,14 @@ const (
 // was built for (DESIGN.md §5.4).
 type Generator func(seed int64) (run.Sequence, error)
 
-// sampleGenerator draws the one sequence botbox has without pkg/generate: a
-// create of the target's sample, which generation starts from (DESIGN.md
-// §5.4).
-func sampleGenerator(t *target.Target) (Generator, error) {
-	return func(seed int64) (run.Sequence, error) {
-		return run.Sequence{
-			Seed:   seed,
-			Target: t.Name,
-			Ops:    []run.Op{{Type: run.OpCreate, Obj: t.Sample}},
-		}, nil
-	}, nil
+// rapidGenerator draws sequences from the target's CRD schema (DESIGN.md
+// §5.4). It reads the CRDs once, because a draw itself does no I/O.
+func rapidGenerator(t *target.Target) (Generator, error) {
+	g, err := generate.New(t, generate.Options{})
+	if err != nil {
+		return nil, err
+	}
+	return g.Draw, nil
 }
 
 // cli is one invocation. Its writers, its generator and its test cluster are

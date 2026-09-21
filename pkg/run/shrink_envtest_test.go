@@ -8,32 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-
+	"github.com/rosenhouse/botbox/pkg/generate"
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
-
-// draw stands in for pkg/generate until it lands: it draws one sequence for
-// the target from a seed (DESIGN.md §5.4). What M5 accepts is that the harness
-// finds and shrinks the failure without a hand-written sequence, so all this
-// has to be is deterministic.
-func draw(t *target.Target, seed int64) run.Sequence {
-	widget := t.Sample.DeepCopy()
-	if err := unstructured.SetNestedField(widget.Object, seed%2+1, "spec", "count"); err != nil {
-		panic(err)
-	}
-	ops := []run.Op{
-		{Type: run.OpCreate, Obj: widget},
-		{Type: run.OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": seed%4 + 1}}},
-		{Type: run.OpSettle},
-		{Type: run.OpDelete},
-	}
-	for i := range ops {
-		ops[i].Index = i
-	}
-	return run.Sequence{Seed: seed, Target: t.Name, Ops: ops}
-}
 
 // The acceptance of DESIGN.md §10 M5: with --bug=2 the harness finds a failure
 // in a sequence it drew and shrinks it to three ops or fewer.
@@ -52,7 +30,14 @@ func TestShrinkingAGeneratedFailure(t *testing.T) {
 		})
 	}
 
-	drawn := draw(toy, 8675309)
+	generator, err := generate.New(toy, generate.Options{})
+	if err != nil {
+		t.Fatalf("Reading the toy's schema failed: %v", err)
+	}
+	drawn, err := generator.Draw(8675309)
+	if err != nil {
+		t.Fatalf("Drawing a sequence failed: %v", err)
+	}
 	found, err := run.Run(ctx, toy, drawn, run.Options{
 		Dir: filepath.Join(dir, "run-1"), Config: testCluster.Config(), Check: run.Engine{},
 	})

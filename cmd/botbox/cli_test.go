@@ -418,6 +418,32 @@ func TestAFailingRunWritesItsReport(t *testing.T) {
 	}
 }
 
+// A run ends at its first violation, so its report says how far it got. The
+// ops after it never ran, and a reader who counts them all has been told the
+// wrong thing (DESIGN.md §5.7).
+func TestTheReportSaysHowFarTheRunGot(t *testing.T) {
+	violation := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{results: []run.Result{{
+		Violation: &violation,
+		Timeline:  run.Timeline{Ops: []run.AppliedOp{{Op: run.Op{Index: 0, Type: run.OpCreate}}}},
+	}}}
+	generate := countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle)
+
+	code, _, stderr := invokeWith(t, session, generate,
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "applied 1 of the sequence's 3 ops"; !strings.Contains(string(written), want) {
+		t.Errorf("The report is\n%s\nwant it to say %q.", written, want)
+	}
+}
+
 // A sequence the caller named is never minimized, and it still gets a report.
 // This is the path `botbox replay` takes, which is how M6's own fault sequence
 // is run.
@@ -528,6 +554,38 @@ func TestTheReportSaysWhenTheMinimizedSequenceDidNotReproduce(t *testing.T) {
 	if !strings.Contains(string(written), "passed when it ran again") {
 		t.Errorf("The report is\n%s\nwant it to say the recordings are of a run that found nothing.", written)
 	}
+	// The counts describe the sequence the directory holds a run of, or they
+	// describe two sequences and one of them is a fiction (DESIGN.md §5.7).
+	encoded, err := os.ReadFile(filepath.Join(session.dirs[0], report.JSONFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var carried struct{ Applied, Ops int }
+	if err := json.Unmarshal(encoded, &carried); err != nil {
+		t.Fatal(err)
+	}
+	if carried.Applied > carried.Ops {
+		t.Errorf("The report says the run applied %d of %d ops.", carried.Applied, carried.Ops)
+	}
+}
+
+// The shrink pass weakens a fault as well as removing ops, so a sequence it
+// changed without shortening is still one the report has to carry.
+func TestASequenceWeakenedButNotShortenedCountsAsSimpler(t *testing.T) {
+	failing := run.Sequence{Seed: 1, Target: "toy-widget", Ops: []run.Op{
+		{Index: 0, Type: run.OpFault, Fault: &run.Fault{Action: run.Action{Error: 500}, Until: run.Trigger{Count: 8}}},
+		{Index: 1, Type: run.OpSettle},
+	}}
+	weakened := failing
+	weakened.Ops = slices.Clone(failing.Ops)
+	weakened.Ops[0].Fault = &run.Fault{Action: run.Action{Error: 500}, Until: run.Trigger{Count: 4}}
+
+	if !simpler(weakened, failing) {
+		t.Error("A fault weakened from a count of 8 to 4 reads as the sequence botbox drew.")
+	}
+	if simpler(failing, failing) {
+		t.Error("The sequence botbox drew reads as simpler than itself.")
+	}
 }
 
 // The run directory holds the minimized sequence's own run, so a run of it
@@ -556,6 +614,37 @@ func TestAMinimizedSequenceThatPassesOnItsOwnRunIsReported(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "G4") {
 		t.Errorf("botbox run printed %q, want the violation it found.", stdout)
+	}
+}
+
+// A run the deadline cut short says so in the flag's own terms, because Go's
+// phrase for it names nothing the caller set (DESIGN.md §11).
+func TestADeadlineThatEndsARunNamesTheFlag(t *testing.T) {
+	for _, failure := range []struct {
+		name     string
+		deadline string
+		err      error
+		names    bool
+	}{
+		{"the deadline", "1ns", fmt.Errorf("op 0 (create): %w", context.DeadlineExceeded), true},
+		{"a target that stopped", "1ns", errors.New("op 0 (create): the target is no longer running"), false},
+		// The teardown runs on a budget of its own, which no flag names
+		// (DESIGN.md §5.5).
+		{"a deadline the flag did not set", "5s", fmt.Errorf("stopping: %w", context.DeadlineExceeded), false},
+	} {
+		t.Run(failure.name, func(t *testing.T) {
+			session := &fakeSession{failures: []error{failure.err}}
+
+			code, _, stderr := invokeWith(t, session, countingGenerator(nil),
+				"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--deadline", failure.deadline)
+
+			if code != exitError {
+				t.Fatalf("botbox run exited %d, want %d.", code, exitError)
+			}
+			if named := strings.Contains(stderr, "the --deadline of "+failure.deadline); named != failure.names {
+				t.Errorf("botbox run printed %q, and what ended the run was %s.", stderr, failure.name)
+			}
+		})
 	}
 }
 

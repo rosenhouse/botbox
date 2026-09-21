@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -42,6 +43,23 @@ func okUpstream() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		io.WriteString(w, "ok")
 	})
+}
+
+// finishedRecords waits for the proxy to complete count records, which it does
+// after the client already has its response (see Proxy.Log).
+func finishedRecords(t *testing.T, p *proxy.Proxy, count int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		log := p.Log()
+		if len(log) >= count && !slices.ContainsFunc(log, func(r proxy.Request) bool { return r.Latency <= 0 }) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("The proxy recorded %+v, want %d finished records.", log, count)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 func do(t *testing.T, p *proxy.Proxy, method, target string, header http.Header) *http.Response {
@@ -310,6 +328,10 @@ func TestWriteLogWritesOneJSONObjectPerRequest(t *testing.T) {
 	do(t, p, "POST", "/apis/toy.botbox/v1/namespaces/ns1/widgets", nil)
 	do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps?watch=true", nil)
 
+	// The client has its response before the proxy stamps the exchange's
+	// latency, so the log is read once the records are finished, as the
+	// envtest tier's recordsAfter does (see Proxy.Log).
+	finishedRecords(t, p, 2)
 	var buf strings.Builder
 	if err := p.WriteLog(&buf); err != nil {
 		t.Fatalf("WriteLog returned an error: %v", err)
@@ -509,5 +531,32 @@ func TestRecordsACanceledRequestWithoutAStatus(t *testing.T) {
 			t.Fatal("The canceled request never ended.")
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// An open request carries no latency, so a report sampled mid-run does not
+// contradict requests.jsonl (DESIGN.md §5.7).
+func TestAnOpenRequestMarshalsWithNoLatency(t *testing.T) {
+	open := proxy.Request{Verb: "watch", Watch: true, Status: http.StatusOK}
+	done := open
+	done.Latency = time.Millisecond
+
+	for _, request := range []struct {
+		name    string
+		request proxy.Request
+		carries bool
+	}{
+		{"a watch still open", open, false},
+		{"a request that finished", done, true},
+	} {
+		t.Run(request.name, func(t *testing.T) {
+			encoded, err := json.Marshal(request.request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if carries := strings.Contains(string(encoded), "latencyNs"); carries != request.carries {
+				t.Errorf("%s marshals as %s.", request.name, encoded)
+			}
+		})
 	}
 }

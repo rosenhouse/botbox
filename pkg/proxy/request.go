@@ -8,23 +8,25 @@ import (
 )
 
 // Request is one recorded exchange between the target and the API server.
-// Status is the status the target saw, and 0 while it has seen none. Latency
-// is 0 until the exchange ends, so an open watch carries its start and its
-// status alone.
+// Status is the status the target saw, and 0 while it has seen none.
 type Request struct {
-	Start       time.Time     `json:"start"`
-	Verb        string        `json:"verb"`
-	Group       string        `json:"group,omitempty"`
-	Version     string        `json:"version,omitempty"`
-	Resource    string        `json:"resource,omitempty"`
-	Subresource string        `json:"subresource,omitempty"`
-	Namespace   string        `json:"namespace,omitempty"`
-	Name        string        `json:"name,omitempty"`
-	Path        string        `json:"path"`
-	Watch       bool          `json:"watch,omitempty"`
-	Status      int           `json:"status"`
-	Latency     time.Duration `json:"latencyNs"`
-	Fault       string        `json:"fault,omitempty"`
+	Start       time.Time `json:"start"`
+	Verb        string    `json:"verb"`
+	Group       string    `json:"group,omitempty"`
+	Version     string    `json:"version,omitempty"`
+	Resource    string    `json:"resource,omitempty"`
+	Subresource string    `json:"subresource,omitempty"`
+	Namespace   string    `json:"namespace,omitempty"`
+	Name        string    `json:"name,omitempty"`
+	Path        string    `json:"path"`
+	Watch       bool      `json:"watch,omitempty"`
+	Status      int       `json:"status"`
+	// Latency is unset until the exchange ends, so an open watch carries its
+	// start and its status alone. A report sampled mid-run therefore carries
+	// no latency where requests.jsonl carries what the request took
+	// (DESIGN.md §5.7).
+	Latency time.Duration `json:"latencyNs,omitempty"`
+	Fault   string        `json:"fault,omitempty"`
 }
 
 // namespaceSubresources follow a namespace name instead of scoping a resource.

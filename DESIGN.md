@@ -226,11 +226,15 @@ harness, not the target; tune windows, don't retry.
 
 ### 5.7 Report
 
-A failing run emits `report.json` and `report.md` containing: the minimized sequence,
-the violated invariant or property with the concrete evidence (request log excerpt, object
-version timeline), the target and versions, the seed, and a one-line replay command. The
-run directory also holds recordings of the run (§11), so a report can be re-examined without
-re-running.
+A failing run emits `report.json` and `report.md` containing: the minimized sequence and
+how many of its ops the run reached, the violated invariant or property with the concrete
+evidence (request log excerpt, object version timeline), the target and versions, the
+seed, and a one-line replay command. The run directory also holds recordings of the run
+(§11), so a report can be re-examined without re-running.
+
+A report is a snapshot taken where the check failed, and the recordings beside it are
+finalized when the run ends. A request still open at the snapshot, which a watch usually
+is, therefore carries no latency in the report and its own in `requests.jsonl`.
 
 ### 5.8 Test cluster
 

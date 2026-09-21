@@ -45,6 +45,10 @@ type Report struct {
 	// Sequence is the minimized sequence in the canonical form of
 	// DESIGN.md §7, as run.Sequence.Marshal writes it.
 	Sequence json.RawMessage
+	// Applied is how many of the sequence's ops the run reached, and Ops is
+	// how many it holds. A run that ended at its violation reached fewer
+	// (DESIGN.md §5.5).
+	Applied, Ops int
 	// Requests and Versions are the evidence the check quoted. The report
 	// bounds each excerpt and says how many there were.
 	Requests []proxy.Request
@@ -96,6 +100,8 @@ type document struct {
 	Notes         []string          `json:"notes,omitempty"`
 	Replay        string            `json:"replay"`
 	Sequence      json.RawMessage   `json:"sequence"`
+	Applied       int               `json:"applied,omitempty"`
+	Ops           int               `json:"ops,omitempty"`
 	Requests      []proxy.Request   `json:"requests,omitempty"`
 	RequestsTotal int               `json:"requestsTotal,omitempty"`
 	Versions      []observe.Version `json:"versions,omitempty"`
@@ -111,6 +117,8 @@ func (r Report) document() document {
 		Notes:         r.Notes,
 		Replay:        r.Replay,
 		Sequence:      r.Sequence,
+		Applied:       r.Applied,
+		Ops:           r.Ops,
 		Requests:      recent(r.Requests),
 		RequestsTotal: len(r.Requests),
 		Versions:      timeline(r.Versions),

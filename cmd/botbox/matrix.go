@@ -68,7 +68,7 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	defer cancel()
 	for i := range rows {
 		if err := c.exerciseBug(ctx, s, exercised, &rows[i], dir); err != nil {
-			return c.fail(err)
+			return c.fail(opts.named(ctx, err))
 		}
 	}
 

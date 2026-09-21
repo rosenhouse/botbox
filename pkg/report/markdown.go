@@ -104,12 +104,18 @@ func table(md *strings.Builder, header []string, rows [][]string) {
 	}
 }
 
-// provenance says what ran the sequence, in the versions each declares.
+// provenance says what ran the sequence, in the versions each declares, and
+// how far the run got (DESIGN.md §5.7).
 func (d document) provenance() string {
-	if d.Botbox == "" {
-		return fmt.Sprintf("The run exercised %s on seed %d.", d.Target.describe(), d.Seed)
+	who := "The run"
+	if d.Botbox != "" {
+		who = "botbox " + d.Botbox
 	}
-	return fmt.Sprintf("botbox %s exercised %s on seed %d.", d.Botbox, d.Target.describe(), d.Seed)
+	ran := fmt.Sprintf("%s exercised %s on seed %d", who, d.Target.describe(), d.Seed)
+	if d.Applied < d.Ops {
+		ran += fmt.Sprintf(" and applied %d of the sequence's %d ops", d.Applied, d.Ops)
+	}
+	return ran + "."
 }
 
 // describe names the target and the version it declares (DESIGN.md §8.1).

@@ -1034,17 +1034,101 @@ func TestTheTeardownIsStampedBeforeItChangesAnything(t *testing.T) {
 func TestASettleExpiryWithADeadTargetIsAHarnessError(t *testing.T) {
 	h := &fakeHarness{clean: true, targetGone: true, targetExit: errors.New("exit status 1")}
 	sequence := sequenceOf(Op{Type: OpCreate, Obj: widget("widget")})
+	// A target that refuses its own flags says so on the way out, and that
+	// line is what the reader acts on.
+	dir := t.TempDir()
+	written := "toy-widget: --bug=12: want a bug ID from 0 to 11"
+	if err := os.WriteFile(filepath.Join(dir, targetLogFile), []byte("starting\n"+written+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
-	result, err := runSequence(t.Context(), toyTarget, sequence, Options{Check: &fakeChecker{}, Dir: "out"}, h)
+	result, err := runSequence(t.Context(), toyTarget, sequence, Options{Check: &fakeChecker{}, Dir: dir}, h)
 	if err == nil {
 		t.Fatal("The run reported no error although the target had stopped.")
 	}
-	for _, want := range []string{"no longer running", "exit status 1", "target.log"} {
+	for _, want := range []string{"no longer running", "exit status 1", "target.log", written} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("The error is %q, which does not mention %q.", err, want)
 		}
 	}
 	if result.Violation != nil {
 		t.Errorf("The run reported %+v against the target; a dead target is the harness's failure.", result.Violation)
+	}
+}
+
+// The harness quotes what the target said on the way out, so what it quotes
+// has to be a whole line: klog puts the level and the message at the front,
+// and a Go panic puts the stack after it.
+func TestWhatTheTargetSaidOnTheWayOut(t *testing.T) {
+	// The sizes are literal, so that a wider maxTail fails this rather than
+	// scaling the log with it.
+	const pastTheTail = 5000
+	for _, log := range []struct {
+		name  string
+		wrote string
+		want  string
+	}{
+		{"one line and no newline", "toy-widget: --bug=12: want a bug ID from 0 to 11",
+			"toy-widget: --bug=12: want a bug ID from 0 to 11"},
+		{"a trailing blank line", "the message\n   \n", "the message"},
+		{"a panic before its stack",
+			"starting\npanic: runtime error: index out of range\n\ngoroutine 1 [running]:\nmain.main()\n\t/src/main.go:57 +0x1d5\n",
+			"panic: runtime error: index out of range"},
+		{"several lines and no panic", "starting\nlistening on :8080\nE0921 fatal: reconcile failed\n",
+			"E0921 fatal: reconcile failed"},
+		{"a tail that begins mid-line", strings.Repeat("y", pastTheTail) + "\nE0921 fatal: reconcile failed\n",
+			"E0921 fatal: reconcile failed"},
+		{"a last line longer than the tail", "E0921 fatal: " + strings.Repeat("x", pastTheTail) + "\n", ""},
+		{"nothing at all", "", ""},
+		{"only newlines", "\n\n\n", ""},
+	} {
+		t.Run(log.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), targetLogFile)
+			if err := os.WriteFile(path, []byte(log.wrote), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			if got := whyItStopped(path); got != log.want {
+				t.Errorf("A log of %d bytes reads as %q, want %q.", len(log.wrote), got, log.want)
+			}
+		})
+	}
+	if got := whyItStopped(filepath.Join(t.TempDir(), "no-such-log")); got != "" {
+		t.Errorf("A log botbox never wrote reads as %q.", got)
+	}
+}
+
+// A target that wrote nothing leaves the reader its log, and one that wrote
+// control bytes leaves them quoted: the line goes into an error CI prints.
+func TestTheStoppedTargetsErrorWithoutALineAndWithControlBytes(t *testing.T) {
+	for _, log := range []struct {
+		name  string
+		wrote string
+		want  string
+		says  bool
+	}{
+		{name: "an empty log", wrote: "", want: "its output is in"},
+		{name: "an escape sequence", wrote: "fatal: \x1b[31mbad flag\x1b[0m\n", want: `\x1b[31mbad flag`, says: true},
+	} {
+		t.Run(log.name, func(t *testing.T) {
+			h := &fakeHarness{clean: true, targetGone: true, targetExit: errors.New("exit status 1")}
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, targetLogFile), []byte(log.wrote), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := runSequence(t.Context(), toyTarget, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}),
+				Options{Check: &fakeChecker{}, Dir: dir}, h)
+
+			if err == nil {
+				t.Fatal("The run reported no error although the target had stopped.")
+			}
+			if !strings.Contains(err.Error(), log.want) {
+				t.Errorf("The error is %q, which does not carry %q.", err, log.want)
+			}
+			if said := strings.Contains(err.Error(), "it wrote"); said != log.says {
+				t.Errorf("The error is %q, and the log held %q.", err, log.wrote)
+			}
+		})
 	}
 }

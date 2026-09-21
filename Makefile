@@ -202,10 +202,27 @@ test-example: verify-cert-manager-pin setup build
 
 # The nightly tier of DESIGN.md §10 (M5). botbox draws the seeds, so a find here
 # is a new one rather than the fixed seeds again, and every run prints its seed,
-# so the find replays (§11).
+# so the find replays (§11). It carries the same negative control as test-example,
+# because a nightly that only ever passes cannot tell a quiet night from a harness
+# that stopped judging.
 .PHONY: test-example-nightly
 test-example-nightly: verify-cert-manager-pin
-	examples/cert-manager/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE)
+	@echo "==> drawn seeds, which must pass"
+	@examples/cert-manager/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE) \
+		|| { echo "test-example-nightly: a drawn seed failed."; exit 1; }
+	@echo "==> the negative control, which must fail G3"
+	@log=$$(examples/cert-manager/quickstart.sh --seed $(EXAMPLE_SEED) --runs 1 --deadline $(EXAMPLE_DEADLINE) \
+		--launch-arg --enable-certificate-owner-ref=false 2>&1); \
+	status=$$?; \
+	echo "$$log"; \
+	if [ $$status -eq 0 ]; then \
+		echo "test-example-nightly: the negative control passed, so the tier proves nothing."; \
+		exit 1; \
+	fi; \
+	if ! echo "$$log" | grep -q "G3 .*Secret example-tls"; then \
+		echo "test-example-nightly: the negative control failed for another reason than G3."; \
+		exit 1; \
+	fi
 
 .PHONY: fmt
 fmt:

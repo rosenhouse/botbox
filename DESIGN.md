@@ -669,7 +669,8 @@ proxy; the `Image` launcher. Separate design addendum.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` = the cert-manager example under envtest, under 10
   minutes on CI including obtaining the binary (cached). All three run on every PR.
-  `make test-kind` = kind, nightly or on demand.
+  `make test-example-nightly` = the same example on seeds botbox draws, nightly, with the
+  negative control. `make test-kind` = kind, nightly or on demand.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code

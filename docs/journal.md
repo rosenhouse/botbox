@@ -269,7 +269,7 @@ acceptance test, and it would have caught both of the misses above.
 
 D33 gave generation the settle waits that leave the ops it drew judged, and
 `Sequence.Validate` rejects a sequence without a terminal one, which also stops the shrink
-pass proposing it. 55b97c5 then wrapped every drawn `restart` in settle waits on both
+pass proposing it. Generation then wraps every drawn `restart` in settle waits on both
 sides, and the 13 seeds that had failed or gone unjudged all pass with no notes. The shape
 is forbidden in generation and not in the format: `b0.json` and `b10.json` each follow a
 restart with a change and no settle between, on purpose, and a hand-written sequence is

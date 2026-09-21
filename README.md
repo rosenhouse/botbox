@@ -61,6 +61,10 @@ applies the Issuer fixture to a fresh namespace, launches the controller behind 
 executes one drawn sequence. With no `--seed` botbox draws one and prints it. Fixing it draws
 the same five sequences every time:
 
+```sh
+examples/cert-manager/quickstart.sh --seed 23
+```
+
 ```
 run 1: seed 23, generated
 run 2: seed 24, generated
@@ -75,29 +79,32 @@ every run passed.
 A passing example proves little by itself, so the example also ships a configuration that must
 fail. With `--enable-certificate-owner-ref=false`, which `--launch-arg` appends to `launch.args`,
 cert-manager leaves the issued Secret behind, as upstream documents. The target declares
-`v1/Secret` as managed, so G3 has to report it. Seed 24 draws four ops, so it also shows the
-minimizer: botbox cuts them to the one that still fails, then runs it again so the evidence matches.
+`v1/Secret` as managed, so G3 has to report it:
 
 ```sh
-examples/cert-manager/quickstart.sh --seed 24 --runs 1 --launch-arg --enable-certificate-owner-ref=false
+examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 5m --launch-arg --enable-certificate-owner-ref=false
 ```
 
 ```
-run 1: seed 24, generated
+run 1: seed 23, generated
 run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR
-  at 2026-09-21T04:34:27.246567796Z; 1 versions, the first v1/Secret example-tls
-  the evidence is in botbox-out/20260921T042637Z-24/run-1
-  the sequence is 1 op, in botbox-out/20260921T042637Z-24/run-1/sequence.json
+  at 2026-09-21T05:59:08.980624165Z; 1 versions, the first v1/Secret example-tls
+  the evidence is in botbox-out/20260921T055744Z-23/run-1
+  the sequence is 1 op, in botbox-out/20260921T055744Z-23/run-1/sequence.json
 ```
 
-`make test-example` runs this control on seed 23, the first seed it fixes, whose one drawn op is
-already minimal, and fails unless the default configuration passes and the control fails on G3
-naming that Secret. A nightly workflow draws its own seeds.
+Seed 23 draws a single op, so there is nothing to minimize. A longer sequence is cut to the ops
+the failure needs before it is reported, which costs a replay each: give `--deadline` room for
+that. `make test-example` runs this same control, and fails unless the default configuration
+passes and the control fails on G3 naming that Secret. A nightly workflow draws its own seeds.
 
 ## Your own controller
 
-A target is one YAML file, here `examples/cert-manager/target.yaml` trimmed to the keys every
-target needs. `generate`, `properties`, `timeouts` and `thresholds` are optional ([DESIGN.md §8.1](DESIGN.md#81-targetyaml)).
+A target is one YAML file, here `examples/cert-manager/target.yaml` trimmed. Four keys are
+required: `name`, `primary`, `sample` and `launch.binary`. Everything else is optional. A target
+that declares no `ready` is judged by `has(status.observedGeneration) && status.observedGeneration
+== metadata.generation`, so declare one if your CR does not carry `observedGeneration`
+([DESIGN.md §8.1](DESIGN.md#81-targetyaml)).
 
 ```yaml
 name: cert-manager
@@ -115,7 +122,7 @@ ready: >-                                     # CEL over metadata, spec, status;
     c.type == "Ready" && c.status == "True"
     && has(c.observedGeneration) && c.observedGeneration == metadata.generation)
 launch:
-  binary: bin/cert-manager-controller
+  binary: bin/cert-manager-controller       # relative to the working directory, not to this file
   args:
     - --kubeconfig=$KUBECONFIG                # replaced with a kubeconfig for the proxy
     - --enable-certificate-owner-ref=true
@@ -124,13 +131,14 @@ launch:
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the
 controller's back. Field values come from the CRD's own schema: its numeric ranges, enums,
-patterns and list lengths, and a path the schema says too little about is left alone rather
-than guessed at. Where the schema allows more than your controller does, `generate.mutate`
+patterns and list lengths. A schema that says only `type: string` yields a random word, so the
+schema is not a safety net. Where it allows more than your controller does, `generate.mutate`
 lists the only paths a sequence changes and `generate.overlay` tightens one path's schema, as
-`examples/cert-manager/target.yaml` does ([DESIGN.md §8.3](DESIGN.md#83-generation-constraints-and-admission-webhooks)).
+`examples/cert-manager/target.yaml` does. Naming a path botbox cannot draw from is a
+configuration error, not a silent skip ([DESIGN.md §8.3](DESIGN.md#83-generation-constraints-and-admission-webhooks)).
 
-A sequence file runs as written and is never minimized. This is the whole of
-`examples/cert-manager/sequences/issue.json` ([DESIGN.md §7](DESIGN.md#7-sequence-format)):
+A sequence file runs as written and is never minimized. This is
+`examples/cert-manager/sequences/issue.json`, reflowed ([DESIGN.md §7](DESIGN.md#7-sequence-format)):
 
 ```json
 {"seed": 20260920, "target": "cert-manager", "ops": [
@@ -146,14 +154,17 @@ a failure, and `make test-example` runs both pinned sequences so they cannot rot
 
 ## Reading a report
 
-A run that violates an invariant prints the ID, what it saw and where the evidence is, then exits 1. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
+A run that violates an invariant prints the ID, what it saw and where the evidence is, then
+exits 1. A configuration or harness error exits 2, so your CI can tell a find from a broken
+target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 
-- `sequence.json` — the minimized sequence, which is what that directory's evidence is of.
+- `sequence.json` — the sequence the rest of the directory is evidence of.
+- `sequence.shrunk.json` — a smaller sequence the deadline left unrun. Present only then.
 - `requests.jsonl` — every request the target made, as the proxy saw it.
 - `objects.jsonl` — every version of every object the Observer saw.
 - `target.log` — the target's own output.
 
-Passing runs are not kept, and `report.md` and `report.json` arrive in M6 ([DESIGN.md §5.7](DESIGN.md#57-report)).
+Passing runs are not kept. `report.md` and `report.json` arrive in M6 ([DESIGN.md §5.7](DESIGN.md#57-report)).
 
 ## Running in CI
 
@@ -162,11 +173,17 @@ Passing runs are not kept, and `report.md` and `report.json` arrive in M6 ([DESI
   with:
     go-version-file: go.mod
 - run: go install github.com/rosenhouse/botbox/cmd/botbox@latest
+- run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
+- run: |
+    index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
+    echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 --index $index -p path)" >>"$GITHUB_ENV"
 - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
-- run: botbox run --target target.yaml --seed 23 --runs 5
+- run: botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m
 ```
 
-Install the control plane as above, and cache it and the target, as
+`$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not. Give
+`--deadline` room for your controller, because a run that overruns it exits 2 rather than
+reporting a find. Cache the control plane and the target as
 [.github/workflows/ci.yml](.github/workflows/ci.yml) does. Fix the seed on pull requests, so that
 a failure is the change under review and not a new draw, and draw fresh seeds on a schedule, as
 [nightly.yml](.github/workflows/nightly.yml) does. The job needs no cluster and no registry.

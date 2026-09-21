@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -198,6 +199,60 @@ func TestShrinkPassesAgainOverWhatItLeft(t *testing.T) {
 
 	if want := names(OpDelete); !slices.Equal(opTypesOf(shrunk), want) {
 		t.Errorf("Shrink returned %v, want %v.", opTypesOf(shrunk), want)
+	}
+}
+
+// A fault that cannot go entirely shrinks toward a shorter duration
+// (DESIGN.md §5.5).
+func TestShrinkWeakensAFaultItCannotRemove(t *testing.T) {
+	failing := sequenceOfTypes(OpFault, OpSettle)
+	failing.Ops[0].Fault = &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 8}}
+	// The failure needs a fault, and one refused request is enough.
+	replay := &fakeReplay{violates: func(candidate Sequence) string {
+		for _, op := range candidate.Ops {
+			if op.Type == OpFault {
+				return "G1"
+			}
+		}
+		return ""
+	}}
+
+	shrunk := shrink(t, t.Context(), failing, "G1", replay)
+
+	if got := shrunk.Ops[0].Fault.Until.Count; got != 1 {
+		t.Errorf("Shrink left the fault refusing %d requests, want the 1 the failure needs.", got)
+	}
+	if failing.Ops[0].Fault.Until.Count != 8 {
+		t.Errorf("Shrink changed the sequence it was given: its fault now refuses %d.",
+			failing.Ops[0].Fault.Until.Count)
+	}
+}
+
+// Removal is tried before weakening, so a fault the failure does not need
+// costs one replay and not one per halving. In a run each replay is a cluster
+// (DESIGN.md §5.5).
+func TestShrinkTriesRemovingAFaultBeforeWeakeningIt(t *testing.T) {
+	failing := sequenceOfTypes(OpFault, OpDelete)
+	failing.Ops[0].Fault = &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 8}}
+	replay := &fakeReplay{violates: failsOn("G3", OpDelete)}
+
+	shrink(t, t.Context(), failing, "G3", replay)
+
+	if first := opTypesOf(replay.seen[0]); slices.Contains(first, string(OpFault)) {
+		t.Errorf("Shrink replayed %v first, want the fault gone: no fault is simpler than a short one.", first)
+	}
+}
+
+// No fault is simpler than a short one, so removal is tried first.
+func TestShrinkRemovesAFaultTheFailureDoesNotNeed(t *testing.T) {
+	failing := sequenceOfTypes(OpFault, OpDelete)
+	failing.Ops[0].Fault = &Fault{Action: Action{Delay: Duration(time.Second)}, Until: Trigger{For: Duration(8 * time.Second)}}
+	replay := &fakeReplay{violates: failsOn("G3", OpDelete)}
+
+	shrunk := shrink(t, t.Context(), failing, "G3", replay)
+
+	if want := names(OpDelete); !slices.Equal(opTypesOf(shrunk), want) {
+		t.Errorf("Shrink returned %v, want %v: the failure needs no fault at all.", opTypesOf(shrunk), want)
 	}
 }
 

@@ -9,14 +9,10 @@ import (
 // error is a configuration or harness error, never a finding.
 type Replay func(ctx context.Context, candidate Sequence) (Result, error)
 
-// Shrink removes ops one at a time, replays what is left and keeps the
-// shorter sequence while it still fails for the same reason, until no single
-// op can go (DESIGN.md §5.5). It stops at the context's deadline and returns
-// the smallest failing sequence it found (§11).
-//
-// M6 adds the other half of §5.5, where a fault op shrinks toward no fault and
-// shorter durations: those are further candidates for shrinkPass to try
-// alongside the shorter sequences of without.
+// Shrink simplifies one op at a time, replays what is left and keeps the
+// simpler sequence while it still fails for the same reason, until no op can
+// give any more (DESIGN.md §5.5). It stops at the context's deadline and
+// returns the smallest failing sequence it found (§11).
 func Shrink(ctx context.Context, failing Sequence, violation Violation, replay Replay) Sequence {
 	smallest := failing
 	for removed := true; removed; {
@@ -25,22 +21,82 @@ func Shrink(ctx context.Context, failing Sequence, violation Violation, replay R
 	return smallest
 }
 
-// shrinkPass removes every op it can, in order, and reports whether it
-// removed any. Removing one op can free another, so Shrink passes again.
+// shrinkPass simplifies every op it can, in order, and reports whether it
+// simplified any. Simplifying one op can free another, so Shrink passes again.
 func shrinkPass(ctx context.Context, s Sequence, violation Violation, replay Replay) (Sequence, bool) {
-	removed := false
+	simplified := false
 	for i := 0; i < len(s.Ops) && ctx.Err() == nil; {
-		candidate := s.without(i)
-		// Removing an op can leave a sequence the format does not allow, such
-		// as one ending on a restart. It is not a reproducer, and replaying it
-		// would cost a run to learn so.
-		if candidate.Validate() != nil || !reproduces(ctx, candidate, violation, replay) {
+		candidate, ok := simpler(ctx, s, i, violation, replay)
+		if !ok {
 			i++
 			continue
 		}
-		s, removed = candidate, true
+		// The op is gone or milder, so try the same position again.
+		s, simplified = candidate, true
 	}
-	return s, removed
+	return s, simplified
+}
+
+// simpler returns the sequence with op i removed, or with its fault weakened,
+// whichever still reproduces. Removal comes first, because no fault is simpler
+// than a short one (DESIGN.md §5.5).
+func simpler(ctx context.Context, s Sequence, i int, violation Violation, replay Replay) (Sequence, bool) {
+	candidates := []Sequence{s.without(i)}
+	for _, milder := range weakened(s.Ops[i]) {
+		candidates = append(candidates, s.with(i, milder))
+	}
+	for _, candidate := range candidates {
+		// Simplifying an op can leave a sequence the format does not allow,
+		// such as one ending on a restart. It is not a reproducer, and
+		// replaying it would cost a run to learn so.
+		if candidate.Validate() != nil {
+			continue
+		}
+		if reproduces(ctx, candidate, violation, replay) {
+			return candidate, true
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return s, false
+}
+
+// weakened are the milder faults to try in the op's place, each halving one
+// duration the fault carries (DESIGN.md §5.5). Halving stops short of zero,
+// which is not a milder fault but an endless one.
+func weakened(op Op) []Op {
+	if op.Type != OpFault || op.Fault == nil {
+		return nil
+	}
+	var milder []Op
+	if half := op.Fault.Until.Count / 2; half > 0 {
+		milder = append(milder, op.withFault(func(f *Fault) { f.Until.Count = half }))
+	}
+	if half := op.Fault.Until.For / 2; half > 0 {
+		milder = append(milder, op.withFault(func(f *Fault) { f.Until.For = half }))
+	}
+	if half := op.Fault.Action.Delay / 2; half > 0 {
+		milder = append(milder, op.withFault(func(f *Fault) { f.Action.Delay = half }))
+	}
+	return milder
+}
+
+// withFault copies the op with its fault changed, so that a candidate never
+// shares a fault with the sequence it came from.
+func (o Op) withFault(change func(*Fault)) Op {
+	fault := *o.Fault
+	change(&fault)
+	o.Fault = &fault
+	return o
+}
+
+// with returns the sequence with op i replaced.
+func (s Sequence) with(i int, op Op) Sequence {
+	replaced := s
+	replaced.Ops = slices.Clone(s.Ops)
+	replaced.Ops[i] = op
+	return replaced
 }
 
 // reproduces reports whether the candidate fails the same check the failing

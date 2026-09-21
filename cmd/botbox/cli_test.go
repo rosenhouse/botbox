@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +12,11 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/rosenhouse/botbox/pkg/observe"
+	"github.com/rosenhouse/botbox/pkg/proxy"
+	"github.com/rosenhouse/botbox/pkg/report"
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
@@ -135,13 +141,17 @@ func TestVersionPrintsTheVersion(t *testing.T) {
 }
 
 func TestHelpPrintsTheUsage(t *testing.T) {
-	code, stdout, _ := invoke(t, &fakeSession{}, "run", "--help")
+	// Asking for the usage is not an error, and exit 2 is what tells CI the
+	// target or the invocation is broken (DESIGN.md §11).
+	for _, asked := range [][]string{{"run", "--help"}, {"--help"}, {"-h"}, {"help"}} {
+		code, stdout, stderr := invoke(t, &fakeSession{}, asked...)
 
-	if code != exitOK {
-		t.Errorf("botbox run --help exited %d, want %d.", code, exitOK)
-	}
-	if !strings.Contains(stdout, "botbox replay") {
-		t.Errorf("botbox run --help printed %q, want the usage.", stdout)
+		if code != exitOK {
+			t.Errorf("botbox %s exited %d, want %d: %s", strings.Join(asked, " "), code, exitOK, stderr)
+		}
+		if !strings.Contains(stdout, "botbox replay") {
+			t.Errorf("botbox %s printed %q, want the usage.", strings.Join(asked, " "), stdout)
+		}
 	}
 }
 
@@ -290,6 +300,32 @@ func TestRunShrinksTheFailingSequence(t *testing.T) {
 	}
 }
 
+// A report says the sequence it carries is the one botbox drew, because §5.7
+// says a report carries the minimized sequence and this one is not it (D31).
+func TestTheReportSaysWhenTheDeadlineLeftTheSequenceUnminimized(t *testing.T) {
+	ctx, expire := context.WithCancel(t.Context())
+	violation := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{fails: func(run.Sequence, string) *run.Violation { return &violation }}
+	// The deadline passes before the first candidate is replayed, so the pass
+	// never finds anything smaller.
+	session.after = expire
+	generate := countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle)
+
+	code, _, stderr := invokeCtx(t, ctx, session, generate,
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d, want %d: %s", code, exitViolation, stderr)
+	}
+	report, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "the deadline ended minimization"; !strings.Contains(string(report), want) {
+		t.Errorf("The report is\n%s\nwant it to say %q.", report, want)
+	}
+}
+
 // DESIGN.md §11: the run directory reports the sequence its recordings are of.
 // A pass the deadline cut short never ran the smaller sequence, so what the
 // directory holds is still the run of the sequence botbox drew.
@@ -334,6 +370,163 @@ func TestADeadlineDuringTheShrinkPassLeavesTheDrawnSequence(t *testing.T) {
 	if len(smaller.Ops) >= len(written.Ops) {
 		t.Errorf("%s holds %d ops, want fewer than the drawn sequence's %d.",
 			shrunkFile, len(smaller.Ops), len(written.Ops))
+	}
+}
+
+// DESIGN.md §11: each failing run writes report.json and report.md beside the
+// recordings they describe (§5.7).
+func TestAFailingRunWritesItsReport(t *testing.T) {
+	violation := run.Violation{
+		ID: "G4", Statement: "the target converges", Evidence: "the settle wait expired",
+		Requests: []proxy.Request{{Verb: "get", Path: "/api/v1/namespaces/ns/configmaps/w-0", Status: 404}},
+		Versions: []observe.Version{{Key: observe.Key{
+			GVK:  schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"},
+			Name: "left-behind",
+		}, ResourceVersion: "12"}},
+	}
+	note := "G3 is not evaluated for the deletion of widget"
+	session := &fakeSession{results: []run.Result{{Violation: &violation, Notes: []string{note}}}}
+
+	code, _, stderr := invokeWith(t, session, countingGenerator(nil),
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42",
+		"--launch-arg", "--bug=7")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	for _, name := range []string{report.JSONFile, report.MarkdownFile} {
+		if _, err := os.Stat(filepath.Join(session.dirs[0], name)); err != nil {
+			t.Fatalf("The run directory holds no %s: %v", name, err)
+		}
+	}
+	written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{violation.ID, violation.Statement, note}
+	// The command has to carry what selected this run, or it replays something
+	// else (DESIGN.md §5.7).
+	want = append(want, "botbox replay --target "+toyTargetYAML+" --launch-arg --bug=7 "+
+		filepath.Join(session.dirs[0], sequenceFile))
+	// §5.7 also asks for what ran, the seed, and the evidence the check named.
+	want = append(want, version(), "seed 42",
+		violation.Requests[0].Path, violation.Versions[0].Name)
+	for _, want := range want {
+		if !strings.Contains(string(written), want) {
+			t.Errorf("The report is\n%s\nwant it to carry %q.", written, want)
+		}
+	}
+}
+
+// A sequence the caller named is never minimized, and it still gets a report.
+// This is the path `botbox replay` takes, which is how M6's own fault sequence
+// is run.
+func TestReplayWritesAReportForTheSequenceItWasGiven(t *testing.T) {
+	violation := run.Violation{ID: "G1", Statement: "the target falls quiet"}
+	session := &fakeSession{results: []run.Result{{Violation: &violation}}}
+	path := writeSequence(t, 8675309)
+
+	code, _, stderr := invoke(t, session, "replay", "--target", toyTargetYAML, "--out", t.TempDir(), path)
+
+	if code != exitViolation {
+		t.Fatalf("botbox replay exited %d: %s", code, stderr)
+	}
+	written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+	if err != nil {
+		t.Fatalf("The run directory holds no report: %v", err)
+	}
+	// The command replays the caller's file, which is a better thing to run
+	// than a copy botbox made of it.
+	for _, want := range []string{violation.ID, "botbox replay --target " + toyTargetYAML + " " + path} {
+		if !strings.Contains(string(written), want) {
+			t.Errorf("The report is\n%s\nwant it to carry %q.", written, want)
+		}
+	}
+}
+
+// §10 M6's acceptance says the report names the MINIMIZED sequence. Nothing
+// else ties the two together: a report carrying the sequence botbox drew would
+// send a reader to reproduce the long way round.
+func TestTheReportCarriesTheMinimizedSequence(t *testing.T) {
+	violation := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{fails: func(candidate run.Sequence, _ string) *run.Violation {
+		// Only the restart is needed, so the pass cuts the rest away.
+		if slices.ContainsFunc(candidate.Ops, func(op run.Op) bool { return op.Type == run.OpRestart }) {
+			return &violation
+		}
+		return nil
+	}}
+	generate := countingGenerator(nil, run.OpSettle, run.OpRestart, run.OpSettle)
+
+	code, _, stderr := invokeWith(t, session, generate,
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	reported := reportedSequence(t, session.dirs[0])
+	if want := []run.OpType{run.OpRestart, run.OpSettle}; !slices.Equal(opTypesOf(reported), want) {
+		t.Errorf("The report carries %v, want the minimized %v.", opTypesOf(reported), want)
+	}
+	written, err := run.ReadSequence(filepath.Join(session.dirs[0], sequenceFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(opTypesOf(reported), opTypesOf(written)) {
+		t.Errorf("The report carries %v and the directory holds %v; they are one sequence.",
+			opTypesOf(reported), opTypesOf(written))
+	}
+}
+
+// reportedSequence is the sequence report.json embedded.
+func reportedSequence(t *testing.T, dir string) run.Sequence {
+	t.Helper()
+	body, err := os.ReadFile(filepath.Join(dir, report.JSONFile))
+	if err != nil {
+		t.Fatalf("The run directory holds no report: %v", err)
+	}
+	var written struct {
+		Sequence json.RawMessage `json:"sequence"`
+	}
+	if err := json.Unmarshal(body, &written); err != nil {
+		t.Fatalf("The report does not parse: %v", err)
+	}
+	sequence, err := run.UnmarshalSequence(written.Sequence)
+	if err != nil {
+		t.Fatalf("The report's sequence does not parse: %v", err)
+	}
+	return sequence
+}
+
+// A report is the artefact a reader trusts, so it says when the recordings
+// beside it are of a run that found nothing (D31, D35).
+func TestTheReportSaysWhenTheMinimizedSequenceDidNotReproduce(t *testing.T) {
+	violation := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{
+		results: []run.Result{{Violation: &violation}},
+		// Only the first run fails, so the shrink pass minimizes and the run of
+		// what it found passes.
+		fails: func(candidate run.Sequence, dir string) *run.Violation {
+			if strings.Contains(dir, shrinkDir) && len(candidate.Ops) < 3 {
+				return &violation
+			}
+			return nil
+		},
+	}
+	generate := countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle)
+
+	code, _, _ := invokeWith(t, session, generate,
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d, want %d.", code, exitViolation)
+	}
+	written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+	if err != nil {
+		t.Fatalf("The run directory holds no report: %v", err)
+	}
+	if !strings.Contains(string(written), "passed when it ran again") {
+		t.Errorf("The report is\n%s\nwant it to say the recordings are of a run that found nothing.", written)
 	}
 }
 

@@ -1,11 +1,17 @@
 package controller
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
 
 func TestParseBugAcceptsEveryCatalogEntry(t *testing.T) {
+	// The catalog of DESIGN.md §9.1 ends at B11. Deriving the range from
+	// MaxBug alone would accept a MaxBug that had lost an entry.
+	if MaxBug != int(B11) {
+		t.Fatalf("MaxBug is %d, and the catalog of DESIGN.md §9.1 ends at B11.", MaxBug)
+	}
 	for id := 0; id <= MaxBug; id++ {
 		bug, err := ParseBug(id)
 		if err != nil {
@@ -23,7 +29,7 @@ func TestParseBugRejectsIDsOutsideTheCatalog(t *testing.T) {
 		if err == nil {
 			t.Fatalf("ParseBug(%d) accepted an ID outside the catalog.", id)
 		}
-		if !strings.Contains(err.Error(), "10") {
+		if !strings.Contains(err.Error(), strconv.Itoa(MaxBug)) {
 			t.Errorf("ParseBug(%d) returned %q, which does not name the valid range.", id, err)
 		}
 	}

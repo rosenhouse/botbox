@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -63,8 +64,21 @@ type Violation struct {
 	ID string
 	// Statement is what the check requires and the run broke.
 	Statement string
-	// Evidence quotes what the run did, for the report (DESIGN.md §5.7).
+	// Evidence quotes what the run did, in one line.
 	Evidence string
+	// Requests and Versions are the evidence the violation named, which a
+	// report quotes (DESIGN.md §5.7).
+	Requests []proxy.Request
+	Versions []observe.Version
+}
+
+// String is the violation in one line. A message that prints one wants the
+// finding, not the evidence behind it.
+func (v Violation) String() string {
+	if v.Evidence == "" {
+		return v.ID + " " + v.Statement
+	}
+	return fmt.Sprintf("%s %s; %s", v.ID, v.Statement, v.Evidence)
 }
 
 // Result is one run's outcome. An error alongside it is a configuration or
@@ -98,8 +112,10 @@ type Timeline struct {
 	// Cleaned is when the teardown saw the run namespace empty, or zero if it
 	// never did (DESIGN.md §6, D34).
 	Cleaned time.Time
-	// Faults are the windows the Runner had a fault op's spec injected in. An
-	// open window has no End: the fault outlived the run.
+	// Faults are the windows the proxy applied a fault op's spec in, one per
+	// fault op. A window with no Start is a fault that matched no request,
+	// which changed nothing and excuses nothing (D36). An open window has no
+	// End: the fault outlived the run.
 	Faults []Window
 	// Forced names every object the teardown force-removed a finalizer from.
 	// One such removal invalidates G3 for the run (DESIGN.md §5.5).
@@ -187,6 +203,9 @@ type harness interface {
 	sleep(ctx context.Context, d time.Duration) error
 	restart(ctx context.Context) error
 	setFaults(specs []proxy.FaultSpec)
+	// faultWindows is what the proxy has done with each spec setFaults was
+	// last given, in that order.
+	faultWindows() []proxy.FaultWindow
 	createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error)
 	patchCR(ctx context.Context, name string, patch map[string]any) error
 	deleteCR(ctx context.Context, name string) error
@@ -233,15 +252,19 @@ type runner struct {
 	faults []activeFault
 }
 
-// activeFault is a fault op's spec while it is injected.
+// activeFault is a fault op's spec while the proxy holds it. The Runner's
+// faults are exactly the specs it last gave the proxy, in that order, so that
+// the proxy's windows line up with them.
 type activeFault struct {
 	spec proxy.FaultSpec
 	// until is the op index the fault ends at, or nil if only the proxy's own
 	// trigger ends it (DESIGN.md §5.2).
 	until *int
-	// window is the fault's place in Timeline.Faults, which closes when the
-	// Runner clears it.
+	// window is the fault's place in Timeline.Faults.
 	window int
+	// applied is whether the proxy has faulted a request with it, and retired
+	// is whether the proxy has stopped applying it.
+	applied, retired bool
 }
 
 func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts Options, h harness) (Result, error) {
@@ -388,10 +411,13 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		}
 		if !r.faultActive() {
 			r.violate(Violation{
-				ID:        "G4",
-				Statement: "the target's Ready predicate holds within T_settle after a spec change",
-				Evidence: fmt.Sprintf("the settle wait after op %d (%s) expired after %v with no fault active",
-					op.Index, op.Type, r.target.Timeouts.Settle),
+				ID: "G4",
+				Statement: fmt.Sprintf("the settle wait after op %d (%s) expired with no fault active",
+					op.Index, op.Type),
+				Evidence: fmt.Sprintf("in %v of T_settle the target never held its Ready predicate with %v of quiet behind it",
+					r.target.Timeouts.Settle, r.target.Timeouts.Stable),
+				Requests: invariant.Recent(r.h.requests()),
+				Versions: invariant.Recent(r.h.objects().HistoryOf(r.target.Primary, r.cr)),
 			})
 		}
 	}
@@ -426,9 +452,10 @@ func (r *runner) violate(violation Violation) {
 	}
 }
 
-// inject adds the op's fault to those the proxy applies and opens its window.
+// inject adds the op's fault to those the proxy applies. Its window opens
+// where the proxy first applies it, which may be never (D36).
 func (r *runner) inject(op Op) {
-	r.timeline.Faults = append(r.timeline.Faults, Window{Start: r.now()})
+	r.timeline.Faults = append(r.timeline.Faults, Window{})
 	r.faults = append(r.faults, activeFault{
 		spec:   op.Fault.spec(),
 		until:  op.Fault.Until.Op,
@@ -438,21 +465,42 @@ func (r *runner) inject(op Op) {
 }
 
 // expireFaults drops the faults whose until trigger names this op or an
-// earlier one (DESIGN.md §5.2).
+// earlier one, and the ones the proxy has finished with (DESIGN.md §5.2).
 func (r *runner) expireFaults(op int) {
+	r.readFaultWindows()
 	kept := make([]activeFault, 0, len(r.faults))
 	for _, fault := range r.faults {
-		if fault.until == nil || *fault.until > op {
+		switch {
+		case fault.retired: // The proxy is done with it, and its window is closed.
+		case fault.until != nil && *fault.until <= op:
+			r.timeline.Faults[fault.window].End = r.now()
+		default:
 			kept = append(kept, fault)
-			continue
 		}
-		r.timeline.Faults[fault.window].End = r.now()
 	}
 	if len(kept) == len(r.faults) {
 		return
 	}
 	r.faults = kept
 	r.setFaults()
+}
+
+// readFaultWindows writes what the proxy has done with each fault into the
+// timeline: a window opens where the proxy first applied the fault and closes
+// where the proxy stopped applying it (D36). A fault the proxy never applied
+// leaves its window unopened, because the run then ran as if the fault op
+// were not there.
+func (r *runner) readFaultWindows() {
+	windows := r.h.faultWindows()
+	for i := range min(len(r.faults), len(windows)) {
+		fault, window := &r.faults[i], &r.timeline.Faults[r.faults[i].window]
+		if !windows[i].First.IsZero() {
+			fault.applied, window.Start = true, windows[i].First
+		}
+		if !windows[i].Retired.IsZero() {
+			fault.retired, window.End = true, windows[i].Retired
+		}
+	}
 }
 
 func (r *runner) setFaults() {
@@ -463,13 +511,22 @@ func (r *runner) setFaults() {
 	r.h.setFaults(specs)
 }
 
-func (r *runner) faultActive() bool { return len(r.faults) > 0 }
+// faultActive reports whether the proxy is still applying a fault it has
+// applied at least once. That window is what a check excuses the target over,
+// so it is what the Runner's own G4 stands down for (DESIGN.md §6, D36).
+func (r *runner) faultActive() bool {
+	r.readFaultWindows()
+	return slices.ContainsFunc(r.faults, func(f activeFault) bool { return f.applied && !f.retired })
+}
 
 // clearFaults takes every fault off the proxy and closes its window, which the
 // teardown does before it measures anything (DESIGN.md §5.5).
 func (r *runner) clearFaults() {
+	r.readFaultWindows()
 	for _, fault := range r.faults {
-		r.timeline.Faults[fault.window].End = r.now()
+		if fault.applied && !fault.retired {
+			r.timeline.Faults[fault.window].End = r.now()
+		}
 	}
 	r.faults = nil
 	r.h.setFaults(nil)

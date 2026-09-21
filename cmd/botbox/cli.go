@@ -18,6 +18,7 @@ import (
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/generate"
+	"github.com/rosenhouse/botbox/pkg/report"
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
@@ -167,7 +168,7 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		case exitError:
 			return c.fail(err)
 		case exitViolation:
-			return c.reportFailure(ctx, s, exercised, planned, *result.Violation, number, dir)
+			return c.reportFailure(ctx, opts, s, exercised, planned, result, number, dir)
 		}
 		if err := out.Discard(number); err != nil {
 			return c.fail(err)
@@ -225,9 +226,12 @@ func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, e
 // reportFailure minimizes a sequence botbox drew and leaves it in the run
 // directory with the evidence of a run of it (DESIGN.md §5.5). A sequence the
 // caller wrote is reported as it was written.
-func (c *cli) reportFailure(ctx context.Context, s session, t *target.Target,
-	failed planned, violation run.Violation, number int, dir string) int {
+func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *target.Target,
+	failed planned, result run.Result, number int, dir string) int {
+	violation := *result.Violation
 	if !failed.generated() {
+		// The caller's file is a better thing to replay than a copy of it.
+		c.warn(c.writeReport(dir, opts, t, failed.path, failed.sequence, result))
 		c.report(number, violation, dir)
 		return exitViolation
 	}
@@ -235,23 +239,42 @@ func (c *cli) reportFailure(ctx context.Context, s session, t *target.Target,
 		return s.execute(ctx, t, candidate, filepath.Join(dir, shrinkDir), run.Engine{})
 	})
 	reported := shrunk
-	if len(shrunk.Ops) < len(failed.sequence.Ops) {
-		if ctx.Err() != nil {
-			// The deadline ended the pass before the smaller sequence could be
-			// run into the directory, which still holds the run of the sequence
-			// botbox drew. The directory reports the sequence its evidence is
-			// of, and keeps the smaller one beside it.
-			reported = failed.sequence
-			c.warn(run.WriteSequence(filepath.Join(dir, shrunkFile), shrunk))
-			c.warn(fmt.Errorf("the deadline ended the shrink pass with %s, left unrun in %s",
-				ops(shrunk), filepath.Join(dir, shrunkFile)))
-		} else if found := c.rerun(ctx, s, t, shrunk, dir); found != nil {
-			violation = *found
+	smaller := len(shrunk.Ops) < len(failed.sequence.Ops)
+	switch {
+	case ctx.Err() != nil && smaller:
+		// The deadline ended the pass before the smaller sequence could be
+		// run into the directory, which still holds the run of the sequence
+		// botbox drew. The directory reports the sequence its evidence is
+		// of, and keeps the smaller one beside it.
+		reported = failed.sequence
+		c.warn(run.WriteSequence(filepath.Join(dir, shrunkFile), shrunk))
+		c.warn(fmt.Errorf("the deadline ended the shrink pass with %s, left unrun in %s",
+			ops(shrunk), filepath.Join(dir, shrunkFile)))
+		result.Notes = append(result.Notes, fmt.Sprintf(
+			"the deadline ended minimization with %s, left unrun in %s: this is the sequence botbox drew",
+			ops(shrunk), shrunkFile))
+	case ctx.Err() != nil:
+		// §5.7 says a report carries the minimized sequence, and the pass
+		// never got to a smaller one (D31).
+		result.Notes = append(result.Notes,
+			"the deadline ended minimization before it found a smaller sequence: this is the sequence botbox drew")
+	case smaller:
+		if again := c.rerun(ctx, s, t, shrunk, dir); again.Violation != nil {
+			result, violation = again, *again.Violation
+		} else {
+			// The directory now holds a run of the minimized sequence that
+			// found nothing. The finding stands, and the report says which
+			// run these recordings are of rather than leaving a reader to
+			// infer it from a passing log (D31, D35).
+			result.Notes = append(result.Notes, fmt.Sprintf(
+				"the minimized sequence passed when it ran again, so this directory holds that run and not the one %s was found in",
+				violation.ID))
 		}
 	}
 	// What the pass replayed is nobody's evidence (DESIGN.md §11).
 	c.warn(os.RemoveAll(filepath.Join(dir, shrinkDir)))
 	c.warn(run.WriteRunSequence(dir, reported))
+	c.warn(c.writeReport(dir, opts, t, filepath.Join(dir, sequenceFile), reported, result))
 	// The violation is reported once the directory holds the run it belongs to.
 	c.report(number, violation, dir)
 	fmt.Fprintf(c.stdout, "  the sequence is %s, in %s\n", ops(reported), filepath.Join(dir, sequenceFile))
@@ -262,7 +285,7 @@ func (c *cli) reportFailure(ctx context.Context, s session, t *target.Target,
 // recordings there are of the sequence the run reports, and returns what that
 // run found. A run that reproduced nothing says so: the directory then holds
 // a run that passed.
-func (c *cli) rerun(ctx context.Context, s session, t *target.Target, shrunk run.Sequence, dir string) *run.Violation {
+func (c *cli) rerun(ctx context.Context, s session, t *target.Target, shrunk run.Sequence, dir string) run.Result {
 	result, err := s.execute(ctx, t, shrunk, dir, run.Engine{})
 	switch {
 	case err != nil:
@@ -270,7 +293,46 @@ func (c *cli) rerun(ctx context.Context, s session, t *target.Target, shrunk run
 	case result.Violation == nil:
 		c.warn(fmt.Errorf("the minimized sequence passed when it ran again, so %s holds that run", dir))
 	}
-	return result.Violation
+	return result
+}
+
+// replayCommand is the one line §5.7 asks a report to carry. It repeats the
+// flags that select what ran, because a command that leaves them out runs a
+// different target and reproduces nothing.
+func (o options) replayCommand(sequence string) string {
+	command := []string{"botbox", "replay", "--target", o.target}
+	if o.kubeconfig != "" {
+		command = append(command, "--kubeconfig", o.kubeconfig)
+	}
+	for _, arg := range o.launchArgs {
+		command = append(command, "--launch-arg", arg)
+	}
+	return strings.Join(append(command, sequence), " ")
+}
+
+// writeReport leaves §5.7's report beside the recordings it describes. replay
+// names the sequence file a reader should run to see this again.
+func (c *cli) writeReport(dir string, opts options, t *target.Target,
+	replay string, sequence run.Sequence, result run.Result) error {
+	if result.Violation == nil {
+		return nil
+	}
+	encoded, err := sequence.Marshal()
+	if err != nil {
+		return err
+	}
+	violation := *result.Violation
+	return report.Write(dir, report.Report{
+		Check:    report.Check{ID: violation.ID, Statement: violation.Statement, Evidence: violation.Evidence},
+		Target:   report.Target{Name: t.Name, Version: t.Version},
+		Botbox:   version(),
+		Seed:     sequence.Seed,
+		Notes:    result.Notes,
+		Replay:   opts.replayCommand(replay),
+		Sequence: encoded,
+		Requests: violation.Requests,
+		Versions: violation.Versions,
+	})
 }
 
 // warn reports what went wrong beside a finding, which stands whether or not
@@ -332,6 +394,8 @@ func parse(args []string) (options, []string, error) {
 	}
 	opts := options{command: args[0]}
 	switch opts.command {
+	case "help", "-h", "--help":
+		return opts, nil, flag.ErrHelp
 	case "version":
 		return opts, nil, nil
 	case "run", "replay", "matrix":

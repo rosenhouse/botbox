@@ -5,9 +5,9 @@ import (
 	"time"
 )
 
-// maxEvidence caps how much of a request log or a version history one
+// MaxEvidence caps how much of a request log or a version history one
 // violation carries into the report (DESIGN.md §5.7).
-const maxEvidence = 20
+const MaxEvidence = 20
 
 // quiet is a stretch in which DESIGN.md §6 requires the run to have gone
 // still: the T_stable that follows an op's settle wait, and the T_stable the
@@ -78,19 +78,20 @@ func (in Input) tornDown(t time.Time) bool {
 	return !in.Teardown.IsZero() && t.After(in.Teardown)
 }
 
-// excerpt caps a list of evidence at its first maxEvidence entries.
+// excerpt caps a list of evidence at its first MaxEvidence entries.
 func excerpt[T any](evidence []T) []T {
-	if len(evidence) > maxEvidence {
-		return evidence[:maxEvidence]
+	if len(evidence) > MaxEvidence {
+		return evidence[:MaxEvidence]
 	}
 	return evidence
 }
 
-// recent caps a timeline of evidence at the maxEvidence entries nearest the
-// violation, which are its last.
-func recent[T any](evidence []T) []T {
-	if len(evidence) > maxEvidence {
-		return evidence[len(evidence)-maxEvidence:]
+// Recent caps a timeline of evidence at the MaxEvidence entries nearest the
+// violation, which are its last. The Runner bounds the evidence of a violation
+// it raises itself the same way (DESIGN.md §5.7).
+func Recent[T any](evidence []T) []T {
+	if len(evidence) > MaxEvidence {
+		return evidence[len(evidence)-MaxEvidence:]
 	}
 	return evidence
 }

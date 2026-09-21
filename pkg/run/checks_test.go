@@ -233,6 +233,11 @@ func TestTheChecksJudgeTheQuietWindowTheTeardownWaited(t *testing.T) {
 	if len(violations) != 1 || violations[0].ID != "G1" {
 		t.Fatalf("The checks reported %v, want G1: the target was still working in the teardown's window.", ids(violations))
 	}
+	// A report quotes the requests themselves, not only the count in the
+	// statement (DESIGN.md §5.7).
+	if len(violations[0].Requests) == 0 {
+		t.Errorf("G1 carried out no requests, and it counted the ones it found.")
+	}
 }
 
 // The engine looks a checkpoint's op up by index, so the adapter carries the
@@ -354,6 +359,11 @@ func TestTheChecksQuoteWhatTheRunDid(t *testing.T) {
 	}
 	if !strings.Contains(first.Evidence, "toy.botbox/v1/Widget widget") {
 		t.Errorf("G4's evidence is %q, want the object version it read.", first.Evidence)
+	}
+	// A report quotes the versions themselves, not only this summary of them
+	// (DESIGN.md §5.7).
+	if len(first.Versions) == 0 {
+		t.Errorf("G4 carried out no versions, and its evidence quotes one.")
 	}
 }
 

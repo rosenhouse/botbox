@@ -98,6 +98,12 @@ func (s *Store) History(key Key) []Version {
 	return history
 }
 
+// HistoryOf is the version history of one object of the run namespace, which
+// is the only namespace the Observer watches (DESIGN.md §5.3).
+func (s *Store) HistoryOf(gvk schema.GroupVersionKind, name string) []Version {
+	return s.History(Key{GVK: gvk, Namespace: s.opts.Namespace, Name: name})
+}
+
 // Current returns the latest version of every live object of one kind.
 func (s *Store) Current(gvk schema.GroupVersionKind) []Version {
 	return s.live(func(v Version) bool { return v.GVK == gvk })

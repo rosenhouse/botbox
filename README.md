@@ -8,8 +8,9 @@ restarts the controller where a sequence says to, and records every request the 
 It then checks six generic invariants that need no per-controller configuration, plus properties a
 target declares. If your controller talks to an API server, botbox can test it.
 
-**Status:** M0–M5 are merged. `botbox run` draws sequences, runs them, and minimizes the first
-failure; `botbox replay` re-executes one. Faults and `report.md` arrive in M6 ([DESIGN.md §10](DESIGN.md#10-milestones)).
+**Status:** M0–M6 are merged. `botbox run` draws sequences, runs them, and minimizes the first
+failure; `botbox replay` re-executes one. A failing run writes a report naming what broke and
+how to see it again ([DESIGN.md §5.7](DESIGN.md#57-report)).
 
 ## Install
 
@@ -88,7 +89,7 @@ examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 5m --launch-ar
 ```
 run 1: seed 23, generated
 run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR
-  at 2026-09-21T05:59:08.980624165Z; 1 versions, the first v1/Secret example-tls
+  at 2026-09-21T05:59:08.980624165Z; 1 version, the first v1/Secret example-tls
   the evidence is in botbox-out/20260921T055744Z-23/run-1
   the sequence is 1 op, in botbox-out/20260921T055744Z-23/run-1/sequence.json
 ```
@@ -130,9 +131,22 @@ launch:
 
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the
-controller's back. Field values come from the CRD's own schema: its numeric ranges, enums,
-patterns and list lengths. A schema that says only `type: string` yields a random word, so the
-schema is not a safety net. Where it allows more than your controller does, `generate.mutate`
+controller's back. A sequence you write yourself can also carry a `fault`, which makes the
+proxy refuse, delay or drop the requests it matches:
+
+```json
+{"i": 1, "t": "fault",
+  "spec": {"match": {"verb": "create", "resource": "configmaps"},
+           "action": {"error": 500}, "until": {"count": 30}}}
+```
+
+An invariant ignores any window the proxy applied a fault in, so what a fault tests is how
+the controller behaves once the fault stops. A fault that matches no request changes nothing
+and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
+
+Field values come from the CRD's own schema: its numeric ranges, enums, patterns and list
+lengths. A schema that says only `type: string` yields a random word, so the schema is not a
+safety net. Where it allows more than your controller does, `generate.mutate`
 lists the only paths a sequence changes and `generate.overlay` tightens one path's schema, as
 `examples/cert-manager/target.yaml` does. Naming a path botbox cannot draw from is a
 configuration error, not a silent skip ([DESIGN.md §8.3](DESIGN.md#83-generation-constraints-and-admission-webhooks)).
@@ -158,13 +172,18 @@ A run that violates an invariant prints the ID, what it saw and where the eviden
 exits 1. A configuration or harness error exits 2, so your CI can tell a find from a broken
 target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 
+- `report.md` — what failed, the command that reproduces it, the sequence and the evidence.
+- `report.json` — the same, for a machine.
 - `sequence.json` — the sequence the rest of the directory is evidence of.
 - `sequence.shrunk.json` — a smaller sequence the deadline left unrun. Present only then.
 - `requests.jsonl` — every request the target made, as the proxy saw it.
 - `objects.jsonl` — every version of every object the Observer saw.
 - `target.log` — the target's own output.
+- `kubeconfig` — what the target was pointed at, which is the proxy and not the cluster.
 
-Passing runs are not kept. `report.md` and `report.json` arrive in M6 ([DESIGN.md §5.7](DESIGN.md#57-report)).
+The report quotes the requests and object versions nearest the violation, up to twenty of
+each, and names the file holding the rest. Passing runs are not kept
+([DESIGN.md §5.7](DESIGN.md#57-report)).
 
 ## Running in CI
 

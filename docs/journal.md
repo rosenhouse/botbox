@@ -307,3 +307,97 @@ dies on bind and botbox reports a harness error several ops later.
 
 M5 outcome: `make test-example` draws its sequences, and a nightly workflow draws its own
 seeds.
+
+## M6 — 2026-09-21
+
+### Right
+
+The acceptance was proved with a throwaway sequence before any M6 code was written, and
+the assumption behind it was wrong. G4 is the invariant that anchors on "the fault
+stopped", so G4 was what the fault was expected to break. It breaks G1 instead: the toy's
+backoff outlives the fault, and the create it finally lands falls in the quiet window the
+teardown waits. That finding needs no seeded bug, because every controller that retries
+takes time to recover.
+
+Which invariant a fault breaks is the target's property, not the fault's. Running the
+sequence settled it; reasoning about it had not.
+
+### Wrong in the first draft
+
+- The fault test said the fault refuses thirty creates. It refuses ten: the count trigger
+  is never reached, and the teardown ends the fault. The same unchecked claim went into a
+  commit message, a comment and a failure message before anyone read the request log.
+- The report's replay command left out `--launch-arg` and `--kubeconfig`. A G3 found under
+  `--bug=3` replayed green from its own report, so the one line a report exists to give a
+  reader said the opposite of the truth.
+- A rerun of the minimized sequence that found nothing left the report asserting the
+  original failure beside recordings of a passing run, with the only warning on stderr.
+- D35 said each excerpt is the first twenty and that nothing is dropped silently. The
+  checks already bound their evidence at the twenty nearest the violation, so the report's
+  own bound is a backstop, its totals never exceed twenty, and "the first N are below"
+  named the wrong end.
+- The checks flattened their evidence into a one-line summary and dropped the requests and
+  versions behind it, so §5.7's "request log excerpt, object version timeline" had nothing
+  to quote. The data existed and was discarded one layer before the report.
+- A fault's duration halved toward a nanosecond in thirty-two steps, each step a cluster,
+  and every successful weakening re-replayed the removal candidate it had just rejected.
+- The acceptance test was built on the toy's recovery time, so its verdict came down to
+  whether a retry landed inside a window. It passed on a 115 ms margin, and no retiming of
+  the windows widened it.
+- The G4 an expired settle wait raises carried no requests and no versions, so the one
+  run M6's acceptance gates on would have written a report with no evidence to quote.
+- One `fault` op left the rest of the run unjudged. The Runner treated a fault as active
+  from the op that injected it until it dropped the spec, and only an op-index trigger
+  made it drop one, so a `count` or `for` trigger — the shape the README documents — kept
+  every later window excused. A fault matching a resource the target never touches did it
+  too. B7 with an inert fault reported nothing, and neither did `b11-fault.json` with its
+  trigger written as `{"count": 1}`. The exploratory review found it by writing the fault
+  op the documentation shows.
+- B11 was written up as a bug only a fault can reveal, twice: in §9.1, the matrix's own
+  preamble and the acceptance test, and again after a `deleteManaged` op had revealed it.
+  The belief outlives whatever removed the child, a scale-down included, so B11's matrix
+  row is two spec changes. Two runs settled what two rounds of reasoning had not.
+
+### What fixed it
+
+D35 and the README say what the code does. `run.Violation` carries the evidence. The
+replay command repeats the flags that selected the run. A report says when the recordings
+beside it are of a run that found nothing, which is what D31 exists to require. Durations
+halve to a floor, removal is asked once per position, and a candidate that changes nothing
+is refused, which also stops the pass spinning.
+
+A fault now excuses the target over the window the proxy applied it in, and a fault the
+proxy never applied excuses nothing (D36). The proxy reports what it did with each fault,
+and a spec keeps its progress across a `SetFaults` call, so dropping one fault no longer
+restarts another's trigger.
+
+B11 makes a fault's damage permanent. The toy notes a child as present the moment it asks
+the API server for it, so a refused create leaves it one child short for good: no error, no
+requeue, no watch event. The settle wait after the fault stops then expires however wide
+any window is, and the acceptance turns on state rather than timing. A G4 the Runner raises
+itself quotes the CR's history and the requests nearest the expiry, as a check's G4 does.
+
+### Process notes
+
+Two adversarial reviews ran over this work rather than one. The reviewer reading the diff
+and mutating the code found the unpinned bound and the report quoting the wrong end of its
+evidence. The reviewer driving the binary found the fault op that silences the invariants.
+Neither would have found the other's.
+
+Nine mutations of the M6 code outside `pkg/report` survived the first draft. The sharpest
+was §10 M6's own acceptance: nothing tied a report to the minimized sequence, so the
+report could have carried the sequence botbox drew and every test would have passed.
+A milestone's acceptance sentence deserves a test that reads like it.
+
+One of the tests written to close those holes passed for the wrong reason: it looked for an
+object name that also appeared inside a request path, so the version table could vanish
+unnoticed. Mutating each field separately caught it; running the test did not.
+
+Two retimings of the acceptance test were tried and both were invalid. A one-second settle
+breaks the toy's first reconcile before any fault exists. A wider stable makes convergence
+impossible, because a settle wait needs `T_stable` of quiet inside `T_settle` — which is
+issue #10, a target configured that way fails G4 on every op and botbox blames the
+controller.
+
+M6 outcome: a failing run writes a report that quotes its evidence, a fault shrinks toward
+a shorter duration, and a fault makes the toy fail an invariant it otherwise passes.

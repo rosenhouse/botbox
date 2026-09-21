@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"path"
+	"slices"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -83,30 +84,64 @@ type Trigger struct {
 	For   time.Duration
 }
 
-// SetFaults replaces the active faults. The first spec that matches a request
-// wins.
+// SetFaults replaces the active faults. A spec the proxy already holds keeps
+// what it has done so far, so that adding or dropping one fault does not
+// restart another's trigger. The first spec that matches a request wins.
 func (p *Proxy) SetFaults(specs []FaultSpec) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	held := slices.Clone(p.faults)
 	faults := make([]*activeFault, len(specs))
 	for i, spec := range specs {
+		if j := slices.IndexFunc(held, func(f *activeFault) bool { return f != nil && f.spec == spec }); j >= 0 {
+			faults[i], held[j] = held[j], nil
+			continue
+		}
 		faults[i] = &activeFault{
 			spec:   spec,
 			since:  time.Now(),
 			random: rand.New(rand.NewPCG(uint64(p.seed), uint64(i))),
 		}
 	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	p.faults = faults
 }
 
 // ClearFaults removes every active fault.
 func (p *Proxy) ClearFaults() { p.SetFaults(nil) }
 
+// FaultWindow is what the proxy has done with one fault (DESIGN.md §5.2).
+type FaultWindow struct {
+	// First is when the proxy first applied the fault, and zero if it never
+	// has: a fault that matches no request changes nothing about the run.
+	First time.Time
+	// Retired is when the proxy stopped applying the fault, and zero while it
+	// would still apply it.
+	Retired time.Time
+}
+
+// Windows reports what the proxy has done with each fault of the last
+// SetFaults call, in that order. The Runner reads them into the run's timeline:
+// a fault excuses the target over the window the proxy applied it in, and a
+// fault it never applied excuses nothing (DESIGN.md §6).
+func (p *Proxy) Windows() []FaultWindow {
+	now := time.Now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	windows := make([]FaultWindow, len(p.faults))
+	for i, fault := range p.faults {
+		windows[i] = FaultWindow{First: fault.first, Retired: fault.retiredBy(now)}
+	}
+	return windows
+}
+
 type activeFault struct {
 	spec    FaultSpec
 	since   time.Time
 	random  *rand.Rand
 	applied int
+	// first is when the fault was applied to a request, and spent is when the
+	// request that used up Until.Count arrived.
+	first, spent time.Time
 }
 
 func (f *activeFault) expired(now time.Time) bool {
@@ -116,7 +151,7 @@ func (f *activeFault) expired(now time.Time) bool {
 	return f.spec.Until.For > 0 && now.Sub(f.since) >= f.spec.Until.For
 }
 
-func (f *activeFault) applies(r Request) bool {
+func (f *activeFault) applies(r Request, now time.Time) bool {
 	if !f.spec.Match.Matches(r) {
 		return false
 	}
@@ -124,7 +159,26 @@ func (f *activeFault) applies(r Request) bool {
 		return false
 	}
 	f.applied++
+	if f.applied == 1 {
+		f.first = now
+	}
+	if f.spec.Until.Count > 0 && f.applied >= f.spec.Until.Count {
+		f.spent = now
+	}
 	return true
+}
+
+// retiredBy is when the proxy stopped applying the fault, or the zero time
+// while it still applies. A count runs out on the request that spends it, and
+// a window runs out on the clock, whether or not a request came.
+func (f *activeFault) retiredBy(now time.Time) time.Time {
+	retired := f.spent
+	if f.spec.Until.For > 0 {
+		if ends := f.since.Add(f.spec.Until.For); !ends.After(now) && (retired.IsZero() || ends.Before(retired)) {
+			retired = ends
+		}
+	}
+	return retired
 }
 
 // faultFor returns the action of the first active fault the request matches.
@@ -133,7 +187,7 @@ func (p *Proxy) faultFor(r Request) FaultAction {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, fault := range p.faults {
-		if !fault.expired(now) && fault.applies(r) {
+		if !fault.expired(now) && fault.applies(r, now) {
 			return fault.spec.Action
 		}
 	}

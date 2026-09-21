@@ -125,8 +125,9 @@ func TestTheChecksReadTheTeardownCheckpointAsNoSettleWait(t *testing.T) {
 
 // A namespace that came clean settles G3 where the teardown stopped watching,
 // which is before T_delete is up whenever the target cleans up promptly
-// (DESIGN.md §6).
-func TestTheChecksTakeTheCleanNamespaceFromTheTeardownCheckpoint(t *testing.T) {
+// (DESIGN.md §6). The timeline carries that instant, not a teardown
+// checkpoint, which a run that already failed never records.
+func TestTheChecksTakeTheCleanNamespaceFromTheTimeline(t *testing.T) {
 	for _, teardown := range []struct {
 		namespace string
 		clean     bool
@@ -151,6 +152,15 @@ func TestTheChecksTakeTheCleanNamespaceFromTheTeardownCheckpoint(t *testing.T) {
 	}
 }
 
+// cleanedAt is when the teardown saw the namespace empty, or zero if it never
+// did.
+func cleanedAt(clean bool) time.Time {
+	if !clean {
+		return time.Time{}
+	}
+	return at(12)
+}
+
 // deletedRun deleted its CR at the teardown and stopped watching once the
 // namespace was clean, well before T_delete was up.
 func deletedRun(clean bool) Input {
@@ -160,13 +170,11 @@ func deletedRun(clean bool) Input {
 		Target:  checkTarget(),
 		Objects: store,
 		Timeline: Timeline{
-			Ops: []AppliedOp{appliedOp(0, OpCreate, at(0))},
-			Checkpoints: []Checkpoint{
-				{At: at(2.1), Op: 0, Converged: true},
-				{At: at(12), Op: Teardown, Converged: clean},
-			},
-			Quiet:    Window{Start: at(8), End: at(10)},
-			Deletion: Window{Start: at(10), End: at(12)},
+			Ops:         []AppliedOp{appliedOp(0, OpCreate, at(0))},
+			Checkpoints: []Checkpoint{{At: at(2.1), Op: 0, Converged: true}},
+			Quiet:       Window{Start: at(8), End: at(10)},
+			Deletion:    Window{Start: at(10), End: at(12)},
+			Cleaned:     cleanedAt(clean),
 		},
 	}
 	child := recordChild(store, at(0.2), "widget-0", "12")

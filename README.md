@@ -167,8 +167,9 @@ target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `objects.jsonl` — every version of every object the Observer saw.
 - `target.log` — the target's own output.
 
-The report quotes the first twenty requests and object versions the check named, and says how
-many there were. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-report)).
+The report quotes the requests and object versions nearest the violation, up to twenty of
+each, and names the file holding the rest. Passing runs are not kept
+([DESIGN.md §5.7](DESIGN.md#57-report)).
 
 ## Running in CI
 

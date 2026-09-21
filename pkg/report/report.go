@@ -21,9 +21,10 @@ const (
 	MarkdownFile = "report.md"
 )
 
-// maxEvidence bounds each excerpt. A run makes thousands of requests, and the
-// first of them are where the failure starts. The report says how many the
-// check quoted, and the run's recordings hold every one.
+// maxEvidence is a backstop. A check hands over the entries nearest its
+// violation and bounds them itself (pkg/invariant), so a report quotes what it
+// is given; this only stops a caller that bounds nothing. The run's recordings
+// hold every entry either way.
 const maxEvidence = 20
 
 // Report is one failing run.

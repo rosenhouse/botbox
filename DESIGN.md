@@ -921,11 +921,14 @@ built from source and run as a black-box binary.
   reading as passes until D31 made notes visible. The teardown now stamps
   `Timeline.Cleaned` from what `awaitClean` saw, and G3 reads that. A run that never came
   clean leaves it zero, which is the case G3 exists to report.
-- **D35 A report bounds its evidence and carries the notes.** §5.7 asks a report to quote
-  the request log and the version timeline and does not say how much. A run makes
-  thousands of requests, and a report nobody reads is worth nothing, so each excerpt is
-  the first twenty in time order and both files name the total: a loop or a churn starts
-  at the beginning, and nothing is dropped silently. Quoted versions leave their object
-  bodies to `objects.jsonl`. The report also carries what no check could judge, for D31's
-  reason: a report that omits "G3 could not be judged" reads like one where G3 passed,
-  and it is the artefact a human actually reads.
+- **D35 A report quotes the evidence nearest the violation, and carries the notes.**
+  §5.7 asks a report to quote the request log and the version timeline and does not say
+  how much. A run makes thousands of requests, and a report nobody reads is worth
+  nothing. The checks already bound what they quote, at the twenty entries nearest the
+  violation (`pkg/invariant`), which are the ones that explain it; the report quotes what
+  it is given and names the file that holds the rest. Its own bound is a backstop against
+  a caller that does not. A check whose statement counts more than it quotes — G6 naming
+  a fifty-request loop — is the reader's cue to open `requests.jsonl`. Quoted versions
+  leave their object bodies to `objects.jsonl`. The report also carries what no check
+  could judge, for D31's reason: a report that omits "G3 could not be judged" reads like
+  one where G3 passed, and it is the artefact a human actually reads.

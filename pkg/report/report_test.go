@@ -248,7 +248,7 @@ func TestReportBoundsTheEvidenceAndSaysHowMuchThereWas(t *testing.T) {
 		if rows := strings.Count(body, excerpt.row); rows != 20 {
 			t.Errorf("The report quotes %d %s, want 20.", rows, excerpt.key)
 		}
-		if want := fmt.Sprintf("The check quoted %d %s. The first 20 are below.", quoted, excerpt.key); !strings.Contains(body, want) {
+		if want := fmt.Sprintf("The check quoted %d %s. The 20 nearest the violation are below.", quoted, excerpt.key); !strings.Contains(body, want) {
 			t.Errorf("The report does not say %q:\n%s", want, body)
 		}
 		var held []json.RawMessage

@@ -346,7 +346,8 @@ func TestAFailingRunWritesItsReport(t *testing.T) {
 	session := &fakeSession{results: []run.Result{{Violation: &violation, Notes: []string{note}}}}
 
 	code, _, stderr := invokeWith(t, session, countingGenerator(nil),
-		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42",
+		"--launch-arg", "--bug=7")
 
 	if code != exitViolation {
 		t.Fatalf("botbox run exited %d: %s", code, stderr)
@@ -360,10 +361,47 @@ func TestAFailingRunWritesItsReport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{violation.ID, violation.Statement, note, "botbox replay --target " + toyTargetYAML} {
+	want := []string{violation.ID, violation.Statement, note}
+	// The command has to carry what selected this run, or it replays something
+	// else (DESIGN.md §5.7).
+	want = append(want, "botbox replay --target "+toyTargetYAML+" --launch-arg --bug=7 "+
+		filepath.Join(session.dirs[0], sequenceFile))
+	for _, want := range want {
 		if !strings.Contains(string(written), want) {
 			t.Errorf("The report is\n%s\nwant it to carry %q.", written, want)
 		}
+	}
+}
+
+// A report is the artefact a reader trusts, so it says when the recordings
+// beside it are of a run that found nothing (D31, D35).
+func TestTheReportSaysWhenTheMinimizedSequenceDidNotReproduce(t *testing.T) {
+	violation := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{
+		results: []run.Result{{Violation: &violation}},
+		// Only the first run fails, so the shrink pass minimizes and the run of
+		// what it found passes.
+		fails: func(candidate run.Sequence, dir string) *run.Violation {
+			if strings.Contains(dir, shrinkDir) && len(candidate.Ops) < 3 {
+				return &violation
+			}
+			return nil
+		},
+	}
+	generate := countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle)
+
+	code, _, _ := invokeWith(t, session, generate,
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d, want %d.", code, exitViolation)
+	}
+	written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+	if err != nil {
+		t.Fatalf("The run directory holds no report: %v", err)
+	}
+	if !strings.Contains(string(written), "passed when it ran again") {
+		t.Errorf("The report is\n%s\nwant it to say the recordings are of a run that found nothing.", written)
 	}
 }
 

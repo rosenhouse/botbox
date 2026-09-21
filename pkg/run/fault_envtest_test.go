@@ -12,12 +12,19 @@ import (
 // The acceptance of DESIGN.md §10 M6: a fault makes the toy fail an invariant
 // it passes without the fault.
 //
-// The fault errors the toy's ConfigMap creates until thirty have been refused.
-// controller-runtime backs off exponentially, so by the time the fault clears
-// the toy is still retrying, and the create it finally lands falls inside the
-// quiet window the teardown waits. That is G1's business. The toy has no
-// seeded bug: what fails here is its recovery time, which is a property of
-// every controller that retries.
+// The fault errors the toy's ConfigMap creates. controller-runtime backs off
+// exponentially, so about ten are refused before the teardown clears the fault
+// — the count trigger is an upper bound and is never reached. The toy is then
+// still retrying, and the create it finally lands falls inside the quiet
+// window the teardown waits, which is G1's business. The toy has no seeded
+// bug: what fails is its recovery time, which every controller that retries
+// has.
+//
+// The margin is thin. The create lands about 115ms into a window T_stable
+// wide, because controller-runtime's backoff ladder puts it at 5.115s while
+// the window opens at T_settle, 5s. A harness stall of that order puts the
+// retry back under the fault, and the one after it is 10s later, outside
+// everything. Issue #11 tracks making this deterministic rather than close.
 func TestAFaultMakesTheToyFailAnInvariantItOtherwisePasses(t *testing.T) {
 	ctx := t.Context()
 	toy := loadTarget(t, buildToy(t))
@@ -35,7 +42,15 @@ func TestAFaultMakesTheToyFailAnInvariantItOtherwisePasses(t *testing.T) {
 		t.Fatalf("The faulted run failed: %v", err)
 	}
 	if found.Violation == nil {
-		t.Fatalf("The faulted run found nothing, and the fault refuses thirty creates.")
+		t.Fatalf("The faulted run found nothing. The toy's retry after the fault clears is " +
+			"meant to land in the teardown's quiet window, and it has about 115ms of room: " +
+			"if this is a stall rather than a real change, see issue #11.")
+	}
+	// Pin the check. If the fault starts tripping something else, the test
+	// would otherwise pass for a reason it does not describe.
+	if found.Violation.ID != "G1" {
+		t.Errorf("The faulted run reported %s, and this sequence is written to break G1: %s",
+			found.Violation.ID, found.Violation.Evidence)
 	}
 
 	// The control is this sequence with the fault taken out, so nothing but the

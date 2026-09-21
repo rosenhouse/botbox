@@ -43,12 +43,12 @@ func (d document) markdown() []byte {
 	return []byte(md.String())
 }
 
-// quotedLine says how much evidence the check found, and names what the bound
-// of maxEvidence left out.
+// quotedLine says how much evidence the check quoted, and names what the
+// backstop of maxEvidence left out on the way.
 func quotedLine(total, shown int, noun, recording string) string {
 	line := fmt.Sprintf("The check quoted %s.", count(total, noun))
 	if shown < total {
-		line += fmt.Sprintf(" The first %d are below.", shown)
+		line += fmt.Sprintf(" The %d nearest the violation are below.", shown)
 	}
 	return line + fmt.Sprintf(" `%s` holds them all.\n\n", recording)
 }

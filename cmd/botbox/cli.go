@@ -251,6 +251,14 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 				ops(shrunk), filepath.Join(dir, shrunkFile)))
 		} else if again := c.rerun(ctx, s, t, shrunk, dir); again.Violation != nil {
 			result, violation = again, *again.Violation
+		} else {
+			// The directory now holds a run of the minimized sequence that
+			// found nothing. The finding stands, and the report says which
+			// run these recordings are of rather than leaving a reader to
+			// infer it from a passing log (D31, D35).
+			result.Notes = append(result.Notes, fmt.Sprintf(
+				"the minimized sequence passed when it ran again, so this directory holds that run and not the one %s was found in",
+				violation.ID))
 		}
 	}
 	// What the pass replayed is nobody's evidence (DESIGN.md §11).
@@ -278,6 +286,20 @@ func (c *cli) rerun(ctx context.Context, s session, t *target.Target, shrunk run
 	return result
 }
 
+// replayCommand is the one line §5.7 asks a report to carry. It repeats the
+// flags that select what ran, because a command that leaves them out runs a
+// different target and reproduces nothing.
+func (o options) replayCommand(sequence string) string {
+	command := []string{"botbox", "replay", "--target", o.target}
+	if o.kubeconfig != "" {
+		command = append(command, "--kubeconfig", o.kubeconfig)
+	}
+	for _, arg := range o.launchArgs {
+		command = append(command, "--launch-arg", arg)
+	}
+	return strings.Join(append(command, sequence), " ")
+}
+
 // writeReport leaves §5.7's report beside the recordings it describes. replay
 // names the sequence file a reader should run to see this again.
 func (c *cli) writeReport(dir string, opts options, t *target.Target,
@@ -296,7 +318,7 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 		Botbox:   version(),
 		Seed:     sequence.Seed,
 		Notes:    result.Notes,
-		Replay:   fmt.Sprintf("botbox replay --target %s %s", opts.target, replay),
+		Replay:   opts.replayCommand(replay),
 		Sequence: encoded,
 		Requests: violation.Requests,
 		Versions: violation.Versions,

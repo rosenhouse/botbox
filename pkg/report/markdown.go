@@ -32,25 +32,26 @@ func (d document) markdown() []byte {
 	fmt.Fprintf(&md, "\n## Sequence\n\n```json\n%s\n```\n", strings.TrimRight(string(d.Sequence), "\n"))
 	if len(d.Requests) > 0 {
 		md.WriteString("\n## Requests\n\n")
-		md.WriteString(quotedLine(d.RequestsTotal, len(d.Requests), "request", "requests.jsonl"))
+		md.WriteString(quotedLine(d.RequestsTotal, len(d.Requests), "request", "requests.jsonl", "every request the run made"))
 		table(&md, []string{"start", "verb", "path", "status", "fault"}, requestRows(d.Requests))
 	}
 	if len(d.Versions) > 0 {
 		md.WriteString("\n## Object versions\n\n")
-		md.WriteString(quotedLine(d.VersionsTotal, len(d.Versions), "version", "objects.jsonl"))
-		table(&md, []string{"time", "kind", "name", "resourceVersion", "finalizers", "deleted"}, versionRows(d.Versions))
+		md.WriteString(quotedLine(d.VersionsTotal, len(d.Versions), "version", "objects.jsonl", "every version the Observer saw"))
+		table(&md, []string{"time", "kind", "name", "resourceVersion", "generation", "observed", "finalizers", "deleted"},
+			versionRows(d.Versions))
 	}
 	return []byte(md.String())
 }
 
-// quotedLine says how much evidence the check quoted, and names what the
+// quotedLine says how much evidence the violation quoted, and names what the
 // backstop of maxEvidence left out on the way.
-func quotedLine(total, shown int, noun, recording string) string {
-	line := fmt.Sprintf("The check quoted %s.", count(total, noun))
+func quotedLine(total, shown int, noun, recording, holds string) string {
+	line := fmt.Sprintf("The violation quoted %s.", count(total, noun))
 	if shown < total {
-		line += fmt.Sprintf(" The %d nearest the violation are below.", shown)
+		line += fmt.Sprintf(" The %d nearest it are below.", shown)
 	}
-	return line + fmt.Sprintf(" `%s` holds them all.\n\n", recording)
+	return line + fmt.Sprintf(" `%s` holds %s.\n\n", recording, holds)
 }
 
 // count writes a number of things, in the singular where there is one.
@@ -72,15 +73,27 @@ func requestRows(requests []proxy.Request) [][]string {
 	return rows
 }
 
+// versionRows carry the generation and the observed generation, because a
+// check that reads a Ready predicate reads those (DESIGN.md §8.4).
 func versionRows(versions []observe.Version) [][]string {
 	rows := make([][]string, len(versions))
 	for i, version := range versions {
 		rows[i] = []string{
 			stamp(version.Time), kindName(version.GVK), version.Name, version.ResourceVersion,
+			strconv.FormatInt(version.Generation, 10), observed(version.ObservedGeneration),
 			strings.Join(version.Finalizers, ", "), yes(version.Deleted),
 		}
 	}
 	return rows
+}
+
+// observed writes the observedGeneration a version carried, and nothing for
+// one whose status had none.
+func observed(generation *int64) string {
+	if generation == nil {
+		return ""
+	}
+	return strconv.FormatInt(*generation, 10)
 }
 
 func table(md *strings.Builder, header []string, rows [][]string) {

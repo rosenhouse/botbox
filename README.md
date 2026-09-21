@@ -89,7 +89,7 @@ examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 5m --launch-ar
 ```
 run 1: seed 23, generated
 run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR
-  at 2026-09-21T05:59:08.980624165Z; 1 versions, the first v1/Secret example-tls
+  at 2026-09-21T05:59:08.980624165Z; 1 version, the first v1/Secret example-tls
   the evidence is in botbox-out/20260921T055744Z-23/run-1
   the sequence is 1 op, in botbox-out/20260921T055744Z-23/run-1/sequence.json
 ```

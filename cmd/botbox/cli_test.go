@@ -141,13 +141,17 @@ func TestVersionPrintsTheVersion(t *testing.T) {
 }
 
 func TestHelpPrintsTheUsage(t *testing.T) {
-	code, stdout, _ := invoke(t, &fakeSession{}, "run", "--help")
+	// Asking for the usage is not an error, and exit 2 is what tells CI the
+	// target or the invocation is broken (DESIGN.md §11).
+	for _, asked := range [][]string{{"run", "--help"}, {"--help"}, {"-h"}, {"help"}} {
+		code, stdout, stderr := invoke(t, &fakeSession{}, asked...)
 
-	if code != exitOK {
-		t.Errorf("botbox run --help exited %d, want %d.", code, exitOK)
-	}
-	if !strings.Contains(stdout, "botbox replay") {
-		t.Errorf("botbox run --help printed %q, want the usage.", stdout)
+		if code != exitOK {
+			t.Errorf("botbox %s exited %d, want %d: %s", strings.Join(asked, " "), code, exitOK, stderr)
+		}
+		if !strings.Contains(stdout, "botbox replay") {
+			t.Errorf("botbox %s printed %q, want the usage.", strings.Join(asked, " "), stdout)
+		}
 	}
 }
 
@@ -293,6 +297,32 @@ func TestRunShrinksTheFailingSequence(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(session.dirs[0], shrinkDir)); !os.IsNotExist(err) {
 		t.Errorf("The run directory keeps the shrink pass's replays: %v", err)
+	}
+}
+
+// A report says the sequence it carries is the one botbox drew, because §5.7
+// says a report carries the minimized sequence and this one is not it (D31).
+func TestTheReportSaysWhenTheDeadlineLeftTheSequenceUnminimized(t *testing.T) {
+	ctx, expire := context.WithCancel(t.Context())
+	violation := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{fails: func(run.Sequence, string) *run.Violation { return &violation }}
+	// The deadline passes before the first candidate is replayed, so the pass
+	// never finds anything smaller.
+	session.after = expire
+	generate := countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle)
+
+	code, _, stderr := invokeCtx(t, ctx, session, generate,
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d, want %d: %s", code, exitViolation, stderr)
+	}
+	report, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "the deadline ended minimization"; !strings.Contains(string(report), want) {
+		t.Errorf("The report is\n%s\nwant it to say %q.", report, want)
 	}
 }
 

@@ -239,17 +239,27 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 		return s.execute(ctx, t, candidate, filepath.Join(dir, shrinkDir), run.Engine{})
 	})
 	reported := shrunk
-	if len(shrunk.Ops) < len(failed.sequence.Ops) {
-		if ctx.Err() != nil {
-			// The deadline ended the pass before the smaller sequence could be
-			// run into the directory, which still holds the run of the sequence
-			// botbox drew. The directory reports the sequence its evidence is
-			// of, and keeps the smaller one beside it.
-			reported = failed.sequence
-			c.warn(run.WriteSequence(filepath.Join(dir, shrunkFile), shrunk))
-			c.warn(fmt.Errorf("the deadline ended the shrink pass with %s, left unrun in %s",
-				ops(shrunk), filepath.Join(dir, shrunkFile)))
-		} else if again := c.rerun(ctx, s, t, shrunk, dir); again.Violation != nil {
+	smaller := len(shrunk.Ops) < len(failed.sequence.Ops)
+	switch {
+	case ctx.Err() != nil && smaller:
+		// The deadline ended the pass before the smaller sequence could be
+		// run into the directory, which still holds the run of the sequence
+		// botbox drew. The directory reports the sequence its evidence is
+		// of, and keeps the smaller one beside it.
+		reported = failed.sequence
+		c.warn(run.WriteSequence(filepath.Join(dir, shrunkFile), shrunk))
+		c.warn(fmt.Errorf("the deadline ended the shrink pass with %s, left unrun in %s",
+			ops(shrunk), filepath.Join(dir, shrunkFile)))
+		result.Notes = append(result.Notes, fmt.Sprintf(
+			"the deadline ended minimization with %s, left unrun in %s: this is the sequence botbox drew",
+			ops(shrunk), shrunkFile))
+	case ctx.Err() != nil:
+		// §5.7 says a report carries the minimized sequence, and the pass
+		// never got to a smaller one (D31).
+		result.Notes = append(result.Notes,
+			"the deadline ended minimization before it found a smaller sequence: this is the sequence botbox drew")
+	case smaller:
+		if again := c.rerun(ctx, s, t, shrunk, dir); again.Violation != nil {
 			result, violation = again, *again.Violation
 		} else {
 			// The directory now holds a run of the minimized sequence that
@@ -384,6 +394,8 @@ func parse(args []string) (options, []string, error) {
 	}
 	opts := options{command: args[0]}
 	switch opts.command {
+	case "help", "-h", "--help":
+		return opts, nil, flag.ErrHelp
 	case "version":
 		return opts, nil, nil
 	case "run", "replay", "matrix":

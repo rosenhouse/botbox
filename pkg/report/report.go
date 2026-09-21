@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 )
@@ -21,11 +22,10 @@ const (
 	MarkdownFile = "report.md"
 )
 
-// maxEvidence is a backstop. A check hands over the entries nearest its
-// violation and bounds them itself (pkg/invariant), so a report quotes what it
-// is given; this only stops a caller that bounds nothing. The run's recordings
-// hold every entry either way.
-const maxEvidence = 20
+// maxEvidence is a backstop, at the bound a violation's own evidence already
+// carries (pkg/invariant). A report quotes what it is given; this only stops a
+// caller that bounds nothing. The run's recordings hold every entry either way.
+const maxEvidence = invariant.MaxEvidence
 
 // Report is one failing run.
 type Report struct {
@@ -111,7 +111,7 @@ func (r Report) document() document {
 		Notes:         r.Notes,
 		Replay:        r.Replay,
 		Sequence:      r.Sequence,
-		Requests:      r.Requests[:min(len(r.Requests), maxEvidence)],
+		Requests:      recent(r.Requests),
 		RequestsTotal: len(r.Requests),
 		Versions:      timeline(r.Versions),
 		VersionsTotal: len(r.Versions),
@@ -121,11 +121,20 @@ func (r Report) document() document {
 // timeline quotes when each version appeared and what it carried, and drops
 // the object bodies that objects.jsonl holds in full.
 func timeline(versions []observe.Version) []observe.Version {
-	excerpt := slices.Clone(versions[:min(len(versions), maxEvidence)])
+	excerpt := slices.Clone(recent(versions))
 	for i := range excerpt {
 		excerpt[i].Object = nil
 	}
 	return excerpt
+}
+
+// recent keeps the maxEvidence entries nearest the violation, which are the
+// last. Those are the ones the report says it quotes.
+func recent[T any](evidence []T) []T {
+	if len(evidence) > maxEvidence {
+		return evidence[len(evidence)-maxEvidence:]
+	}
+	return evidence
 }
 
 // marshal renders report.json: two spaces of indentation and a trailing

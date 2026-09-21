@@ -27,7 +27,7 @@ func Property(declared target.Property) Check {
 				continue
 			}
 			out.violate(Violation{
-				Statement: fmt.Sprintf("%s did not hold: %s", declared.ID, declared.Description),
+				Statement: fmt.Sprintf("the property did not hold: %s", declared.Description),
 				At:        s.at,
 				Versions:  excerpt(read(cr, found, managed)),
 			})

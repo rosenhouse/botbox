@@ -130,7 +130,7 @@ func TestReportJSONIsIndentedNewlineTerminatedAndUnescaped(t *testing.T) {
 	}
 }
 
-func TestReportQuotesTheRequestsAndVersionsTheCheckNamed(t *testing.T) {
+func TestReportQuotesTheRequestsAndVersionsTheViolationNamed(t *testing.T) {
 	failure := failingRun()
 	failure.Requests = []proxy.Request{{
 		Start: time.Date(2026, 9, 21, 5, 59, 8, 980624165, time.UTC),
@@ -140,8 +140,11 @@ func TestReportQuotesTheRequestsAndVersionsTheCheckNamed(t *testing.T) {
 		Key:             observe.Key{GVK: schema.GroupVersionKind{Group: "cert-manager.io", Version: "v1", Kind: "CertificateRequest"}, Name: "widget-0"},
 		Time:            time.Date(2026, 9, 21, 5, 59, 9, 0, time.UTC),
 		ResourceVersion: "812",
-		Finalizers:      []string{"widget.botbox/cleanup"},
-		Deleted:         true,
+		// A check reading a Ready predicate reads these, so a report quotes them.
+		Generation:         4,
+		ObservedGeneration: ptr(int64(3)),
+		Finalizers:         []string{"widget.botbox/cleanup"},
+		Deleted:            true,
 	}, {
 		Key:             observe.Key{GVK: schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, Name: "widget-0-0"},
 		Time:            time.Date(2026, 9, 21, 5, 59, 10, 0, time.UTC),
@@ -154,12 +157,12 @@ func TestReportQuotesTheRequestsAndVersionsTheCheckNamed(t *testing.T) {
 		heading string
 		wants   []string
 	}{
-		{"Requests", []string{"The check quoted 1 request.", "requests.jsonl",
+		{"Requests", []string{"The violation quoted 1 request.", "requests.jsonl",
 			"| start | verb | path | status | fault |\n| --- | --- | --- | --- | --- |\n",
 			"| 2026-09-21T05:59:08.980624165Z | create | /api/v1/namespaces/botbox-run-x/configmaps | 500 | error(500) |"}},
-		{"Object versions", []string{"The check quoted 2 versions.", "objects.jsonl",
-			"| 2026-09-21T05:59:09Z | cert-manager.io/v1/CertificateRequest | widget-0 | 812 | widget.botbox/cleanup | yes |",
-			"| 2026-09-21T05:59:10Z | v1/ConfigMap | widget-0-0 | 813 |  |  |"}},
+		{"Object versions", []string{"The violation quoted 2 versions.", "objects.jsonl",
+			"| 2026-09-21T05:59:09Z | cert-manager.io/v1/CertificateRequest | widget-0 | 812 | 4 | 3 | widget.botbox/cleanup | yes |",
+			"| 2026-09-21T05:59:10Z | v1/ConfigMap | widget-0-0 | 813 | 0 |  |  |  |"}},
 	} {
 		body := section(md, excerpt.heading)
 		for _, want := range excerpt.wants {
@@ -167,7 +170,7 @@ func TestReportQuotesTheRequestsAndVersionsTheCheckNamed(t *testing.T) {
 				t.Errorf("The report's %s do not name %q:\n%s", excerpt.heading, want, body)
 			}
 		}
-		if strings.Contains(body, "The first") {
+		if strings.Contains(body, "nearest it") {
 			t.Errorf("The report says it bounded evidence it quoted whole:\n%s", body)
 		}
 	}
@@ -234,21 +237,21 @@ func TestReportBoundsTheEvidenceAndSaysHowMuchThereWas(t *testing.T) {
 
 	md, encoded := write(t, failure)
 
-	for _, excerpt := range []struct{ heading, key, first, dropped, row string }{
-		{"Requests", "requests", "/api/v1/path-0", "/api/v1/path-20", "/api/v1/path-"},
-		{"Object versions", "versions", "widget-0", "widget-20", "widget-"},
+	for _, excerpt := range []struct{ heading, key, nearest, dropped, row string }{
+		{"Requests", "requests", "/api/v1/path-24", "/api/v1/path-4", "/api/v1/path-"},
+		{"Object versions", "versions", "widget-24", "widget-4", "widget-"},
 	} {
 		body := section(md, excerpt.heading)
-		if !strings.Contains(body, excerpt.first) {
-			t.Errorf("The report drops the first %s:\n%s", excerpt.key, body)
+		if !strings.Contains(body, excerpt.nearest) {
+			t.Errorf("The report drops the %s nearest the violation:\n%s", excerpt.key, body)
 		}
 		if strings.Contains(body, excerpt.dropped) {
-			t.Errorf("The report quotes %s, beyond the bound:\n%s", excerpt.dropped, body)
+			t.Errorf("The report quotes %s, which the bound drops as the furthest away:\n%s", excerpt.dropped, body)
 		}
 		if rows := strings.Count(body, excerpt.row); rows != 20 {
 			t.Errorf("The report quotes %d %s, want 20.", rows, excerpt.key)
 		}
-		if want := fmt.Sprintf("The check quoted %d %s. The 20 nearest the violation are below.", quoted, excerpt.key); !strings.Contains(body, want) {
+		if want := fmt.Sprintf("The violation quoted %d %s. The 20 nearest it are below.", quoted, excerpt.key); !strings.Contains(body, want) {
 			t.Errorf("The report does not say %q:\n%s", want, body)
 		}
 		var held []json.RawMessage
@@ -406,3 +409,5 @@ func sameJSON(t *testing.T, a, b string) bool {
 	}
 	return reflect.DeepEqual(parsedA, parsedB)
 }
+
+func ptr[T any](v T) *T { return &v }

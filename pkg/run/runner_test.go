@@ -734,6 +734,45 @@ func TestRunStampsTheQuietWindowTheTeardownWaited(t *testing.T) {
 
 // The checks name what they could not judge, and the run carries it out, so
 // that a reader can tell a skipped check from a passing one (DESIGN.md §6).
+// G3 reads whether the teardown saw the namespace empty (DESIGN.md §6). A run
+// that already found a violation records no teardown checkpoint, so the clean
+// cannot ride on one: G3 would discard a clean deletion the teardown watched.
+func TestTheTeardownRecordsACleanNamespaceEvenAfterAViolation(t *testing.T) {
+	h := newFakeHarness()
+	check := &fakeChecker{violations: [][]Violation{{{ID: "G2"}}}}
+
+	result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil {
+		t.Fatal("The run reported no violation, so it does not exercise the case.")
+	}
+	if result.Timeline.Cleaned.IsZero() {
+		t.Errorf("The teardown saw the namespace clean and the timeline does not say so, so G3 cannot judge it.")
+	}
+	if got, want := result.Timeline.Cleaned, result.Timeline.Deletion.End; !got.Equal(want) {
+		t.Errorf("The timeline reports it clean at %v, want the %v the deletion window closed at.", got, want)
+	}
+}
+
+// A namespace the teardown never saw empty leaves no instant to report.
+func TestTheTeardownReportsNoCleanWhenTheNamespaceStaysDirty(t *testing.T) {
+	h := newFakeHarness()
+	h.clean = false
+
+	result, err := runFake(t, h, &fakeChecker{}, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if !result.Timeline.Cleaned.IsZero() {
+		t.Errorf("The timeline reports the namespace clean at %v, and the teardown never saw it empty.",
+			result.Timeline.Cleaned)
+	}
+}
+
 func TestRunCarriesTheNotesTheLastCheckpointLeft(t *testing.T) {
 	h := newFakeHarness()
 	check := &fakeChecker{notes: [][]string{{"G5 is not evaluated for op 0"}, {"G3 is not evaluated for the deletion of widget"}}}

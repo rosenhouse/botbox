@@ -47,7 +47,7 @@ func Evaluate(in Input) ([]invariant.Result, error) {
 		Faults:      engineFaults(in.Timeline.Faults),
 		Teardown:    in.Timeline.Deletion.Start,
 		Quiet:       in.Timeline.Quiet.Start,
-		Cleaned:     cleaned(in.Timeline),
+		Cleaned:     in.Timeline.Cleaned,
 		// The deletion window is the last of the run the Observer watched.
 		// It is zero until the teardown closes it, and the engine then
 		// evaluates at the last checkpoint.
@@ -90,15 +90,6 @@ func settleResult(checkpoint Checkpoint) invariant.SettleResult {
 // cleaned is when the teardown saw the run namespace empty, which its
 // checkpoint's Converged reports. A namespace that never emptied leaves it
 // zero, and G3 judges the deletion against its deadline instead.
-func cleaned(timeline Timeline) time.Time {
-	for _, checkpoint := range timeline.Checkpoints {
-		if checkpoint.Op == Teardown && checkpoint.Converged {
-			return timeline.Deletion.End
-		}
-	}
-	return time.Time{}
-}
-
 func engineFaults(windows []Window) []invariant.FaultWindow {
 	faults := make([]invariant.FaultWindow, len(windows))
 	for i, window := range windows {

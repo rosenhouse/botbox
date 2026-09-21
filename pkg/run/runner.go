@@ -95,6 +95,11 @@ type Timeline struct {
 	// Deletion is the window G3 judges: it opens when the teardown deletes the
 	// primary CR and closes when the namespace is clean or the window expires.
 	Deletion Window
+	// Cleaned is when the teardown saw the run namespace empty, or zero if it
+	// never did. G3 reads it here rather than from a teardown checkpoint,
+	// because a run that already found a violation records no checkpoint and
+	// would lose a clean deletion the teardown watched (DESIGN.md §6).
+	Cleaned time.Time
 	// Faults are the windows the Runner had a fault op's spec injected in. An
 	// open window has no End: the fault outlived the run.
 	Faults []Window
@@ -493,6 +498,9 @@ func (r *runner) teardown(ctx context.Context) error {
 	}
 	clean, err := r.h.awaitClean(ctx, r.target.Timeouts.Delete+deletionMargin)
 	r.timeline.Deletion.End = r.now()
+	if clean {
+		r.timeline.Cleaned = r.timeline.Deletion.End
+	}
 	failures = append(failures, err)
 	if r.violation == nil && !r.failed {
 		failures = append(failures, r.checkpoint(Teardown, clean))

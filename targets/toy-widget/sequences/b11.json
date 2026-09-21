@@ -1,5 +1,5 @@
 {
-  "seed": 20260921,
+  "seed": 20260920,
   "target": "toy-widget",
   "ops": [
     {
@@ -18,12 +18,24 @@
     },
     {
       "i": 1,
-      "t": "deleteManaged",
-      "kind": "v1/ConfigMap",
-      "index": 0
+      "t": "update",
+      "patch": {
+        "spec": {
+          "count": 1
+        }
+      }
     },
     {
       "i": 2,
+      "t": "update",
+      "patch": {
+        "spec": {
+          "count": 2
+        }
+      }
+    },
+    {
+      "i": 3,
       "t": "settle"
     }
   ]

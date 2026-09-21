@@ -342,15 +342,21 @@ sequence settled it; reasoning about it had not.
 - A fault's duration halved toward a nanosecond in thirty-two steps, each step a cluster,
   and every successful weakening re-replayed the removal candidate it had just rejected.
 - The acceptance test was built on the toy's recovery time, so its verdict came down to
-  whether a retry landed inside a window. It passed on a 115 ms margin, and no retiming
-  of the windows widened that margin: a settle wait needs `T_stable` of quiet inside
-  `T_settle`.
+  whether a retry landed inside a window. It passed on a 115 ms margin, and no retiming of
+  the windows widened it.
 - The G4 an expired settle wait raises carried no requests and no versions, so the one
   run M6's acceptance gates on would have written a report with no evidence to quote.
-- B11 was written up as a bug only a fault can reveal, in §9.1, in the bug matrix's own
-  preamble and in the acceptance test's comment. A `deleteManaged` op reveals it too: the
-  belief outlives the object it is about. One run settled it, and no run had been made.
-  B11 has a matrix row now.
+- One `fault` op left the rest of the run unjudged. The Runner treated a fault as active
+  from the op that injected it until it dropped the spec, and only an op-index trigger
+  made it drop one, so a `count` or `for` trigger — the shape the README documents — kept
+  every later window excused. A fault matching a resource the target never touches did it
+  too. B7 with an inert fault reported nothing, and neither did `b11-fault.json` with its
+  trigger written as `{"count": 1}`. The exploratory review found it by writing the fault
+  op the documentation shows.
+- B11 was written up as a bug only a fault can reveal, twice: in §9.1, the matrix's own
+  preamble and the acceptance test, and again after a `deleteManaged` op had revealed it.
+  The belief outlives whatever removed the child, a scale-down included, so B11's matrix
+  row is two spec changes. Two runs settled what two rounds of reasoning had not.
 
 ### What fixed it
 
@@ -360,6 +366,11 @@ beside it are of a run that found nothing, which is what D31 exists to require. 
 halve to a floor, removal is asked once per position, and a candidate that changes nothing
 is refused, which also stops the pass spinning.
 
+A fault now excuses the target over the window the proxy applied it in, and a fault the
+proxy never applied excuses nothing (D36). The proxy reports what it did with each fault,
+and a spec keeps its progress across a `SetFaults` call, so dropping one fault no longer
+restarts another's trigger.
+
 B11 makes a fault's damage permanent. The toy notes a child as present the moment it asks
 the API server for it, so a refused create leaves it one child short for good: no error, no
 requeue, no watch event. The settle wait after the fault stops then expires however wide
@@ -367,6 +378,11 @@ any window is, and the acceptance turns on state rather than timing. A G4 the Ru
 itself quotes the CR's history and the requests nearest the expiry, as a check's G4 does.
 
 ### Process notes
+
+Two adversarial reviews ran over this work rather than one. The reviewer reading the diff
+and mutating the code found the unpinned bound and the report quoting the wrong end of its
+evidence. The reviewer driving the binary found the fault op that silences the invariants.
+Neither would have found the other's.
 
 Nine mutations of the M6 code outside `pkg/report` survived the first draft. The sharpest
 was §10 M6's own acceptance: nothing tied a report to the minimized sequence, so the

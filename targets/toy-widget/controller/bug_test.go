@@ -7,6 +7,11 @@ import (
 )
 
 func TestParseBugAcceptsEveryCatalogEntry(t *testing.T) {
+	// The catalog of DESIGN.md §9.1 ends at B11. Deriving the range from
+	// MaxBug alone would accept a MaxBug that had lost an entry.
+	if MaxBug != int(B11) {
+		t.Fatalf("MaxBug is %d, and the catalog of DESIGN.md §9.1 ends at B11.", MaxBug)
+	}
 	for id := 0; id <= MaxBug; id++ {
 		bug, err := ParseBug(id)
 		if err != nil {

@@ -11,26 +11,18 @@ import (
 	"github.com/rosenhouse/botbox/pkg/run"
 )
 
-// seededBugB11 selects the bug of DESIGN.md §9.1 whose damage only a fault
-// makes permanent. A later --bug wins over the one target.yaml declares (§11).
+// seededBugB11 selects the bug of DESIGN.md §9.1 that a refused create makes
+// permanent. A later --bug wins over the one target.yaml declares (§11).
 const seededBugB11 = "--bug=11"
 
 // The acceptance of DESIGN.md §10 M6: a fault makes the toy fail an invariant
 // it passes without the fault.
 //
-// B11 believes a child is there from the moment it asks the API server for it.
-// The fault refuses one ConfigMap create, so the toy is left believing in a
-// child it never made and never asks again. That state is permanent rather
-// than transient: the toy goes quiet one child short of its spec, and the
-// settle wait after the fault stops expires however wide any window is.
-// Neither a backoff interval nor a window width enters into the outcome.
-//
-// The sequence `targets/toy-widget/sequences/fault.json` demonstrates the
-// other thing a fault does to the toy, which is how long it takes to recover
-// from one. No tier gates on it, because whether the retry it waits for lands
-// inside the teardown's quiet window is a matter of timing. Run it by hand
-// with `botbox replay --target targets/toy-widget/target.yaml
-// targets/toy-widget/sequences/fault.json`.
+// The fault refuses one ConfigMap create, and B11 goes on believing in the
+// child it never made. The toy falls quiet one child short of its spec, so the
+// settle wait after the scale-up expires however wide the windows are: neither
+// a backoff interval nor a window width enters into the outcome. The fault's
+// own count ends it, so the run is judged from the refusal on (D36).
 func TestAFaultMakesTheToyFailAnInvariantItOtherwisePasses(t *testing.T) {
 	ctx := t.Context()
 	// One target for both runs, so that the fault is the only difference.

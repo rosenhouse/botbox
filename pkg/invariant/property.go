@@ -2,6 +2,7 @@ package invariant
 
 import (
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -30,6 +31,7 @@ func Property(declared target.Property) Check {
 				Statement: fmt.Sprintf("the property did not hold: %s", declared.Description),
 				At:        s.at,
 				Versions:  excerpt(read(cr, found, managed)),
+				Managed:   counted(managed),
 			})
 			return out, nil // A run ends at its first violation (DESIGN.md §5.5).
 		}
@@ -37,12 +39,16 @@ func Property(declared target.Property) Check {
 	}
 }
 
-// read is the state the property saw, as the report quotes it.
+// read is the state the property saw, as the report quotes it, in the order
+// the table reads.
 func read(cr observe.Version, found bool, managed []observe.Version) []observe.Version {
-	if !found {
-		return managed
+	state := managed
+	if found {
+		state = append([]observe.Version{cr}, managed...)
 	}
-	return append([]observe.Version{cr}, managed...)
+	state = slices.Clone(state)
+	slices.SortStableFunc(state, byTime)
+	return state
 }
 
 // evaluationPoints are the instants a property is evaluated at, in order.

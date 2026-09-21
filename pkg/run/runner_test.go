@@ -182,6 +182,16 @@ func (f *fakeHarness) recordCR(name, resourceVersion string) {
 	f.store.Record(widgetKind, object, time.Now())
 }
 
+// recordChild records a managed object of the CR, as the Observer would.
+func (f *fakeHarness) recordChild(name, resourceVersion string) {
+	object := &unstructured.Unstructured{Object: map[string]any{}}
+	object.SetGroupVersionKind(configMapKind)
+	object.SetNamespace(fakeNamespace)
+	object.SetName(name)
+	object.SetResourceVersion(resourceVersion)
+	f.store.Record(configMapKind, object, time.Now())
+}
+
 func (f *fakeHarness) opCalls() []string       { return f.calls[:f.teardownStart()] }
 func (f *fakeHarness) teardownCalls() []string { return f.calls[f.teardownStart():] }
 
@@ -1137,7 +1147,10 @@ func TestTheStoppedTargetsErrorWithoutALineAndWithControlBytes(t *testing.T) {
 // G4 does (#13).
 func TestTheG4OfAnExpiredWaitCountsTheManagedObjects(t *testing.T) {
 	h := newFakeHarness()
-	h.converged, h.count = false, 3
+	h.converged = false
+	for i := range 3 {
+		h.recordChild(fmt.Sprintf("widget-%d", i), "12")
+	}
 
 	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
 
@@ -1152,5 +1165,30 @@ func TestTheG4OfAnExpiredWaitCountsTheManagedObjects(t *testing.T) {
 	}
 	if result.Violation.Managed == nil || *result.Violation.Managed != 3 {
 		t.Errorf("The G4 carried out no count of 3, and its evidence quotes one.")
+	}
+}
+
+// The G4 an expired wait raised quotes the children too, since the object a
+// readiness finding is about is usually one of them (#20).
+func TestTheG4OfAnExpiredWaitQuotesTheManagedObjects(t *testing.T) {
+	h := newFakeHarness()
+	h.converged = false
+	h.recordCR("widget", "11")
+	h.recordChild("widget-0", "12")
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || result.Violation.ID != "G4" {
+		t.Fatalf("The run reported %v, want a G4 violation.", result.Violation)
+	}
+	versions := result.Violation.Versions
+	if !slices.ContainsFunc(versions, func(v observe.Version) bool { return v.GVK == configMapKind }) {
+		t.Errorf("The violation carries %d versions and no managed object: %v", len(versions), versions)
+	}
+	if !slices.ContainsFunc(versions, func(v observe.Version) bool { return v.GVK == widgetKind }) {
+		t.Errorf("The violation carries %d versions and not the CR the statement names.", len(versions))
 	}
 }

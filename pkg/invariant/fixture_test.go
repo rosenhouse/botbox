@@ -33,6 +33,7 @@ const (
 var (
 	widgetGVK    = schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
 	configMapGVK = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
+	secretGVK    = schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
 	epoch        = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 )
 
@@ -87,9 +88,14 @@ type run struct {
 
 // newRun returns a run of the toy target whose primary CR botbox created, so
 // that the CR is never a managed object (DESIGN.md §6).
-func newRun() *run {
+func newRun() *run { return newRunManaging(configMapGVK) }
+
+// newRunManaging returns a run of a target that manages the kinds named, since
+// a real target manages several: cert-manager's example declares two.
+func newRunManaging(kinds ...schema.GroupVersionKind) *run {
 	t := toyTarget()
-	store := observe.NewStore(observe.Options{Namespace: namespace, Primary: t.Primary, Manages: t.Manages})
+	t.Manages = kinds
+	store := observe.NewStore(observe.Options{Namespace: namespace, Primary: t.Primary, Manages: kinds})
 	store.MarkBotboxCreated(widgetGVK, widgetName)
 	return &run{in: invariant.Input{Target: t, History: store}, store: store}
 }
@@ -200,6 +206,11 @@ func widget(resourceVersion string, opts ...option) *unstructured.Unstructured {
 // otherwise.
 func child(name, resourceVersion string, opts ...option) *unstructured.Unstructured {
 	return object(configMapGVK, name, resourceVersion, append([]option{ownedByWidget}, opts...)...)
+}
+
+// secret is a Secret of the Widget, a second managed kind.
+func secret(name, resourceVersion string, opts ...option) *unstructured.Unstructured {
+	return object(secretGVK, name, resourceVersion, append([]option{ownedByWidget}, opts...)...)
 }
 
 func object(gvk schema.GroupVersionKind, name, resourceVersion string, opts ...option) *unstructured.Unstructured {
@@ -430,3 +441,24 @@ func managed(v invariant.Violation) string {
 	}
 	return strconv.Itoa(*v.Managed)
 }
+
+// quoted names the versions a violation carries, for a message.
+func quoted(v invariant.Violation) []string {
+	names := make([]string, len(v.Versions))
+	for i, version := range v.Versions {
+		names[i] = version.Name + "@" + version.ResourceVersion
+	}
+	return names
+}
+
+func versionsOf(v invariant.Violation, gvk schema.GroupVersionKind) []observe.Version {
+	var found []observe.Version
+	for _, version := range v.Versions {
+		if version.GVK == gvk {
+			found = append(found, version)
+		}
+	}
+	return found
+}
+
+func kindOf(gvk schema.GroupVersionKind) string { return gvk.Version + "/" + gvk.Kind }

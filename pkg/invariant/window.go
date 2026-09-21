@@ -2,7 +2,14 @@ package invariant
 
 import (
 	"fmt"
+	"maps"
+	"slices"
+	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
+	"github.com/rosenhouse/botbox/pkg/observe"
 )
 
 // MaxEvidence caps how much of a request log or a version history one
@@ -94,4 +101,70 @@ func Recent[T any](evidence []T) []T {
 		return evidence[len(evidence)-MaxEvidence:]
 	}
 	return evidence
+}
+
+// Readiness is what a violation of the CR's readiness quotes: the state of the
+// objects the target managed at the verdict, and the versions nearest it
+// beside them. Neither side takes more than half the bound where the other can
+// use the rest (D39).
+func Readiness(history, managed []observe.Version) []observe.Version {
+	children := sample(managed)
+	// A managed object's state is quoted once. Where the history holds that
+	// same version, the state is the row to keep, and the object's earlier
+	// versions stay.
+	var rest []observe.Version
+	for _, v := range history {
+		if !slices.ContainsFunc(children, func(child observe.Version) bool {
+			return child.Key == v.Key && child.ResourceVersion == v.ResourceVersion
+		}) {
+			rest = append(rest, v)
+		}
+	}
+	keepRest, keepChildren := fairShare(len(rest), len(children))
+	quoted := append(rest[len(rest)-keepRest:], children[:keepChildren]...)
+	slices.SortStableFunc(quoted, byTime)
+	return quoted
+}
+
+// byTime orders evidence the way the report's table reads it, down the run.
+func byTime(a, b observe.Version) int { return a.Time.Compare(b.Time) }
+
+// fairShare splits the evidence bound between two lists, giving each at most
+// half of it where the other can use the rest.
+func fairShare(history, children int) (int, int) {
+	half := MaxEvidence / 2
+	switch {
+	case history+children <= MaxEvidence:
+		return history, children
+	case history <= half:
+		return history, MaxEvidence - history
+	case children <= half:
+		return MaxEvidence - children, children
+	default:
+		return half, MaxEvidence - half
+	}
+}
+
+// sample orders the objects the target managed for quoting: one kind at a time,
+// and within a kind the ones recorded nearest the verdict first (D39).
+func sample(managed []observe.Version) []observe.Version {
+	kinds := map[schema.GroupVersionKind][]observe.Version{}
+	for _, v := range managed {
+		kinds[v.GVK] = append(kinds[v.GVK], v)
+	}
+	order := slices.SortedFunc(maps.Keys(kinds), func(a, b schema.GroupVersionKind) int {
+		return strings.Compare(kindName(a), kindName(b))
+	})
+	for _, gvk := range order {
+		slices.SortStableFunc(kinds[gvk], func(a, b observe.Version) int { return b.Time.Compare(a.Time) })
+	}
+	var sampled []observe.Version
+	for i := 0; len(sampled) < len(managed); i++ {
+		for _, gvk := range order {
+			if i < len(kinds[gvk]) {
+				sampled = append(sampled, kinds[gvk][i])
+			}
+		}
+	}
+	return sampled
 }

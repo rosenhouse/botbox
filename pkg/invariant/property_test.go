@@ -2,6 +2,7 @@ package invariant_test
 
 import (
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
+	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
@@ -164,4 +166,25 @@ func TestPropertyEvaluatedAlwaysFiresOnAnEventTheTeardownCameAfter(t *testing.T)
 	in.Teardown = at(6 * time.Second)
 
 	fired(t, invariant.Property(in.Target.Properties[0]), in)
+}
+
+// A property about the children says how many there were and quotes them in
+// the order the table reads (#20).
+func TestAPropertyCountsAndOrdersTheStateItSaw(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(3*time.Second, child("w-1", "12")).
+		record(4*time.Second, child("w-0", "13")).
+		record(5*time.Second, widget("14", spec(3), status(3, 1))).
+		checkpoint(5*time.Second, invariant.Converged).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
+
+	if violation.Managed == nil || *violation.Managed != 2 {
+		t.Errorf("The violation counts %v managed objects, want the 2 the property saw.", managed(violation))
+	}
+	if !slices.IsSortedFunc(violation.Versions, func(a, b observe.Version) int { return a.Time.Compare(b.Time) }) {
+		t.Errorf("The evidence holds %v, want it in the order the run recorded.", quoted(violation))
+	}
 }

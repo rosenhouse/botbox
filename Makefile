@@ -13,6 +13,18 @@ CERT_MANAGER_CRDS_SHA256 ?= 262fef78478492cd35b73a1b227106b7802f9c056361d1f561d0
 # The release index setup-envtest downloads from, pinned to a controller-tools tag.
 ENVTEST_INDEX_URL ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/$(CONTROLLER_GEN_VERSION)/envtest-releases.yaml
 
+# The example draws its own sequences (DESIGN.md §10, M5). A pull request fixes
+# the seeds, so that a failing tier means the change under review and not a new
+# draw, and so the tier stays inside the ten minutes §11 budgets. Seeds 23 to 27
+# draw create, delete, recreate, restart and deleteManaged between them. The
+# negative control runs the first seed alone, and seed 23 draws a single op, so
+# minimizing it costs no replay. The nightly workflow draws its own seeds.
+EXAMPLE_SEED ?= 23
+EXAMPLE_RUNS ?= 5
+EXAMPLE_DEADLINE ?= 5m
+NIGHTLY_RUNS ?= 20
+NIGHTLY_DEADLINE ?= 30m
+
 # Project-local tool and asset directories. Both are git-ignored.
 LOCALBIN := $(CURDIR)/bin
 ENVTEST_ASSETS_DIR := $(LOCALBIN)/envtest
@@ -47,6 +59,7 @@ help:
 	@echo "  test                     Run the unit tier. No API server."
 	@echo "  test-envtest             Run the envtest tier."
 	@echo "  test-example             Run the cert-manager example and its negative control."
+	@echo "  test-example-nightly     Run the cert-manager example on seeds botbox draws."
 	@echo "  fmt                      Fail if any file needs gofmt."
 	@echo "  vet                      Run go vet over both tiers."
 
@@ -158,17 +171,24 @@ test:
 test-envtest: setup
 	KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" go test -tags envtest -count=1 ./...
 
-# The example tier of DESIGN.md §11. The negative control proves the example is
-# not passing vacuously: with the owner reference off, cert-manager retains the
-# issued Secret by design, and the target declares Secrets as managed, so G3
-# must report it.
+# The example tier of DESIGN.md §11. The pinned sequences are the worked example
+# of the format §7 states, so the tier runs them rather than letting them rot.
+# The negative control proves the example is not passing vacuously: with
+# the owner reference off, cert-manager retains the issued Secret by design, and
+# the target declares Secrets as managed, so G3 must report it.
 .PHONY: test-example
-test-example: verify-cert-manager-pin
+test-example: verify-cert-manager-pin setup build
 	@echo "==> the default configuration, which must pass"
-	@examples/cert-manager/quickstart.sh \
+	@examples/cert-manager/quickstart.sh --seed $(EXAMPLE_SEED) --runs $(EXAMPLE_RUNS) --deadline $(EXAMPLE_DEADLINE) \
 		|| { echo "test-example: the default configuration failed."; exit 1; }
+	@echo "==> the pinned sequences, which must pass as written"
+	@KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox run \
+		--target examples/cert-manager/target.yaml --deadline $(EXAMPLE_DEADLINE) \
+		examples/cert-manager/sequences/*.json \
+		|| { echo "test-example: a pinned sequence failed."; exit 1; }
 	@echo "==> the negative control, which must fail G3"
-	@log=$$(examples/cert-manager/quickstart.sh --launch-arg --enable-certificate-owner-ref=false 2>&1); \
+	@log=$$(examples/cert-manager/quickstart.sh --seed $(EXAMPLE_SEED) --runs 1 --deadline $(EXAMPLE_DEADLINE) \
+		--launch-arg --enable-certificate-owner-ref=false 2>&1); \
 	status=$$?; \
 	echo "$$log"; \
 	if [ $$status -eq 0 ]; then \
@@ -177,6 +197,30 @@ test-example: verify-cert-manager-pin
 	fi; \
 	if ! echo "$$log" | grep -q "G3 .*Secret example-tls"; then \
 		echo "test-example: the negative control failed, but not on G3 naming the retained Secret."; \
+		exit 1; \
+	fi
+
+# The nightly tier of DESIGN.md §10 (M5). botbox draws the seeds, so a find here
+# is a new one rather than the fixed seeds again, and every run prints its seed,
+# so the find replays (§11). It carries the same negative control as test-example,
+# because a nightly that only ever passes cannot tell a quiet night from a harness
+# that stopped judging.
+.PHONY: test-example-nightly
+test-example-nightly: verify-cert-manager-pin
+	@echo "==> drawn seeds, which must pass"
+	@examples/cert-manager/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE) \
+		|| { echo "test-example-nightly: a drawn seed failed."; exit 1; }
+	@echo "==> the negative control, which must fail G3"
+	@log=$$(examples/cert-manager/quickstart.sh --seed $(EXAMPLE_SEED) --runs 1 --deadline $(EXAMPLE_DEADLINE) \
+		--launch-arg --enable-certificate-owner-ref=false 2>&1); \
+	status=$$?; \
+	echo "$$log"; \
+	if [ $$status -eq 0 ]; then \
+		echo "test-example-nightly: the negative control passed, so the tier proves nothing."; \
+		exit 1; \
+	fi; \
+	if ! echo "$$log" | grep -q "G3 .*Secret example-tls"; then \
+		echo "test-example-nightly: the negative control failed for another reason than G3."; \
 		exit 1; \
 	fi
 

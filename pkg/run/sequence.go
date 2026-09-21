@@ -62,6 +62,9 @@ var opTypes = []OpType{OpCreate, OpUpdate, OpDelete, OpRecreate, OpSettle, OpRes
 // crOps act on the primary CR and may carry noSettle (DESIGN.md §4).
 var crOps = []OpType{OpCreate, OpUpdate, OpDelete, OpRecreate}
 
+// OnCR reports whether the op type acts on the primary CR.
+func (t OpType) OnCR() bool { return slices.Contains(crOps, t) }
+
 // Fault is what a fault op injects (DESIGN.md §5.2).
 type Fault struct {
 	Match  Match   `json:"match,omitzero"`
@@ -114,9 +117,9 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// settles reports whether the Runner waits for convergence after the op
+// Settles reports whether the Runner waits for convergence after the op
 // (DESIGN.md §5.5). A settle op is the wait itself.
-func (o Op) settles() bool {
+func (o Op) Settles() bool {
 	return o.Type == OpSettle || (!o.NoSettle && slices.Contains(mutatingOps, o.Type))
 }
 
@@ -175,12 +178,22 @@ func (s Sequence) Marshal() ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// Validate reports the first malformed op.
+// Validate reports the first malformed op, or a sequence that ends while the
+// target is still working.
 func (s Sequence) Validate() error {
 	for i, op := range s.Ops {
 		if err := op.validate(i); err != nil {
 			return fmt.Errorf("op %d: %w", i, err)
 		}
+	}
+	// The teardown's quiet window is the only one such a sequence would be
+	// judged on, and the teardown does not wait for convergence before it opens
+	// that window (DESIGN.md §6).
+	if len(s.Ops) == 0 {
+		return fmt.Errorf("the sequence holds no ops; want at least the create it opens with")
+	}
+	if !s.Ops[len(s.Ops)-1].Settles() {
+		return fmt.Errorf("the sequence does not end with an op that settles")
 	}
 	return nil
 }

@@ -70,6 +70,24 @@ func onlyRequest(t *testing.T, p *proxy.Proxy) proxy.Request {
 	return log[0]
 }
 
+// onlyFinishedRequest waits for that record's exchange to end. The client sees
+// its response before the proxy completes the record, so a test that asserts on
+// timing waits for it (see Proxy.Log).
+func onlyFinishedRequest(t *testing.T, p *proxy.Proxy) proxy.Request {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		got := onlyRequest(t, p)
+		if got.Latency > 0 {
+			return got
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("The proxy never finished the record %+v.", got)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 func TestRecordsTheParsedRequest(t *testing.T) {
 	cases := []struct {
 		method string
@@ -152,7 +170,7 @@ func TestRecordsTheUpstreamStatusAndLatency(t *testing.T) {
 
 	do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps/cm1", nil)
 
-	got := onlyRequest(t, p)
+	got := onlyFinishedRequest(t, p)
 	if got.Status != http.StatusNotFound {
 		t.Errorf("Recorded status %d, want 404.", got.Status)
 	}

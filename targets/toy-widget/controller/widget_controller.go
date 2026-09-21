@@ -3,6 +3,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"time"
@@ -134,10 +135,16 @@ func (r *Reconciler) b1Hold() time.Duration {
 	return r.B1Hold
 }
 
+// patchStatus writes the whole status, not the difference from the one the
+// Widget carries: a difference omits a field whose value did not change, so a
+// Widget created at count 0 would never gain status.ready at all.
 func (r *Reconciler) patchStatus(ctx context.Context, widget *toyv1.Widget, status toyv1.WidgetStatus) error {
-	base := widget.DeepCopy()
 	widget.Status = status
-	if err := r.Status().Patch(ctx, widget, client.MergeFrom(base)); err != nil {
+	patch, err := json.Marshal(map[string]any{"status": status})
+	if err != nil {
+		return fmt.Errorf("encoding the status: %w", err)
+	}
+	if err := r.Status().Patch(ctx, widget, client.RawPatch(types.MergePatchType, patch)); err != nil {
 		return fmt.Errorf("writing the status: %w", err)
 	}
 	return nil

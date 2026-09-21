@@ -8,6 +8,6 @@ import (
 )
 
 func main() {
-	c := &cli{stdout: os.Stdout, stderr: os.Stderr, open: openSession}
+	c := &cli{stdout: os.Stdout, stderr: os.Stderr, open: openSession, newGenerator: rapidGenerator}
 	os.Exit(c.main(context.Background(), os.Args[1:]))
 }

@@ -423,36 +423,41 @@ func TestRunResolvesDeleteManagedAtExecutionTime(t *testing.T) {
 	}
 }
 
-func TestRunReportsADeleteManagedThatResolvesToNothing(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		op       Op
-		wantCall string
-	}{
-		{
-			name: "an index past the managed objects",
-			op:   Op{Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(7)},
-		},
-		{
-			name: "a kind the target does not manage",
-			op:   Op{Type: OpDeleteManaged, Kind: "v1/Secret", Nth: nth(0)},
-		},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			h := newFakeHarness()
+// A generated deleteManaged can outrun what the target manages, and the run is
+// worth finishing. The skip is a note, never silence (DESIGN.md §6).
+func TestRunSkipsADeleteManagedThatResolvesToNothing(t *testing.T) {
+	h := newFakeHarness()
+	op := Op{Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(7)}
 
-			_, err := runFake(t, h, nil, sequenceOf(test.op))
+	result, err := runFake(t, h, nil, sequenceOf(op))
 
-			if err == nil {
-				t.Fatalf("The run succeeded, want a harness error.")
-			}
-			if !strings.Contains(err.Error(), test.op.Kind) {
-				t.Errorf("The run returned %q, want the kind named.", err)
-			}
-			if !slices.Contains(h.calls, "stop") {
-				t.Errorf("The run did %v, want it torn down anyway.", h.calls)
-			}
-		})
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if got := h.opCalls(); slices.ContainsFunc(got, func(call string) bool {
+		return strings.HasPrefix(call, "deleteManaged")
+	}) {
+		t.Errorf("The run did %v, want nothing deleted: the index resolves to nothing.", got)
+	}
+	if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], "op 0 (deleteManaged)") {
+		t.Errorf("The run reported the notes %v, want the skipped op named.", result.Notes)
+	}
+}
+
+func TestRunReportsADeleteManagedOfAKindTheTargetDoesNotManage(t *testing.T) {
+	h := newFakeHarness()
+	op := Op{Type: OpDeleteManaged, Kind: "v1/Secret", Nth: nth(0)}
+
+	_, err := runFake(t, h, nil, sequenceOf(op))
+
+	if err == nil {
+		t.Fatalf("The run succeeded, want a harness error.")
+	}
+	if !strings.Contains(err.Error(), op.Kind) {
+		t.Errorf("The run returned %q, want the kind named.", err)
+	}
+	if !slices.Contains(h.calls, "stop") {
+		t.Errorf("The run did %v, want it torn down anyway.", h.calls)
 	}
 }
 
@@ -628,7 +633,7 @@ func TestRunWritesTheSequenceToTheRunDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "run-1")
 	sequence := readGolden(t)
 
-	if err := writeRunSequence(dir, sequence); err != nil {
+	if err := WriteRunSequence(dir, sequence); err != nil {
 		t.Fatalf("Writing the run's sequence failed: %v", err)
 	}
 

@@ -362,11 +362,15 @@ remaining ownerReferences. A target excludes further paths with `equalIgnore` (�
 Details the example does not show:
 
 - Any CR op may carry `"noSettle": true`, which skips the Runner's implicit settle wait.
+- A sequence ends with an op that settles, or nothing judges the state it leaves behind
+  (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
 - `update` applies `patch` as a JSON merge patch (RFC 7386).
 - `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
   then name. The index is resolved at execution time and the chosen object is recorded by
-  name in the report. An index that resolves to nothing is a harness error (§11, exit 2).
+  name in the report. An index that resolves to nothing is skipped and reported as a note,
+  since a target that manages fewer objects than the sequence expected is behaving, not
+  failing. A kind the target does not declare in `manages` is a configuration error.
 
 `botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
 embed the minimized sequence in this format.
@@ -485,9 +489,10 @@ botbox generates from the CRD's OpenAPI v3 schema, and phase 1 does not install 
 target's admission webhooks. Rules that only a webhook enforces are therefore invisible to
 the generator. For cert-manager these include: a Certificate needs at least one of
 `commonName`, `dnsNames`, `ipAddresses`, `uris` or `emailAddresses`; `duration` must
-parse as a Go duration; `renewBefore` must be shorter than `duration`. The target keeps
-generation inside the valid subset with `sample`, `generate.mutate` and
-`generate.overlay`. A generated spec that the target rejects or ignores because it
+parse as a Go duration; `renewBefore` must be shorter than `duration`; a `dnsNames` entry
+must be a DNS name, which neither the CRD schema nor the API server checks, so the
+overlay spells out an RFC 1123 label. The target keeps generation inside the valid subset
+with `sample`, `generate.mutate` and `generate.overlay`. A generated spec that the target rejects or ignores because it
 violates such a rule is a target-declaration bug, not a finding; the journal records each
 rule that had to be encoded this way.
 
@@ -646,22 +651,26 @@ proxy; the `Image` launcher. Separate design addendum.
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `docs/`, and `bin/` for git-ignored
   build output.
-- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]...`;
+- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]... [<sequence.json>...]`;
   `botbox replay --target <yaml> [--deadline D] <sequence.json>`; `botbox version`.
-  `--deadline` defaults to 4m; the shrinker stops at the deadline and reports the smallest
-  failing sequence found so far. `--launch-arg` appends to `launch.args` (repeatable; a
-  later flag wins), which is how the bug matrix selects `--bug=N`. `--kubeconfig` selects an existing cluster instead of
-  envtest; `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
+  `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
+  says how many to draw. `--deadline` defaults to 4m, and the shrinker stops there and
+  reports the smallest failing sequence it found. `--launch-arg` appends to `launch.args`
+  (repeatable; a later flag wins), which is how the bug matrix selects `--bug=N`.
+  `--kubeconfig` selects an existing cluster instead of envtest; `KUBEBUILDER_ASSETS`
+  locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
   harness error.
 - **Output.** `--out` defaults to `botbox-out/`. Each invocation writes
   `<out>/<timestamp>-<seed>/`; each failing run writes `run-<n>/` under it with
   `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl` and
-  `target.log`. Passing runs are not persisted.
+  `target.log`, plus `sequence.shrunk.json` where the deadline ended the shrink pass
+  before its result could be run there. Passing runs are not persisted.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` = the cert-manager example under envtest, under 10
   minutes on CI including obtaining the binary (cached). All three run on every PR.
-  `make test-kind` = kind, nightly or on demand.
+  `make test-example-nightly` = the same example on seeds botbox draws, nightly, with the
+  negative control. `make test-kind` = kind, nightly or on demand.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
@@ -885,7 +894,22 @@ built from source and run as a black-box binary.
   here ends with an op that settles, and a teardown that settles first, which would also
   give §6's "within `T_settle` after faults stop" somewhere to be measured, waits for M6.
   G1's row promised `T_settle` to fall quiet while the code judged the `T_stable` after
-  the settle wait, which is shorter whenever the target converges early. The statement now says what the code does
-  and what G2 already said: the settle wait is where botbox judges the target converged,
-  and B1 keeps the G1 row D26 gave it, because it reports itself converged and only then
-  creates its children.
+  the settle wait, which is shorter whenever the target converges early. The statement
+  now says what the code does and what G2 already said: the settle wait is where botbox
+  judges the target converged, and B1 keeps the G1 row D26 gave it, because it reports
+  itself converged and only then creates its children.
+- **D33 A sequence ends with an op that settles, and generation adds the settle waits
+  that leave the ops it drew judged.** D32 left this a statement about the sequences
+  in the repo, and the generator of M5 then drew sequences ending in a `noSettle`, a
+  `restart` or nothing at all: roughly half of them, each judged on a window that opens
+  while the target is still working, so a correct target failed G4. `Sequence.Validate`
+  rejects that shape now, which also keeps the shrink pass from proposing it, and
+  generation appends the settle a drawn op needs. A `noSettle` in the middle of a
+  sequence stands: skipping that wait is what it is for.
+
+  Generation also wraps every drawn `restart` in settle waits, because G5 compares the
+  converged state either side of one: a change before it leaves G5 nothing to compare,
+  and a change after it is blamed on the restart. That is a rule for generation, not for
+  the format, because a hand-written sequence may mean to restart and change the spec at
+  once — `b0.json` and `b10.json` both do. `Options.MaxOps` therefore bounds the ops a
+  draw makes, not the sequence's length: at most two settles join each drawn op.

@@ -29,7 +29,9 @@ properties:
 # No webhook runs, so only paths whose valid values the overlay can state are
 # mutated (DESIGN.md §8.3). The CRD schema constrains none of these: it takes
 # any string as a duration or a DNS name, and would let renewBefore exceed
-# duration, so renewBefore is not mutated at all.
+# duration, so renewBefore is not mutated at all. The dnsNames pattern spells
+# out one RFC 1123 label, because neither the CRD nor the API server rejects a
+# label that starts or ends with a hyphen.
 generate:
   mutate:
     - spec.dnsNames
@@ -37,7 +39,7 @@ generate:
     - spec.privateKey.algorithm
     - spec.privateKey.rotationPolicy
   overlay:
-    spec.dnsNames: {minItems: 1, maxItems: 3, items: {pattern: "^[a-z0-9-]{1,32}\\.example\\.test$"}}
+    spec.dnsNames: {minItems: 1, maxItems: 3, items: {pattern: "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?\\.example\\.test$"}}
     spec.duration: {enum: ["1h", "24h", "2160h"]}
 launch:
   binary: bin/cert-manager-controller

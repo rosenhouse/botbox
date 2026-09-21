@@ -108,6 +108,15 @@ func TestWidgetController(t *testing.T) {
 		})
 	})
 
+	// A Widget born at count zero is ready the moment its status lands, and a
+	// target is only ready when every field its predicate reads is there (§8.1).
+	t.Run("writes status.ready for a Widget created at count zero", func(t *testing.T) {
+		widget := createWidget(t, ctx, c, 0)
+
+		requireStatus(t, ctx, c, widget, 0)
+		requireStatusFields(t, ctx, c, widget)
+	})
+
 	t.Run("controls only its own children", func(t *testing.T) {
 		namespace := createNamespace(t, ctx, c)
 		mine := createWidgetIn(t, ctx, c, namespace, "mine", 2)

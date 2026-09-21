@@ -9,3 +9,6 @@ botbox-out/
 .claude/worktrees/
 # Build output of the spike module.
 docs/spikes/cert-manager-envtest/cert-manager-envtest
+
+# rapid writes a reproduction file beside a failing property test.
+testdata/rapid/

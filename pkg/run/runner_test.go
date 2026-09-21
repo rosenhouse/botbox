@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -27,10 +28,12 @@ type fakeHarness struct {
 
 	converged bool
 	clean     bool
-	managed   map[schema.GroupVersionKind][]string
-	count     int
-	forced    []string
-	fail      map[string]error
+	// store is the version history the checks and the report read.
+	store   *observe.Store
+	managed map[schema.GroupVersionKind][]string
+	count   int
+	forced  []string
+	fail    map[string]error
 
 	// deleteCRDelay holds the CR delete open, and deletedCRAt is when it began.
 	// Together they show whether the teardown was stamped before the delete.
@@ -46,6 +49,7 @@ func newFakeHarness() *fakeHarness {
 	return &fakeHarness{
 		converged: true,
 		clean:     true,
+		store:     observe.NewStore(observe.Options{Namespace: fakeNamespace, Primary: widgetKind, Manages: []schema.GroupVersionKind{configMapKind}}),
 		managed:   map[schema.GroupVersionKind][]string{configMapKind: {"widget-0", "widget-1"}},
 		fail:      map[string]error{},
 	}
@@ -56,7 +60,9 @@ func (f *fakeHarness) record(call string) error {
 	return f.fail[call]
 }
 
-func (f *fakeHarness) namespace() string { return "botbox-run-test" }
+const fakeNamespace = "botbox-run-test"
+
+func (f *fakeHarness) namespace() string { return fakeNamespace }
 
 func (f *fakeHarness) settle(context.Context) (bool, error) {
 	return f.converged, f.record("settle")
@@ -118,12 +124,26 @@ func (f *fakeHarness) forceFinalizers(context.Context) ([]string, error) {
 }
 
 func (f *fakeHarness) empty(context.Context) error { return f.record("empty") }
-func (f *fakeHarness) objects() *observe.Store     { return nil }
+func (f *fakeHarness) objects() *observe.Store     { return f.store }
 func (f *fakeHarness) stop(context.Context) error  { return f.record("stop") }
 
 // requests grows with the run, so that a log sampled late is longer than one
-// sampled at a checkpoint.
-func (f *fakeHarness) requests() []proxy.Request { return make([]proxy.Request, len(f.calls)) }
+// sampled at a checkpoint. Each entry names the call it followed.
+func (f *fakeHarness) requests() []proxy.Request {
+	log := make([]proxy.Request, len(f.calls))
+	for i, call := range f.calls {
+		log[i] = proxy.Request{Path: call}
+	}
+	return log
+}
+
+// recordCR records a version of the CR, as the Observer would.
+func (f *fakeHarness) recordCR(name, resourceVersion string) {
+	object := widget(name)
+	object.SetNamespace(fakeNamespace)
+	object.SetResourceVersion(resourceVersion)
+	f.store.Record(widgetKind, object, time.Now())
+}
 
 func (f *fakeHarness) opCalls() []string       { return f.calls[:f.teardownStart()] }
 func (f *fakeHarness) teardownCalls() []string { return f.calls[f.teardownStart():] }
@@ -342,6 +362,37 @@ func TestRunRecordsG4WhenASettleExpiresWithNoFaultActive(t *testing.T) {
 	}
 	if got := h.opCalls(); slices.Contains(got, "deleteCR widget") {
 		t.Errorf("The run did %v, want it to end at the G4 violation.", got)
+	}
+}
+
+// A G4 the expired wait raised carries the evidence a check's G4 would: the
+// CR's version history and the request log as the expiry left it
+// (DESIGN.md §5.7).
+func TestTheG4OfAnExpiredWaitCarriesTheEvidence(t *testing.T) {
+	h := newFakeHarness()
+	h.converged = false
+	for i := range 25 {
+		h.recordCR("widget", strconv.Itoa(10+i))
+	}
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || result.Violation.ID != "G4" {
+		t.Fatalf("The run reported %+v, want a G4 violation.", result.Violation)
+	}
+	versions := result.Violation.Versions
+	if len(versions) != 20 {
+		t.Fatalf("The violation carries %d versions of the CR, want the 20 a report quotes.", len(versions))
+	}
+	if last := versions[19].ResourceVersion; last != "34" {
+		t.Errorf("The versions end at resourceVersion %s, want the CR's latest, 34.", last)
+	}
+	requests := result.Violation.Requests
+	if len(requests) == 0 || requests[len(requests)-1].Path != "settle" {
+		t.Errorf("The violation carries the requests %v, want the log as the expired wait left it.", requests)
 	}
 }
 

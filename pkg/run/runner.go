@@ -12,6 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -65,8 +66,8 @@ type Violation struct {
 	Statement string
 	// Evidence quotes what the run did, in one line.
 	Evidence string
-	// Requests and Versions are what the check named, which a report quotes
-	// (DESIGN.md §5.7). A violation the Runner raises itself carries neither.
+	// Requests and Versions are the evidence the violation named, which a
+	// report quotes (DESIGN.md §5.7).
 	Requests []proxy.Request
 	Versions []observe.Version
 }
@@ -396,6 +397,8 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 				Statement: "the target's Ready predicate holds within T_settle after a spec change",
 				Evidence: fmt.Sprintf("the settle wait after op %d (%s) expired after %v with no fault active",
 					op.Index, op.Type, r.target.Timeouts.Settle),
+				Requests: invariant.Recent(r.h.requests()),
+				Versions: invariant.Recent(r.h.objects().HistoryOf(r.target.Primary, r.cr)),
 			})
 		}
 	}

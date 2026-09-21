@@ -32,7 +32,7 @@ func Convergence(in Input) (Result, error) {
 			Statement: fmt.Sprintf("the CR %s was not ready %s after %s%s",
 				cr.Name, in.timeouts().Settle, from.what, quoted(err)),
 			At:       deadline,
-			Versions: recent(in.History.History(cr.Key)),
+			Versions: Recent(in.History.History(cr.Key)),
 		})
 	}
 	out.reportExpiredWaits(in)
@@ -84,7 +84,7 @@ func (out *Result) reportExpiredWaits(in Input) {
 			Statement: fmt.Sprintf("the settle wait after %s expired with no fault active",
 				in.describeOp(checkpoint.Op)),
 			At:       checkpoint.Time,
-			Versions: recent(in.versionsIn(started, checkpoint.Time)),
+			Versions: Recent(in.versionsIn(started, checkpoint.Time)),
 		})
 	}
 }

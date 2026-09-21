@@ -23,7 +23,7 @@ func BoundedReconciliation(in Input) (Result, error) {
 			Statement: fmt.Sprintf("the target made %d API requests in %s, which §6 requires to be quiet",
 				len(noisy), window),
 			At:       noisy[0].Start,
-			Requests: recent(noisy),
+			Requests: Recent(noisy),
 		})
 	}
 	return out, nil

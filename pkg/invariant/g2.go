@@ -19,7 +19,7 @@ func NoChurn(in Input) (Result, error) {
 				Statement: fmt.Sprintf("the target changed %d objects in %s, where §6 requires none",
 					len(moved), window),
 				At:       moved[0].Time,
-				Versions: recent(moved),
+				Versions: Recent(moved),
 			})
 		}
 		if written := in.requestsIn(window, writesStatus); len(written) > 0 {
@@ -27,7 +27,7 @@ func NoChurn(in Input) (Result, error) {
 				Statement: fmt.Sprintf("the target made %d status writes in %s, which §6 counts as churn",
 					len(written), window),
 				At:       written[0].Start,
-				Requests: recent(written),
+				Requests: Recent(written),
 			})
 		}
 	}

@@ -425,3 +425,16 @@ func TestTheStoreServesReadersWhileItRecords(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+// The Observer watches one namespace, so a kind and a name identify an object
+// (DESIGN.md §5.3).
+func TestHistoryOfFillsInTheWatchedNamespace(t *testing.T) {
+	s := observe.NewStore(managing(configMapGVK))
+	s.Record(widgetGVK, object(widgetGVK, "widget", "10"), at(0))
+	s.Record(widgetGVK, object(widgetGVK, "widget", "11"), at(1))
+	s.Record(configMapGVK, object(configMapGVK, "widget", "12"), at(2))
+
+	if got := resourceVersions(s.HistoryOf(widgetGVK, "widget")); !slices.Equal(got, []string{"10", "11"}) {
+		t.Errorf("HistoryOf holds resourceVersions %v, want the widget's 10 and 11 in order.", got)
+	}
+}

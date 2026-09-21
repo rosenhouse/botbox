@@ -104,6 +104,18 @@ func (r *run) op(opType invariant.OpType, when time.Duration) *run {
 	return r
 }
 
+// deletedManaged is a DeleteManaged op and the object it resolved to, which
+// botbox deleted behind the target's back (DESIGN.md §5.4).
+func (r *run) deletedManaged(when time.Duration, name string) *run {
+	r.in.Ops = append(r.in.Ops, invariant.Op{
+		Index:   len(r.in.Ops),
+		Type:    invariant.OpDeleteManaged,
+		Time:    at(when),
+		Deleted: observe.Key{GVK: configMapGVK, Namespace: namespace, Name: name},
+	})
+	return r
+}
+
 func (r *run) checkpoint(when time.Duration, result invariant.SettleResult) *run {
 	r.in.Checkpoints = append(r.in.Checkpoints, invariant.Checkpoint{
 		Op: len(r.in.Ops) - 1, Time: at(when), Settle: result,

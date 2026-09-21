@@ -307,7 +307,8 @@ emulated on envtest, §5.8). G3 therefore fails on orphans, meaning children wit
 ownerReference to the CR, and on finalizers that never clear. The teardown watches the
 namespace until it is clean or `T_delete` expires (§5.5 step 4). A namespace that came
 clean satisfies G3 at that instant, which is how a target that cleans up promptly is
-judged rather than left unjudged: the run stops watching long before `T_delete` is up.
+judged rather than left unjudged: the run stops watching long before `T_delete` is up. An
+object a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (D38).
 
 **What the proxy cannot see.** G1 and G6 observe only requests that leave the target
 process. Reads served from a client-side cache are invisible, so a reconcile loop that
@@ -322,8 +323,8 @@ which G1 excludes: G1 ignores a watch because a watch that hangs is the target w
 while a watch that fails returns at once and repeating it is a loop.
 
 **Notes.** A check that could not judge something records a note naming it: G3 for a
-deletion whose deadline the run did not reach or that a fault reached into, G5 for a
-`Restart` missing a snapshot. The Runner carries the last checkpoint's notes out and
+deletion whose deadline the run did not reach, that a fault reached into, or that botbox
+cleaned up inside, G5 for a `Restart` missing a snapshot. The Runner carries the last checkpoint's notes out and
 `botbox` prints them at the end of the run, because a check that was skipped otherwise
 reads like one that passed.
 
@@ -953,6 +954,15 @@ built from source and run as a black-box binary.
   `objects.jsonl`. The report also carries what no check could judge, for D31's reason: a
   report that omits "G3 could not be judged" reads like one where G3 passed, and it is the
   artefact a human actually reads.
+- **D38 G3 credits no cleanup botbox performed.** A `DeleteManaged` op deletes a managed
+  object behind the target's back (§5.4). Inside a CR deletion's window that deletes the
+  evidence: G3 asks whether the object was gone by the deadline and never asked who
+  removed it, so `b3.json` with one `deleteManaged` op added turned a reported orphan into
+  "every run passed". The Runner knows which object the op resolved to and the engine now
+  receives it. G3 notes an object botbox took inside the window rather than counting it as
+  cleaned. A note and not a violation: the target still had until the deadline, and an
+  object botbox took at or after the deadline was still there at the deadline, which
+  already fires.
 - **D37 A forced finalizer is a note, not a reason to withhold G3.** §5.5 step 4 said each
   forced removal invalidates G3 for the run, and nothing implemented it. Implementing it
   literally would have thrown away true findings. The teardown stamps the end of the

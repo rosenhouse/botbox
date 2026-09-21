@@ -19,6 +19,7 @@ func CleanDeletion(in Input) (Result, error) {
 	out := Result{ID: "G3"}
 	for _, deleted := range in.crDeletions() {
 		deadline := deleted.at.Add(in.timeouts().Delete)
+		out.noteWhatBotboxTook(in, deleted, deadline)
 		switch {
 		case in.cleanedBy(deadline): // The namespace emptied, so nothing was left.
 		case in.faulted(deleted.at, deadline):
@@ -30,6 +31,27 @@ func CleanDeletion(in Input) (Result, error) {
 		}
 	}
 	return out, nil
+}
+
+// noteWhatBotboxTook records the objects botbox deleted inside the window
+// after the CR went. A deleteManaged op takes an object out of the target's
+// hands (DESIGN.md §5.4), and the target had until the deadline, so whether
+// it would have cleaned that object is nobody's to say (D38). Judging it
+// either way would be a guess; a silent pass reads as cleanup that happened.
+func (out *Result) noteWhatBotboxTook(in Input, deleted deletion, deadline time.Time) {
+	had := in.stateAt(deleted.at)
+	for _, op := range in.Ops {
+		// Only a DeleteManaged op names an object it took (DESIGN.md §5.4),
+		// and only one the CR still had when it went is this deletion's.
+		if _, took := had.version(op.Deleted); !took {
+			continue
+		}
+		if !op.Time.After(deleted.at) || op.Time.After(deadline) {
+			continue
+		}
+		out.note("for the deletion of %s: op %d deleted %s %s inside its %s deadline, so the target was never asked to clean it up",
+			deleted.key.Name, op.Index, kindName(op.Deleted.GVK), op.Deleted.Name, in.timeouts().Delete)
+	}
 }
 
 // cleanedBy reports whether botbox saw the run namespace empty by t, which

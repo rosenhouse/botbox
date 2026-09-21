@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
+	"github.com/rosenhouse/botbox/pkg/observe"
+	"github.com/rosenhouse/botbox/pkg/target"
 )
 
 // Engine is the invariant engine as a Checker (DESIGN.md §5.6): the generic
@@ -44,7 +46,7 @@ func Evaluate(in Input) ([]invariant.Result, error) {
 		Target:      in.Target,
 		Requests:    in.Requests,
 		History:     in.Objects,
-		Ops:         engineOps(in.Timeline.Ops),
+		Ops:         engineOps(in.Target, in.Timeline),
 		Checkpoints: engineCheckpoints(in.Timeline.Checkpoints),
 		Faults:      engineFaults(in.Timeline.Faults),
 		Teardown:    in.Timeline.Deletion.Start,
@@ -58,11 +60,21 @@ func Evaluate(in Input) ([]invariant.Result, error) {
 }
 
 // engineOps carries each op's index, which is what a checkpoint names and not
-// the op's position in the timeline.
-func engineOps(applied []AppliedOp) []invariant.Op {
-	ops := make([]invariant.Op, len(applied))
-	for i, op := range applied {
+// the op's position in the timeline, and the object a deleteManaged op
+// resolved to: G3 does not credit the target for a cleanup botbox performed
+// (DESIGN.md §5.4, D38).
+func engineOps(t *target.Target, timeline Timeline) []invariant.Op {
+	ops := make([]invariant.Op, len(timeline.Ops))
+	for i, op := range timeline.Ops {
 		ops[i] = invariant.Op{Index: op.Op.Index, Type: invariant.OpType(op.Op.Type), Time: op.At}
+		if op.Resolved == "" {
+			continue
+		}
+		gvk, err := managedKind(t, op.Op.Kind)
+		if err != nil {
+			continue // The op never ran: the Runner refuses a kind it cannot resolve.
+		}
+		ops[i].Deleted = observe.Key{GVK: gvk, Namespace: timeline.Namespace, Name: op.Resolved}
 	}
 	return ops
 }

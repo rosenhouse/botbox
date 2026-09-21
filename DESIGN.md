@@ -231,8 +231,9 @@ how many of its ops the run reached, the violated invariant or property with the
 evidence (request log excerpt, object version timeline), the target and versions, the
 seed, and a one-line replay command. The run directory also holds recordings of the run
 (§11), so a report can be re-examined without re-running. A violation that judged the
-CR's readiness also says how many objects the target managed where it failed, because a
-child the target never created has no version to quote.
+CR's readiness also quotes the state of the objects the target managed where it failed,
+within the same bound, and says how many there were: a child the target never created has
+no version to quote, and the count is what a report about a missing one turns on (D39).
 
 A report is a snapshot taken where the check failed, and the recordings beside it are
 finalized when the run ends. A request still open at the snapshot, which a watch usually
@@ -948,6 +949,19 @@ built from source and run as a black-box binary.
   reading as passes until D31 made notes visible. The teardown now stamps
   `Timeline.Cleaned` from what `awaitClean` saw, and G3 reads that. A run that never came
   clean leaves it zero, which is the case G3 exists to report.
+- **D39 A readiness verdict quotes the children, and neither side takes the whole bound.**
+  G4's evidence was the primary CR's version history alone, so a finding about a managed
+  object left the object out. A count answers the case the child was never created in,
+  since an object that does not exist has no version any table can hold, but it says
+  nothing about a child that exists and is wrong. A verdict quotes one version of each
+  object the target managed at the instant it judged, and fills the rest of D35's bound
+  with the versions nearest that instant. Neither side takes more than half the bound
+  where the other can use the rest: a CR that writes its status twenty times in the last
+  second would otherwise crowd out the child the finding is about, and a target managing
+  more objects than the bound would crowd out the CR its statement names. The children are
+  taken one kind at a time and newest first, so that a bound too small for them drops the
+  oldest of each kind rather than every object of the kinds that sort last. What a bound
+  this tight dropped is not visible in the report itself, which is #22.
 - **D35 A report quotes the evidence nearest the violation, and carries the notes.**
   §5.7 asks a report to quote the request log and the version timeline and does not say
   how much. A run makes thousands of requests, and a report nobody reads is worth

@@ -418,16 +418,19 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 			return r.targetStopped(status)
 		}
 		if !r.faultActive() {
-			managed := r.h.managedCount()
+			// One read of the managed objects answers both, so that the count
+			// cannot disagree with the versions quoted beside it.
+			managed := r.h.objects().Managed()
+			count := len(managed)
 			r.violate(Violation{
 				ID: "G4",
 				Statement: fmt.Sprintf("the settle wait after op %d (%s) expired with no fault active",
 					op.Index, op.Type),
 				Evidence: fmt.Sprintf("in %v of T_settle the target never held its Ready predicate with %v of quiet behind it; %s",
-					r.target.Timeouts.Settle, r.target.Timeouts.Stable, managedClause(managed)),
+					r.target.Timeouts.Settle, r.target.Timeouts.Stable, managedClause(count)),
 				Requests: invariant.Recent(r.h.requests()),
-				Versions: invariant.Recent(r.h.objects().HistoryOf(r.target.Primary, r.cr)),
-				Managed:  &managed,
+				Versions: invariant.Readiness(r.h.objects().HistoryOf(r.target.Primary, r.cr), managed),
+				Managed:  &count,
 			})
 		}
 	}

@@ -31,12 +31,13 @@ func Convergence(in Input) (Result, error) {
 		if ready && err == nil {
 			continue
 		}
+		managed := seen.managed(in)
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the CR %s was not ready %s after %s%s",
 				cr.Name, in.timeouts().Settle, from.what, quoted(err)),
 			At:       deadline,
-			Versions: Recent(in.History.History(cr.Key)),
-			Managed:  counted(seen.managed(in)),
+			Versions: Readiness(upTo(in.History.History(cr.Key), deadline), managed),
+			Managed:  counted(managed),
 		})
 	}
 	out.reportExpiredWaits(in)
@@ -84,12 +85,13 @@ func (out *Result) reportExpiredWaits(in Input) {
 		if in.faulted(started, checkpoint.Time) {
 			continue
 		}
+		managed := in.stateAt(checkpoint.Time).managed(in)
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the settle wait after %s expired with no fault active",
 				in.describeOp(checkpoint.Op)),
 			At:       checkpoint.Time,
-			Versions: Recent(in.versionsIn(started, checkpoint.Time)),
-			Managed:  counted(in.stateAt(checkpoint.Time).managed(in)),
+			Versions: Readiness(in.versionsIn(started, checkpoint.Time), managed),
+			Managed:  counted(managed),
 		})
 	}
 }
@@ -108,6 +110,12 @@ func (in Input) describeOp(index int) string {
 		return describe(op)
 	}
 	return "teardown"
+}
+
+// upTo drops the versions recorded after the verdict, which a report of what
+// the run looked like at that instant cannot quote.
+func upTo(versions []observe.Version, t time.Time) []observe.Version {
+	return slices.DeleteFunc(slices.Clone(versions), func(v observe.Version) bool { return v.Time.After(t) })
 }
 
 // counted is the count a violation carries, which is never nil where a check

@@ -1,12 +1,17 @@
 package invariant_test
 
 import (
+	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"github.com/rosenhouse/botbox/pkg/invariant"
+	"github.com/rosenhouse/botbox/pkg/observe"
 )
 
 func TestG4PassesWhenTheCRIsReadyWithinTheSettleTimeout(t *testing.T) {
@@ -253,5 +258,204 @@ func TestG4CountsTheManagedObjectsAtAnExpiredWait(t *testing.T) {
 
 	if violation.Managed == nil || *violation.Managed != 1 {
 		t.Fatalf("The violation counts %v managed objects, want the 1 the wait expired with.", managed(violation))
+	}
+}
+
+// A child that exists and is wrong is what the verdict is about, so G4 quotes
+// its state beside the CR's history (#20).
+func TestG4QuotesTheStateOfEveryManagedObject(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(0, 1)), child("w-0", "11", data("wrong"))).
+		record(2*time.Second, widget("12", spec(2), status(0, 1))).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if !slices.ContainsFunc(violation.Versions, func(v observe.Version) bool { return v.GVK == configMapGVK }) {
+		t.Fatalf("The evidence holds %v, want the managed object the verdict is about.", quoted(violation))
+	}
+	if !slices.ContainsFunc(violation.Versions, func(v observe.Version) bool { return v.GVK == widgetGVK }) {
+		t.Errorf("The evidence holds %v, want the CR the statement names.", quoted(violation))
+	}
+	// The report's table reads down the run, so the evidence is in time order.
+	if !slices.IsSortedFunc(violation.Versions, func(a, b observe.Version) int { return a.Time.Compare(b.Time) }) {
+		t.Errorf("The evidence holds %v, want it in the order the run recorded.", quoted(violation))
+	}
+}
+
+// A child that changed inside the window is in the history already, so the
+// state quoted beside it is not a second row for the same version (#20).
+func TestG4QuotesAChildThatChangedInsideTheWindowOnce(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1))).
+		record(2*time.Second, child("w-0", "11")).
+		checkpoint(5*time.Second, invariant.Expired).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if got := versionsOf(violation, configMapGVK); len(got) != 1 {
+		t.Errorf("The evidence holds %v, want one row for the child.", quoted(violation))
+	}
+}
+
+// The children are reserved against a chatty CR, the CR keeps its latest
+// version because the statement names it, and neither side takes the evidence
+// past one bound (#20, D35, D39).
+func TestG4KeepsTheCRAndTheChildrenInsideOneBound(t *testing.T) {
+	for _, c := range []struct {
+		crVersions, children  int
+		wantCRs, wantChildren int
+	}{
+		// Neither side takes more than half where the other can use it.
+		{crVersions: 41, children: 35, wantCRs: 10, wantChildren: 10},
+		{crVersions: 40, children: 5, wantCRs: 15, wantChildren: 5},
+		{crVersions: 5, children: 30, wantCRs: 5, wantChildren: 15},
+		{crVersions: 3, children: 2, wantCRs: 3, wantChildren: 2},
+	} {
+		t.Run(fmt.Sprintf("%d versions of the CR and %d children", c.crVersions, c.children), func(t *testing.T) {
+			r := newRun().op(invariant.OpCreate, 0)
+			for i := range c.crVersions {
+				r.record(time.Duration(i)*100*time.Millisecond, widget(strconv.Itoa(10+i), spec(30), status(0, 1)))
+			}
+			for i := range c.children {
+				r.record(3*time.Second, child("w-"+strconv.Itoa(i), strconv.Itoa(100+i)))
+			}
+			in := r.through(8 * time.Second)
+
+			violation := fired(t, invariant.Convergence, in)
+
+			if len(violation.Versions) > invariant.MaxEvidence {
+				t.Fatalf("The evidence holds %d versions, over the bound of %d.", len(violation.Versions), invariant.MaxEvidence)
+			}
+			crs := versionsOf(violation, widgetGVK)
+			if len(crs) != c.wantCRs {
+				t.Errorf("The evidence holds %d versions of the CR, want %d.", len(crs), c.wantCRs)
+			}
+			if latest := strconv.Itoa(9 + c.crVersions); len(crs) == 0 || crs[len(crs)-1].ResourceVersion != latest {
+				t.Errorf("The evidence holds %v of the CR, want it to end at its latest, %s.", quoted(violation), latest)
+			}
+			if children := versionsOf(violation, configMapGVK); len(children) != c.wantChildren {
+				t.Errorf("The evidence holds %d children, want %d.", len(children), c.wantChildren)
+			}
+		})
+	}
+}
+
+// A child that did not change inside the wait is still the state the wait
+// expired on (#20).
+func TestG4QuotesAChildThatNeverChangedDuringAnExpiredWait(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(1), status(1, 1)), child("w-0", "11")).
+		checkpoint(2*time.Second, invariant.Converged).
+		op(invariant.OpUpdate, 10*time.Second).
+		record(11*time.Second, widget("12", spec(2), generation(2), status(2, 2))).
+		checkpoint(15*time.Second, invariant.Expired).
+		through(18 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if !slices.ContainsFunc(violation.Versions, func(v observe.Version) bool { return v.GVK == configMapGVK }) {
+		t.Fatalf("The evidence holds %v, want the child the wait expired with.", quoted(violation))
+	}
+}
+
+// A target manages several kinds, and the bound takes them one kind at a time
+// so that none is lost whole (#20, D39).
+func TestG4QuotesEveryManagedKindItCan(t *testing.T) {
+	r := newRunManaging(configMapGVK, secretGVK).op(invariant.OpCreate, 0)
+	for i := range 40 {
+		r.record(time.Duration(i)*10*time.Millisecond, widget(strconv.Itoa(10+i), spec(30), status(0, 1)))
+	}
+	for i := range 25 {
+		r.record(time.Second, child("w-"+strconv.Itoa(i), strconv.Itoa(100+i)))
+	}
+	for i := range 5 {
+		r.record(time.Second, secret("s-"+strconv.Itoa(i), strconv.Itoa(200+i)))
+	}
+	in := r.through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	for _, gvk := range []schema.GroupVersionKind{configMapGVK, secretGVK} {
+		if got := versionsOf(violation, gvk); len(got) == 0 {
+			t.Errorf("The evidence holds no %s, and the target managed some: %v", kindOf(gvk), quoted(violation))
+		}
+	}
+}
+
+// The children quoted are the ones nearest the verdict, because a target that
+// manages more than the bound has to lose some (#20, D39).
+func TestG4QuotesTheChildrenNearestTheVerdict(t *testing.T) {
+	r := newRun().op(invariant.OpCreate, 0)
+	r.record(time.Second, widget("10", spec(30), status(0, 1)))
+	for i := range 30 {
+		r.record(time.Duration(100+i)*10*time.Millisecond, child("w-"+strconv.Itoa(i), strconv.Itoa(100+i)))
+	}
+	in := r.through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	children := versionsOf(violation, configMapGVK)
+	if len(children) == 0 {
+		t.Fatalf("The evidence holds no children: %v", quoted(violation))
+	}
+	if last := children[len(children)-1]; last.Name != "w-29" {
+		t.Errorf("The children quoted end at %s, want w-29, the one nearest the verdict.", last.Name)
+	}
+}
+
+// A report of what the run looked like at the verdict cannot quote what came
+// after it (#20).
+func TestG4QuotesNoVersionRecordedAfterTheVerdict(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(0, 1))).
+		record(7*time.Second, widget("11", spec(2), status(2, 1))).
+		through(9 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	for _, v := range violation.Versions {
+		if v.Time.After(violation.At) {
+			t.Errorf("The evidence quotes %s at %s, after the verdict at %s.", v.Name, v.Time, violation.At)
+		}
+	}
+}
+
+// A child that changed inside the wait keeps the version it changed from: only
+// the row the state repeats is dropped (#20).
+func TestG4QuotesAChildsEarlierVersionBesideItsState(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1))).
+		record(2*time.Second, child("w-0", "11")).
+		record(3*time.Second, child("w-0", "12", data("changed"))).
+		checkpoint(5*time.Second, invariant.Expired).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if got := versionsOf(violation, configMapGVK); len(got) != 2 {
+		t.Errorf("The evidence holds %v, want both versions of the child it changed.", quoted(violation))
+	}
+}
+
+// A resourceVersion is opaque, so two objects may carry the same one: what the
+// state repeats is one object's version, not one string (#20).
+func TestG4QuotesACRVersionAChildsResourceVersionMatches(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("11", spec(2), status(0, 1))).
+		record(2*time.Second, child("w-0", "11")).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if got := versionsOf(violation, widgetGVK); len(got) != 1 {
+		t.Errorf("The evidence holds %v of the CR, want the one version it has.", quoted(violation))
 	}
 }

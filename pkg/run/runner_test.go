@@ -626,7 +626,7 @@ func TestRunReportsADeleteManagedOfAKindTheTargetDoesNotManage(t *testing.T) {
 
 func TestRunTearsDownInTheOrderTheDesignGives(t *testing.T) {
 	h := newFakeHarness()
-	h.forced = []string{"v1/ConfigMap widget-0"}
+	h.forced = []string{"v1/ConfigMap widget-0", "toy.botbox/v1/Widget widget"}
 	sequence := sequenceOf(Op{Type: OpCreate, Obj: widget("widget")})
 
 	result, err := runFake(t, h, nil, sequence)
@@ -647,8 +647,18 @@ func TestRunTearsDownInTheOrderTheDesignGives(t *testing.T) {
 		t.Errorf("The teardown did\n\t%v\nwant\n\t%v", got, want)
 	}
 	if !slices.Equal(result.Timeline.Forced, h.forced) {
-		t.Errorf("The run recorded the forced finalizers %v, want %v: a forced removal invalidates G3.",
-			result.Timeline.Forced, h.forced)
+		t.Errorf("The run recorded the forced finalizers %v, want %v.", result.Timeline.Forced, h.forced)
+	}
+	// A namespace botbox emptied by hand is not one the target cleaned, and no
+	// check judges what the teardown did (DESIGN.md §5.5, D37).
+	note := strings.Join(result.Notes, "\n")
+	for _, forced := range h.forced {
+		if !strings.Contains(note, forced) {
+			t.Errorf("The run notes are %q, want them to name the finalizer forced off %s.", note, forced)
+		}
+	}
+	if !strings.Contains(note, "did not empty on its own") {
+		t.Errorf("The run notes are %q, want them to say the namespace did not empty on its own.", note)
 	}
 }
 

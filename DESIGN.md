@@ -200,8 +200,9 @@ The Runner executes one sequence:
    the run as a harness limit, reported as such rather than as a finding.
 4. Tear down. Clear every active fault and wait `T_stable`, which is the last quiet
    window (§6). Delete the primary CR if it still exists and wait for the G3 window. Then
-   force-remove any finalizer still present in the run namespace; each forced removal is
-   recorded in the report and invalidates G3 for that run. Delete every remaining object
+   force-remove any finalizer still present in the run namespace; the report notes each one
+   (D37). G3 judged the deletion window, which closed before this. Delete every remaining
+   object
    in the namespace that botbox or the target created. Stop the target if it was started
    for this run. Delete the namespace. Namespace names are never reused, so a namespace
    that never finishes terminating (envtest, §5.8) is harmless.
@@ -952,6 +953,14 @@ built from source and run as a black-box binary.
   `objects.jsonl`. The report also carries what no check could judge, for D31's reason: a
   report that omits "G3 could not be judged" reads like one where G3 passed, and it is the
   artefact a human actually reads.
+- **D37 A forced finalizer is a note, not a reason to withhold G3.** §5.5 step 4 said each
+  forced removal invalidates G3 for the run, and nothing implemented it. Implementing it
+  literally would have thrown away true findings. The teardown stamps the end of the
+  deletion window and takes G3's checkpoint before it forces anything, and no check reads a
+  version recorded after that instant, so nothing botbox forced was ever credited to the
+  target. What was missing is visibility: an object no check judges — a fixture, or a child
+  born after the deletion — can hold a finalizer while G3 passes, and nothing said so. The
+  run notes what it forced.
 - **D36 A fault excuses the target over the window the proxy applied it in.** The Runner
   used to open a fault's window where it injected the spec and close it where it dropped
   the spec, and only an op-index trigger made it drop one. A `Count` or `For` trigger runs

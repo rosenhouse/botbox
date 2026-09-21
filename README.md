@@ -56,7 +56,7 @@ KUBEBUILDER_ASSETS="$(make --no-print-directory assets-path)" ./bin/botbox run \
 ```
 
 The first invocation installs `setup-envtest`, downloads the control plane and builds
-cert-manager, a few minutes in all; the five runs then take about 160 seconds together. Each
+cert-manager, a few minutes in all; the five runs then take about three minutes together. Each
 applies the Issuer fixture to a fresh namespace, launches the controller behind the proxy, and
 executes one drawn sequence. With no `--seed` botbox draws one and prints it. Fixing it draws
 the same five sequences every time:
@@ -65,14 +65,10 @@ the same five sequences every time:
 run 1: seed 23, generated
 run 2: seed 24, generated
 run 3: seed 25, generated
-run 3: G5 is not evaluated for op 1 (restart): it has no converged snapshot before it
 run 4: seed 26, generated
 run 5: seed 27, generated
 every run passed.
 ```
-
-Run 3 creates its Certificate without waiting, so the restart that follows has no converged state
-to compare against, and §6 has G5 say so rather than pass quietly.
 
 ### The negative control
 
@@ -85,9 +81,9 @@ them to the one that still fails, then runs it again so the evidence matches:
 ```
 run 1: seed 24, generated
 run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR
-  at 2026-09-21T03:08:21.470060394Z; 1 versions, the first v1/Secret example-tls
-  the evidence is in botbox-out/20260921T030030Z-24/run-1
-  the sequence is 1 op, in botbox-out/20260921T030030Z-24/run-1/sequence.json
+  at 2026-09-21T04:34:27.246567796Z; 1 versions, the first v1/Secret example-tls
+  the evidence is in botbox-out/20260921T042637Z-24/run-1
+  the sequence is 1 op, in botbox-out/20260921T042637Z-24/run-1/sequence.json
 ```
 
 `make test-example` runs both configurations on the seeds the Makefile fixes, and fails unless the

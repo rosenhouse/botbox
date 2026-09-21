@@ -225,17 +225,31 @@ M4 outcome: `make test-example` and the embed check run on every pull request.
 
 The generator reads values out of the CRD's OpenAPI schema, and where the schema says too
 little it refuses to guess rather than inventing a value: naming such a path in
-`generate.mutate` is a configuration error, not a silent no-op. The shrinker keeps a candidate only while it
-fails with the same violation ID, so a shorter sequence that trips a different check is
-reported as the different bug it is, and the minimized sequence is re-run so the run
-directory's evidence is of the sequence botbox prints.
+`generate.mutate` is a configuration error, not a silent no-op. The shrinker keeps a
+candidate only while it fails with the same check ID, so a shorter sequence that trips a
+different check is reported as the different bug it is, and the minimized sequence is
+re-run so the run directory's evidence is of the sequence botbox prints.
 
 ### Wrong in the first draft
 
+- The M5 acceptance test was vacuous. It pinned seed 8675309 and asserted that with
+  `--bug=2` the harness found a failure and shrank it, which it did. The same sequence
+  failed identically with `--bug=0`, so the failure was the harness's and nothing in the
+  test could tell the difference. The maintainer was told the acceptance was proved.
 - A drawn sequence could end on a `restart` or a `noSettle` op. The teardown does not wait
   for convergence, so its quiet window then measured work still in flight. 26 of the first
   60 cert-manager seeds drew such a sequence, and each of the nine that ran failed G1 on
   the Issuer fixture's own status update, shrinking to the empty sequence.
+- The first fix of that was incomplete. `checkpointed` skipped the settle after a `restart`
+  whenever the next drawn op settled, so G5 compared the converged state before the restart
+  against the state after the next spec change and blamed the restart for it. A second
+  review sampled 200 toy seeds, found 16 of that shape with 8 failing a correct toy, and 5
+  more that spent a restart with no converged snapshot before it.
+- The shrinker briefly compared a candidate's violation statement as well as its ID,
+  reasoned from the Runner's G4, whose statement carries no op index. The Engine's
+  statements come from the invariants themselves, and G5, G1 and G2 all embed the op index,
+  G1 and G2 a request count as well, so every candidate that removed an op before the
+  failing one was rejected.
 - A generated `deleteManaged` ended the invocation where its index resolved to nothing. A
   target that manages fewer objects than the sequence expected is behaving, not failing.
 - The example's `spec.dnsNames` overlay admitted `plg-.example.test`. A DNS label may not
@@ -247,20 +261,45 @@ directory's evidence is of the sequence botbox prints.
 
 ### What fixed it
 
-D33 records the first: generation appends the settle waits that leave the ops it drew
-judged, and `Sequence.Validate` rejects the shape, which also stops the shrink pass
-proposing it. `deleteManaged` now skips and reports a note (§7). The overlay spells out an
-RFC 1123 label. The toy patches its whole status rather than a diff against a base.
+The acceptance test now pins seed 2 and replays the minimized sequence against a toy with
+no seeded bug, requiring it to pass. Both mutations of it fail loudly. That is the rule the
+milestone earned: **a test that asserts the harness found something must assert in the same
+test that the control finds nothing.** It is the bug matrix's B0 row applied to every
+acceptance test, and it would have caught both of the misses above.
+
+D33 gave generation the settle waits that leave the ops it drew judged, and
+`Sequence.Validate` rejects a sequence without a terminal one, which also stops the shrink
+pass proposing it. 55b97c5 then wrapped every drawn `restart` in settle waits on both
+sides, and the 13 seeds that had failed or gone unjudged all pass with no notes. The shape
+is forbidden in generation and not in the format: `b0.json` and `b10.json` each follow a
+restart with a change and no settle between, on purpose, and a hand-written sequence is
+entitled to.
+
+The shrinker compares the check ID alone again. `deleteManaged` skips and reports a note
+(§7). The overlay spells out an RFC 1123 label. The toy patches its whole status rather
+than a diff against a base.
 
 ### Process notes
 
-`pkg/run` cannot import `pkg/generate`, because the generator produces a `run.Sequence`
-and the dependency runs the other way, so the M5 acceptance test lives in `pkg/run`'s
-external test package.
+Both of the large misses were caught by adversarial reviews rather than by the tests, and
+the second review caught the first review's fix being incomplete. One review per change is
+not enough when the change is the thing that decides whether the tests mean anything.
+
+Reasoning about a value's shape from one of its two producers is what broke the shrinker.
+`Violation.Statement` reaches the shrinker from the Runner and from the Engine, and only
+the Runner's form matched the assumption.
+
+`pkg/run` cannot import `pkg/generate`, because the generator produces a `run.Sequence` and
+the dependency runs the other way, so the M5 acceptance test lives in `pkg/run`'s external
+test package.
 
 The example keeps its two hand-written sequences and gains generated runs. The fixed seeds
 draw `deleteManaged` and `recreate`, which neither file did, and `reissue.json` is the only
 `update` the tier runs. The tier runs both files, so the worked example §7 needs cannot rot.
+
+`docs/bug-matrix.md` now marks G3 unjudged in five of eleven rows and G5 in one, where the
+toy's 10s deletion window closes before the teardown reaches a verdict. Those cells used to
+read as passes. It is the first time D31's notes are visible in the matrix.
 
 Two runs against cert-manager cannot overlap, and only the quickstart's port guard keeps
 them apart. A caller that drives `botbox` directly gets no warning: the second controller

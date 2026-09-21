@@ -214,8 +214,37 @@ func TestSequenceAcceptsTheOpsTheRunnerExecutes(t *testing.T) {
 		`{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 3}}}`,
 	} {
 		t.Run(ops, func(t *testing.T) {
-			if _, err := UnmarshalSequence([]byte(`{"seed": 1, "target": "t", "ops": [` + ops + `]}`)); err != nil {
+			// The trailing settle is what the sequence needs, not the op under test.
+			whole := `{"seed": 1, "target": "t", "ops": [` + ops + `, {"i": 1, "t": "settle"}]}`
+			if _, err := UnmarshalSequence([]byte(whole)); err != nil {
 				t.Errorf("The op was rejected: %v", err)
+			}
+		})
+	}
+}
+
+// DESIGN.md §5.6: the teardown does not wait for convergence before it opens
+// its quiet window, so a sequence that ends while the target is still working
+// is judged on that work. Every sequence ends with an op that settles.
+func TestSequenceRequiresALastOpThatSettles(t *testing.T) {
+	create := `{"i": 0, "t": "create", "obj": {"kind": "Widget"}}`
+	for _, test := range []struct {
+		name string
+		ops  string
+	}{
+		{name: "no ops at all", ops: ``},
+		{name: "a last op that skips its settle", ops: `{"i": 0, "t": "create", "obj": {"kind": "Widget"}, "noSettle": true}`},
+		{name: "a trailing restart", ops: create + `, {"i": 1, "t": "restart"}`},
+		{name: "a trailing fault", ops: create + `, {"i": 1, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 3}}}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := UnmarshalSequence([]byte(`{"seed": 1, "target": "t", "ops": [` + test.ops + `]}`))
+
+			if err == nil {
+				t.Fatalf("The ops %s were accepted, want an error naming the settle they lack.", test.ops)
+			}
+			if !strings.Contains(err.Error(), "settle") {
+				t.Errorf("The ops %s were rejected with %q, want the error to name the settle.", test.ops, err)
 			}
 		})
 	}
@@ -236,10 +265,10 @@ func TestOpSettlesUnlessItSaysOtherwise(t *testing.T) {
 		{opType: OpFault},
 	} {
 		t.Run(string(test.opType), func(t *testing.T) {
-			if got := (Op{Type: test.opType}).settles(); got != test.want {
+			if got := (Op{Type: test.opType}).Settles(); got != test.want {
 				t.Errorf("A %s op settles: %t, want %t.", test.opType, got, test.want)
 			}
-			if got := (Op{Type: test.opType, NoSettle: true}).settles(); got && test.opType != OpSettle {
+			if got := (Op{Type: test.opType, NoSettle: true}).Settles(); got && test.opType != OpSettle {
 				t.Errorf("A %s op with noSettle still settles.", test.opType)
 			}
 		})

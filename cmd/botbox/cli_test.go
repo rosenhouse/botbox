@@ -25,7 +25,10 @@ type fakeSession struct {
 	// fails answers every execute the results do not, which is how a shrink
 	// pass is given its verdicts. It reads the directory too, because that is
 	// what tells a replay of the pass from the run of the minimized sequence.
-	fails     func(sequence run.Sequence, dir string) *run.Violation
+	fails func(sequence run.Sequence, dir string) *run.Violation
+	// after runs once a sequence has executed, which is where a test expires
+	// the deadline.
+	after     func()
 	sequences []run.Sequence
 	checks    []run.Checker
 	dirs      []string
@@ -40,6 +43,9 @@ func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.
 	s.checks = append(s.checks, check)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return run.Result{}, err
+	}
+	if s.after != nil {
+		s.after()
 	}
 	n := len(s.sequences) - 1
 	var failure error
@@ -69,6 +75,13 @@ func invoke(t *testing.T, fake *fakeSession, args ...string) (int, string, strin
 
 func invokeWith(t *testing.T, fake *fakeSession, newGenerator func(*target.Target) (Generator, error), args ...string) (int, string, string) {
 	t.Helper()
+	return invokeCtx(t, t.Context(), fake, newGenerator, args...)
+}
+
+// invokeCtx is invokeWith under a context the test controls, for the deadline.
+func invokeCtx(t *testing.T, ctx context.Context, fake *fakeSession,
+	newGenerator func(*target.Target) (Generator, error), args ...string) (int, string, string) {
+	t.Helper()
 	var stdout, stderr bytes.Buffer
 	c := &cli{
 		stdout:       &stdout,
@@ -76,7 +89,7 @@ func invokeWith(t *testing.T, fake *fakeSession, newGenerator func(*target.Targe
 		open:         func(options, *target.Target) (session, error) { return fake, nil },
 		newGenerator: newGenerator,
 	}
-	return c.main(t.Context(), args), stdout.String(), stderr.String()
+	return c.main(ctx, args), stdout.String(), stderr.String()
 }
 
 // countingGenerator draws sequences of the ops given, or of one settle, and
@@ -224,12 +237,21 @@ func TestANamedSequenceTakesPrecedenceOverGeneration(t *testing.T) {
 	}
 }
 
+func opTypesOf(s run.Sequence) []run.OpType {
+	var types []run.OpType
+	for _, op := range s.Ops {
+		types = append(types, op.Type)
+	}
+	return types
+}
+
 func TestRunShrinksTheFailingSequence(t *testing.T) {
 	violation := run.Violation{ID: "G4", Statement: "the target converges", Evidence: "the settle wait after op 2 expired"}
 	minimized := run.Violation{ID: "G4", Statement: "the target converges", Evidence: "the settle wait after op 0 expired"}
 	session := &fakeSession{
 		results: []run.Result{{Violation: &violation}},
-		// Only the restart is needed to fail, so the pass removes the rest.
+		// Only the restart is needed to fail, so the pass removes every other
+		// op but the settle that a sequence cannot end without (DESIGN.md §7).
 		fails: func(candidate run.Sequence, _ string) *run.Violation {
 			if slices.ContainsFunc(candidate.Ops, func(op run.Op) bool { return op.Type == run.OpRestart }) {
 				return &minimized
@@ -249,22 +271,59 @@ func TestRunShrinksTheFailingSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("The run directory holds no minimized sequence: %v", err)
 	}
-	if len(written.Ops) != 1 || written.Ops[0].Type != run.OpRestart {
-		t.Errorf("The run directory holds the sequence %v, want the minimized one.", written.Ops)
+	if want := []run.OpType{run.OpRestart, run.OpSettle}; !slices.Equal(opTypesOf(written), want) {
+		t.Errorf("The run directory holds the sequence %v, want the minimized %v.", written.Ops, want)
 	}
-	if !strings.Contains(stdout, "G4") || !strings.Contains(stdout, "1 op") {
+	if !strings.Contains(stdout, "G4") || !strings.Contains(stdout, "2 ops") {
 		t.Errorf("botbox run printed %q, want the violation and what it shrank the sequence to.", stdout)
 	}
 	if !strings.Contains(stdout, minimized.Evidence) || strings.Contains(stdout, violation.Evidence) {
 		t.Errorf("botbox run printed %q, want the evidence of the run the directory holds.", stdout)
 	}
 	last := len(session.sequences) - 1
-	if session.dirs[last] != session.dirs[0] || len(session.sequences[last].Ops) != 1 {
+	if session.dirs[last] != session.dirs[0] || len(session.sequences[last].Ops) != 2 {
 		t.Errorf("The last run executed %d ops in %s, want the minimized sequence in the run directory: its evidence is what the run directory reports.",
 			len(session.sequences[last].Ops), session.dirs[last])
 	}
 	if _, err := os.Stat(filepath.Join(session.dirs[0], shrinkDir)); !os.IsNotExist(err) {
 		t.Errorf("The run directory keeps the shrink pass's replays: %v", err)
+	}
+}
+
+// DESIGN.md §11: the run directory reports the sequence its recordings are of.
+// A pass the deadline cut short never ran the smaller sequence, so what the
+// directory holds is still the run of the sequence botbox drew.
+func TestADeadlineDuringTheShrinkPassLeavesTheDrawnSequence(t *testing.T) {
+	ctx, expire := context.WithCancel(t.Context())
+	violation := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{fails: func(run.Sequence, string) *run.Violation { return &violation }}
+	// The run itself, then one candidate the pass accepts, then the deadline.
+	session.after = func() {
+		if len(session.sequences) == 2 {
+			expire()
+		}
+	}
+	generate := countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle)
+
+	code, stdout, stderr := invokeCtx(t, ctx, session, generate,
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d, want %d.", code, exitViolation)
+	}
+	written, err := run.ReadSequence(filepath.Join(session.dirs[0], sequenceFile))
+	if err != nil {
+		t.Fatalf("The run directory holds no sequence: %v", err)
+	}
+	if len(written.Ops) != len(session.sequences[0].Ops) {
+		t.Errorf("The run directory holds %d ops, want the %d of the sequence its recordings are of.",
+			len(written.Ops), len(session.sequences[0].Ops))
+	}
+	if !strings.Contains(stderr, "deadline") {
+		t.Errorf("botbox run printed %q on stderr, want the deadline that ended the pass.", stderr)
+	}
+	if !strings.Contains(stdout, ops(written)) {
+		t.Errorf("botbox run printed %q, want the %s the directory holds.", stdout, ops(written))
 	}
 }
 

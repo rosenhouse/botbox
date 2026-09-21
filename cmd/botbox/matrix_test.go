@@ -56,6 +56,17 @@ func recorded(t *testing.T, converged bool) run.Result {
 	return result
 }
 
+// recordedWithAnUnjudgedRestart is a converged run whose restart has no
+// converged snapshot after it, so G5 leaves a note instead of a verdict.
+func recordedWithAnUnjudgedRestart(t *testing.T) run.Result {
+	t.Helper()
+	result := recorded(t, true)
+	at := result.Recorded.Timeline.Checkpoints[0].At.Add(time.Second)
+	result.Recorded.Timeline.Ops = append(result.Recorded.Timeline.Ops,
+		run.AppliedOp{Op: run.Op{Index: 1, Type: run.OpRestart}, At: at})
+	return result
+}
+
 func matrixFile(t *testing.T) string { return filepath.Join(t.TempDir(), "bug-matrix.md") }
 
 func readMatrix(t *testing.T, path string) string {
@@ -115,6 +126,31 @@ func TestMatrixWritesBugAgainstCheck(t *testing.T) {
 	}
 	if !strings.Contains(written, "every check that fired") {
 		t.Errorf("The matrix is\n%s\nwant it to say a row lists every check that fired.", written)
+	}
+}
+
+// DESIGN.md §6 and D31: a check that judged nothing reads like a passing one
+// from outside, so the matrix says which cell is which.
+func TestMatrixMarksACheckThatJudgedNothing(t *testing.T) {
+	// The control is the row D31 is about: it reads as empty either way.
+	session := &fakeSession{results: []run.Result{recordedWithAnUnjudgedRestart(t), recorded(t, false)}}
+	out := matrixFile(t)
+
+	code, stdout, stderr := invoke(t, session, "matrix",
+		"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", out)
+
+	if code != exitOK {
+		t.Fatalf("botbox matrix exited %d: %s", code, stderr)
+	}
+	written := readMatrix(t, out)
+	if !strings.Contains(written, "| B0 |  |  |  |  | ? |  |  |") {
+		t.Errorf("The matrix is\n%s\nwant B0's G5 cell to say it judged nothing.", written)
+	}
+	if !strings.Contains(written, "judged nothing") {
+		t.Errorf("The matrix is\n%s\nwant it to say what the mark means.", written)
+	}
+	if !strings.Contains(stdout, "G5 is not evaluated") {
+		t.Errorf("botbox matrix printed %q, want the note G5 left.", stdout)
 	}
 }
 

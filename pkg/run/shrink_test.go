@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 // fakeReplay answers what a candidate sequence does, without a cluster.
@@ -47,12 +49,29 @@ func failsOn(id string, needs ...OpType) func(Sequence) string {
 	}
 }
 
+// sequenceOfTypes builds a sequence of those op types, each op carrying the
+// fields its type needs, because Shrink is given sequences that validate.
 func sequenceOfTypes(types ...OpType) Sequence {
 	ops := make([]Op, len(types))
 	for i, opType := range types {
-		ops[i] = Op{Type: opType}
+		ops[i] = opOfType(opType)
 	}
 	return sequenceOf(ops...)
+}
+
+func opOfType(opType OpType) Op {
+	op := Op{Type: opType}
+	switch opType {
+	case OpCreate, OpRecreate:
+		op.Obj = &unstructured.Unstructured{Object: map[string]any{"kind": "Widget"}}
+	case OpUpdate:
+		op.Patch = map[string]any{"spec": map[string]any{"count": int64(1)}}
+	case OpDeleteManaged:
+		op.Kind, op.Nth = "v1/ConfigMap", nth(0)
+	case OpFault:
+		op.Fault = &Fault{Action: Action{Drop: true}, Until: Trigger{Count: 1}}
+	}
+	return op
 }
 
 // names writes op types as opTypesOf reads them.
@@ -94,7 +113,7 @@ func TestShrinkKeepsAnOpTheFailureNeeds(t *testing.T) {
 // A shorter sequence that fails a different check is not a smaller reproducer
 // of the same bug (DESIGN.md §5.5).
 func TestShrinkRejectsAShorterSequenceThatFailsDifferently(t *testing.T) {
-	failing := sequenceOfTypes(OpRestart, OpDelete)
+	failing := sequenceOfTypes(OpRestart, OpSettle, OpDelete)
 	replay := &fakeReplay{violates: func(candidate Sequence) string {
 		if slices.Contains(opTypesOf(candidate), string(OpRestart)) {
 			return "G5"
@@ -104,9 +123,29 @@ func TestShrinkRejectsAShorterSequenceThatFailsDifferently(t *testing.T) {
 
 	shrunk := shrink(t, t.Context(), failing, "G5", replay)
 
-	if want := names(OpRestart); !slices.Equal(opTypesOf(shrunk), want) {
+	if want := names(OpRestart, OpDelete); !slices.Equal(opTypesOf(shrunk), want) {
 		t.Errorf("Shrink returned %v, want %v: the sequence without the restart fails G3, not G5.",
 			opTypesOf(shrunk), want)
+	}
+}
+
+// Shrink's candidates are replayed and reported, so each one is a sequence of
+// DESIGN.md §7. Removing an op can leave one that is not: a sequence ending on
+// a restart waits for nothing.
+func TestShrinkSkipsACandidateThatIsNotALegalSequence(t *testing.T) {
+	failing := sequenceOfTypes(OpRestart, OpSettle)
+	replay := &fakeReplay{violates: failsOn("G5", OpRestart)}
+
+	shrunk := shrink(t, t.Context(), failing, "G5", replay)
+
+	if want := names(OpRestart, OpSettle); !slices.Equal(opTypesOf(shrunk), want) {
+		t.Errorf("Shrink returned %v, want %v: dropping the settle ends the sequence on the restart.",
+			opTypesOf(shrunk), want)
+	}
+	for _, candidate := range replay.seen {
+		if err := candidate.Validate(); err != nil {
+			t.Errorf("Shrink replayed %v, which is not a legal sequence: %v", opTypesOf(candidate), err)
+		}
 	}
 }
 

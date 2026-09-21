@@ -362,11 +362,15 @@ remaining ownerReferences. A target excludes further paths with `equalIgnore` (�
 Details the example does not show:
 
 - Any CR op may carry `"noSettle": true`, which skips the Runner's implicit settle wait.
+  The last op is not one of them: a sequence ends with an op that settles, or nothing
+  judges the state it leaves behind (§5.6, D33).
 - `update` applies `patch` as a JSON merge patch (RFC 7386).
 - `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
   then name. The index is resolved at execution time and the chosen object is recorded by
-`deleteManaged` skips an index that resolves to nothing and reports it as a note, since a target that manages fewer objects than the sequence expected is behaving, not failing; a kind the target does not declare in `manages` is a configuration error.
+  name in the report. An index that resolves to nothing is skipped and reported as a note,
+  since a target that manages fewer objects than the sequence expected is behaving, not
+  failing. A kind the target does not declare in `manages` is a configuration error.
 
 `botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
 embed the minimized sequence in this format.
@@ -885,7 +889,17 @@ built from source and run as a black-box binary.
   here ends with an op that settles, and a teardown that settles first, which would also
   give §6's "within `T_settle` after faults stop" somewhere to be measured, waits for M6.
   G1's row promised `T_settle` to fall quiet while the code judged the `T_stable` after
-  the settle wait, which is shorter whenever the target converges early. The statement now says what the code does
-  and what G2 already said: the settle wait is where botbox judges the target converged,
-  and B1 keeps the G1 row D26 gave it, because it reports itself converged and only then
-  creates its children.
+  the settle wait, which is shorter whenever the target converges early. The statement
+  now says what the code does and what G2 already said: the settle wait is where botbox
+  judges the target converged, and B1 keeps the G1 row D26 gave it, because it reports
+  itself converged and only then creates its children.
+- **D33 A sequence ends with an op that settles, and generation adds the settle waits
+  that leave the ops it drew judged.** D32 left this a statement about the sequences
+  in the repo, and the generator of M5 then drew sequences ending in a `noSettle`, a
+  `restart` or nothing at all: roughly half of them, each judged on a window that opens
+  while the target is still working, so a correct target failed G4. `Sequence.Validate`
+  rejects that shape now, which also keeps the shrink pass from proposing it, and
+  generation appends the settle a drawn op needs. A `restart` gets one too, since §6
+  checks a restart only once the settle after it ends. `Options.MaxOps` therefore bounds
+  the ops a draw makes rather than the sequence's length. A `noSettle` in the middle of a
+  sequence stands: skipping that wait is what it is for.

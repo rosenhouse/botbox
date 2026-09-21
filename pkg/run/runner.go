@@ -271,7 +271,7 @@ func (r *runner) applyOps(ctx context.Context) error {
 		r.expireFaults(op.Index)
 		applied, err := r.apply(ctx, op)
 		r.timeline.Ops = append(r.timeline.Ops, applied)
-		if err == nil && op.settles() {
+		if err == nil && op.Settles() {
 			err = r.settle(ctx, op)
 		}
 		if err != nil {

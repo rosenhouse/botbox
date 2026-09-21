@@ -231,17 +231,25 @@ func (c *cli) reportFailure(ctx context.Context, s session, t *target.Target,
 	shrunk := run.Shrink(ctx, failed.sequence, violation, func(ctx context.Context, candidate run.Sequence) (run.Result, error) {
 		return s.execute(ctx, t, candidate, filepath.Join(dir, shrinkDir), run.Engine{})
 	})
-	if len(shrunk.Ops) < len(failed.sequence.Ops) && ctx.Err() == nil {
-		if found := c.rerun(ctx, s, t, shrunk, dir); found != nil {
+	reported := shrunk
+	if len(shrunk.Ops) < len(failed.sequence.Ops) {
+		if ctx.Err() != nil {
+			// The deadline ended the pass before the smaller sequence could be
+			// run into the directory, which still holds the run of the sequence
+			// botbox drew. The directory reports the sequence its evidence is of.
+			c.warn(fmt.Errorf("the deadline ended the shrink pass at %s, so %s reports the sequence as drawn",
+				ops(shrunk), dir))
+			reported = failed.sequence
+		} else if found := c.rerun(ctx, s, t, shrunk, dir); found != nil {
 			violation = *found
 		}
 	}
 	// What the pass replayed is nobody's evidence (DESIGN.md §11).
 	c.warn(os.RemoveAll(filepath.Join(dir, shrinkDir)))
-	c.warn(run.WriteRunSequence(dir, shrunk))
+	c.warn(run.WriteRunSequence(dir, reported))
 	// The violation is reported once the directory holds the run it belongs to.
 	c.report(number, violation, dir)
-	fmt.Fprintf(c.stdout, "  the sequence is %s, in %s\n", ops(shrunk), filepath.Join(dir, sequenceFile))
+	fmt.Fprintf(c.stdout, "  the sequence is %s, in %s\n", ops(reported), filepath.Join(dir, sequenceFile))
 	return exitViolation
 }
 

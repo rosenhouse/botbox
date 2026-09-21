@@ -7,7 +7,6 @@ package generate
 
 import (
 	"fmt"
-	"slices"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"pgregory.net/rapid"
@@ -21,8 +20,9 @@ const defaultMaxOps = 6
 
 // Options tune generation.
 type Options struct {
-	// MaxOps bounds a sequence's length, counting the create it opens with.
-	// Zero takes the default.
+	// MaxOps bounds the ops a draw makes, counting the create it opens with.
+	// Generation adds the settle waits that leave those ops judged (DESIGN.md
+	// §6), so a sequence can be longer. Zero takes the default.
 	MaxOps int
 }
 
@@ -58,21 +58,48 @@ func New(t *target.Target, opts Options) (*Generator, error) {
 		}
 		g.managed = append(g.managed, name)
 	}
-	g.sequences = rapid.Custom(g.Sequence)
+	g.sequences = rapid.Custom(g.sequence)
 	return g, nil
 }
 
-// Sequence draws one sequence, which starts by creating the primary CR
-// (DESIGN.md §5.5). Its Seed is zero: Draw records the seed it was asked for,
-// and a caller that drives rapid itself records the seed rapid runs under.
-func (g *Generator) Sequence(t *rapid.T) run.Sequence {
+// sequence draws one sequence, which starts by creating the primary CR
+// (DESIGN.md §5.5). It leaves Seed zero; Draw, the only way out of this
+// package, records the seed it was asked for.
+func (g *Generator) sequence(t *rapid.T) run.Sequence {
 	create := run.Op{Index: 0, Type: run.OpCreate, Obj: g.cr(t), NoSettle: rapid.Bool().Draw(t, "noSettle")}
 	ops := []run.Op{create}
-	at := state{crExists: true, settled: settles(create)}
+	at := state{crExists: true, settled: create.Settles()}
 	for range rapid.IntRange(0, g.maxOps-1).Draw(t, "ops") {
 		ops = append(ops, g.op(t, len(ops), &at))
 	}
-	return run.Sequence{Target: g.target.Name, Ops: ops}
+	return run.Sequence{Target: g.target.Name, Ops: checkpointed(ops)}
+}
+
+// checkpointed inserts the settle waits that leave the drawn ops judged.
+// Invariants are evaluated where a settle wait ends (DESIGN.md §6), so a
+// restart nothing waits on is never checked, and a sequence that ends without
+// one is judged on work still in flight (§5.6). A noSettle in the middle is
+// left alone: skipping that wait is what it is for.
+func checkpointed(ops []run.Op) []run.Op {
+	judged := make([]run.Op, 0, len(ops)+1)
+	for i, op := range ops {
+		judged = append(judged, op)
+		var next run.Op
+		last := i == len(ops)-1
+		if !last {
+			next = ops[i+1]
+		}
+		if op.Settles() || next.Settles() {
+			continue
+		}
+		if last || op.Type == run.OpRestart {
+			judged = append(judged, run.Op{Type: run.OpSettle})
+		}
+	}
+	for i := range judged {
+		judged[i].Index = i
+	}
+	return judged
 }
 
 // Draw returns the sequence the seed produces, recording the seed as the
@@ -140,12 +167,12 @@ func (g *Generator) op(t *rapid.T, index int, at *state) run.Op {
 		op.Obj = g.cr(t)
 	case run.OpDeleteManaged:
 		op.Kind = rapid.SampledFrom(g.managed).Draw(t, "kind")
-		// The first managed object of its kind: generation cannot know how
-		// many the run will hold, and an index that resolves to nothing is a
-		// harness error (DESIGN.md §7).
+		// The first managed object of its kind: generation cannot know how many
+		// the run will hold, and a later index would often resolve to nothing
+		// and be skipped (DESIGN.md §7).
 		op.Nth = new(int)
 	}
-	if slices.Contains(crOps, op.Type) {
+	if op.Type.OnCR() {
 		op.NoSettle = rapid.Bool().Draw(t, "noSettle")
 	}
 	at.advance(op)
@@ -176,25 +203,13 @@ func (at *state) advance(op run.Op) {
 	case run.OpRecreate:
 		at.crExists = true
 	}
-	if settles(op) {
+	// The only op that changes the managed objects without waiting for the
+	// target's reaction is a CR op that skips its settle.
+	if op.Settles() {
 		at.settled = true
-	} else if slices.Contains(mutatingOps, op.Type) {
+	} else if op.Type.OnCR() {
 		at.settled = false
 	}
-}
-
-// crOps act on the primary CR and are the only ops that carry noSettle
-// (DESIGN.md §4).
-var crOps = []run.OpType{run.OpCreate, run.OpUpdate, run.OpDelete, run.OpRecreate}
-
-// mutatingOps change the CR or a managed object, so the Runner settles after
-// them (DESIGN.md §5.5).
-var mutatingOps = append(slices.Clone(crOps), run.OpDeleteManaged)
-
-// settles reports whether the Runner waits for the target's reaction after the
-// op, as the Runner itself reads it (DESIGN.md §5.5).
-func settles(op run.Op) bool {
-	return op.Type == run.OpSettle || (!op.NoSettle && slices.Contains(mutatingOps, op.Type))
 }
 
 // nest wraps a value in the objects its path names, which is the merge patch

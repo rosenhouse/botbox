@@ -46,7 +46,7 @@ func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
 			crd := crdSchemaOf(t, testCase.path)
 			rapid.Check(t, func(rt *rapid.T) {
 				var cr map[string]any
-				for _, op := range g.Sequence(rt).Ops {
+				for _, op := range g.sequence(rt).Ops {
 					switch op.Type {
 					case run.OpCreate, run.OpRecreate:
 						cr = op.Obj.DeepCopy().Object
@@ -71,15 +71,17 @@ func TestSequencesAreLegalToReplay(t *testing.T) {
 			loaded := loadTarget(t, testCase.path)
 			g := newGenerator(t, loaded, Options{MaxOps: maxOps})
 			rapid.Check(t, func(rt *rapid.T) {
-				sequence := g.Sequence(rt)
+				sequence := g.sequence(rt)
 				if err := sequence.Validate(); err != nil {
 					rt.Fatalf("The Runner rejects the sequence: %v.", err)
 				}
 				if sequence.Target != loaded.Name {
 					rt.Fatalf("The sequence names the target %q, want %q.", sequence.Target, loaded.Name)
 				}
-				if len(sequence.Ops) > maxOps {
-					rt.Fatalf("The sequence holds %d ops, over the %d it was asked for.", len(sequence.Ops), maxOps)
+				// checkpointed adds at most one settle per drawn op.
+				if len(sequence.Ops) > 2*maxOps {
+					rt.Fatalf("The sequence holds %d ops, over the %d drawn and the settle each may need.",
+						len(sequence.Ops), maxOps)
 				}
 				if sequence.Ops[0].Type != run.OpCreate {
 					rt.Fatalf("The sequence opens with a %s, want the create of the CR.", sequence.Ops[0].Type)
@@ -119,13 +121,35 @@ func TestSequencesAreLegalToReplay(t *testing.T) {
 	}
 }
 
+// An invariant is evaluated where a settle wait ends (DESIGN.md §6), so an op
+// that nothing waits on is a draw spent on a run nothing judges.
+func TestEveryDrawnOpIsFollowedByTheSettleThatJudgesIt(t *testing.T) {
+	for _, testCase := range targets {
+		t.Run(testCase.path, func(t *testing.T) {
+			g := newGenerator(t, loadTarget(t, testCase.path), Options{MaxOps: 5})
+			rapid.Check(t, func(rt *rapid.T) {
+				ops := g.sequence(rt).Ops
+				if last := ops[len(ops)-1]; !last.Settles() {
+					rt.Fatalf("The sequence ends with a %s, so only the teardown judges it (§5.6).", last.Type)
+				}
+				for i, op := range ops {
+					if op.Type == run.OpRestart && !ops[i+1].Settles() {
+						rt.Fatalf("Op %d restarts the target and op %d waits for nothing, so G5 sees neither.",
+							i, i+1)
+					}
+				}
+			})
+		})
+	}
+}
+
 func TestSequencesRoundTripThroughTheirFile(t *testing.T) {
 	for _, testCase := range targets {
 		t.Run(testCase.path, func(t *testing.T) {
 			g := newGenerator(t, loadTarget(t, testCase.path), Options{})
 			file := filepath.Join(t.TempDir(), "sequence.json")
 			rapid.Check(t, func(rt *rapid.T) {
-				written := write(rt, file, g.Sequence(rt))
+				written := write(rt, file, g.sequence(rt))
 				read, err := run.ReadSequence(file)
 				if err != nil {
 					rt.Fatalf("ReadSequence failed on %s: %v.", written, err)
@@ -188,7 +212,7 @@ func TestGeneratedCountsStayInsideTheCRDsBounds(t *testing.T) {
 	loaded := loadTarget(t, toyTarget)
 	g := newGenerator(t, loaded, Options{})
 	rapid.Check(t, func(rt *rapid.T) {
-		for _, count := range generatedAt(g.Sequence(rt), loaded.Sample, "spec", "count") {
+		for _, count := range generatedAt(g.sequence(rt), loaded.Sample, "spec", "count") {
 			whole, isInteger := count.(int64)
 			if !isInteger {
 				rt.Fatalf("spec.count is %#v, want the int64 the API server's decoder writes.", count)
@@ -207,7 +231,7 @@ func TestGeneratedValuesObeyTheOverlay(t *testing.T) {
 	g := newGenerator(t, loaded, Options{})
 	allowed := []any{"1h", "24h", "2160h"}
 	rapid.Check(t, func(rt *rapid.T) {
-		sequence := g.Sequence(rt)
+		sequence := g.sequence(rt)
 		for _, duration := range generatedAt(sequence, loaded.Sample, "spec", "duration") {
 			if !slices.Contains(allowed, duration) {
 				rt.Fatalf("spec.duration is %#v, which the overlay's enum %v does not allow.", duration, allowed)
@@ -227,7 +251,7 @@ func TestTheOverlayBoundsTheListLength(t *testing.T) {
 	loaded.Generate.Overlay["spec.dnsNames"] = map[string]any{"minItems": exactly, "maxItems": exactly}
 	g := newGenerator(t, loaded, Options{})
 	rapid.Check(t, func(rt *rapid.T) {
-		for _, names := range generatedAt(g.Sequence(rt), loaded.Sample, "spec", "dnsNames") {
+		for _, names := range generatedAt(g.sequence(rt), loaded.Sample, "spec", "dnsNames") {
 			if length := len(names.([]any)); length != exactly {
 				rt.Fatalf("spec.dnsNames holds %d names, and the overlay allows %d.", length, exactly)
 			}
@@ -241,7 +265,7 @@ func TestOnlyTheMutablePathsMove(t *testing.T) {
 			loaded := loadTarget(t, testCase.path)
 			g := newGenerator(t, loaded, Options{})
 			rapid.Check(t, func(rt *rapid.T) {
-				for _, op := range g.Sequence(rt).Ops {
+				for _, op := range g.sequence(rt).Ops {
 					if op.Obj == nil {
 						continue
 					}
@@ -335,7 +359,7 @@ func TestATargetWithNothingToMutateStillDrawsSequences(t *testing.T) {
 	g := newGenerator(t, loadTarget(t, toyTarget), Options{})
 	g.fields, g.managed = nil, nil
 	rapid.Check(t, func(rt *rapid.T) {
-		for _, op := range g.Sequence(rt).Ops {
+		for _, op := range g.sequence(rt).Ops {
 			if op.Type == run.OpUpdate || op.Type == run.OpDeleteManaged {
 				rt.Fatalf("Op %d is a %s, and the target offers it nothing to name.", op.Index, op.Type)
 			}

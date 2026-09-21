@@ -31,7 +31,10 @@ func shrinkPass(ctx context.Context, s Sequence, violation Violation, replay Rep
 	removed := false
 	for i := 0; i < len(s.Ops) && ctx.Err() == nil; {
 		candidate := s.without(i)
-		if !reproduces(ctx, candidate, violation, replay) {
+		// Removing an op can leave a sequence the format does not allow, such
+		// as one ending on a restart. It is not a reproducer, and replaying it
+		// would cost a run to learn so.
+		if candidate.Validate() != nil || !reproduces(ctx, candidate, violation, replay) {
 			i++
 			continue
 		}
@@ -44,9 +47,17 @@ func shrinkPass(ctx context.Context, s Sequence, violation Violation, replay Rep
 // sequence did. A shorter sequence that fails another one is a different bug,
 // not a smaller reproducer of this one. A candidate the Runner cannot execute,
 // such as an update whose create is gone, reproduces nothing either.
+//
+// The statement decides alongside the ID, because one check states itself more
+// than one way: G4 holds after a spec change and again after faults stop
+// (DESIGN.md §6). The evidence does not, since it quotes op indexes that
+// removing an op moves.
 func reproduces(ctx context.Context, candidate Sequence, violation Violation, replay Replay) bool {
 	result, err := replay(ctx, candidate)
-	return err == nil && result.Violation != nil && result.Violation.ID == violation.ID
+	if err != nil || result.Violation == nil {
+		return false
+	}
+	return result.Violation.ID == violation.ID && result.Violation.Statement == violation.Statement
 }
 
 // without returns the sequence with op i removed, renumbered so that it is

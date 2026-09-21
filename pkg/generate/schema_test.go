@@ -77,16 +77,25 @@ func TestSchemaReadsCertManagersCertificate(t *testing.T) {
 }
 
 func TestOverlayWinsOverTheSchema(t *testing.T) {
-	spec := primarySchemaOf(t, certManagerTarget).Properties["spec"]
+	loaded := loadTarget(t, certManagerTarget)
+	// The expectations come from the target's own overlay, so that tightening
+	// it does not turn this test red for saying so.
+	overlay := loaded.Generate.Overlay
+	read, err := primarySchema(loaded)
+	if err != nil {
+		t.Fatalf("primarySchema(%s) failed: %v.", certManagerTarget, err)
+	}
+	spec := read.Properties["spec"]
 
 	dnsNames := spec.Properties["dnsNames"]
-	if dnsNames.MinItems == nil || *dnsNames.MinItems != 1 {
-		t.Errorf("spec.dnsNames has minItems %v, want the overlay's 1.", dnsNames.MinItems)
+	wanted := overlay["spec.dnsNames"]
+	if dnsNames.MinItems == nil || float64(*dnsNames.MinItems) != wanted["minItems"] {
+		t.Errorf("spec.dnsNames has minItems %v, want the overlay's %v.", dnsNames.MinItems, wanted["minItems"])
 	}
-	if dnsNames.MaxItems == nil || *dnsNames.MaxItems != 3 {
-		t.Errorf("spec.dnsNames has maxItems %v, want the overlay's 3.", dnsNames.MaxItems)
+	if dnsNames.MaxItems == nil || float64(*dnsNames.MaxItems) != wanted["maxItems"] {
+		t.Errorf("spec.dnsNames has maxItems %v, want the overlay's %v.", dnsNames.MaxItems, wanted["maxItems"])
 	}
-	if want := `^[a-z0-9-]{1,32}\.example\.test$`; dnsNames.Items.Pattern != want {
+	if want := wanted["items"].(map[string]any)["pattern"]; dnsNames.Items.Pattern != want {
 		t.Errorf("spec.dnsNames items have pattern %q, want the overlay's %q.", dnsNames.Items.Pattern, want)
 	}
 	if dnsNames.Items.Type != "string" {
@@ -95,7 +104,7 @@ func TestOverlayWinsOverTheSchema(t *testing.T) {
 	}
 
 	duration := spec.Properties["duration"]
-	if want := []any{"1h", "24h", "2160h"}; !reflect.DeepEqual(duration.Enum, want) {
+	if want := overlay["spec.duration"]["enum"]; !reflect.DeepEqual(duration.Enum, want) {
 		t.Errorf("spec.duration has enum %v, want the overlay's %v.", duration.Enum, want)
 	}
 }

@@ -32,6 +32,7 @@ func (Engine) Check(in Input) (Findings, error) {
 				Evidence:  evidence(violation),
 				Requests:  violation.Requests,
 				Versions:  violation.Versions,
+				Managed:   violation.Managed,
 			})
 		}
 		found.Notes = append(found.Notes, result.Notes...)
@@ -134,5 +135,16 @@ func evidence(violation invariant.Violation) string {
 		quoted = append(quoted, fmt.Sprintf("%s, the first %s %s",
 			count(len(versions), "version"), kindName(versions[0].GVK), versions[0].Name))
 	}
+	if violation.Managed != nil {
+		quoted = append(quoted, managedClause(*violation.Managed))
+	}
 	return strings.Join(quoted, "; ")
+}
+
+// managedClause says what the target managed at a violation, over the kinds the
+// target declares (DESIGN.md §6). The clause names the declaration because a
+// target that declares too few kinds managed nothing by that measure while the
+// request log shows it creating children.
+func managedClause(managed int) string {
+	return "the target managed " + count(managed, "object") + " of the kinds it declares"
 }

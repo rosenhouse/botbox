@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"time"
+
+	"github.com/rosenhouse/botbox/pkg/observe"
 )
 
 // Convergence is G4: within T_settle after any spec change, and within
@@ -17,7 +19,8 @@ func Convergence(in Input) (Result, error) {
 		if !in.observed(deadline) || in.faulted(from.at, deadline) || in.tornDown(deadline) || in.respecified(from.at, deadline) {
 			continue
 		}
-		cr, found := in.stateAt(deadline).cr(in.Target.Primary)
+		seen := in.stateAt(deadline)
+		cr, found := seen.cr(in.Target.Primary)
 		if !found {
 			continue // The run has no CR to be ready: it deleted it.
 		}
@@ -33,6 +36,7 @@ func Convergence(in Input) (Result, error) {
 				cr.Name, in.timeouts().Settle, from.what, quoted(err)),
 			At:       deadline,
 			Versions: Recent(in.History.History(cr.Key)),
+			Managed:  counted(seen.managed(in)),
 		})
 	}
 	out.reportExpiredWaits(in)
@@ -85,6 +89,7 @@ func (out *Result) reportExpiredWaits(in Input) {
 				in.describeOp(checkpoint.Op)),
 			At:       checkpoint.Time,
 			Versions: Recent(in.versionsIn(started, checkpoint.Time)),
+			Managed:  counted(in.stateAt(checkpoint.Time).managed(in)),
 		})
 	}
 }
@@ -103,6 +108,13 @@ func (in Input) describeOp(index int) string {
 		return describe(op)
 	}
 	return "teardown"
+}
+
+// counted is the count a violation carries, which is never nil where a check
+// asked: a run in which the target managed nothing is the finding.
+func counted(managed []observe.Version) *int {
+	n := len(managed)
+	return &n
 }
 
 func describe(op Op) string { return fmt.Sprintf("op %d (%s)", op.Index, op.Type) }

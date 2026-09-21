@@ -326,7 +326,8 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 	}
 	violation := *result.Violation
 	return report.Write(dir, report.Report{
-		Check:    report.Check{ID: violation.ID, Statement: violation.Statement, Evidence: violation.Evidence},
+		Check: report.Check{ID: violation.ID, Statement: violation.Statement,
+			Evidence: violation.Evidence, Managed: violation.Managed},
 		Target:   report.Target{Name: t.Name, Version: t.Version},
 		Botbox:   version(),
 		Seed:     sequence.Seed,

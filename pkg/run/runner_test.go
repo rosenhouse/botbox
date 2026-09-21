@@ -1132,3 +1132,25 @@ func TestTheStoppedTargetsErrorWithoutALineAndWithControlBytes(t *testing.T) {
 		})
 	}
 }
+
+// The G4 an expired wait raised counts what the target managed, as a check's
+// G4 does (#13).
+func TestTheG4OfAnExpiredWaitCountsTheManagedObjects(t *testing.T) {
+	h := newFakeHarness()
+	h.converged, h.count = false, 3
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || result.Violation.ID != "G4" {
+		t.Fatalf("The run reported %v, want a G4 violation.", result.Violation)
+	}
+	if want := "the target managed 3 objects of the kinds it declares"; !strings.Contains(result.Violation.Evidence, want) {
+		t.Errorf("The G4's evidence is %q, want it to say %q.", result.Violation.Evidence, want)
+	}
+	if result.Violation.Managed == nil || *result.Violation.Managed != 3 {
+		t.Errorf("The G4 carried out no count of 3, and its evidence quotes one.")
+	}
+}

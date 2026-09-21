@@ -437,3 +437,25 @@ func TestReportSaysHowManyOpsTheRunApplied(t *testing.T) {
 		})
 	}
 }
+
+// A readiness verdict's count is a number in report.json (#13).
+func TestReportJSONCountsWhatTheTargetManaged(t *testing.T) {
+	failure := failingRun()
+	failure.Check.Managed = ptr(0)
+
+	_, encoded := write(t, failure)
+
+	if got := field(t, encoded, "check"); !strings.Contains(got, `"managed": 0`) {
+		t.Errorf("report.json names the check as\n%s\nwant it to count what the target managed.", got)
+	}
+}
+
+// A check that counted nothing leaves the count out, so that a reader can tell
+// a zero from a check that never asked.
+func TestReportJSONOmitsTheCountNoCheckMade(t *testing.T) {
+	_, encoded := write(t, failingRun())
+
+	if got := field(t, encoded, "check"); strings.Contains(got, "managed") {
+		t.Errorf("report.json names the check as\n%s\nwant no count: G3 made none.", got)
+	}
+}

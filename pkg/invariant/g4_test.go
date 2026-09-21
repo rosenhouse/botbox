@@ -206,3 +206,52 @@ func TestG4IgnoresACRUnderDeletion(t *testing.T) {
 
 	silent(t, invariant.Convergence, in)
 }
+
+// G4 counts what the target managed at the verdict (#13).
+func TestG4SaysHowManyObjectsTheTargetManaged(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(3), status(0, 1))).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if violation.Managed == nil {
+		t.Fatalf("The violation counts no managed objects, want the count at the verdict.")
+	}
+	if *violation.Managed != 0 {
+		t.Errorf("The violation says the target managed %d objects, want 0.", *violation.Managed)
+	}
+}
+
+// The count is the target's holding at the deadline: one child was gone by
+// then and another arrived after it.
+func TestG4CountsTheManagedObjectsLiveAtTheDeadline(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(3), status(0, 1)), child("w-0", "11"), child("w-1", "12")).
+		remove(2*time.Second, child("w-1", "13")).
+		record(6*time.Second, child("w-2", "14")).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if violation.Managed == nil || *violation.Managed != 1 {
+		t.Fatalf("The violation counts %v managed objects, want the 1 live at the deadline.", managed(violation))
+	}
+}
+
+func TestG4CountsTheManagedObjectsAtAnExpiredWait(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1)), child("w-0", "11")).
+		checkpoint(5*time.Second, invariant.Expired).
+		record(6*time.Second, child("w-1", "12")).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if violation.Managed == nil || *violation.Managed != 1 {
+		t.Fatalf("The violation counts %v managed objects, want the 1 the wait expired with.", managed(violation))
+	}
+}

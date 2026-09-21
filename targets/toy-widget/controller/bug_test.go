@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -23,7 +24,7 @@ func TestParseBugRejectsIDsOutsideTheCatalog(t *testing.T) {
 		if err == nil {
 			t.Fatalf("ParseBug(%d) accepted an ID outside the catalog.", id)
 		}
-		if !strings.Contains(err.Error(), "10") {
+		if !strings.Contains(err.Error(), strconv.Itoa(MaxBug)) {
 			t.Errorf("ParseBug(%d) returned %q, which does not name the valid range.", id, err)
 		}
 	}

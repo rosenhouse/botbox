@@ -4,33 +4,41 @@ package run_test
 
 import (
 	"path/filepath"
+	"slices"
 	"testing"
 
+	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/run"
 )
+
+// seededBugB11 selects the bug of DESIGN.md §9.1 whose damage only a fault
+// makes permanent. A later --bug wins over the one target.yaml declares (§11).
+const seededBugB11 = "--bug=11"
 
 // The acceptance of DESIGN.md §10 M6: a fault makes the toy fail an invariant
 // it passes without the fault.
 //
-// The fault errors the toy's ConfigMap creates. controller-runtime backs off
-// exponentially, so about ten are refused before the teardown clears the fault
-// — the count trigger is an upper bound and is never reached. The toy is then
-// still retrying, and the create it finally lands falls inside the quiet
-// window the teardown waits, which is G1's business. The toy has no seeded
-// bug: what fails is its recovery time, which every controller that retries
-// has.
+// B11 believes a child is there from the moment it asks the API server for it.
+// The fault refuses one ConfigMap create, so the toy is left believing in a
+// child it never made and never asks again. That state is permanent rather
+// than transient: the toy goes quiet one child short of its spec, and the
+// settle wait after the fault stops expires however wide any window is.
+// Neither a backoff interval nor a window width enters into the outcome.
 //
-// The margin is thin. The create lands about 115ms into a window T_stable
-// wide, because controller-runtime's backoff ladder puts it at 5.115s while
-// the window opens at T_settle, 5s. A harness stall of that order puts the
-// retry back under the fault, and the one after it is 10s later, outside
-// everything. Issue #11 tracks making this deterministic rather than close.
+// The sequence `targets/toy-widget/sequences/fault.json` demonstrates the
+// other thing a fault does to the toy, which is how long it takes to recover
+// from one. No tier gates on it, because whether the retry it waits for lands
+// inside the teardown's quiet window is a matter of timing. Run it by hand
+// with `botbox replay --target targets/toy-widget/target.yaml
+// targets/toy-widget/sequences/fault.json`.
 func TestAFaultMakesTheToyFailAnInvariantItOtherwisePasses(t *testing.T) {
 	ctx := t.Context()
+	// One target for both runs, so that the fault is the only difference.
 	toy := loadTarget(t, buildToy(t))
+	toy.Launch.Args = append(toy.Launch.Args, seededBugB11)
 	testCluster := startCluster(t, toy.CRDs)
 	dir := t.TempDir()
-	faulted, err := run.ReadSequence("../../targets/toy-widget/sequences/fault.json")
+	faulted, err := run.ReadSequence("../../targets/toy-widget/sequences/b11-fault.json")
 	if err != nil {
 		t.Fatalf("Reading the sequence failed: %v", err)
 	}
@@ -42,15 +50,27 @@ func TestAFaultMakesTheToyFailAnInvariantItOtherwisePasses(t *testing.T) {
 		t.Fatalf("The faulted run failed: %v", err)
 	}
 	if found.Violation == nil {
-		t.Fatalf("The faulted run found nothing. The toy's retry after the fault clears is " +
-			"meant to land in the teardown's quiet window, and it has about 115ms of room: " +
-			"if this is a stall rather than a real change, see issue #11.")
+		t.Fatal("The faulted run found nothing, and the create the fault refused leaves B11 a child short for good.")
 	}
 	// Pin the check. If the fault starts tripping something else, the test
 	// would otherwise pass for a reason it does not describe.
-	if found.Violation.ID != "G1" {
-		t.Errorf("The faulted run reported %s, and this sequence is written to break G1: %s",
+	if found.Violation.ID != "G4" {
+		t.Errorf("The faulted run reported %s, and this sequence is written to break G4: %s",
 			found.Violation.ID, found.Violation.Evidence)
+	}
+	// The toy asked the API server for its one child once and never again,
+	// which is what makes the state permanent rather than slow to recover.
+	if asked, denied := configMapCreates(found.Recorded.Requests); asked != 1 || denied != 1 {
+		t.Errorf("The toy made %d creates of configmaps, %d of them refused, want the one child asked for once and refused.",
+			asked, denied)
+	}
+	// §10 M6 asks the report to name the evidence, and this is the run that
+	// shows it: the create the fault refused is in what the violation carries.
+	if !slices.ContainsFunc(found.Violation.Requests, refusedCreate) {
+		t.Errorf("The violation carries %d requests, none of them the create the fault refused.", len(found.Violation.Requests))
+	}
+	if len(found.Violation.Versions) == 0 {
+		t.Error("The violation carries no version of the CR, and its report has a table to quote them in.")
 	}
 
 	// The control is this sequence with the fault taken out, so nothing but the
@@ -65,6 +85,30 @@ func TestAFaultMakesTheToyFailAnInvariantItOtherwisePasses(t *testing.T) {
 		t.Errorf("The control reports %+v, so the %s the faulted run found is not the fault's.",
 			clean.Violation, found.Violation.ID)
 	}
+}
+
+// configMapCreates counts what the toy asked the API server to create and how
+// many of those the proxy refused.
+func configMapCreates(log []proxy.Request) (asked, denied int) {
+	for _, request := range log {
+		if !configMapCreate(request) {
+			continue
+		}
+		asked++
+		if refusedCreate(request) {
+			denied++
+		}
+	}
+	return asked, denied
+}
+
+func configMapCreate(request proxy.Request) bool {
+	return request.Verb == "create" && request.Resource == "configmaps"
+}
+
+// refusedCreate is the create the fault answered with a 500.
+func refusedCreate(request proxy.Request) bool {
+	return configMapCreate(request) && request.Fault != ""
 }
 
 // without is the sequence with every op of that type removed, renumbered so it

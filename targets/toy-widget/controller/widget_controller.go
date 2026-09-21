@@ -53,6 +53,10 @@ type Reconciler struct {
 	// reads it, and a restart loses it. Reconciles run on one worker (the
 	// default MaxConcurrentReconciles), so nothing else touches it.
 	createdFor sets.Set[types.NamespacedName]
+	// believedPresent holds the children this process has asked the API server
+	// for. Only B11 reads it, and a create the API server refused leaves an
+	// entry no reconcile revisits.
+	believedPresent sets.Set[types.NamespacedName]
 }
 
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
@@ -250,6 +254,13 @@ func (r *Reconciler) ensureChild(ctx context.Context, widget *toyv1.Widget, inde
 			return fmt.Errorf("reading ConfigMap %s: %w", desired.Name, err)
 		}
 		return nil
+	case B11:
+		// B11 (§9.1): the child is believed present from the moment it is
+		// asked for, so a create the API server refused is never retried.
+		if r.believesPresent(desired) {
+			return nil
+		}
+		r.noteBelievedPresent(desired)
 	}
 
 	child := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: desired.Namespace, Name: desired.Name}}
@@ -298,6 +309,17 @@ func (r *Reconciler) noteCreatedChildFor(widget *toyv1.Widget) {
 
 func (r *Reconciler) createdChildFor(widget *toyv1.Widget) bool {
 	return r.createdFor.Has(client.ObjectKeyFromObject(widget))
+}
+
+func (r *Reconciler) noteBelievedPresent(child *corev1.ConfigMap) {
+	if r.believedPresent == nil {
+		r.believedPresent = sets.New[types.NamespacedName]()
+	}
+	r.believedPresent.Insert(client.ObjectKeyFromObject(child))
+}
+
+func (r *Reconciler) believesPresent(child *corev1.ConfigMap) bool {
+	return r.believedPresent.Has(client.ObjectKeyFromObject(child))
 }
 
 func controlledChildren(ctx context.Context, reader client.Reader, widget *toyv1.Widget) ([]corev1.ConfigMap, error) {

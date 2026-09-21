@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -306,5 +307,49 @@ func TestB10LosesTheStatusOfAWidgetItDidNotCreateChildrenFor(t *testing.T) {
 	}
 	if ready := readWidget(t, r, widget).Status.Ready; ready != 3 {
 		t.Errorf("status.ready is %d, want it left stale at 3.", ready)
+	}
+}
+
+func TestB11NeverRetriesAChildCreateTheAPIServerRefused(t *testing.T) {
+	for _, testCase := range []struct {
+		name string
+		bug  Bug
+		want []string
+	}{
+		{"the correct controller creates the child on its next reconcile", 0, []string{"w-0", "w-1"}},
+		{"B11 believes in the child the refused create never made", B11, []string{"w-1"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			widget := newWidget(2)
+			r := fixture(t, testCase.bug, refuseTheFirstChildCreate(), widget)
+
+			if err := reconcile(t, r, widget); err == nil {
+				t.Fatal("The reconcile whose create was refused returned no error.")
+			}
+			mustReconcile(t, r, widget)
+			mustReconcile(t, r, widget)
+
+			if names := childNames(t, r, widget); !slices.Equal(names, testCase.want) {
+				t.Errorf("Three reconciles left the ConfigMaps %v, want %v.", names, testCase.want)
+			}
+			if ready, want := readWidget(t, r, widget).Status.Ready, int32(len(testCase.want)); ready != want {
+				t.Errorf("status.ready is %d, want the %d the API server holds.", ready, want)
+			}
+		})
+	}
+}
+
+// refuseTheFirstChildCreate is the fault the sequence b11-fault.json injects,
+// as the fake API server: one refused ConfigMap create and no more.
+func refuseTheFirstChildCreate() interceptor.Funcs {
+	refused := false
+	return interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if _, isChild := obj.(*corev1.ConfigMap); isChild && !refused {
+				refused = true
+				return apierrors.NewInternalError(errors.New("botbox fault"))
+			}
+			return c.Create(ctx, obj, opts...)
+		},
 	}
 }

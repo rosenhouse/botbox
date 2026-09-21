@@ -6,10 +6,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	"github.com/rosenhouse/botbox/pkg/target"
+	"github.com/rosenhouse/botbox/targets/toy-widget/controller"
 )
 
 func writeKubeconfig(t *testing.T, server string) string {
@@ -79,13 +81,14 @@ func TestRunRejectsABugOutsideTheCatalog(t *testing.T) {
 	// The unreadable kubeconfig keeps a run that fails to reject the bug from
 	// reaching an API server.
 	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "no-such-kubeconfig"))
+	outside := strconv.Itoa(controller.MaxBug + 1)
 
-	err := run([]string{"--bug=11"}, io.Discard)
+	err := run([]string{"--bug=" + outside}, io.Discard)
 
 	if err == nil {
-		t.Fatal("run accepted --bug=11.")
+		t.Fatalf("run accepted --bug=%s.", outside)
 	}
-	if !strings.Contains(err.Error(), "11") {
+	if !strings.Contains(err.Error(), outside) {
 		t.Errorf("run returned %q, which does not name the rejected value.", err)
 	}
 }

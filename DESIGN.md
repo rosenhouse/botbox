@@ -97,6 +97,7 @@ type Launcher interface {
     Start(ctx context.Context, kubeconfig string) error // kubeconfig points at the proxy
     Stop(ctx context.Context) error                     // graceful: SIGTERM, then SIGKILL after a grace period
     Restart(ctx context.Context) error                  // crash: SIGKILL, then Start
+    Status() Status                    // is the target still running, and why it stopped if not
 }
 ```
 
@@ -634,7 +635,9 @@ proxy; the `Image` launcher. Separate design addendum.
   `github.com/google/cel-go` v0.30.x. Tool and target pins live in one Makefile variable
   each: `ENVTEST_K8S_VERSION`, `SETUP_ENVTEST_VERSION`, `CONTROLLER_GEN_VERSION` (which
   also pins the envtest release index), and, from
-  M4, `CERT_MANAGER_VERSION`. Values live in the Makefile only. Bumps are their own PRs,
+  M4, `CERT_MANAGER_VERSION` with the `CERT_MANAGER_COMMIT` the tag must name and the
+  `CERT_MANAGER_CRDS_SHA256` of its checked-in CRDs, so a moved tag or an edited asset
+  fails rather than passing quietly. Values live in the Makefile only. Bumps are their own PRs,
   never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
   import it. The rule covers the root module; the spike modules under `docs/spikes/` are

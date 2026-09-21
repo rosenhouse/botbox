@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -339,5 +340,79 @@ func TestStartRejectsADoneContext(t *testing.T) {
 	}
 	if log.String() != "" {
 		t.Errorf("Start ran the target; its log holds %q.", log.String())
+	}
+}
+
+// awaitExit waits for the target to stop on its own and returns its status.
+func awaitExit(t *testing.T, binary *launch.Binary) launch.Status {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		status := binary.Status()
+		if !status.Running {
+			return status
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the target was still running 10s after it should have exited.")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A target that dies takes the run with it, so the launcher keeps the exit
+// status for its caller to report instead of a settle expiry.
+func TestStatusAfterANonZeroExit(t *testing.T) {
+	binary, _ := newBinary(t, 0, "exit 3")
+	mustStart(t, binary)
+
+	status := awaitExit(t, binary)
+
+	var exit *exec.ExitError
+	if !errors.As(status.Exit, &exit) || exit.ExitCode() != 3 {
+		t.Errorf("Status reported %v, and the target exited 3.", status.Exit)
+	}
+}
+
+// An exit of zero mid-run stops the target just as surely.
+func TestStatusAfterAnExitOfZero(t *testing.T) {
+	binary, _ := newBinary(t, 0, "exit 0")
+	mustStart(t, binary)
+
+	status := awaitExit(t, binary)
+
+	if !errors.Is(status.Exit, launch.ErrExitedZero) {
+		t.Errorf("Status reported %v for a target that exited 0.", status.Exit)
+	}
+}
+
+func TestStatusWhileTheTargetRuns(t *testing.T) {
+	binary, log := newBinary(t, 0, "echo started; "+forever)
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+
+	status := binary.Status()
+
+	if !status.Running || status.Exit != nil {
+		t.Errorf("Status reported %+v for a target that is still running.", status)
+	}
+}
+
+// Before Start and after Stop, botbox is running no target and nothing stopped
+// on its own.
+func TestStatusWithNoTargetRunning(t *testing.T) {
+	binary, log := newBinary(t, 0, "echo started; "+forever)
+
+	if status := binary.Status(); status.Running || status.Exit != nil {
+		t.Errorf("Status reported %+v before Start.", status)
+	}
+
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+	if err := binary.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	if status := binary.Status(); status.Running || status.Exit != nil {
+		t.Errorf("Status reported %+v after Stop.", status)
 	}
 }

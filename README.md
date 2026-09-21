@@ -6,26 +6,21 @@ botbox exercises an unmodified controller and judges it only through the Kuberne
 It applies a sequence of operations to one custom resource, restarts the controller where
 the sequence says to, and records every request the controller makes. It then checks six
 generic invariants that need no per-controller configuration, plus properties a target
-declares. Nothing is linked into the controller: if it talks to an API server, botbox can
-test it.
+declares. If your controller talks to an API server, botbox can test it.
 
-**Status:** M0–M3 are merged, and M4, the cert-manager example below, is this change.
-`botbox run` and `botbox replay` execute hand-written sequences and report the first
-violation. Generated sequences and shrinking arrive in M5; fault injection and
-`report.md` arrive in M6 ([DESIGN.md §10](DESIGN.md#10-milestones)).
+**Status:** M0–M4 are merged. `botbox run` and `botbox replay` execute hand-written sequences and report
+the first violation. Generation and shrinking arrive in M5, faults and `report.md` in M6 ([DESIGN.md §10](DESIGN.md#10-milestones)).
 
 ## Install
 
+Each invocation starts an envtest control plane, so botbox needs `kube-apiserver` and `etcd`
+too. `setup-envtest` fetches them, and the pinned `--index` decides which build ([DESIGN.md §15, D18](DESIGN.md#15-decision-log)).
+
 ```sh
 go install github.com/rosenhouse/botbox/cmd/botbox@latest
-```
-
-Each invocation starts an envtest control plane, so botbox also needs `kube-apiserver`
-and `etcd`. `setup-envtest` fetches them, and `KUBEBUILDER_ASSETS` says where they landed:
-
-```sh
 go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
-export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 -p path)"
+index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
+export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 ```
 
 `botbox run --kubeconfig` uses an existing cluster instead ([DESIGN.md §5.8](DESIGN.md#58-test-cluster)).
@@ -33,11 +28,9 @@ export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 -p path)"
 ## Quickstart: cert-manager
 
 `examples/cert-manager/` drives [cert-manager](https://github.com/cert-manager/cert-manager)
-v1.21.2. botbox builds it from its own source at that tag, runs the binary unmodified
-behind a recording proxy, and judges it only through the API. Nothing is patched into
-cert-manager: the CRDs are its release asset and the flags are its own.
-
-From a clean checkout, this script is the whole run.
+v1.21.2, built from its own source at that tag and run unmodified. Nothing is patched into
+it: the CRDs are its release asset, pinned by sha256, and the flags are its own. From a
+clean checkout, this script is the whole run.
 
 <!-- embed: examples/cert-manager/quickstart.sh -->
 ```sh
@@ -47,6 +40,14 @@ From a clean checkout, this script is the whole run.
 set -eu
 cd "$(dirname "$0")/../.."
 
+# cert-manager's healthz port is fixed (DESIGN.md §15, D28), so runs collide.
+if ! command -v lsof >/dev/null; then
+  echo "lsof is missing, so nothing checked whether port 9403 is free." >&2
+elif lsof -nP -iTCP:9403 -sTCP:LISTEN >/dev/null; then
+  echo "port 9403 is bound. cert-manager listens there, so its runs cannot overlap." >&2
+  exit 1
+fi
+
 go build -o bin/botbox ./cmd/botbox
 make --no-print-directory cert-manager
 
@@ -55,11 +56,10 @@ KUBEBUILDER_ASSETS="$(make --no-print-directory assets-path)" ./bin/botbox run \
   examples/cert-manager/sequences/*.json
 ```
 
-It clones the tag and builds `cmd/controller`, which costs about 90 seconds once. botbox
-then starts one envtest control plane holding the CRDs, and for each sequence it applies
-the Issuer fixture to a fresh namespace, launches the controller behind the proxy, and
-executes the ops. `issue.json` creates a Certificate and deletes it. `reissue.json` adds a
-name to `spec.dnsNames` and restarts the controller. After the build output, botbox prints:
+The first invocation installs `setup-envtest`, downloads the control plane and builds cert-manager,
+a few minutes in all; the two runs then take about 80 seconds together. Per sequence, botbox applies
+the Issuer fixture to a fresh namespace and launches the controller behind the proxy. `issue.json`
+creates a Certificate and deletes it, and `reissue.json` adds a `spec.dnsNames` entry and restarts the controller:
 
 ```
 run 1: seed 20260920, sequence examples/cert-manager/sequences/issue.json
@@ -70,11 +70,9 @@ every run passed.
 ### The negative control
 
 A passing example proves little by itself, so the example also ships a configuration that
-must fail. With `--enable-certificate-owner-ref=false`, cert-manager leaves the issued
-Secret behind when the Certificate is deleted, which upstream documents as intended. The
-target declares `v1/Secret` as managed, so G3 has to report it. Passing
-`--launch-arg --enable-certificate-owner-ref=false` to the script appends that flag to
-`launch.args`, and the run ends:
+must fail. With `--enable-certificate-owner-ref=false`, which `--launch-arg` appends to
+`launch.args`, cert-manager leaves the issued Secret behind, as upstream documents. The
+target declares `v1/Secret` as managed, so G3 has to report it:
 
 ```
 run 1: seed 20260920, sequence examples/cert-manager/sequences/issue.json
@@ -83,13 +81,11 @@ run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was delete
   the evidence is in botbox-out/20260920T231452Z-20260920/run-1
 ```
 
-`make test-example` runs both configurations and fails unless the first passes and the
-second fails on G3 naming that Secret. CI runs it on every pull request.
+`make test-example` runs both and fails unless the first passes and the second fails on G3 naming that Secret.
 
 ## Your own controller
 
-A target is one YAML file. Below is `examples/cert-manager/target.yaml`, the file the
-quickstart runs, trimmed to the keys every target needs.
+A target is one YAML file, here `examples/cert-manager/target.yaml` trimmed to the keys every target needs.
 
 ```yaml
 name: cert-manager
@@ -116,12 +112,26 @@ launch:
     - --metrics-listen-address=127.0.0.1:0
 ```
 
-You supply the CRDs your controller serves, one valid sample CR, any fixture that CR
-depends on as a Certificate depends on an Issuer, the kinds your controller creates so
-that botbox can tell your objects from its own, an expression that says when
-reconciliation has finished, and a command line that launches your binary. `properties`,
-`generate`, `timeouts` and `thresholds` are optional ([DESIGN.md §8.1](DESIGN.md#81-targetyaml)).
-`botbox run --target target.yaml sequences/*.json` then exercises it.
+`properties`, `generate`, `timeouts` and `thresholds` are optional ([DESIGN.md §8.1](DESIGN.md#81-targetyaml)).
+
+### Your own sequence
+
+M5 generates sequences, so until then you write one by hand. Here is the whole `ops` array of
+`examples/cert-manager/sequences/issue.json`, which the file wraps in a `seed` and a target name:
+
+```json
+"ops": [
+  {"i": 0, "t": "create", "obj": {"apiVersion": "cert-manager.io/v1", "kind": "Certificate",
+    "metadata": {"name": "example"},
+    "spec": {"secretName": "example-tls", "commonName": "example.test",
+             "dnsNames": ["example.test"], "issuerRef": {"kind": "Issuer", "name": "selfsigned"}}}},
+  {"i": 1, "t": "delete"}
+]
+```
+
+The op types are `create`, `update`, `delete`, `recreate`, `settle`, `restart` and `deleteManaged`,
+and a settle wait follows every op that changes the CR or a managed object ([DESIGN.md §7](DESIGN.md#7-sequence-format)).
+`botbox run --target target.yaml sequences/*.json` then exercises your controller.
 
 ## Reading a report
 
@@ -133,8 +143,7 @@ then exits 1. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `objects.jsonl` — every version of every object the Observer saw.
 - `target.log` — the target's own output.
 
-Passing runs are not kept. `report.md` and `report.json`, with the minimized sequence and
-its evidence inline, arrive in M6 ([DESIGN.md §5.7](DESIGN.md#57-report)).
+Passing runs are not kept. `report.md` and `report.json` arrive in M6 ([DESIGN.md §5.7](DESIGN.md#57-report)).
 
 ## Running in CI
 
@@ -144,19 +153,20 @@ its evidence inline, arrive in M6 ([DESIGN.md §5.7](DESIGN.md#57-report)).
     go-version-file: go.mod
 - run: go install github.com/rosenhouse/botbox/cmd/botbox@latest
 - run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
-- run: echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 -p path)" >>"$GITHUB_ENV"
+- run: |
+    index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
+    echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 --index $index -p path)" >>"$GITHUB_ENV"
 - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
 - run: botbox run --target target.yaml sequences/*.json
 ```
 
-The job needs no cluster and no container registry: envtest is a local API server and
-etcd, and the target is a binary you built. Cache both, as
-[.github/workflows/ci.yml](.github/workflows/ci.yml) does.
+The job needs no cluster and no container registry. Cache the control plane and the target,
+as [.github/workflows/ci.yml](.github/workflows/ci.yml) does.
 
 ## Invariants
 
-Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generic-invariants)
-states them exactly, with their windows, thresholds and attribution rules.
+Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generic-invariants) states
+them exactly, with their windows, thresholds and attribution rules.
 
 | ID | Checks |
 |---|---|
@@ -167,32 +177,22 @@ states them exactly, with their windows, thresholds and attribution rules.
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
 
-[docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the
-toy controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget). CI regenerates it from
-real runs on every pull request and fails if the committed copy is stale. Its B0 row is
-the control, the toy with no bug, and is empty on purpose.
+[docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy
+controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs.
 
 ## Development
 
-- `make setup` — download modules and install the envtest control plane.
-- `make test` — the unit tier. No API server.
-- `make test-envtest` — the envtest tier.
-- `make test-example` — the cert-manager example and its negative control.
-- `make bug-matrix` — regenerate `docs/bug-matrix.md`.
-- `make fmt` and `make vet` — `gofmt` and `go vet`.
+- `make setup` — install the envtest control plane. `make help` lists every target.
+- `make test`, `make test-envtest`, `make test-example` — the three tiers CI runs on every PR.
 
-A Claude Code web session runs `make setup` through the `SessionStart` hook in `.claude/`,
-so envtest is ready without manual steps.
-
-A `<!-- embed: path -->` comment before a fenced block means the block holds that file
-byte for byte, and `make test` enforces it ([DESIGN.md §11](DESIGN.md#11-repo-conventions)).
+A block after `<!-- embed: path -->` holds that file byte for byte, and `make test` enforces it.
 
 ## Design and internals
 
 - [DESIGN.md](DESIGN.md) — the governing design. Code and docs must not contradict it.
 - [docs/bug-matrix.md](docs/bug-matrix.md) — which check catches each seeded bug.
-- [docs/journal.md](docs/journal.md) — what the agents got right and wrong, per milestone.
-- [docs/spikes/](docs/spikes/) — the experiments behind the decisions in DESIGN.md §15.
+- [docs/journal.md](docs/journal.md) and [docs/spikes/](docs/spikes/) — the milestone journal, and
+  the experiments behind the decisions in DESIGN.md §15.
 
 ## License
 

@@ -4,8 +4,9 @@ package botbox_test
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -191,17 +192,69 @@ func lineAt(lines []string, i int) string {
 	return ""
 }
 
-// markdownFiles lists the repository's Markdown, tracked or not, the way the
-// Makefile's fmt target lists Go files.
+// markdownFiles lists the repository's Markdown. It walks the tree rather than
+// asking git, because an export of a checkout has no git in it, and it skips
+// the directories .gitignore names, which keeps the cert-manager clone under
+// bin/ out of the scan.
 func markdownFiles(t *testing.T) []string {
 	t.Helper()
-	listed, err := exec.Command("git", "ls-files", "-c", "-o", "-z", "--exclude-standard", "*.md").Output()
+	skipped := append(ignoredDirs(t), ".git")
+	var paths []string
+	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
+		switch {
+		case err != nil:
+			return err
+		case entry.IsDir() && slices.Contains(skipped, path):
+			return fs.SkipDir
+		case !entry.IsDir() && filepath.Ext(path) == ".md":
+			paths = append(paths, path)
+		}
+		return nil
+	})
 	if err != nil {
-		t.Fatalf("listing the repository's Markdown: %v", err)
+		t.Fatalf("walking the repository: %v", err)
 	}
-	paths := slices.DeleteFunc(strings.Split(string(listed), "\x00"), func(p string) bool { return p == "" })
 	if len(paths) == 0 {
 		t.Fatal("the repository holds no Markdown, so this check would pass vacuously")
 	}
 	return paths
+}
+
+// ignoredDirs are the directories .gitignore names, such as bin/.
+func ignoredDirs(t *testing.T) []string {
+	t.Helper()
+	ignore, err := os.ReadFile(".gitignore")
+	if err != nil {
+		t.Fatalf("reading which directories to skip: %v", err)
+	}
+	var dirs []string
+	for _, line := range strings.Split(string(ignore), "\n") {
+		line = strings.TrimSpace(line)
+		if dir, isDir := strings.CutSuffix(line, "/"); isDir && !strings.HasPrefix(line, "#") {
+			dirs = append(dirs, strings.TrimPrefix(dir, "/"))
+		}
+	}
+	return dirs
+}
+
+func TestMarkdownFilesSkipsWhatGitIgnores(t *testing.T) {
+	t.Chdir(t.TempDir())
+	writeFile(t, ".gitignore", "# a comment\n/build/\nvendor/\n*.out\n")
+	for _, path := range []string{"kept.md", "build/ignored.md", "vendor/ignored.md", ".git/ignored.md"} {
+		writeFile(t, path, "")
+	}
+
+	if listed := markdownFiles(t); !slices.Equal(listed, []string{"kept.md"}) {
+		t.Errorf("markdownFiles listed %q; the walk keeps to the repository's own Markdown.", listed)
+	}
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }

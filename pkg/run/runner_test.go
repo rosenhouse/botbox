@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
@@ -35,6 +36,10 @@ type fakeHarness struct {
 	// Together they show whether the teardown was stamped before the delete.
 	deleteCRDelay time.Duration
 	deletedCRAt   time.Time
+
+	// targetGone makes the harness report a target that has stopped.
+	targetGone bool
+	targetExit error
 }
 
 func newFakeHarness() *fakeHarness {
@@ -73,6 +78,14 @@ func (f *fakeHarness) createCR(_ context.Context, obj *unstructured.Unstructured
 
 func (f *fakeHarness) patchCR(_ context.Context, name string, patch map[string]any) error {
 	return f.record(fmt.Sprintf("patchCR %s %v", name, patch))
+}
+
+// targetStatus answers as a live target unless a test says otherwise.
+func (f *fakeHarness) targetStatus() launch.Status {
+	if f.targetGone {
+		return launch.Status{Exit: f.targetExit}
+	}
+	return launch.Status{Running: true}
 }
 
 func (f *fakeHarness) deleteCR(_ context.Context, name string) error {
@@ -790,5 +803,27 @@ func TestTheTeardownIsStampedBeforeItChangesAnything(t *testing.T) {
 	if start := result.Timeline.Deletion.Start; start.After(h.deletedCRAt) {
 		t.Errorf("The teardown is stamped %v after the CR delete began; it must be stamped before it.",
 			start.Sub(h.deletedCRAt))
+	}
+}
+
+// TestASettleExpiryWithADeadTargetIsAHarnessError pins the difference between
+// the target failing and the harness failing. A target that is gone cannot
+// converge, so reporting G4 would accuse a controller of a fault that is ours:
+// a port collision reads exactly this way (DESIGN.md §5.1).
+func TestASettleExpiryWithADeadTargetIsAHarnessError(t *testing.T) {
+	h := &fakeHarness{clean: true, targetGone: true, targetExit: errors.New("exit status 1")}
+	sequence := sequenceOf(Op{Type: OpCreate, Obj: widget("widget")})
+
+	result, err := runSequence(t.Context(), toyTarget, sequence, Options{Check: &fakeChecker{}, Dir: "out"}, h)
+	if err == nil {
+		t.Fatal("The run reported no error although the target had stopped.")
+	}
+	for _, want := range []string{"no longer running", "exit status 1", "target.log"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("The error is %q, which does not mention %q.", err, want)
+		}
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %+v against the target; a dead target is the harness's failure.", result.Violation)
 	}
 }

@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
@@ -200,6 +201,9 @@ type harness interface {
 	empty(ctx context.Context) error
 	requests() []proxy.Request
 	objects() *observe.Store
+	// targetStatus reports whether the target is still running, and why it
+	// stopped if it is not.
+	targetStatus() launch.Status
 	stop(ctx context.Context) error
 }
 
@@ -210,6 +214,7 @@ type runner struct {
 	check    Checker
 	h        harness
 	limit    int
+	dir      string
 	now      func() time.Time
 
 	timeline  Timeline
@@ -239,6 +244,7 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 		check:    opts.Check,
 		h:        h,
 		limit:    opts.maxManaged(),
+		dir:      opts.Dir,
 		now:      time.Now,
 		timeline: Timeline{Namespace: h.namespace()},
 	}
@@ -358,13 +364,21 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 	}
 	wait.Window.End, wait.Converged = r.now(), converged
 	r.timeline.Ops[len(r.timeline.Ops)-1].Settled = &wait
-	if !converged && !r.faultActive() {
-		r.violate(Violation{
-			ID:        "G4",
-			Statement: "the target's Ready predicate holds within T_settle after a spec change",
-			Evidence: fmt.Sprintf("the settle wait after op %d (%s) expired after %v with no fault active",
-				op.Index, op.Type, r.target.Timeouts.Settle),
-		})
+	if !converged {
+		// A target that is gone cannot converge, so that is the harness's
+		// failure to report, not the target's to answer for.
+		if status := r.h.targetStatus(); !status.Running {
+			return fmt.Errorf("the target is no longer running: %v; its output is in %s",
+				status.Exit, filepath.Join(r.dir, targetLogFile))
+		}
+		if !r.faultActive() {
+			r.violate(Violation{
+				ID:        "G4",
+				Statement: "the target's Ready predicate holds within T_settle after a spec change",
+				Evidence: fmt.Sprintf("the settle wait after op %d (%s) expired after %v with no fault active",
+					op.Index, op.Type, r.target.Timeouts.Settle),
+			})
+		}
 	}
 	return r.checkpoint(op.Index, converged)
 }

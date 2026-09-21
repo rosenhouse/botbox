@@ -1,0 +1,56 @@
+# The nightly tier of DESIGN.md §10 (M5): the cert-manager example on seeds
+# botbox draws for itself. It is separate from CI so that a find never blocks a
+# merge, and it keeps the failing run's evidence.
+name: Nightly
+
+on:
+  schedule:
+    - cron: '17 7 * * *'
+  workflow_dispatch:
+
+# cert-manager binds a fixed healthz port (DESIGN.md §15, D28), so a dispatch
+# waits for the scheduled run rather than racing it.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  example:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cache envtest control-plane binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin/envtest
+            bin/setup-envtest
+          key: envtest-${{ runner.os }}-${{ hashFiles('Makefile') }}
+      - name: Read the cert-manager pin
+        id: pin
+        run: echo "version=$(make --no-print-directory cert-manager-version)" >>"$GITHUB_OUTPUT"
+      - name: Cache the cert-manager controller
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin/cert-manager-controller
+            bin/cert-manager-${{ steps.pin.outputs.version }}.built
+          key: cert-manager-${{ runner.os }}-${{ steps.pin.outputs.version }}
+      - name: The cert-manager example on drawn seeds
+        run: make test-example-nightly
+      # A find is only actionable with the run it came from (§5.7, §11).
+      - name: Keep the failing run's evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: botbox-out
+          path: botbox-out/
+          if-no-files-found: ignore

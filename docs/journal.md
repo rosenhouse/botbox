@@ -218,3 +218,53 @@ that cert-manager's healthz port moves only under a flag upstream hides, so runs
 it stay sequential.
 
 M4 outcome: `make test-example` and the embed check run on every pull request.
+
+## M5 — 2026-09-21
+
+### Right
+
+The generator reads values out of the CRD's OpenAPI schema, and where the schema says too
+little it refuses to guess rather than inventing a value: naming such a path in
+`generate.mutate` is a configuration error, not a silent no-op. The shrinker keeps a candidate only while it
+fails with the same violation ID, so a shorter sequence that trips a different check is
+reported as the different bug it is, and the minimized sequence is re-run so the run
+directory's evidence is of the sequence botbox prints.
+
+### Wrong in the first draft
+
+- A drawn sequence could end on a `restart` or a `noSettle` op. The teardown does not wait
+  for convergence, so its quiet window then measured work still in flight. 26 of the first
+  60 cert-manager seeds drew such a sequence, and each of the nine that ran failed G1 on
+  the Issuer fixture's own status update, shrinking to the empty sequence.
+- A generated `deleteManaged` ended the invocation where its index resolved to nothing. A
+  target that manages fewer objects than the sequence expected is behaving, not failing.
+- The example's `spec.dnsNames` overlay admitted `plg-.example.test`. A DNS label may not
+  start or end with a hyphen, and neither the CRD nor the API server says so, so §8.3 makes
+  the pattern the target declaration's job.
+- A Widget created at `spec.count: 0` went Ready 0 to 0, so its status merge patch carried
+  only `observedGeneration` and never wrote `status.ready`. Its own `ready` expression then
+  never held. About 13% of toy draws set count 0, and every one of them failed G4.
+
+### What fixed it
+
+D33 records the first: generation appends the settle waits that leave the ops it drew
+judged, and `Sequence.Validate` rejects the shape, which also stops the shrink pass
+proposing it. `deleteManaged` now skips and reports a note (§7). The overlay spells out an
+RFC 1123 label. The toy patches its whole status rather than a diff against a base.
+
+### Process notes
+
+`pkg/run` cannot import `pkg/generate`, because the generator produces a `run.Sequence`
+and the dependency runs the other way, so the M5 acceptance test lives in `pkg/run`'s
+external test package.
+
+The example keeps its two hand-written sequences and gains generated runs. The fixed seeds
+draw `deleteManaged` and `recreate`, which neither file did, and `reissue.json` is the only
+`update` the tier runs. The tier runs both files, so the worked example §7 needs cannot rot.
+
+Two runs against cert-manager cannot overlap, and only the quickstart's port guard keeps
+them apart. A caller that drives `botbox` directly gets no warning: the second controller
+dies on bind and botbox reports a harness error several ops later.
+
+M5 outcome: `make test-example` draws its sequences, and a nightly workflow draws its own
+seeds.

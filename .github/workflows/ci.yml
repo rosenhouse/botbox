@@ -90,9 +90,10 @@ jobs:
       - name: The bug matrix is current
         run: make verify-bug-matrix
 
-  # The cert-manager adoption example of DESIGN.md §10 (M4). §11 budgets the
-  # tier at ten minutes, and the timeout adds the cold clone and build of the
-  # controller, about 90 seconds, that a cache miss pays for.
+  # The cert-manager adoption example of DESIGN.md §10 (M5): generated sequences
+  # on the seeds the Makefile fixes. §11 budgets the tier at ten minutes, and the
+  # timeout adds the cold clone and build of the controller, about 90 seconds,
+  # that a cache miss pays for.
   example:
     runs-on: ubuntu-latest
     timeout-minutes: 12

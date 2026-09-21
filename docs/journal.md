@@ -314,13 +314,13 @@ seeds.
 
 The acceptance was proved with a throwaway sequence before any M6 code was written, and
 the assumption behind it was wrong. G4 is the invariant that anchors on "the fault
-stopped", so G4 was what the fault was expected to break. It breaks G1: the toy's backoff
-outlives the fault, and the create it finally lands falls in the quiet window the teardown
-waits. Building the acceptance test around G4 first would have meant contorting a sequence
-until it produced a failure that was never going to happen.
+stopped", so G4 was what the fault was expected to break. It breaks G1 instead: the toy's
+backoff outlives the fault, and the create it finally lands falls in the quiet window the
+teardown waits. That finding needs no seeded bug, because every controller that retries
+takes time to recover.
 
-The finding needs no seeded bug. What fails is the toy's recovery time after a transient
-outage, which every controller that retries has.
+Which invariant a fault breaks is the target's property, not the fault's. Running the
+sequence settled it; reasoning about it had not.
 
 ### Wrong in the first draft
 
@@ -341,6 +341,16 @@ outage, which every controller that retries has.
   to quote. The data existed and was discarded one layer before the report.
 - A fault's duration halved toward a nanosecond in thirty-two steps, each step a cluster,
   and every successful weakening re-replayed the removal candidate it had just rejected.
+- The acceptance test was built on the toy's recovery time, so its verdict came down to
+  whether a retry landed inside a window. It passed on a 115 ms margin, and no retiming
+  of the windows widened that margin: a settle wait needs `T_stable` of quiet inside
+  `T_settle`.
+- The G4 an expired settle wait raises carried no requests and no versions, so the one
+  run M6's acceptance gates on would have written a report with no evidence to quote.
+- B11 was written up as a bug only a fault can reveal, in ยง9.1, in the bug matrix's own
+  preamble and in the acceptance test's comment. A `deleteManaged` op reveals it too: the
+  belief outlives the object it is about. One run settled it, and no run had been made.
+  B11 has a matrix row now.
 
 ### What fixed it
 
@@ -349,6 +359,12 @@ replay command repeats the flags that selected the run. A report says when the r
 beside it are of a run that found nothing, which is what D31 exists to require. Durations
 halve to a floor, removal is asked once per position, and a candidate that changes nothing
 is refused, which also stops the pass spinning.
+
+B11 makes a fault's damage permanent. The toy notes a child as present the moment it asks
+the API server for it, so a refused create leaves it one child short for good: no error, no
+requeue, no watch event. The settle wait after the fault stops then expires however wide
+any window is, and the acceptance turns on state rather than timing. A G4 the Runner raises
+itself quotes the CR's history and the requests nearest the expiry, as a check's G4 does.
 
 ### Process notes
 
@@ -367,5 +383,5 @@ impossible, because a settle wait needs `T_stable` of quiet inside `T_settle` โ€
 issue #10, a target configured that way fails G4 on every op and botbox blames the
 controller.
 
-M6 outcome: a failing run writes a report, a fault shrinks toward a shorter duration, and
-the acceptance test carries a 115 ms margin that issue #11 exists to remove.
+M6 outcome: a failing run writes a report that quotes its evidence, a fault shrinks toward
+a shorter duration, and a fault makes the toy fail an invariant it otherwise passes.

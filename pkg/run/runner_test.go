@@ -732,13 +732,14 @@ func TestRunStampsTheQuietWindowTheTeardownWaited(t *testing.T) {
 	}
 }
 
-// The checks name what they could not judge, and the run carries it out, so
-// that a reader can tell a skipped check from a passing one (DESIGN.md §6).
-// G3 reads whether the teardown saw the namespace empty (DESIGN.md §6). A run
-// that already found a violation records no teardown checkpoint, so the clean
-// cannot ride on one: G3 would discard a clean deletion the teardown watched.
+// G3 reads whether the teardown saw the namespace empty (DESIGN.md §6, D34). A
+// run that already found a violation records no teardown checkpoint, so the
+// clean cannot ride on one.
 func TestTheTeardownRecordsACleanNamespaceEvenAfterAViolation(t *testing.T) {
+	// The delay separates the window's ends, so that a stamp taken from the
+	// wrong one fails by a visible margin rather than by nanoseconds.
 	h := newFakeHarness()
+	h.deleteCRDelay = 20 * time.Millisecond
 	check := &fakeChecker{violations: [][]Violation{{{ID: "G2"}}}}
 
 	result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
@@ -773,6 +774,8 @@ func TestTheTeardownReportsNoCleanWhenTheNamespaceStaysDirty(t *testing.T) {
 	}
 }
 
+// The checks name what they could not judge, and the run carries it out, so
+// that a reader can tell a skipped check from a passing one (DESIGN.md §6).
 func TestRunCarriesTheNotesTheLastCheckpointLeft(t *testing.T) {
 	h := newFakeHarness()
 	check := &fakeChecker{notes: [][]string{{"G5 is not evaluated for op 0"}, {"G3 is not evaluated for the deletion of widget"}}}

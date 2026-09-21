@@ -96,9 +96,7 @@ type Timeline struct {
 	// primary CR and closes when the namespace is clean or the window expires.
 	Deletion Window
 	// Cleaned is when the teardown saw the run namespace empty, or zero if it
-	// never did. G3 reads it here rather than from a teardown checkpoint,
-	// because a run that already found a violation records no checkpoint and
-	// would lose a clean deletion the teardown watched (DESIGN.md §6).
+	// never did (DESIGN.md §6, D34).
 	Cleaned time.Time
 	// Faults are the windows the Runner had a fault op's spec injected in. An
 	// open window has no End: the fault outlived the run.

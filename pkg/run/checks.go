@@ -87,9 +87,6 @@ func settleResult(checkpoint Checkpoint) invariant.SettleResult {
 	}
 }
 
-// cleaned is when the teardown saw the run namespace empty, which its
-// checkpoint's Converged reports. A namespace that never emptied leaves it
-// zero, and G3 judges the deletion against its deadline instead.
 func engineFaults(windows []Window) []invariant.FaultWindow {
 	faults := make([]invariant.FaultWindow, len(windows))
 	for i, window := range windows {

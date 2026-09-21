@@ -916,8 +916,8 @@ built from source and run as a black-box binary.
 - **D34 G3 reads the teardown's own observation, not a checkpoint.** The Runner records a
   teardown checkpoint only for a run that found no violation, and `cleaned` derived G3's
   "the namespace emptied" from that checkpoint, so exactly the runs where a bug fired lost
-  it. G3 then fell through to its last case and reported that the run ended before the
-  deadline, of a namespace it had watched come clean inside it: five of the eleven bug
-  matrix rows, reading as passes until D31 made notes visible. The teardown now stamps
+  it. G3 then fell through to its last case and reported that the run ended before a
+  deadline the namespace had come clean well inside: six of the eleven bug matrix rows,
+  reading as passes until D31 made notes visible. The teardown now stamps
   `Timeline.Cleaned` from what `awaitClean` saw, and G3 reads that. A run that never came
   clean leaves it zero, which is the case G3 exists to report.

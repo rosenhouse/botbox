@@ -157,10 +157,10 @@ func TestReportQuotesTheRequestsAndVersionsTheViolationNamed(t *testing.T) {
 		heading string
 		wants   []string
 	}{
-		{"Requests", []string{"The violation quoted 1 request.", "requests.jsonl",
+		{"Requests", []string{"The violation quotes 1 request.", "requests.jsonl",
 			"| start | verb | path | status | fault |\n| --- | --- | --- | --- | --- |\n",
 			"| 2026-09-21T05:59:08.980624165Z | create | /api/v1/namespaces/botbox-run-x/configmaps | 500 | error(500) |"}},
-		{"Object versions", []string{"The violation quoted 2 versions.", "objects.jsonl",
+		{"Object versions", []string{"The violation quotes 2 versions.", "objects.jsonl",
 			"| 2026-09-21T05:59:09Z | cert-manager.io/v1/CertificateRequest | widget-0 | 812 | 4 | 3 | widget.botbox/cleanup | yes |",
 			"| 2026-09-21T05:59:10Z | v1/ConfigMap | widget-0-0 | 813 | 0 |  |  |  |"}},
 	} {
@@ -251,7 +251,7 @@ func TestReportBoundsTheEvidenceAndSaysHowMuchThereWas(t *testing.T) {
 		if rows := strings.Count(body, excerpt.row); rows != 20 {
 			t.Errorf("The report quotes %d %s, want 20.", rows, excerpt.key)
 		}
-		if want := fmt.Sprintf("The violation quoted %d %s. The 20 nearest it are below.", quoted, excerpt.key); !strings.Contains(body, want) {
+		if want := fmt.Sprintf("The violation chose from %d %s and quotes 20 of them.", quoted, excerpt.key); !strings.Contains(body, want) {
 			t.Errorf("The report does not say %q:\n%s", want, body)
 		}
 		var held []json.RawMessage
@@ -457,5 +457,34 @@ func TestReportJSONOmitsTheCountNoCheckMade(t *testing.T) {
 
 	if got := field(t, encoded, "check"); strings.Contains(got, "managed") {
 		t.Errorf("report.json names the check as\n%s\nwant no count: G3 made none.", got)
+	}
+}
+
+// A check bounds its own evidence at the same number the report does, so a
+// report that counted only what it was handed could never say the bound
+// dropped anything (#22).
+func TestReportSaysWhatTheChecksOwnBoundLeftOut(t *testing.T) {
+	failure := failingRun()
+	for i := range 20 {
+		failure.Requests = append(failure.Requests, proxy.Request{Verb: "get", Path: fmt.Sprintf("/api/v1/path-%d", i)})
+		failure.Versions = append(failure.Versions, observe.Version{
+			Key: observe.Key{GVK: schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, Name: fmt.Sprintf("widget-%d", i)},
+		})
+	}
+	failure.RequestsTotal, failure.VersionsTotal = 133, 41
+
+	md, encoded := write(t, failure)
+
+	for _, excerpt := range []struct {
+		heading, key string
+		chose        int
+	}{{"Requests", "requests", 133}, {"Object versions", "versions", 41}} {
+		body := section(md, excerpt.heading)
+		if want := fmt.Sprintf("The violation chose from %d %s and quotes 20 of them.", excerpt.chose, excerpt.key); !strings.Contains(body, want) {
+			t.Errorf("The report does not say %q:\n%s", want, body)
+		}
+		if total := field(t, encoded, excerpt.key+"Total"); total != fmt.Sprint(excerpt.chose) {
+			t.Errorf("report.json says %s of %s, want the %d the check chose from.", total, excerpt.key, excerpt.chose)
+		}
 	}
 }

@@ -241,3 +241,32 @@ func b10() invariant.Input {
 		checkpoint(21*time.Second, invariant.Expired).
 		through(21 * time.Second)
 }
+
+// Every violation the checks raise says how much evidence it chose from, or a
+// report of it cannot say what the bound left out (#22).
+func TestEveryViolationSaysHowMuchEvidenceItChoseFrom(t *testing.T) {
+	for _, seeded := range []struct {
+		bug string
+		in  invariant.Input
+	}{
+		{"B1", b1()}, {"B2", b2()}, {"B3", b3()}, {"B4", b4()}, {"B5", b5()},
+		{"B6", b6()}, {"B7", b7()}, {"B8", b8()}, {"B9", b9()}, {"B10", b10()},
+	} {
+		t.Run(seeded.bug, func(t *testing.T) {
+			results, err := invariant.Evaluate(seeded.in)
+			if err != nil {
+				t.Fatalf("The checks failed to evaluate: %v", err)
+			}
+			for _, result := range results {
+				for _, v := range result.Violations {
+					if len(v.Requests) > v.RequestsTotal {
+						t.Errorf("%s quotes %d requests and says it chose from %d.", v.ID, len(v.Requests), v.RequestsTotal)
+					}
+					if len(v.Versions) > v.VersionsTotal {
+						t.Errorf("%s quotes %d versions and says it chose from %d.", v.ID, len(v.Versions), v.VersionsTotal)
+					}
+				}
+			}
+		})
+	}
+}

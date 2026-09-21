@@ -30,9 +30,8 @@ func Property(declared target.Property) Check {
 			out.violate(Violation{
 				Statement: fmt.Sprintf("the property did not hold: %s", declared.Description),
 				At:        s.at,
-				Versions:  excerpt(read(cr, found, managed)),
 				Managed:   counted(managed),
-			})
+			}.quotingVersions(excerpt(read(cr, found, managed))))
 			return out, nil // A run ends at its first violation (DESIGN.md §5.5).
 		}
 		return out, nil

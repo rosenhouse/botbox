@@ -206,3 +206,23 @@ func TestG1IgnoresAWindowTheTeardownReachedInto(t *testing.T) {
 
 	silent(t, invariant.BoundedReconciliation, in)
 }
+
+// A check bounds what it quotes, so it says how much it chose from or a report
+// cannot say what the bound left out (#22).
+func TestG1SaysHowManyRequestsItChoseFrom(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1))).
+		checkpoint(2*time.Second, invariant.Converged).
+		requests(2100*time.Millisecond, 10*time.Millisecond, 25, get("w-0")).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.BoundedReconciliation, in)
+
+	if len(violation.Requests) != invariant.MaxEvidence {
+		t.Errorf("G1 quotes %d requests, want the bound of %d.", len(violation.Requests), invariant.MaxEvidence)
+	}
+	if violation.RequestsTotal != 25 {
+		t.Errorf("G1 says it chose from %d requests, want the 25 in the window.", violation.RequestsTotal)
+	}
+}

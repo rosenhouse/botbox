@@ -108,9 +108,8 @@ func (out *Result) reportLeftovers(in Input, deleted deletion, deadline time.Tim
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the CR %s still carried the finalizers %v %s after its deletion",
 				cr.Name, cr.Finalizers, in.timeouts().Delete),
-			At:       deadline,
-			Versions: Recent(in.History.History(cr.Key)),
-		})
+			At: deadline,
+		}.quotingVersions(Recent(in.History.History(cr.Key))))
 	}
 	had := map[observe.Key]types.UID{}
 	for _, object := range when.managed(in) {
@@ -123,9 +122,8 @@ func (out *Result) reportLeftovers(in Input, deleted deletion, deadline time.Tim
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the %s %s was still there %s after the CR was deleted%s",
 				kindName(left.GVK), left.Name, in.timeouts().Delete, orphaned(left, deleted.uid)),
-			At:       deadline,
-			Versions: Recent(in.History.History(left.Key)),
-		})
+			At: deadline,
+		}.quotingVersions(Recent(in.History.History(left.Key))))
 	}
 }
 

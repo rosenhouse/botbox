@@ -44,14 +44,16 @@ func (d document) markdown() []byte {
 	return []byte(md.String())
 }
 
-// quotedLine says how much evidence the violation quoted, and names what the
-// backstop of maxEvidence left out on the way.
+// quotedLine says what the violation quoted and what its own bound left out. A
+// check bounds its evidence before the report sees it, so the total is what it
+// chose from (D35). Which entries it kept is the check's own rule, and not
+// always the nearest, so the line does not claim one (D39).
 func quotedLine(total, shown int, noun, recording, holds string) string {
-	line := fmt.Sprintf("The violation quoted %s.", count(total, noun))
+	held := fmt.Sprintf(" `%s` holds %s.\n\n", recording, holds)
 	if shown < total {
-		line += fmt.Sprintf(" The %d nearest it are below.", shown)
+		return fmt.Sprintf("The violation chose from %s and quotes %d of them.", count(total, noun), shown) + held
 	}
-	return line + fmt.Sprintf(" `%s` holds %s.\n\n", recording, holds)
+	return fmt.Sprintf("The violation quotes %s.", count(shown, noun)) + held
 }
 
 // count writes a number of things, in the singular where there is one.

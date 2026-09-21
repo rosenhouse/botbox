@@ -35,10 +35,9 @@ func Convergence(in Input) (Result, error) {
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the CR %s was not ready %s after %s%s",
 				cr.Name, in.timeouts().Settle, from.what, quoted(err)),
-			At:       deadline,
-			Versions: Readiness(upTo(in.History.History(cr.Key), deadline), managed),
-			Managed:  counted(managed),
-		})
+			At:      deadline,
+			Managed: counted(managed),
+		}.quotingVersions(Readiness(upTo(in.History.History(cr.Key), deadline), managed)))
 	}
 	out.reportExpiredWaits(in)
 	return out, nil
@@ -89,10 +88,9 @@ func (out *Result) reportExpiredWaits(in Input) {
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the settle wait after %s expired with no fault active",
 				in.describeOp(checkpoint.Op)),
-			At:       checkpoint.Time,
-			Versions: Readiness(in.versionsIn(started, checkpoint.Time), managed),
-			Managed:  counted(managed),
-		})
+			At:      checkpoint.Time,
+			Managed: counted(managed),
+		}.quotingVersions(Readiness(in.versionsIn(started, checkpoint.Time), managed)))
 	}
 }
 

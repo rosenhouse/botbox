@@ -234,6 +234,8 @@ seed, and a one-line replay command. The run directory also holds recordings of 
 CR's readiness also quotes the state of the objects the target managed where it failed,
 within the same bound, and says how many there were: a child the target never created has
 no version to quote, and the count is what a report about a missing one turns on (D39).
+Every violation says how many entries it chose each excerpt from, because a report that
+counted only what it was handed would claim every bounded excerpt was whole.
 
 A report is a snapshot taken where the check failed, and the recordings beside it are
 finalized when the run ends. A request still open at the snapshot, which a watch usually
@@ -960,8 +962,7 @@ built from source and run as a black-box binary.
   second would otherwise crowd out the child the finding is about, and a target managing
   more objects than the bound would crowd out the CR its statement names. The children are
   taken one kind at a time and newest first, so that a bound too small for them drops the
-  oldest of each kind rather than every object of the kinds that sort last. What a bound
-  this tight dropped is not visible in the report itself, which is #22.
+  oldest of each kind rather than every object of the kinds that sort last.
 - **D35 A report quotes the evidence nearest the violation, and carries the notes.**
   §5.7 asks a report to quote the request log and the version timeline and does not say
   how much. A run makes thousands of requests, and a report nobody reads is worth
@@ -969,9 +970,10 @@ built from source and run as a black-box binary.
   violation (`pkg/invariant`), which are the ones that explain it; the report quotes what
   it is given and names the file that holds the rest. A violation the Runner raises itself
   quotes the same way, from the request log and the CR history it has in hand. The
-  report's own bound is a backstop against a caller that bounds nothing. A check whose
-  statement counts more than it quotes — G6 naming a fifty-request loop — is the reader's
-  cue to open `requests.jsonl`. Quoted versions leave their object bodies to
+  report's own bound is a backstop against a caller that bounds nothing. A violation also
+  says how many entries it chose its excerpts from, because a report that counted only
+  what it was handed would claim every bounded excerpt was whole. Which entries a check
+  keeps is its own rule and not always the nearest, so no report claims otherwise. Quoted versions leave their object bodies to
   `objects.jsonl`. The report also carries what no check could judge, for D31's reason: a
   report that omits "G3 could not be judged" reads like one where G3 passed, and it is the
   artefact a human actually reads.

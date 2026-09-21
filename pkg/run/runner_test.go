@@ -449,6 +449,14 @@ func TestTheG4OfAnExpiredWaitCarriesTheEvidence(t *testing.T) {
 	if first := requests[0].Path; first != "before-7" {
 		t.Errorf("The requests open at %q, want the 20 nearest the expiry, from before-7.", first)
 	}
+	// A report cannot say what the bound left out unless the violation says how
+	// much it chose from (#22).
+	if want := 25; result.Violation.VersionsTotal != want {
+		t.Errorf("The violation says it chose from %d versions, want the %d the run recorded.", result.Violation.VersionsTotal, want)
+	}
+	if total := result.Violation.RequestsTotal; total <= len(requests) {
+		t.Errorf("The violation says it chose from %d requests and quotes %d of them.", total, len(requests))
+	}
 }
 
 // A message that prints a violation wants the finding. The evidence behind one

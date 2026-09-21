@@ -3,6 +3,7 @@ package run
 import (
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -492,6 +493,60 @@ func TestTheChecksSayHowManyObjectsTheTargetManaged(t *testing.T) {
 			}
 			if first.Managed == nil || *first.Managed != c.children {
 				t.Errorf("G4 carried out no count of %d, and its evidence quotes one.", c.children)
+			}
+		})
+	}
+}
+
+// A report says what the check's own bound left out, so the totals have to
+// cross out of the engine with the excerpts (#22).
+func TestTheChecksCarryOutHowMuchEvidenceTheyChoseFrom(t *testing.T) {
+	versions := history()
+	for i := range 25 {
+		recordWidget(versions, at(0.1+float64(i)*0.1), strconv.Itoa(11+i), 0)
+	}
+	noisy := convergedRun()
+	// The run has to be observed past the quiet window for G1 to judge it.
+	noisy.Timeline.Checkpoints = append(noisy.Timeline.Checkpoints, Checkpoint{At: at(4.5), Op: 0, Converged: true})
+	for i := range 25 {
+		noisy.Requests = append(noisy.Requests, proxy.Request{
+			Verb: "get", Resource: "configmaps", Namespace: fakeNamespace,
+			Path: fmt.Sprintf("/api/v1/path-%d", i), Start: at(2.2 + float64(i)*0.01), Status: 200,
+		})
+	}
+
+	for _, c := range []struct {
+		want, line string
+		in         Input
+		of         func(Violation) (int, int)
+	}{
+		{"G4", "20 of 25 versions", Input{
+			Target:  checkTarget(),
+			Objects: versions,
+			Timeline: Timeline{
+				Ops:         []AppliedOp{appliedOp(0, OpCreate, at(0))},
+				Checkpoints: []Checkpoint{{At: at(5), Op: 0, Converged: false}},
+			},
+		}, func(v Violation) (int, int) { return len(v.Versions), v.VersionsTotal }},
+		{"G1", "20 of 25 requests", noisy, func(v Violation) (int, int) { return len(v.Requests), v.RequestsTotal }},
+	} {
+		t.Run(c.want, func(t *testing.T) {
+			violations := checked(t, c.in)
+
+			if len(violations) == 0 || violations[0].ID != c.want {
+				t.Fatalf("The checks reported %v, want %s first.", ids(violations), c.want)
+			}
+			quoted, total := c.of(violations[0])
+			if quoted != invariant.MaxEvidence {
+				t.Errorf("%s quotes %d entries, want the bound of %d.", c.want, quoted, invariant.MaxEvidence)
+			}
+			if total != 25 {
+				t.Errorf("%s says it chose from %d entries, want the 25 the run holds.", c.want, total)
+			}
+			// The line the CLI prints says the same, or the report states two
+			// numbers for one excerpt (#22).
+			if !strings.Contains(violations[0].Evidence, c.line) {
+				t.Errorf("%s's evidence is %q, want it to say %q.", c.want, violations[0].Evidence, c.line)
 			}
 		})
 	}

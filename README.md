@@ -190,10 +190,10 @@ target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `target.log` — the target's own output.
 - `kubeconfig` — what the target was pointed at, which is the proxy and not the cluster.
 
-The report quotes the requests and object versions nearest the violation, up to twenty of
-each, and names the file holding the rest. A G4 also says how many objects your controller
-managed where it failed, over the kinds your target declares. Passing runs are not kept
-([DESIGN.md §5.7](DESIGN.md#57-report)).
+The report quotes up to twenty requests and twenty object versions, says how many it chose
+them from, and names the file holding the rest. A G4 also says how many objects your
+controller managed where it failed, over the kinds your target declares. Passing runs are
+not kept ([DESIGN.md §5.7](DESIGN.md#57-report)).
 
 ## Running in CI
 

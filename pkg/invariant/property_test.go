@@ -3,6 +3,7 @@ package invariant_test
 import (
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -186,5 +187,26 @@ func TestAPropertyCountsAndOrdersTheStateItSaw(t *testing.T) {
 	}
 	if !slices.IsSortedFunc(violation.Versions, func(a, b observe.Version) int { return a.Time.Compare(b.Time) }) {
 		t.Errorf("The evidence holds %v, want it in the order the run recorded.", quoted(violation))
+	}
+}
+
+// A property's evidence is bounded like any other, so it says how much it
+// chose from (#22).
+func TestAPropertySaysHowMuchEvidenceItChoseFrom(t *testing.T) {
+	r := newRun().op(invariant.OpCreate, 0)
+	for i := range 25 {
+		r.record(time.Second, child("w-"+strconv.Itoa(i), strconv.Itoa(100+i)))
+	}
+	in := r.record(2*time.Second, widget("14", spec(30), status(30, 1))).
+		checkpoint(5*time.Second, invariant.Converged).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
+
+	if len(violation.Versions) != invariant.MaxEvidence {
+		t.Errorf("The property quotes %d versions, want the bound of %d.", len(violation.Versions), invariant.MaxEvidence)
+	}
+	if want := 26; violation.VersionsTotal != want {
+		t.Errorf("The property says it chose from %d versions, want the %d it saw.", violation.VersionsTotal, want)
 	}
 }

@@ -953,3 +953,35 @@ func TestTheReportCountsWhatTheTargetManaged(t *testing.T) {
 		t.Errorf("report.json is\n%s\nwant the check to count the objects the target managed.", encoded)
 	}
 }
+
+// The report says what the check's own bound left out, which only the check
+// knows (#22).
+func TestTheReportSaysWhatTheChecksBoundLeftOut(t *testing.T) {
+	violation := run.Violation{
+		ID: "G4", Statement: "the target converges",
+		Requests:      []proxy.Request{{Verb: "get", Path: "/api/v1/widgets"}},
+		RequestsTotal: 133,
+		Versions:      []observe.Version{{Key: observe.Key{Name: "widget"}, ResourceVersion: "11"}},
+		VersionsTotal: 41,
+	}
+	session := &fakeSession{results: []run.Result{{Violation: &violation}}}
+
+	code, _, stderr := invokeWith(t, session, countingGenerator(nil, run.OpSettle),
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d, want %d: %s", code, exitViolation, stderr)
+	}
+	encoded, err := os.ReadFile(filepath.Join(session.dirs[0], report.JSONFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var carried struct{ RequestsTotal, VersionsTotal int }
+	if err := json.Unmarshal(encoded, &carried); err != nil {
+		t.Fatal(err)
+	}
+	if carried.VersionsTotal != 41 || carried.RequestsTotal != 133 {
+		t.Errorf("report.json says it chose from %d requests and %d versions, want the 133 and 41 the check did.",
+			carried.RequestsTotal, carried.VersionsTotal)
+	}
+}

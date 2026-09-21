@@ -2,11 +2,11 @@
 
 A black-box property-based and fault-injection harness for Kubernetes controllers.
 
-botbox exercises an unmodified controller and judges it only through the Kubernetes API. It
-draws sequences of operations on one custom resource from that resource's own CRD schema,
-applies them, restarts the controller where a sequence says to, and records every request the
-controller makes. It then checks six generic invariants that need no per-controller
-configuration, plus properties a target declares. Any controller that talks to an API server.
+botbox exercises an unmodified controller and judges it only through the Kubernetes API. It draws
+sequences of operations on one custom resource from that resource's own CRD schema, applies them,
+restarts the controller where a sequence says to, and records every request the controller makes.
+It then checks six generic invariants that need no per-controller configuration, plus properties a
+target declares. If your controller talks to an API server, botbox can test it.
 
 **Status:** M0–M5 are merged. `botbox run` draws sequences, runs them, and minimizes the first
 failure; `botbox replay` re-executes one. Faults and `report.md` arrive in M6 ([DESIGN.md §10](DESIGN.md#10-milestones)).
@@ -169,7 +169,7 @@ Passing runs are not kept, and `report.md` and `report.json` arrive in M6 ([DESI
 Install the control plane as above, and cache it and the target, as
 [.github/workflows/ci.yml](.github/workflows/ci.yml) does. Fix the seed on pull requests, so that
 a failure is the change under review and not a new draw, and draw fresh seeds on a schedule, as
-[nightly.yml](.github/workflows/nightly.yml) does. No cluster, no registry.
+[nightly.yml](.github/workflows/nightly.yml) does. The job needs no cluster and no registry.
 
 ## Invariants
 

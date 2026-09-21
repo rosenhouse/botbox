@@ -9,13 +9,29 @@ import (
 )
 
 // G1 ignores a watch whether it hung or failed; G6 counts the one that failed.
-func TestG1PassesWhenOnlyWatchesAndLeaseWritesRemain(t *testing.T) {
+// Leader election reads its lease as well as writing it, and §6 excludes both.
+func TestG1PassesWhenOnlyWatchesAndLeaseTrafficRemain(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
 		settled(2*time.Second, invariant.Converged).
 		request(3*time.Second, watch()).
 		request(3200*time.Millisecond, failedWatch(429)).
-		request(3500*time.Millisecond, leaseUpdate()).
+		request(3500*time.Millisecond, lease("update")).
+		request(3700*time.Millisecond, lease("get")).
+		through(14 * time.Second)
+
+	silent(t, invariant.BoundedReconciliation, in)
+}
+
+// A health probe, and the discovery reads behind a RESTMapper refresh, name no
+// resource, so none of them is reconciliation (DESIGN.md §6).
+func TestG1IgnoresRequestsThatNameNoResource(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		settled(2*time.Second, invariant.Converged).
+		request(3*time.Second, nonResource("/livez/ping")).
+		request(3200*time.Millisecond, nonResource("/apis")).
+		request(3400*time.Millisecond, nonResource("/apis/toy.botbox/v1")).
 		through(14 * time.Second)
 
 	silent(t, invariant.BoundedReconciliation, in)
@@ -123,6 +139,61 @@ func TestG1CountsEveryNonWatchRequestInTheWindow(t *testing.T) {
 	if !strings.Contains(violation.Statement, "10") {
 		t.Errorf("The statement is %q, want it to count the 10 requests.", violation.Statement)
 	}
+}
+
+// The T_stable the teardown waits before it deletes is a quiet window of its
+// own (DESIGN.md §5.5 step 4), so a sequence whose last op never settles is
+// still judged.
+func TestG1JudgesTheTeardownWindow(t *testing.T) {
+	in := newRun().
+		op(invariant.OpRestart, 0).
+		quiet(5*time.Second).
+		request(6*time.Second, get("w-0")).
+		through(14 * time.Second)
+
+	violation := fired(t, invariant.BoundedReconciliation, in)
+
+	if !strings.Contains(violation.Statement, "teardown") {
+		t.Errorf("The statement is %q, want it to name the teardown's window.", violation.Statement)
+	}
+}
+
+// The teardown clears every fault before it opens its window, so a fault that
+// ended there did not reach into it; one that outlived the clearing did.
+func TestG1JudgesTheTeardownWindowByWhenTheFaultsStopped(t *testing.T) {
+	for _, fault := range []struct {
+		stopped string
+		to      time.Duration
+		judged  bool
+	}{
+		{stopped: "as the window opened", to: 5 * time.Second, judged: true},
+		{stopped: "inside the window", to: 5500 * time.Millisecond, judged: false},
+	} {
+		t.Run(fault.stopped, func(t *testing.T) {
+			in := newRun().
+				op(invariant.OpRestart, 0).
+				fault(time.Second, fault.to).
+				quiet(5*time.Second).
+				request(6*time.Second, get("w-0")).
+				through(14 * time.Second)
+
+			if fault.judged {
+				fired(t, invariant.BoundedReconciliation, in)
+				return
+			}
+			silent(t, invariant.BoundedReconciliation, in)
+		})
+	}
+}
+
+func TestG1IgnoresTrafficAfterTheTeardownWindowClosed(t *testing.T) {
+	in := newRun().
+		op(invariant.OpRestart, 0).
+		quiet(5*time.Second).
+		request(7500*time.Millisecond, get("w-0")).
+		through(14 * time.Second)
+
+	silent(t, invariant.BoundedReconciliation, in)
 }
 
 func TestG1IgnoresAWindowTheTeardownReachedInto(t *testing.T) {

@@ -14,22 +14,23 @@ type Engine struct{}
 
 var _ Checker = Engine{}
 
-// Check returns every violation the engine found, in its order of checks. A
-// run ends at the first of them (DESIGN.md §5.5).
-func (Engine) Check(in Input) ([]Violation, error) {
+// Check returns every violation the engine found, in its order of checks, and
+// every note. A run ends at the first violation (DESIGN.md §5.5).
+func (Engine) Check(in Input) (Findings, error) {
 	results, err := Evaluate(in)
 	if err != nil {
-		return nil, err
+		return Findings{}, err
 	}
-	var found []Violation
+	var found Findings
 	for _, result := range results {
 		for _, violation := range result.Violations {
-			found = append(found, Violation{
+			found.Violations = append(found.Violations, Violation{
 				ID:        violation.ID,
 				Statement: violation.Statement,
 				Evidence:  evidence(violation),
 			})
 		}
+		found.Notes = append(found.Notes, result.Notes...)
 	}
 	return found, nil
 }
@@ -45,6 +46,8 @@ func Evaluate(in Input) ([]invariant.Result, error) {
 		Checkpoints: engineCheckpoints(in.Timeline.Checkpoints),
 		Faults:      engineFaults(in.Timeline.Faults),
 		Teardown:    in.Timeline.Deletion.Start,
+		Quiet:       in.Timeline.Quiet.Start,
+		Cleaned:     cleaned(in.Timeline),
 		// The deletion window is the last of the run the Observer watched.
 		// It is zero until the teardown closes it, and the engine then
 		// evaluates at the last checkpoint.
@@ -82,6 +85,18 @@ func settleResult(checkpoint Checkpoint) invariant.SettleResult {
 	default:
 		return invariant.Expired
 	}
+}
+
+// cleaned is when the teardown saw the run namespace empty, which its
+// checkpoint's Converged reports. A namespace that never emptied leaves it
+// zero, and G3 judges the deletion against its deadline instead.
+func cleaned(timeline Timeline) time.Time {
+	for _, checkpoint := range timeline.Checkpoints {
+		if checkpoint.Op == Teardown && checkpoint.Converged {
+			return timeline.Deletion.End
+		}
+	}
+	return time.Time{}
 }
 
 func engineFaults(windows []Window) []invariant.FaultWindow {

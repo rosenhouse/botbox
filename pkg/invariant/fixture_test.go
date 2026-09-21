@@ -1,6 +1,8 @@
 package invariant_test
 
 import (
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,6 +121,19 @@ func (r *run) settled(when time.Duration, result invariant.SettleResult) *run {
 // teardown is when botbox began emptying the namespace (DESIGN.md §5.5).
 func (r *run) teardown(when time.Duration) *run {
 	r.in.Teardown = at(when)
+	return r
+}
+
+// quiet is the T_stable the teardown waits before it deletes, which §5.5
+// step 4 makes the run's last quiet window.
+func (r *run) quiet(from time.Duration) *run {
+	r.in.Quiet = at(from)
+	return r.teardown(from + stableWindow)
+}
+
+// cleaned is when botbox saw the run namespace empty (DESIGN.md §5.5).
+func (r *run) cleaned(when time.Duration) *run {
+	r.in.Cleaned = at(when)
 	return r
 }
 
@@ -300,10 +315,10 @@ func failedDelete(name string, status int) proxy.Request {
 	return failed
 }
 
-// failedUpdate is a write the API server turned away.
-func failedUpdate(name string, status int) proxy.Request {
+// conflicted is the request the API server answered 409.
+func conflicted(verb, name string) proxy.Request {
 	failed := get(name)
-	failed.Verb, failed.Status = "update", status
+	failed.Verb, failed.Status = verb, http.StatusConflict
 	return failed
 }
 
@@ -325,11 +340,19 @@ func failedWatch(status int) proxy.Request {
 	return failed
 }
 
-func leaseUpdate() proxy.Request {
+// lease is one leader-election request, which §6 excludes from G1 whether it
+// reads or writes.
+func lease(verb string) proxy.Request {
 	return proxy.Request{
-		Verb: "update", Group: "coordination.k8s.io", Version: "v1", Resource: "leases",
+		Verb: verb, Group: "coordination.k8s.io", Version: "v1", Resource: "leases",
 		Namespace: namespace, Name: "toy-widget", Status: 200,
 	}
+}
+
+// nonResource is a request to a path that names no resource: a health probe,
+// a discovery read or the OpenAPI schema.
+func nonResource(path string) proxy.Request {
+	return proxy.Request{Verb: "get", Path: path, Status: 200}
 }
 
 func statusPatch() proxy.Request {
@@ -347,6 +370,16 @@ func fired(t *testing.T, check invariant.Check, in invariant.Input) invariant.Vi
 		t.Fatalf("%s reported %d violations, want exactly one: %v", result.ID, len(result.Violations), statements(result))
 	}
 	return result.Violations[0]
+}
+
+// noted fails the test unless the check reported no violation and one note
+// saying what it did not judge.
+func noted(t *testing.T, check invariant.Check, in invariant.Input, want string) {
+	t.Helper()
+	result := silent(t, check, in)
+	if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], want) {
+		t.Fatalf("%s noted %v, want one note saying %q.", result.ID, result.Notes, want)
+	}
 }
 
 // silent fails the test unless the check reported nothing.

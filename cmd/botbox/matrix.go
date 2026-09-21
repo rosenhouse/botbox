@@ -130,7 +130,7 @@ func (r bugRow) summary() string {
 // checks then read the whole recording.
 type observing struct{}
 
-func (observing) Check(run.Input) ([]run.Violation, error) { return nil, nil }
+func (observing) Check(run.Input) (run.Findings, error) { return run.Findings{}, nil }
 
 // readBugSequences reads one b<id>.json per seeded bug, in bug order.
 func readBugSequences(dir string) ([]bugRow, error) {

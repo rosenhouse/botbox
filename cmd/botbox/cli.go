@@ -124,6 +124,9 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		number := i + 1
 		fmt.Fprintf(c.stdout, "run %d: seed %d, sequence %s\n", number, sequence.Seed, paths[i])
 		result, err := s.execute(ctx, exercised, sequence, out.RunDir(number), run.Engine{})
+		for _, note := range result.Notes {
+			fmt.Fprintf(c.stdout, "run %d: %s\n", number, note)
+		}
 		switch exitCode(result, err) {
 		case exitError:
 			return c.fail(err)

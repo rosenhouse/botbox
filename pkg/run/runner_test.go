@@ -126,23 +126,29 @@ func (f *fakeHarness) teardownStart() int {
 	return len(f.calls)
 }
 
-// fakeChecker answers each checkpoint from violations, and records what it was
-// given.
+// fakeChecker answers each checkpoint from violations and notes, and records
+// what it was given.
 type fakeChecker struct {
 	violations [][]Violation
+	notes      [][]string
 	err        error
 	inputs     []Input
 }
 
-func (c *fakeChecker) Check(in Input) ([]Violation, error) {
+func (c *fakeChecker) Check(in Input) (Findings, error) {
 	c.inputs = append(c.inputs, in)
 	if c.err != nil {
-		return nil, c.err
+		return Findings{}, c.err
 	}
-	if len(c.inputs) <= len(c.violations) {
-		return c.violations[len(c.inputs)-1], nil
+	var found Findings
+	n := len(c.inputs) - 1
+	if n < len(c.violations) {
+		found.Violations = c.violations[n]
 	}
-	return nil, nil
+	if n < len(c.notes) {
+		found.Notes = c.notes[n]
+	}
+	return found, nil
 }
 
 var toyTarget = &target.Target{
@@ -684,6 +690,44 @@ func TestRunRecordsTheWholeRunTheTeardownLeftBehind(t *testing.T) {
 	}
 	if result.Recorded.Target != toyTarget {
 		t.Errorf("The recorded run names the target %v, want the run's.", result.Recorded.Target)
+	}
+}
+
+// §5.5 step 4 waits T_stable before it deletes anything, which §6 judges as
+// the run's last quiet window.
+func TestRunStampsTheQuietWindowTheTeardownWaited(t *testing.T) {
+	h := newFakeHarness()
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	quiet, settled := result.Timeline.Quiet, result.Timeline.Ops[0].Settled
+	if !quiet.Start.After(settled.Window.End) {
+		t.Errorf("The teardown's window opens at %v, want it after the settle wait ended at %v.",
+			quiet.Start, settled.Window.End)
+	}
+	if quiet.End != result.Timeline.Deletion.Start {
+		t.Errorf("The teardown's window closes at %v, want it where the deletion opens, at %v.",
+			quiet.End, result.Timeline.Deletion.Start)
+	}
+}
+
+// The checks name what they could not judge, and the run carries it out, so
+// that a reader can tell a skipped check from a passing one (DESIGN.md §6).
+func TestRunCarriesTheNotesTheLastCheckpointLeft(t *testing.T) {
+	h := newFakeHarness()
+	check := &fakeChecker{notes: [][]string{{"G5 is not evaluated for op 0"}, {"G3 is not evaluated for the deletion of widget"}}}
+
+	result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if want := check.notes[1]; !slices.Equal(result.Notes, want) {
+		t.Errorf("The run carried the notes %v, want %v: each checkpoint reads the whole run so far.",
+			result.Notes, want)
 	}
 }
 

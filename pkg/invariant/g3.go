@@ -19,12 +19,23 @@ func CleanDeletion(in Input) (Result, error) {
 	out := Result{ID: "G3"}
 	for _, deleted := range in.crDeletions() {
 		deadline := deleted.at.Add(in.timeouts().Delete)
-		if !in.observed(deadline) || in.faulted(deleted.at, deadline) {
-			continue
+		switch {
+		case in.cleanedBy(deadline): // The namespace emptied, so nothing was left.
+		case in.faulted(deleted.at, deadline):
+			out.note("for the deletion of %s: a fault was active before its deadline", deleted.key.Name)
+		case !in.observed(deadline):
+			out.note("for the deletion of %s: the run ended before its %s deadline", deleted.key.Name, in.timeouts().Delete)
+		default:
+			out.reportLeftovers(in, deleted, deadline)
 		}
-		out.reportLeftovers(in, deleted, deadline)
 	}
 	return out, nil
+}
+
+// cleanedBy reports whether botbox saw the run namespace empty by t, which
+// leaves nothing for G3 to find at t.
+func (in Input) cleanedBy(t time.Time) bool {
+	return !in.Cleaned.IsZero() && !in.Cleaned.After(t)
 }
 
 // deletion is one deletion of the primary CR, timestamped as the Observer saw

@@ -36,7 +36,14 @@ const deletionMargin = time.Second
 // Checker evaluates the invariants and the target's properties at a checkpoint
 // (DESIGN.md §5.6). Its error is a configuration error, never a finding.
 type Checker interface {
-	Check(Input) ([]Violation, error)
+	Check(Input) (Findings, error)
+}
+
+// Findings are what the checks made of the run at one checkpoint.
+type Findings struct {
+	Violations []Violation
+	// Notes name what a check could not judge (DESIGN.md §6).
+	Notes []string
 }
 
 // Input is what a check reads: the proxy's request log, the Observer's object
@@ -65,6 +72,9 @@ type Result struct {
 	// Violation is the first violation the run found, or nil. A run ends at
 	// its first violation.
 	Violation *Violation
+	// Notes name what the checks could not judge, as the last checkpoint read
+	// the run (DESIGN.md §6).
+	Notes []string
 	// Recorded is the whole run as the checks read it, sampled once the
 	// teardown is done. A run that ended early recorded what it reached.
 	Recorded Input
@@ -76,6 +86,10 @@ type Timeline struct {
 	Namespace   string
 	Ops         []AppliedOp
 	Checkpoints []Checkpoint
+	// Quiet is the T_stable the teardown waits before it deletes anything,
+	// which §5.5 step 4 makes the run's last quiet window. It closes where
+	// Deletion opens.
+	Quiet Window
 	// Deletion is the window G3 judges: it opens when the teardown deletes the
 	// primary CR and closes when the namespace is clean or the window expires.
 	Deletion Window
@@ -200,6 +214,7 @@ type runner struct {
 
 	timeline  Timeline
 	violation *Violation
+	notes     []string
 	failed    bool
 	// cr is the primary CR the CR ops act on.
 	cr     string
@@ -230,7 +245,8 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 	failure := r.applyOps(ctx)
 	r.failed = failure != nil
 	teardown := r.teardown(ctx)
-	return Result{Timeline: r.timeline, Violation: r.violation, Recorded: r.input()}, errors.Join(failure, teardown)
+	result := Result{Timeline: r.timeline, Violation: r.violation, Notes: r.notes, Recorded: r.input()}
+	return result, errors.Join(failure, teardown)
 }
 
 // applyOps applies the sequence in order and stops at the first violation
@@ -359,11 +375,12 @@ func (r *runner) checkpoint(op int, converged bool) error {
 		return fmt.Errorf("the run namespace holds %d managed objects, over the harness limit of %d", count, r.limit)
 	}
 	r.timeline.Checkpoints = append(r.timeline.Checkpoints, Checkpoint{At: r.now(), Op: op, Converged: converged})
-	violations, err := r.check.Check(r.input())
+	found, err := r.check.Check(r.input())
 	if err != nil {
 		return fmt.Errorf("evaluating the checks: %w", err)
 	}
-	for _, violation := range violations {
+	r.notes = found.Notes
+	for _, violation := range found.Violations {
 		r.violate(violation)
 		break
 	}
@@ -436,12 +453,15 @@ func (r *runner) teardown(ctx context.Context) error {
 	defer cancel()
 
 	r.clearFaults()
+	r.timeline.Quiet.Start = r.now()
 	failures := []error{r.h.sleep(ctx, r.target.Timeouts.Stable)}
 
 	// Stamped before the delete, not after it: from here on botbox is the one
 	// changing the namespace, and no invariant window reaches past this instant
-	// (§6). The T_stable sleep above is still the target's to answer for.
-	r.timeline.Deletion.Start = r.now()
+	// (§6). The T_stable sleep above is the last quiet window, and still the
+	// target's to answer for.
+	r.timeline.Quiet.End = r.now()
+	r.timeline.Deletion.Start = r.timeline.Quiet.End
 	if r.cr != "" {
 		failures = append(failures, r.h.deleteCR(ctx, r.cr))
 	}

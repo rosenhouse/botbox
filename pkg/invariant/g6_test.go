@@ -53,17 +53,27 @@ func TestG6IgnoresRequestsThatSucceed(t *testing.T) {
 // cert-manager runs six controllers that write one Certificate's status, so
 // they conflict and re-read. That is the API server's optimistic-concurrency
 // contract, not an error loop (DESIGN.md §6).
-func TestG6IgnoresAConflictOnAWrite(t *testing.T) {
-	in := loop(errLoop+1, failedUpdate("w-0", 409)).through(8 * time.Second)
+func TestG6IgnoresAConflictOnAnUpdateOrAPatch(t *testing.T) {
+	for _, verb := range []string{"update", "patch"} {
+		t.Run(verb, func(t *testing.T) {
+			in := loop(errLoop+1, conflicted(verb, "w-0")).through(8 * time.Second)
 
-	silent(t, invariant.NoErrorLoop, in)
+			silent(t, invariant.NoErrorLoop, in)
+		})
+	}
 }
 
-// Only a write loses that race, so the exclusion reaches no further.
-func TestG6CountsAConflictOnARead(t *testing.T) {
-	in := loop(errLoop+1, failedGet("w-0", 409)).through(8 * time.Second)
+// Only an update and a patch lose that race. A 409 on a create is
+// AlreadyExists, which says the object is there: re-creating it is the error
+// loop G6 exists to catch.
+func TestG6CountsAConflictOnAnyOtherVerb(t *testing.T) {
+	for _, verb := range []string{"create", "delete", "get"} {
+		t.Run(verb, func(t *testing.T) {
+			in := loop(errLoop+1, conflicted(verb, "w-0")).through(8 * time.Second)
 
-	fired(t, invariant.NoErrorLoop, in)
+			fired(t, invariant.NoErrorLoop, in)
+		})
+	}
 }
 
 // G1 ignores a watch because a watch that hangs is the target waiting. A watch

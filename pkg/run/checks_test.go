@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
@@ -63,12 +64,13 @@ func recordWidget(store *observe.Store, when time.Time, resourceVersion string, 
 
 // recordChild records a ConfigMap the target owns nothing of, which is what
 // G3 reports as an orphan.
-func recordChild(store *observe.Store, when time.Time, name, resourceVersion string) {
+func recordChild(store *observe.Store, when time.Time, name, resourceVersion string) *unstructured.Unstructured {
 	child := &unstructured.Unstructured{Object: map[string]any{}}
 	child.SetGroupVersionKind(configMapKind)
 	child.SetName(name)
 	child.SetResourceVersion(resourceVersion)
 	store.Record(configMapKind, child, when)
+	return child
 }
 
 func appliedOp(index int, opType OpType, when time.Time) AppliedOp {
@@ -91,11 +93,11 @@ func convergedRun() Input {
 
 func checked(t *testing.T, in Input) []Violation {
 	t.Helper()
-	violations, err := Engine{}.Check(in)
+	found, err := Engine{}.Check(in)
 	if err != nil {
 		t.Fatalf("The checks failed to evaluate: %v", err)
 	}
-	return violations
+	return found.Violations
 }
 
 func ids(violations []Violation) []string {
@@ -118,6 +120,110 @@ func TestTheChecksReadTheTeardownCheckpointAsNoSettleWait(t *testing.T) {
 	if len(violations) != 0 {
 		t.Errorf("The checks reported %v, want none: a namespace that did not come clean is no expired settle wait.",
 			ids(violations))
+	}
+}
+
+// A namespace that came clean settles G3 where the teardown stopped watching,
+// which is before T_delete is up whenever the target cleans up promptly
+// (DESIGN.md §6).
+func TestTheChecksTakeTheCleanNamespaceFromTheTeardownCheckpoint(t *testing.T) {
+	for _, teardown := range []struct {
+		namespace string
+		clean     bool
+		notes     int
+	}{
+		{namespace: "came clean", clean: true, notes: 0},
+		{namespace: "never emptied", clean: false, notes: 1},
+	} {
+		t.Run(teardown.namespace, func(t *testing.T) {
+			in := deletedRun(teardown.clean)
+
+			g3 := resultOf(t, in, "G3")
+
+			if len(g3.Violations) != 0 {
+				t.Errorf("G3 reported %v, want none: nothing the target manages was left.", g3.Violations)
+			}
+			if len(g3.Notes) != teardown.notes {
+				t.Errorf("G3 noted %v, want %d note(s): the deletion's deadline is past the run's end.",
+					g3.Notes, teardown.notes)
+			}
+		})
+	}
+}
+
+// deletedRun deleted its CR at the teardown and stopped watching once the
+// namespace was clean, well before T_delete was up.
+func deletedRun(clean bool) Input {
+	store := history()
+	recordWidget(store, at(0.1), "11", 1)
+	in := Input{
+		Target:  checkTarget(),
+		Objects: store,
+		Timeline: Timeline{
+			Ops: []AppliedOp{appliedOp(0, OpCreate, at(0))},
+			Checkpoints: []Checkpoint{
+				{At: at(2.1), Op: 0, Converged: true},
+				{At: at(12), Op: Teardown, Converged: clean},
+			},
+			Quiet:    Window{Start: at(8), End: at(10)},
+			Deletion: Window{Start: at(10), End: at(12)},
+		},
+	}
+	child := recordChild(store, at(0.2), "widget-0", "12")
+	deleting := &unstructured.Unstructured{Object: map[string]any{
+		"spec": map[string]any{"count": int64(1)}, "status": map[string]any{"ready": int64(1)},
+	}}
+	deleting.SetGroupVersionKind(widgetKind)
+	deleting.SetName("widget")
+	deleting.SetResourceVersion("13")
+	store.RecordDeletion(widgetKind, deleting, at(10.1))
+	if clean {
+		store.RecordDeletion(configMapKind, child, at(11))
+	}
+	return in
+}
+
+// The Runner sees the checks through one Checker, so the engine hands it the
+// notes alongside the violations.
+func TestTheEngineCarriesTheNotesOut(t *testing.T) {
+	found, err := Engine{}.Check(deletedRun(false))
+
+	if err != nil {
+		t.Fatalf("The checks failed to evaluate: %v", err)
+	}
+	if len(found.Notes) != 1 || !strings.Contains(found.Notes[0], "G3") {
+		t.Errorf("The engine reported the notes %v, want G3's.", found.Notes)
+	}
+}
+
+// resultOf returns what one check found over the whole run.
+func resultOf(t *testing.T, in Input, id string) invariant.Result {
+	t.Helper()
+	results, err := Evaluate(in)
+	if err != nil {
+		t.Fatalf("The checks failed to evaluate: %v", err)
+	}
+	for _, result := range results {
+		if result.ID == id {
+			return result
+		}
+	}
+	t.Fatalf("The engine ran %d checks, none of them %s.", len(results), id)
+	return invariant.Result{}
+}
+
+// The T_stable the teardown waits before it deletes is the run's last quiet
+// window (DESIGN.md §5.5 step 4).
+func TestTheChecksJudgeTheQuietWindowTheTeardownWaited(t *testing.T) {
+	in := convergedRun()
+	in.Timeline.Quiet = Window{Start: at(8), End: at(10)}
+	in.Timeline.Deletion = Window{Start: at(10), End: at(21)}
+	in.Requests = []proxy.Request{{Start: at(9), Verb: "get", Resource: "configmaps", Name: "widget-0", Status: 200}}
+
+	violations := checked(t, in)
+
+	if len(violations) != 1 || violations[0].ID != "G1" {
+		t.Fatalf("The checks reported %v, want G1: the target was still working in the teardown's window.", ids(violations))
 	}
 }
 
@@ -254,10 +360,10 @@ func TestTheChecksReportAPropertyThatCannotBeEvaluated(t *testing.T) {
 		},
 	}}
 
-	violations, err := Engine{}.Check(in)
+	found, err := Engine{}.Check(in)
 
 	if err == nil {
-		t.Fatalf("The checks reported %v, want the evaluation error.", ids(violations))
+		t.Fatalf("The checks reported %v, want the evaluation error.", ids(found.Violations))
 	}
 	if !strings.Contains(err.Error(), "P1") {
 		t.Errorf("The checks returned %q, want the property named.", err)

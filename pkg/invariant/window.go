@@ -9,19 +9,18 @@ import (
 // violation carries into the report (DESIGN.md §5.7).
 const maxEvidence = 20
 
-// quiet is the T_stable that follows an op's settle wait, in which DESIGN.md
-// §6 requires the run to have gone still. G1 and G2 both check it.
+// quiet is a stretch in which DESIGN.md §6 requires the run to have gone
+// still: the T_stable that follows an op's settle wait, and the T_stable the
+// teardown waits before it deletes. G1 and G2 both check it.
 type quiet struct {
-	op         Op
+	what       string
 	start, end time.Time
 }
 
-func (w quiet) String() string {
-	return fmt.Sprintf("the quiet window after op %d (%s)", w.op.Index, w.op.Type)
-}
+func (w quiet) String() string { return w.what }
 
-// quietWindows returns the quiet window of every op the run observed to its
-// end under an unchanged spec and no fault.
+// quietWindows returns every window the run observed to its end under an
+// unchanged spec and no fault: one per op that settled, and the teardown's.
 func (in Input) quietWindows() []quiet {
 	var windows []quiet
 	stable := in.timeouts().Stable
@@ -30,7 +29,11 @@ func (in Input) quietWindows() []quiet {
 		if !ok {
 			continue
 		}
-		w := quiet{op: op, start: settled, end: settled.Add(stable)}
+		w := quiet{
+			what:  fmt.Sprintf("the quiet window after op %d (%s)", op.Index, op.Type),
+			start: settled,
+			end:   settled.Add(stable),
+		}
 		if !in.observed(w.end) || in.faulted(op.Time, w.end) || in.tornDown(w.end) {
 			continue
 		}
@@ -39,7 +42,22 @@ func (in Input) quietWindows() []quiet {
 		}
 		windows = append(windows, w)
 	}
+	if w, ok := in.teardownWindow(); ok {
+		windows = append(windows, w)
+	}
 	return windows
+}
+
+// teardownWindow is the T_stable the teardown waits before it deletes
+// anything, which §5.5 step 4 makes a quiet window of its own: a run whose
+// last op never settles has no other. The teardown clears every fault as the
+// window opens, so a fault it cleared did not reach into it.
+func (in Input) teardownWindow() (quiet, bool) {
+	w := quiet{what: "the quiet window the teardown waited before deleting", start: in.Quiet, end: in.Teardown}
+	if w.start.IsZero() || w.end.IsZero() || !in.observed(w.end) || in.faulted(w.start, w.end) {
+		return quiet{}, false
+	}
+	return w, true
 }
 
 // settleEnd is when the op's settle wait ended, on convergence or on T_settle,

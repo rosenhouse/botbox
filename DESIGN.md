@@ -264,18 +264,24 @@ real targets; the toy target sets much shorter ones (§9).
 
 | ID | Name | Statement | Signal |
 |---|---|---|---|
-| **G1** | Bounded reconciliation | With the CR spec unchanged and no faults active, the target's API request rate falls to zero (excluding watch requests and every request to `coordination.k8s.io` leases, since leader election reads as well as writes) within `T_settle` (default 30s) and stays there for `T_stable` (default 10s): the window checked is the `T_stable` that follows the op's settle wait. | Proxy log |
+| **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s), the target makes no further API request for `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io` leases, since leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
 | **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, and within `T_settle` after faults stop, the target's `Ready` predicate holds. This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
-| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on a write does not count. | Proxy log |
+| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
 
 **The quiet window.** G1 and G2 judge the `T_stable` that follows a settle wait, which
 ends where the run converged or, at the latest, `T_settle` after the op (§5.5). Measuring
 it from the op instead leaves it unjudged for a target that converges quickly, because the
-teardown begins one `T_stable` after the settle wait ends. A window a later op or a fault
-reaches into is not judged.
+teardown begins one `T_stable` after the settle wait ends. The `T_stable` the teardown
+waits before it deletes is a window of its own, closing at the teardown boundary (§5.5
+step 4). A run judges one window per op whose settle wait it saw end, plus the teardown's:
+a sequence whose last op does not settle has only the teardown's, and where the last op
+did settle the two overlap, so traffic in the overlap breaks both. A window a later op or
+a fault reaches into is not judged. The teardown clears every fault as its window opens,
+so a fault it cleared did not reach into it; it does not wait for convergence first, so a
+sequence ends with an op that settles.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -293,17 +299,28 @@ selector refine attribution to a particular CR; they are not required for it.
 
 **Deletion.** Owned children are removed by the cluster's garbage collector (real on kind,
 emulated on envtest, §5.8). G3 therefore fails on orphans, meaning children with no
-ownerReference to the CR, and on finalizers that never clear.
+ownerReference to the CR, and on finalizers that never clear. The teardown watches the
+namespace until it is clean or `T_delete` expires (§5.5 step 4). A namespace that came
+clean satisfies G3 at that instant, which is how a target that cleans up promptly is
+judged rather than left unjudged: the run stops watching long before `T_delete` is up.
 
 **What the proxy cannot see.** G1 and G6 observe only requests that leave the target
 process. Reads served from a client-side cache are invisible, so a reconcile loop that
 makes no API calls is outside what botbox can detect.
 
-**What G6 does not count.** A 409 Conflict on a write is the API server's
-optimistic-concurrency contract: the target is meant to re-read and write again, and
-controllers that share one object's status conflict constantly. G6 does count a failing
-watch, which G1 excludes: G1 ignores a watch because a watch that hangs is the target
-waiting, while a watch that fails returns at once and repeating it is a loop.
+**What G6 does not count.** A 409 Conflict on an `update` or a `patch` is the API
+server's optimistic-concurrency contract: the target is meant to re-read and write again,
+and controllers that share one object's status conflict constantly. A 409 on a `create`
+is AlreadyExists, which says the object is there, so a target that keeps re-creating it is
+looping and G6 counts it; so is a 409 on any other verb. G6 also counts a failing watch,
+which G1 excludes: G1 ignores a watch because a watch that hangs is the target waiting,
+while a watch that fails returns at once and repeating it is a loop.
+
+**Notes.** A check that could not judge something records a note naming it: G3 for a
+deletion whose deadline the run did not reach or that a fault reached into, G5 for a
+`Restart` missing a snapshot. The Runner carries the last checkpoint's notes out and
+`botbox` prints them at the end of the run, because a check that was skipped otherwise
+reads like one that passed.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
@@ -522,7 +539,7 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 
 | ID | Bug | Class | Should trip |
 |---|---|---|---|
-| B1 | Writes `status.ready = count` before creating children, and holds that state for 3 s so P1 trips deterministically; the hold must satisfy `T_stable < hold < 2 × T_stable`, which also lands the children in the quiet window | intermediate-state | P1 |
+| B1 | Writes `status.ready = count` before creating children, and holds that state for 3 s so P1 trips deterministically; the hold must satisfy `T_stable < hold < 2 × T_stable`, which also lands the children in the quiet window | intermediate-state | G1, G2, P1 |
 | B2 | Uses `generateName` for children and never deletes surplus ones, so every reconcile adds duplicates | non-idempotent | G1, G2 |
 | B3 | Omits the ownerReference on child `<widget>-0` and counts children by name, so it converges and the orphan surfaces on deletion | orphan | G3 |
 | B4 | Reads `count` from `status.ready` instead of `spec.count` | stale-state | G4 |
@@ -835,3 +852,37 @@ built from source and run as a black-box binary.
   discourage overriding it and records that it may be renamed or removed. The spike tried
   `--healthz-listen-address`, got "unknown flag", and read that as no flag at all. botbox
   does not build on a flag upstream discourages.
+- **D29 G6 ignores a 409 only on an `update` or a `patch`.** D27 excluded every write.
+  A create that collides returns AlreadyExists, which is not a lost race: the object is
+  there, and a controller that re-creates a fixed-name object forever is the error loop
+  G6 exists to catch. Thirty identical failing creates in 1.5 s reported nothing. A patch
+  keeps the exclusion: a server-side-apply conflict answers 409 as well, and the proxy
+  does not keep the response body that would tell the two apart.
+- **D30 G1 ignores every lease request, not only a lease write, and every request that
+  names no resource.** §6 excluded all lease traffic and the code excluded only writes,
+  so one leader-election read inside the quiet window failed a correct target, and leader
+  election is on by default in nearly every controller. A health probe, a discovery read
+  and the RESTMapper refresh that follows one are not reconciliation either; G6 still
+  counts them, because a failing request repeated forever is a loop wherever it points.
+- **D31 A clean run namespace satisfies G3, and a check that judges nothing leaves a
+  note.** The teardown stops watching as soon as the namespace empties, which is always
+  before `deletion + T_delete`, so G3 was skipped in every configuration that passed: the
+  example's `issue.json` was observed to 31.3 s against a 71.3 s deadline, and only the
+  negative control ever reached a verdict. Emptiness decides the deletion at the instant
+  it is seen. G3 and G5 now record what they could not judge, the Runner carries the last
+  checkpoint's notes out, and `botbox` prints them, because a skipped check reads like a
+  passing one from outside.
+- **D32 The teardown's `T_stable` is a quiet window of its own, and G1's statement
+  follows the settle wait.** §5.5 step 4 already called that wait the last quiet window
+  and nothing implemented it, so a sequence ending in a `noSettle`, a `restart` or a
+  `fault` was judged on no window at all. A fault that outlives the last op takes that
+  op's window with it, and the teardown clears every fault as its own window opens, so
+  that shape is judged now too. The teardown does not settle before it waits, so a
+  sequence that ends while the target is working is judged on that work; every sequence
+  here ends with an op that settles, and a teardown that settles first, which would also
+  give §6's "within `T_settle` after faults stop" somewhere to be measured, waits for M6.
+  G1's row promised `T_settle` to fall quiet while the code judged the `T_stable` after
+  the settle wait, which is shorter whenever the target converges early. The statement now says what the code does
+  and what G2 already said: the settle wait is where botbox judges the target converged,
+  and B1 keeps the G1 row D26 gave it, because it reports itself converged and only then
+  creates its children.

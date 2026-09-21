@@ -169,6 +169,22 @@ func TestReplayExecutesTheNamedSequenceAndPrintsItsSeed(t *testing.T) {
 	}
 }
 
+// A skipped check reads as a passing one from outside, so the run prints what
+// it could not judge (DESIGN.md §6).
+func TestARunPrintsWhatTheChecksCouldNotJudge(t *testing.T) {
+	note := "G3 is not evaluated for the deletion of widget: the run ended before its 10s deadline"
+	session := &fakeSession{results: []run.Result{{Notes: []string{note}}}}
+
+	code, stdout, stderr := invoke(t, session, "replay", "--target", toyTargetYAML, "--out", t.TempDir(), writeSequence(t, 1))
+
+	if code != exitOK {
+		t.Fatalf("botbox replay exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, note) {
+		t.Errorf("botbox replay printed %q, want the note %q.", stdout, note)
+	}
+}
+
 func TestPassingRunsAreNotPersisted(t *testing.T) {
 	session := &fakeSession{}
 	out := t.TempDir()

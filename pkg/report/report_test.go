@@ -41,6 +41,7 @@ func failingRun() report.Report {
 			Evidence:  "at 2026-09-21T05:59:08.980624165Z; 1 version, the first v1/ConfigMap widget-0",
 		},
 		Target:   report.Target{Name: "toy-widget", Version: "v0.1.0"},
+		Botbox:   "v1.2.3",
 		Seed:     23,
 		Replay:   replayCommand,
 		Sequence: sequence,
@@ -63,8 +64,8 @@ func TestReportLeadsWithTheFailureAndHowToReproduceIt(t *testing.T) {
 			t.Errorf("The report's first ten lines do not name %q:\n%s", want, opening)
 		}
 	}
-	if !strings.Contains(md, "Seed 23") {
-		t.Errorf("The report does not name the seed:\n%s", md)
+	if want := "botbox v1.2.3 exercised toy-widget v0.1.0 on seed 23."; !strings.Contains(md, want) {
+		t.Errorf("The report does not say %q:\n%s", want, md)
 	}
 }
 
@@ -87,6 +88,7 @@ func TestReportJSONCarriesWhatFailedAndWhatItRanAgainst(t *testing.T) {
 	var got struct {
 		Check  report.Check  `json:"check"`
 		Target report.Target `json:"target"`
+		Botbox string        `json:"botbox"`
 		Seed   int64         `json:"seed"`
 		Replay string        `json:"replay"`
 	}
@@ -98,6 +100,9 @@ func TestReportJSONCarriesWhatFailedAndWhatItRanAgainst(t *testing.T) {
 	}
 	if got.Target != failure.Target {
 		t.Errorf("report.json names the target %+v, want %+v.", got.Target, failure.Target)
+	}
+	if got.Botbox != failure.Botbox {
+		t.Errorf("report.json names botbox %q, want %q.", got.Botbox, failure.Botbox)
 	}
 	if got.Seed != failure.Seed {
 		t.Errorf("report.json names seed %d, want %d.", got.Seed, failure.Seed)
@@ -174,14 +179,46 @@ func TestReportQuotesTheRequestsAndVersionsTheCheckNamed(t *testing.T) {
 	}
 }
 
-func TestReportNamesATargetThatDeclaresNoVersion(t *testing.T) {
+func TestReportNamesWhatRanWhereNoVersionIsDeclared(t *testing.T) {
 	failure := failingRun()
-	failure.Target.Version = ""
+	failure.Target.Version, failure.Botbox = "", ""
 
-	md, _ := write(t, failure)
+	md, encoded := write(t, failure)
 
 	if want := "# G3 failed on toy-widget\n"; !strings.Contains(md, want) {
 		t.Errorf("The report opens with %q, want %q.", strings.SplitN(md, "\n", 2)[0], want)
+	}
+	if want := "The run exercised toy-widget on seed 23."; !strings.Contains(md, want) {
+		t.Errorf("The report does not say %q:\n%s", want, md)
+	}
+	for _, absent := range []string{"botbox", "version"} {
+		if strings.Contains(encoded, `"`+absent+`"`) {
+			t.Errorf("report.json holds an empty %q:\n%s", absent, encoded)
+		}
+	}
+}
+
+// A check that judged nothing reads like one that passed, so the report names
+// what each check could not judge (DESIGN.md §6, D31).
+func TestReportNamesWhatTheChecksCouldNotJudge(t *testing.T) {
+	failure := failingRun()
+	failure.Notes = []string{
+		"G3 did not judge the deletion: the run ended before the deadline.",
+		"G5 skipped the restart at op 3: a converged snapshot is missing.",
+	}
+
+	md, encoded := write(t, failure)
+
+	want := "## Notes\n\n- " + failure.Notes[0] + "\n- " + failure.Notes[1] + "\n"
+	if !strings.Contains(md, want) {
+		t.Errorf("The report's notes read\n%s\nwant\n%s", section(md, "Notes"), want)
+	}
+	var held []string
+	if err := json.Unmarshal([]byte(field(t, encoded, "notes")), &held); err != nil {
+		t.Fatalf("report.json's notes do not parse: %v", err)
+	}
+	if !reflect.DeepEqual(held, failure.Notes) {
+		t.Errorf("report.json holds the notes %q, want %q.", held, failure.Notes)
 	}
 }
 
@@ -246,15 +283,15 @@ func TestReportQuotesTheVersionTimelineWithoutTheObjects(t *testing.T) {
 	}
 }
 
-func TestReportOmitsEvidenceTheCheckQuotedNoneOf(t *testing.T) {
+func TestReportOmitsTheSectionsWithNothingToSay(t *testing.T) {
 	md, encoded := write(t, failingRun())
 
-	for _, absent := range []string{"## Requests", "## Object versions"} {
+	for _, absent := range []string{"## Requests", "## Object versions", "## Notes"} {
 		if strings.Contains(md, absent) {
 			t.Errorf("The report holds an empty %q section:\n%s", absent, md)
 		}
 	}
-	for _, absent := range []string{"requests", "versions"} {
+	for _, absent := range []string{"requests", "versions", "notes"} {
 		if strings.Contains(encoded, `"`+absent+`"`) {
 			t.Errorf("report.json holds an empty %q:\n%s", absent, encoded)
 		}

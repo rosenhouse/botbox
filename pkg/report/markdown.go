@@ -22,7 +22,13 @@ func (d document) markdown() []byte {
 		fmt.Fprintf(&md, "\n%s\n", d.Check.Evidence)
 	}
 	fmt.Fprintf(&md, "\n```sh\n%s\n```\n", d.Replay)
-	fmt.Fprintf(&md, "\nSeed %d. The run directory holds `requests.jsonl`, `objects.jsonl` and `target.log`.\n", d.Seed)
+	fmt.Fprintf(&md, "\n%s The run directory holds `requests.jsonl`, `objects.jsonl` and `target.log`.\n", d.provenance())
+	if len(d.Notes) > 0 {
+		md.WriteString("\n## Notes\n\n")
+		for _, note := range d.Notes {
+			fmt.Fprintf(&md, "- %s\n", note)
+		}
+	}
 	fmt.Fprintf(&md, "\n## Sequence\n\n```json\n%s\n```\n", strings.TrimRight(string(d.Sequence), "\n"))
 	if len(d.Requests) > 0 {
 		md.WriteString("\n## Requests\n\n")
@@ -83,6 +89,14 @@ func table(md *strings.Builder, header []string, rows [][]string) {
 	for _, row := range rows {
 		fmt.Fprintf(md, "| %s |\n", strings.Join(row, " | "))
 	}
+}
+
+// provenance says what ran the sequence, in the versions each declares.
+func (d document) provenance() string {
+	if d.Botbox == "" {
+		return fmt.Sprintf("The run exercised %s on seed %d.", d.Target.describe(), d.Seed)
+	}
+	return fmt.Sprintf("botbox %s exercised %s on seed %d.", d.Botbox, d.Target.describe(), d.Seed)
 }
 
 // describe names the target and the version it declares (DESIGN.md §8.1).

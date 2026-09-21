@@ -30,9 +30,15 @@ const maxEvidence = 20
 type Report struct {
 	Check  Check
 	Target Target
+	// Botbox is the version of botbox that ran the sequence. A bug report
+	// needs it beside the target's own (DESIGN.md §5.7).
+	Botbox string
 	// Seed is the sequence's seed, which the run is reproducible from
 	// (DESIGN.md §11).
 	Seed int64
+	// Notes name what a check could not judge. A report that left them out
+	// would read as though those checks passed (DESIGN.md §6).
+	Notes []string
 	// Replay is the one-line command that re-executes the sequence.
 	Replay string
 	// Sequence is the minimized sequence in the canonical form of
@@ -84,7 +90,9 @@ func Write(dir string, r Report) error {
 type document struct {
 	Check         Check             `json:"check"`
 	Target        Target            `json:"target"`
+	Botbox        string            `json:"botbox,omitempty"`
 	Seed          int64             `json:"seed"`
+	Notes         []string          `json:"notes,omitempty"`
 	Replay        string            `json:"replay"`
 	Sequence      json.RawMessage   `json:"sequence"`
 	Requests      []proxy.Request   `json:"requests,omitempty"`
@@ -97,7 +105,9 @@ func (r Report) document() document {
 	return document{
 		Check:         r.Check,
 		Target:        r.Target,
+		Botbox:        r.Botbox,
 		Seed:          r.Seed,
+		Notes:         r.Notes,
 		Replay:        r.Replay,
 		Sequence:      r.Sequence,
 		Requests:      r.Requests[:min(len(r.Requests), maxEvidence)],

@@ -489,9 +489,10 @@ botbox generates from the CRD's OpenAPI v3 schema, and phase 1 does not install 
 target's admission webhooks. Rules that only a webhook enforces are therefore invisible to
 the generator. For cert-manager these include: a Certificate needs at least one of
 `commonName`, `dnsNames`, `ipAddresses`, `uris` or `emailAddresses`; `duration` must
-parse as a Go duration; `renewBefore` must be shorter than `duration`. The target keeps
-generation inside the valid subset with `sample`, `generate.mutate` and
-`generate.overlay`. A generated spec that the target rejects or ignores because it
+parse as a Go duration; `renewBefore` must be shorter than `duration`; a `dnsNames` entry
+must be a DNS name, which neither the CRD schema nor the API server checks, so the
+overlay spells out an RFC 1123 label. The target keeps generation inside the valid subset
+with `sample`, `generate.mutate` and `generate.overlay`. A generated spec that the target rejects or ignores because it
 violates such a rule is a target-declaration bug, not a finding; the journal records each
 rule that had to be encoded this way.
 
@@ -650,12 +651,14 @@ proxy; the `Image` launcher. Separate design addendum.
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `docs/`, and `bin/` for git-ignored
   build output.
-- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]...`;
+- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]... [<sequence.json>...]`;
   `botbox replay --target <yaml> [--deadline D] <sequence.json>`; `botbox version`.
-  `--deadline` defaults to 4m; the shrinker stops at the deadline and reports the smallest
-  failing sequence found so far. `--launch-arg` appends to `launch.args` (repeatable; a
-  later flag wins), which is how the bug matrix selects `--bug=N`. `--kubeconfig` selects an existing cluster instead of
-  envtest; `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
+  `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
+  says how many to draw. `--deadline` defaults to 4m, and the shrinker stops there and
+  reports the smallest failing sequence it found. `--launch-arg` appends to `launch.args`
+  (repeatable; a later flag wins), which is how the bug matrix selects `--bug=N`.
+  `--kubeconfig` selects an existing cluster instead of envtest; `KUBEBUILDER_ASSETS`
+  locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
   harness error.
 - **Output.** `--out` defaults to `botbox-out/`. Each invocation writes

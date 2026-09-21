@@ -215,6 +215,23 @@ func TestTheChecksDoNotCreditACleanupBotboxPerformed(t *testing.T) {
 	}
 }
 
+// An op whose index resolved to nothing deleted nothing, so it names no
+// object for G3 to read (DESIGN.md §5.4).
+func TestTheChecksCarryNoObjectForAnOpThatResolvedToNothing(t *testing.T) {
+	timeline := Timeline{
+		Namespace: fakeNamespace,
+		Ops: []AppliedOp{{
+			Op: Op{Index: 0, Type: OpDeleteManaged, Kind: "v1/ConfigMap"}, At: at(1),
+		}},
+	}
+
+	ops := engineOps(checkTarget(), timeline)
+
+	if got := ops[0].Deleted; got != (observe.Key{}) {
+		t.Errorf("The op names the object %+v, and its index resolved to nothing.", got)
+	}
+}
+
 // The Runner sees the checks through one Checker, so the engine hands it the
 // notes alongside the violations.
 func TestTheEngineCarriesTheNotesOut(t *testing.T) {

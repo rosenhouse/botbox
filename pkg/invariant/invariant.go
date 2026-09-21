@@ -44,9 +44,9 @@ type Op struct {
 	Index int
 	Type  OpType
 	Time  time.Time
-	// Deleted is the object a DeleteManaged op removed. It is the zero Key for
-	// every other op, and for one whose index resolved to nothing, which names
-	// no object in the history (DESIGN.md §5.4).
+	// Deleted is the object a DeleteManaged op removed. Every other op carries
+	// the zero Key, and so does a DeleteManaged op whose index resolved to
+	// nothing (DESIGN.md §5.4).
 	Deleted observe.Key
 }
 

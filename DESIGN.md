@@ -324,9 +324,9 @@ while a watch that fails returns at once and repeating it is a loop.
 
 **Notes.** A check that could not judge something records a note naming it: G3 for a
 deletion whose deadline the run did not reach, that a fault reached into, or that botbox
-cleaned up inside, G5 for a `Restart` missing a snapshot. The Runner carries the last checkpoint's notes out and
-`botbox` prints them at the end of the run, because a check that was skipped otherwise
-reads like one that passed.
+took an object inside, G5 for a `Restart` missing a snapshot. The Runner carries the last
+checkpoint's notes out and `botbox` prints them at the end of the run, because a check
+that was skipped otherwise reads like one that passed.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
@@ -957,13 +957,14 @@ built from source and run as a black-box binary.
   artefact a human actually reads.
 - **D38 G3 credits no cleanup botbox performed.** A `DeleteManaged` op deletes a managed
   object behind the target's back (§5.4). Inside a CR deletion's window that deletes the
-  evidence: G3 asks whether the object was gone by the deadline and never asked who
+  evidence: G3 asked whether the object was gone by the deadline and never asked who
   removed it, so `b3.json` with one `deleteManaged` op added turned a reported orphan into
-  "every run passed". The Runner knows which object the op resolved to and the engine now
-  receives it. G3 notes an object botbox took inside the window rather than counting it as
-  cleaned. A note and not a violation: the target still had until the deadline, and an
-  object botbox took at or after the deadline was still there at the deadline, which
-  already fires.
+  "every run passed". The Runner resolves the op to an object and hands it to the engine.
+  G3 notes an object botbox took inside the window rather than counting it as cleaned. It
+  is a note and not a violation, because the target still had until the deadline; an
+  object botbox took after the deadline was still there at the deadline, which G3 already
+  reports. The object is matched by UID, since one the run recreated carries the same name
+  and belongs to the CR that came after.
 - **D37 A forced finalizer is a note, not a reason to withhold G3.** §5.5 step 4 said each
   forced removal invalidates G3 for the run, and nothing implemented it. Implementing it
   literally would have thrown away true findings. The teardown stamps the end of the

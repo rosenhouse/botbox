@@ -70,10 +70,9 @@ func engineOps(t *target.Target, timeline Timeline) []invariant.Op {
 		if op.Resolved == "" {
 			continue
 		}
-		gvk, err := managedKind(t, op.Op.Kind)
-		if err != nil {
-			continue // The op never ran: the Runner refuses a kind it cannot resolve.
-		}
+		// The kind resolves: the Runner refuses an op whose kind does not, so
+		// nothing it resolved to an object can carry one (DESIGN.md §5.4).
+		gvk, _ := managedKind(t, op.Op.Kind)
 		ops[i].Deleted = observe.Key{GVK: gvk, Namespace: timeline.Namespace, Name: op.Resolved}
 	}
 	return ops

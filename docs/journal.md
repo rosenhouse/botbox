@@ -307,3 +307,65 @@ dies on bind and botbox reports a harness error several ops later.
 
 M5 outcome: `make test-example` draws its sequences, and a nightly workflow draws its own
 seeds.
+
+## M6 — 2026-09-21
+
+### Right
+
+The acceptance was proved with a throwaway sequence before any M6 code was written, and
+the assumption behind it was wrong. G4 is the invariant that anchors on "the fault
+stopped", so G4 was what the fault was expected to break. It breaks G1: the toy's backoff
+outlives the fault, and the create it finally lands falls in the quiet window the teardown
+waits. Building the acceptance test around G4 first would have meant contorting a sequence
+until it produced a failure that was never going to happen.
+
+The finding needs no seeded bug. What fails is the toy's recovery time after a transient
+outage, which every controller that retries has.
+
+### Wrong in the first draft
+
+- The fault test said the fault refuses thirty creates. It refuses ten: the count trigger
+  is never reached, and the teardown ends the fault. The same unchecked claim went into a
+  commit message, a comment and a failure message before anyone read the request log.
+- The report's replay command left out `--launch-arg` and `--kubeconfig`. A G3 found under
+  `--bug=3` replayed green from its own report, so the one line a report exists to give a
+  reader said the opposite of the truth.
+- A rerun of the minimized sequence that found nothing left the report asserting the
+  original failure beside recordings of a passing run, with the only warning on stderr.
+- D35 said each excerpt is the first twenty and that nothing is dropped silently. The
+  checks already bound their evidence at the twenty nearest the violation, so the report's
+  own bound is a backstop, its totals never exceed twenty, and "the first N are below"
+  named the wrong end.
+- The checks flattened their evidence into a one-line summary and dropped the requests and
+  versions behind it, so §5.7's "request log excerpt, object version timeline" had nothing
+  to quote. The data existed and was discarded one layer before the report.
+- A fault's duration halved toward a nanosecond in thirty-two steps, each step a cluster,
+  and every successful weakening re-replayed the removal candidate it had just rejected.
+
+### What fixed it
+
+D35 and the README say what the code does. `run.Violation` carries the evidence. The
+replay command repeats the flags that selected the run. A report says when the recordings
+beside it are of a run that found nothing, which is what D31 exists to require. Durations
+halve to a floor, removal is asked once per position, and a candidate that changes nothing
+is refused, which also stops the pass spinning.
+
+### Process notes
+
+Nine mutations of the M6 code outside `pkg/report` survived the first draft. The sharpest
+was §10 M6's own acceptance: nothing tied a report to the minimized sequence, so the
+report could have carried the sequence botbox drew and every test would have passed.
+A milestone's acceptance sentence deserves a test that reads like it.
+
+One of the tests written to close those holes passed for the wrong reason: it looked for an
+object name that also appeared inside a request path, so the version table could vanish
+unnoticed. Mutating each field separately caught it; running the test did not.
+
+Two retimings of the acceptance test were tried and both were invalid. A one-second settle
+breaks the toy's first reconcile before any fault exists. A wider stable makes convergence
+impossible, because a settle wait needs `T_stable` of quiet inside `T_settle` — which is
+issue #10, a target configured that way fails G4 on every op and botbox blames the
+controller.
+
+M6 outcome: a failing run writes a report, a fault shrinks toward a shorter duration, and
+the acceptance test carries a 115 ms margin that issue #11 exists to remove.

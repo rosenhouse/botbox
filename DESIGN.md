@@ -663,9 +663,10 @@ proxy; the `Image` launcher. Separate design addendum.
   harness error.
 - **Output.** `--out` defaults to `botbox-out/`. Each invocation writes
   `<out>/<timestamp>-<seed>/`; each failing run writes `run-<n>/` under it with
-  `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl` and
-  `target.log`, plus `sequence.shrunk.json` where the deadline ended the shrink pass
-  before its result could be run there. Passing runs are not persisted.
+  `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl`,
+  `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
+  where the deadline ended the shrink pass before its result could be run there. Passing
+  runs are not persisted.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` = the cert-manager example under envtest, under 10
   minutes on CI including obtaining the binary (cached). All three run on every PR.

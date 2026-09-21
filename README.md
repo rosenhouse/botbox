@@ -8,7 +8,7 @@ restarts the controller where a sequence says to, and records every request the 
 It then checks six generic invariants that need no per-controller configuration, plus properties a
 target declares. If your controller talks to an API server, botbox can test it.
 
-**Status:** M0–M5 are merged. `botbox run` draws sequences, runs them, and minimizes the first
+**Status:** M0–M6 are merged. `botbox run` draws sequences, runs them, and minimizes the first
 failure; `botbox replay` re-executes one. A failing run writes a report naming what broke and
 how to see it again ([DESIGN.md §5.7](DESIGN.md#57-report)).
 
@@ -131,7 +131,17 @@ launch:
 
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the
-controller's back. Field values come from the CRD's own schema: its numeric ranges, enums,
+controller's back. A sequence you write yourself can also carry a `fault`, which makes the
+proxy refuse, delay or drop the requests it matches:
+
+```json
+{"i": 1, "t": "fault",
+  "spec": {"match": {"verb": "create", "resource": "configmaps"},
+           "action": {"error": 500}, "until": {"count": 30}}}
+```
+
+An invariant ignores any window a fault reached into, so what a fault tests is how the
+controller behaves once the fault stops ([DESIGN.md §5.2](DESIGN.md#52-proxy)). Field values come from the CRD's own schema: its numeric ranges, enums,
 patterns and list lengths. A schema that says only `type: string` yields a random word, so the
 schema is not a safety net. Where it allows more than your controller does, `generate.mutate`
 lists the only paths a sequence changes and `generate.overlay` tightens one path's schema, as
@@ -166,6 +176,7 @@ target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `requests.jsonl` — every request the target made, as the proxy saw it.
 - `objects.jsonl` — every version of every object the Observer saw.
 - `target.log` — the target's own output.
+- `kubeconfig` — what the target was pointed at, which is the proxy and not the cluster.
 
 The report quotes the requests and object versions nearest the violation, up to twenty of
 each, and names the file holding the rest. Passing runs are not kept

@@ -227,6 +227,14 @@ func timeouts(declared timeoutsDeclaration) (Timeouts, error) {
 	if parsed.Delete, err = duration("delete", declared.Delete, parsed.Delete); err != nil {
 		return Timeouts{}, err
 	}
+	// A settle wait ends once the Ready predicate holds and nothing has
+	// changed for stable, within settle (DESIGN.md §5.5). Where stable is the
+	// wider of the two, no wait can end that way, and every run reports G4
+	// against a target that did nothing wrong.
+	if parsed.Stable >= parsed.Settle {
+		return Timeouts{}, fmt.Errorf("timeouts: stable %s is not shorter than settle %s, and a settle wait has to observe stable of quiet inside settle",
+			parsed.Stable, parsed.Settle)
+	}
 	return parsed, nil
 }
 

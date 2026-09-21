@@ -259,6 +259,13 @@ func TestLoadRejects(t *testing.T) {
 		{"timeout of zero", minimalTarget + "timeouts:\n  stable: 0s\n", "", []string{"stable", "positive"}},
 		{"negative timeout", minimalTarget + "timeouts:\n  delete: -1s\n", "", []string{"delete", "positive"}},
 		{"errloop of zero", minimalTarget + "thresholds:\n  errloop: 0\n", "", []string{"errloop", "positive"}},
+		// A settle wait carves T_stable of quiet out of T_settle, so these
+		// leave the target no time to react and every op expires. The wants
+		// carry the durations: the temp directory's path holds the case name,
+		// so a bare "stable" would match whatever the loader said.
+		{"stable as wide as settle", minimalTarget + "timeouts:\n  settle: 5s\n  stable: 5s\n", "", []string{"stable 5s", "settle 5s"}},
+		{"stable wider than settle", minimalTarget + "timeouts:\n  settle: 5s\n  stable: 10s\n", "", []string{"stable 10s", "settle 5s"}},
+		{"a stable the default settle cannot hold", minimalTarget + "timeouts:\n  stable: 40s\n", "", []string{"stable 40s", "settle 30s"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sample := sampleWidget

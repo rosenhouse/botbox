@@ -18,6 +18,11 @@ import (
 	"github.com/rosenhouse/botbox/targets/toy-widget/controller"
 )
 
+// b1Hold is how long B1 holds its premature status. DESIGN.md §9.1 requires
+// T_stable < hold < 2 × T_stable, which lands B1's children after the
+// checkpoint and inside the quiet window that follows.
+const b1Hold = 3 * time.Second
+
 func main() {
 	if err := run(os.Args[1:], os.Stdout); err != nil && !errors.Is(err, flag.ErrHelp) {
 		fmt.Fprintf(os.Stderr, "toy-widget: %v\n", err)
@@ -67,7 +72,7 @@ func run(args []string, out io.Writer) error {
 		APIReader: manager.GetAPIReader(),
 		Scheme:    manager.GetScheme(),
 		Bug:       bug,
-		B1Hold:    3 * time.Second, // Exceeds the toy's T_stable of 2s (DESIGN.md §9.1).
+		B1Hold:    b1Hold,
 	}
 	if err := reconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("setting up the controller: %w", err)

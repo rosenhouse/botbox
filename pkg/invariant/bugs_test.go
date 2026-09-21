@@ -13,9 +13,9 @@ import (
 )
 
 // Each input below is the run the toy target produces under one seeded bug of
-// DESIGN.md §9.1, observed to the checkpoint that catches it. `catalog` is
-// what §9.1 promises the bug trips; `fires` is everything the engine reports,
-// which is a superset wherever the toy also fails to converge.
+// DESIGN.md §9.1, observed as far as the run took it. `catalog` is what §9.1
+// promises the bug trips; `fires` is everything the engine reports, which is a
+// superset wherever the bug breaks another check too.
 func TestTheSeededBugsTripTheChecksTheCatalogNames(t *testing.T) {
 	for _, seeded := range []struct {
 		bug     string
@@ -24,7 +24,7 @@ func TestTheSeededBugsTripTheChecksTheCatalogNames(t *testing.T) {
 		in      invariant.Input
 	}{
 		{bug: "B0", in: noBug()},
-		{bug: "B1", catalog: []string{"P1"}, fires: []string{"P1"}, in: b1()},
+		{bug: "B1", catalog: []string{"P1"}, fires: []string{"G1", "G2", "P1"}, in: b1()},
 		{bug: "B2", catalog: []string{"G1", "G2"}, fires: []string{"G1", "G2", "G4"}, in: b2()},
 		{bug: "B3", catalog: []string{"G3"}, fires: []string{"G3"}, in: b3()},
 		{bug: "B4", catalog: []string{"G4"}, fires: []string{"G4"}, in: b4()},
@@ -92,13 +92,18 @@ func deletedWidget(resourceVersion string, opts ...option) *unstructured.Unstruc
 }
 
 // b1 reports both children ready before it creates them, and holds that
-// status across the checkpoint.
+// status across the checkpoint. §9.1 times the hold so that the children then
+// land inside the quiet window.
 func b1() invariant.Input {
 	return newRun().
 		op(invariant.OpCreate, 0).
 		record(100*time.Millisecond, widget("11", spec(2), status(2, 1), finalizers(cleanup))).
-		checkpoint(2200*time.Millisecond, invariant.Converged).
-		through(2200 * time.Millisecond)
+		settled(2200*time.Millisecond, invariant.Converged).
+		request(3100*time.Millisecond, createChild("w-0")).
+		record(3150*time.Millisecond, child("w-0", "12")).
+		request(3200*time.Millisecond, createChild("w-1")).
+		record(3250*time.Millisecond, child("w-1", "13")).
+		through(14 * time.Second)
 }
 
 // b2 adds a generated child on every reconcile, so the namespace never goes

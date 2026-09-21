@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/retry"
 
+	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
@@ -219,6 +220,8 @@ func (l *liveRun) empty(ctx context.Context) error {
 func (l *liveRun) requests() []proxy.Request { return l.h.Proxy.Log() }
 
 func (l *liveRun) objects() *observe.Store { return l.h.Observer.Store }
+
+func (l *liveRun) targetStatus() launch.Status { return l.h.Launcher.Status() }
 
 func (l *liveRun) stop(ctx context.Context) error { return l.h.Stop(ctx) }
 

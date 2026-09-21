@@ -3,6 +3,7 @@ package invariant
 import (
 	"cmp"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"time"
@@ -53,7 +54,7 @@ func (k requestKey) String() string {
 func (in Input) repeatedFailures() []failure {
 	grouped := map[time.Time]map[requestKey][]proxy.Request{}
 	for _, r := range in.Requests {
-		if r.Status < 400 || r.Fault != "" || in.faulted(r.Start, r.Start) {
+		if r.Status < 400 || conflicted(r) || r.Fault != "" || in.faulted(r.Start, r.Start) {
 			continue
 		}
 		key := requestKey{verb: r.Verb, group: r.Group, resource: r.Resource, name: r.Name}
@@ -77,6 +78,14 @@ func (in Input) repeatedFailures() []failure {
 		)
 	})
 	return failures
+}
+
+// conflicted reports whether the request lost an optimistic-concurrency race,
+// which tells the target to re-read and write again rather than to stop
+// (DESIGN.md §6, G6). Only an update and a patch lose that race: a 409 on a
+// create is AlreadyExists, and repeating it is a loop.
+func conflicted(r proxy.Request) bool {
+	return r.Status == http.StatusConflict && (r.Verb == "update" || r.Verb == "patch")
 }
 
 // specSetAt is when the run last gave the target a new spec, which opens the

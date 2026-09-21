@@ -23,7 +23,24 @@ type Launcher interface {
 	Stop(ctx context.Context) error
 	// Restart crashes the target: SIGKILL, then Start once it is reaped.
 	Restart(ctx context.Context) error
+	// Status reports whether the target is still running.
+	Status() Status
 }
+
+// Status is what the launcher knows of the target process. It is the process's
+// status, not a health probe (DESIGN.md §5.1).
+type Status struct {
+	// Running is whether the target process is alive.
+	Running bool
+	// Exit is why a target that ran stopped: an *exec.ExitError naming its exit
+	// status or signal, or ErrExitedZero. It is nil while the target runs, and
+	// before Start and after Stop, when botbox is running no target.
+	Exit error
+}
+
+// ErrExitedZero is the Exit of a target that ended successfully, which os/exec
+// reports as no error at all.
+var ErrExitedZero = errors.New("exit status 0")
 
 // DefaultGracePeriod is how long Stop waits after SIGTERM before it escalates.
 const DefaultGracePeriod = 5 * time.Second
@@ -55,8 +72,10 @@ type Binary struct {
 
 type process struct {
 	cmd *exec.Cmd
-	// done closes once the process has exited and been reaped.
+	// done closes once the process has exited and been reaped, after exit is
+	// set.
 	done chan struct{}
+	exit error
 }
 
 var _ Launcher = (*Binary)(nil)
@@ -92,14 +111,33 @@ func (b *Binary) start(kubeconfig string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting %s: %w", b.options.Path, err)
 	}
-	done := make(chan struct{})
+	running := &process{cmd: cmd, done: make(chan struct{})}
 	go func() {
-		_ = cmd.Wait()
-		close(done)
+		if running.exit = cmd.Wait(); running.exit == nil {
+			running.exit = ErrExitedZero
+		}
+		close(running.done)
 	}()
-	b.running = &process{cmd: cmd, done: done}
+	b.running = running
 	b.kubeconfig = kubeconfig
 	return nil
+}
+
+// Status reports whether the target is still running, and why it stopped if it
+// is not. A target that stopped on its own took the run with it, which is a
+// harness error rather than a finding against the target (DESIGN.md §11).
+func (b *Binary) Status() Status {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.running == nil {
+		return Status{}
+	}
+	select {
+	case <-b.running.done:
+		return Status{Exit: b.running.exit}
+	default:
+		return Status{Running: true}
+	}
 }
 
 // Stop sends SIGTERM and escalates to SIGKILL once the grace period or ctx

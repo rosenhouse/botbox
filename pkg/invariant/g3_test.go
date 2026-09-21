@@ -77,15 +77,44 @@ func TestG3FiresOnAFinalizerThatNeverClears(t *testing.T) {
 func TestG3WaitsForTheWholeDeleteTimeout(t *testing.T) {
 	in := deletedRun().through(19 * time.Second)
 
-	silent(t, invariant.CleanDeletion, in)
+	noted(t, invariant.CleanDeletion, in, "the run ended")
 }
 
-func TestG3IgnoresADeletionAFaultReachedInto(t *testing.T) {
+// A namespace that came clean settles the deletion before T_delete is up, so
+// a run that stops observing there is judged rather than left unjudged
+// (DESIGN.md §6).
+func TestG3PassesOnANamespaceThatCameCleanBeforeTheDeadline(t *testing.T) {
+	in := deletedRun().
+		record(time.Second, child("w-0", "12")).
+		remove(11*time.Second, child("w-0", "13")).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		cleaned(12 * time.Second).
+		through(12 * time.Second)
+
+	if notes := silent(t, invariant.CleanDeletion, in).Notes; len(notes) > 0 {
+		t.Errorf("G3 noted %v, want the clean namespace to decide the deletion.", notes)
+	}
+}
+
+// The namespace came clean long after this deletion's deadline, which the run
+// observed, so the leftovers still count.
+func TestG3FiresOnLeftoversTheNamespaceOnlyLostAfterTheDeadline(t *testing.T) {
+	in := deletedRun().
+		record(time.Second, child("w-0", "12", orphaned)).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		remove(25*time.Second, child("w-0", "13")).
+		cleaned(25 * time.Second).
+		through(25 * time.Second)
+
+	fired(t, invariant.CleanDeletion, in)
+}
+
+func TestG3NotesADeletionAFaultReachedInto(t *testing.T) {
 	in := deletedRun().
 		fault(11*time.Second, 12*time.Second).
 		through(21 * time.Second)
 
-	silent(t, invariant.CleanDeletion, in)
+	noted(t, invariant.CleanDeletion, in, "a fault was active")
 }
 
 func TestG3IgnoresACRTheRunRecreated(t *testing.T) {

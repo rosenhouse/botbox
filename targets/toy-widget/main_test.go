@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/rosenhouse/botbox/pkg/target"
 )
 
 func writeKubeconfig(t *testing.T, server string) string {
@@ -53,6 +55,23 @@ func TestRestConfigFallsBackToTheEnvironment(t *testing.T) {
 	}
 	if config.Host != "https://environment.example" {
 		t.Errorf("restConfig used the server %q, want the one from $KUBECONFIG.", config.Host)
+	}
+}
+
+// B1's hold is what makes its children land after the checkpoint that reads
+// its premature status and inside the quiet window that follows, so it is
+// timed against the T_stable the target declares (DESIGN.md §9.1).
+func TestTheB1HoldLandsTheChildrenInTheQuietWindow(t *testing.T) {
+	declared, err := target.Load("target.yaml")
+	if err != nil {
+		t.Fatalf("Loading the toy's declaration failed: %v", err)
+	}
+
+	stable := declared.Timeouts.Stable
+
+	if b1Hold <= stable || b1Hold >= 2*stable {
+		t.Errorf("B1 holds its premature status for %v against a T_stable of %v, want §9.1's T_stable < hold < 2 × T_stable.",
+			b1Hold, stable)
 	}
 }
 

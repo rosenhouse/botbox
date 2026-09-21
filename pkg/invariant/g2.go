@@ -56,3 +56,11 @@ func (in Input) attributes(v observe.Version) bool {
 }
 
 func writesStatus(r proxy.Request) bool { return r.Subresource == "status" && writes(r.Verb) }
+
+func writes(verb string) bool {
+	switch verb {
+	case "create", "update", "patch", "delete", "deletecollection":
+		return true
+	}
+	return false
+}

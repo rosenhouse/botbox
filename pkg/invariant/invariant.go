@@ -91,6 +91,13 @@ type Input struct {
 	// (DESIGN.md §5.5). What changes after it is botbox's own doing, so no
 	// window reaches past it. G3 judges the deletion it opens.
 	Teardown time.Time
+	// Quiet is when the teardown began waiting T_stable, which §5.5 step 4
+	// makes the run's last quiet window. The window closes at Teardown.
+	Quiet time.Time
+	// Cleaned is when botbox saw the run namespace empty: every managed object
+	// gone and the CR with it (DESIGN.md §5.5). It satisfies G3's deletion for
+	// every deadline at or after it. Zero means the namespace never emptied.
+	Cleaned time.Time
 	// End is the instant the engine evaluates at, after which the run is
 	// unobserved. A zero End takes the last checkpoint's time.
 	End time.Time
@@ -147,8 +154,10 @@ func (r *Result) violate(v Violation) {
 	r.Violations = append(r.Violations, v)
 }
 
+// note records what the check left unjudged, naming the check, so that a
+// reader can tell a skipped check from a passing one (DESIGN.md §6).
 func (r *Result) note(format string, args ...any) {
-	r.Notes = append(r.Notes, fmt.Sprintf(format, args...))
+	r.Notes = append(r.Notes, r.ID+" is not evaluated "+fmt.Sprintf(format, args...))
 }
 
 // timeouts are the target's windows, with §6's defaults wherever it declares

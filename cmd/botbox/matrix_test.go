@@ -263,10 +263,10 @@ func TestMatrixChecksWithoutEndingTheRun(t *testing.T) {
 		t.Fatalf("The matrix ran no sequence.")
 	}
 	for _, check := range session.checks {
-		violations, err := check.Check(run.Input{})
-		if violations != nil || err != nil {
+		found, err := check.Check(run.Input{})
+		if len(found.Violations) > 0 || err != nil {
 			t.Errorf("The matrix checked with %v, which reported %v, %v: a matrix run ends at no violation.",
-				check, violations, err)
+				check, found.Violations, err)
 		}
 	}
 }

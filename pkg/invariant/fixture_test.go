@@ -1,6 +1,8 @@
 package invariant_test
 
 import (
+	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,16 +104,36 @@ func (r *run) op(opType invariant.OpType, when time.Duration) *run {
 	return r
 }
 
-func (r *run) checkpoint(when time.Duration, settled invariant.SettleResult) *run {
+func (r *run) checkpoint(when time.Duration, result invariant.SettleResult) *run {
 	r.in.Checkpoints = append(r.in.Checkpoints, invariant.Checkpoint{
-		Op: len(r.in.Ops) - 1, Time: at(when), Settle: settled,
+		Op: len(r.in.Ops) - 1, Time: at(when), Settle: result,
 	})
 	return r
+}
+
+// settled ends the last op's settle wait at when, which is where §6's quiet
+// window opens. The teardown follows one T_stable later, because §5.5 step 4
+// waits that long before it deletes.
+func (r *run) settled(when time.Duration, result invariant.SettleResult) *run {
+	return r.checkpoint(when, result).teardown(when + stableWindow + 100*time.Millisecond)
 }
 
 // teardown is when botbox began emptying the namespace (DESIGN.md §5.5).
 func (r *run) teardown(when time.Duration) *run {
 	r.in.Teardown = at(when)
+	return r
+}
+
+// quiet is the T_stable the teardown waits before it deletes, which §5.5
+// step 4 makes the run's last quiet window.
+func (r *run) quiet(from time.Duration) *run {
+	r.in.Quiet = at(from)
+	return r.teardown(from + stableWindow)
+}
+
+// cleaned is when botbox saw the run namespace empty (DESIGN.md §5.5).
+func (r *run) cleaned(when time.Duration) *run {
+	r.in.Cleaned = at(when)
 	return r
 }
 
@@ -293,6 +315,13 @@ func failedDelete(name string, status int) proxy.Request {
 	return failed
 }
 
+// conflicted is the request the API server answered 409.
+func conflicted(verb, name string) proxy.Request {
+	failed := get(name)
+	failed.Verb, failed.Status = verb, http.StatusConflict
+	return failed
+}
+
 func failedWidgetGet(status int) proxy.Request {
 	return proxy.Request{
 		Verb: "get", Group: widgetGVK.Group, Version: widgetGVK.Version, Resource: "widgets",
@@ -304,11 +333,26 @@ func watch() proxy.Request {
 	return proxy.Request{Verb: "watch", Version: "v1", Resource: "configmaps", Namespace: namespace, Watch: true, Status: 200}
 }
 
-func leaseUpdate() proxy.Request {
+// failedWatch is the watch envtest's flow control turned away.
+func failedWatch(status int) proxy.Request {
+	failed := watch()
+	failed.Status = status
+	return failed
+}
+
+// lease is one leader-election request, which §6 excludes from G1 whether it
+// reads or writes.
+func lease(verb string) proxy.Request {
 	return proxy.Request{
-		Verb: "update", Group: "coordination.k8s.io", Version: "v1", Resource: "leases",
+		Verb: verb, Group: "coordination.k8s.io", Version: "v1", Resource: "leases",
 		Namespace: namespace, Name: "toy-widget", Status: 200,
 	}
+}
+
+// nonResource is a request to a path that names no resource: a health probe,
+// a discovery read or the OpenAPI schema.
+func nonResource(path string) proxy.Request {
+	return proxy.Request{Verb: "get", Path: path, Status: 200}
 }
 
 func statusPatch() proxy.Request {
@@ -326,6 +370,16 @@ func fired(t *testing.T, check invariant.Check, in invariant.Input) invariant.Vi
 		t.Fatalf("%s reported %d violations, want exactly one: %v", result.ID, len(result.Violations), statements(result))
 	}
 	return result.Violations[0]
+}
+
+// noted fails the test unless the check reported no violation and one note
+// saying what it did not judge.
+func noted(t *testing.T, check invariant.Check, in invariant.Input, want string) {
+	t.Helper()
+	result := silent(t, check, in)
+	if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], want) {
+		t.Fatalf("%s noted %v, want one note saying %q.", result.ID, result.Notes, want)
+	}
 }
 
 // silent fails the test unless the check reported nothing.

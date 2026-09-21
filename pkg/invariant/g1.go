@@ -6,13 +6,12 @@ import (
 	"github.com/rosenhouse/botbox/pkg/proxy"
 )
 
-// leases are the objects a leader-electing target keeps writing however
-// quiet it is (DESIGN.md §6, G1).
+// leases are the objects a leader-electing target keeps reading and writing
+// however quiet it is (DESIGN.md §6, G1).
 const leaseGroup, leaseResource = "coordination.k8s.io", "leases"
 
-// BoundedReconciliation is G1: with the spec unchanged and no fault active,
-// the target's API request rate falls to zero within T_settle and stays there
-// for T_stable (DESIGN.md §6).
+// BoundedReconciliation is G1: once the settle wait has ended, the target
+// makes no further API request for T_stable (DESIGN.md §6).
 func BoundedReconciliation(in Input) (Result, error) {
 	out := Result{ID: "G1"}
 	for _, window := range in.quietWindows() {
@@ -44,18 +43,12 @@ func (in Input) requestsIn(window quiet, keep func(proxy.Request) bool) []proxy.
 }
 
 // reconciles reports whether a request counts towards the rate G1 bounds. A
-// watch is the target waiting, and a lease write is it holding leadership.
+// watch is the target waiting, lease traffic is it holding leadership, and a
+// request that names no resource is a health probe or a discovery read
+// (DESIGN.md §6).
 func reconciles(r proxy.Request) bool {
-	if r.Watch || r.Verb == "watch" {
+	if r.Watch || r.Verb == "watch" || r.Resource == "" {
 		return false
 	}
-	return !(r.Group == leaseGroup && r.Resource == leaseResource && writes(r.Verb))
-}
-
-func writes(verb string) bool {
-	switch verb {
-	case "create", "update", "patch", "delete", "deletecollection":
-		return true
-	}
-	return false
+	return !(r.Group == leaseGroup && r.Resource == leaseResource)
 }

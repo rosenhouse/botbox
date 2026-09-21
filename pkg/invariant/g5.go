@@ -22,7 +22,7 @@ func RestartStable(in Input) (Result, error) {
 		}
 		before, after, missing := in.convergedAround(op)
 		if missing != "" {
-			out.note("%s has no converged snapshot %s it, so G5 was not evaluated", describe(op), missing)
+			out.note("for %s: it has no converged snapshot %s it", describe(op), missing)
 			continue
 		}
 		out.compare(in, op, before, after)

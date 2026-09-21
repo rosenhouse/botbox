@@ -48,7 +48,7 @@ type recordingChecker struct {
 	checkpoints []checkpointState
 }
 
-func (c *recordingChecker) Check(in run.Input) ([]run.Violation, error) {
+func (c *recordingChecker) Check(in run.Input) (run.Findings, error) {
 	last := in.Timeline.Checkpoints[len(in.Timeline.Checkpoints)-1]
 	state := checkpointState{op: last.Op, converged: last.Converged}
 	for _, managed := range in.Objects.Managed() {
@@ -64,9 +64,9 @@ func (c *recordingChecker) Check(in run.Input) ([]run.Violation, error) {
 	}
 	c.checkpoints = append(c.checkpoints, state)
 	if c.fail != nil {
-		return []run.Violation{*c.fail}, nil
+		return run.Findings{Violations: []run.Violation{*c.fail}}, nil
 	}
-	return nil, nil
+	return run.Findings{}, nil
 }
 
 func (c *recordingChecker) at(op int) (checkpointState, bool) {

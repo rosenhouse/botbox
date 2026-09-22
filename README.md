@@ -241,8 +241,8 @@ the count beside it. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-r
 ```
 
 `$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not. Give
-`--deadline` room for your controller, because a run that overruns it exits 2 rather than
-reporting a find, and so does an invocation it stops before the last run. Cache the control plane and the target as
+`--deadline` room for your controller, because a run that overruns it, or an invocation it stops
+before the last run, exits 2 rather than reporting a find. Cache the control plane and the target as
 [.github/workflows/ci.yml](.github/workflows/ci.yml) does. Fix the seed on pull requests, so that
 a failure is the change under review and not a new draw, and draw fresh seeds on a schedule, as
 [nightly.yml](.github/workflows/nightly.yml) does. The job needs no cluster and no registry.

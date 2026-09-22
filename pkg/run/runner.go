@@ -333,15 +333,28 @@ func (r *runner) applyOps(ctx context.Context) error {
 		if r.violation != nil {
 			return nil
 		}
-		r.expireFaults(op.Index)
-		applied, err := r.apply(ctx, op)
-		r.timeline.Ops = append(r.timeline.Ops, applied)
-		if err == nil && op.Settles() {
-			err = r.settle(ctx, op)
-		}
-		if err != nil {
+		if err := r.applyOp(ctx, op); err != nil {
 			return fmt.Errorf("op %d (%s): %w", op.Index, op.Type, err)
 		}
+	}
+	return nil
+}
+
+// applyOp applies one op and waits for the target's reaction. A target that
+// has stopped ends the run here, because the op would otherwise be applied to
+// nothing (DESIGN.md §5.5).
+func (r *runner) applyOp(ctx context.Context, op Op) error {
+	if status := r.h.targetStatus(); !status.Running {
+		return r.targetStopped(status)
+	}
+	r.expireFaults(op.Index)
+	applied, err := r.apply(ctx, op)
+	r.timeline.Ops = append(r.timeline.Ops, applied)
+	if err != nil {
+		return err
+	}
+	if op.Settles() {
+		return r.settle(ctx, op)
 	}
 	return nil
 }
@@ -472,11 +485,15 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 // is what its reader acts on.
 func (r *runner) targetStopped(status launch.Status) error {
 	log := filepath.Join(r.dir, targetLogFile)
-	if said := whyItStopped(log); said != "" {
-		return fmt.Errorf("the target is no longer running: %v; it wrote %q, and the rest of its output is in %s",
-			status.Exit, said, log)
+	stopped := "the target is no longer running"
+	// The launcher knows no exit where it holds no process at all.
+	if status.Exit != nil {
+		stopped += ": " + status.Exit.Error()
 	}
-	return fmt.Errorf("the target is no longer running: %v; its output is in %s", status.Exit, log)
+	if said := whyItStopped(log); said != "" {
+		return fmt.Errorf("%s; it wrote %q, and the rest of its output is in %s", stopped, said, log)
+	}
+	return fmt.Errorf("%s; its output is in %s", stopped, log)
 }
 
 // panicked opens the report a Go runtime writes on the way out. The lines
@@ -669,7 +686,7 @@ func (r *runner) teardown(ctx context.Context) error {
 	}
 	failures = append(failures, err)
 	if r.violation == nil && !r.failed {
-		failures = append(failures, r.checkpoint(Teardown, clean))
+		failures = append(failures, r.teardownCheckpoint(clean))
 	}
 
 	forced, err := r.h.forceFinalizers(ctx)
@@ -683,6 +700,15 @@ func (r *runner) teardown(ctx context.Context) error {
 	}
 	failures = append(failures, err, r.h.empty(ctx), r.h.stop(ctx))
 	return errors.Join(failures...)
+}
+
+// teardownCheckpoint judges the deletion window, unless the target stopped: a
+// target that is gone cleaned nothing up (DESIGN.md §5.5).
+func (r *runner) teardownCheckpoint(clean bool) error {
+	if status := r.h.targetStatus(); !status.Running {
+		return fmt.Errorf("the teardown: %w", r.targetStopped(status))
+	}
+	return r.checkpoint(Teardown, clean)
 }
 
 func (r *runner) teardownBudget() time.Duration {

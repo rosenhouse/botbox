@@ -25,6 +25,9 @@ type Launcher interface {
 	Restart(ctx context.Context) error
 	// Status reports whether the target is still running.
 	Status() Status
+	// Exited is closed once the running target has stopped, so that a caller
+	// waiting on the target ends where it does.
+	Exited() <-chan struct{}
 }
 
 // Status is what the launcher knows of the target process. It is the process's
@@ -138,6 +141,24 @@ func (b *Binary) Status() Status {
 	default:
 		return Status{Running: true}
 	}
+}
+
+// noTarget is the Exited of a launcher with nothing left to wait for.
+var noTarget = func() chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}()
+
+// Exited answers a closed channel while no target runs, as Status answers that
+// none is running.
+func (b *Binary) Exited() <-chan struct{} {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.running == nil {
+		return noTarget
+	}
+	return b.running.done
 }
 
 // Stop sends SIGTERM and escalates to SIGKILL once the grace period or ctx

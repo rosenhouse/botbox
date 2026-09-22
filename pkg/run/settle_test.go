@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -11,8 +12,18 @@ import (
 
 var testTimeouts = target.Timeouts{Settle: 5 * time.Second, Stable: 2 * time.Second, Delete: 10 * time.Second}
 
-// clock drives a settle wait without sleeping: each poll advances it.
-type clock struct{ now time.Time }
+const testPoll = 100 * time.Millisecond
+
+// clock drives a settle wait without sleeping: each poll advances it. A wait
+// that polls on well beyond T_settle can no longer end, so the clock fails it
+// rather than letting the test spin.
+type clock struct {
+	now   time.Time
+	polls int
+}
+
+// maxPolls is twice what a wait that runs to T_settle takes.
+var maxPolls = 2 * int(testTimeouts.Settle/testPoll)
 
 func newClock() *clock { return &clock{now: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)} }
 
@@ -20,21 +31,28 @@ func (c *clock) sleep(ctx context.Context, d time.Duration) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if c.polls++; c.polls > maxPolls {
+		return fmt.Errorf("the wait polled %d times without ending", c.polls)
+	}
 	c.now = c.now.Add(d)
 	return nil
 }
 
+// neverStops is the Exited of a target the wait never sees stop.
+var neverStops = make(chan struct{})
+
 // waitOn runs a settle wait over state and returns whether it converged and
 // how long it took on the clock.
-func waitOn(t *testing.T, ctx context.Context, c *clock, state func(since time.Time) (bool, time.Time)) (bool, time.Duration, error) {
+func waitOn(t *testing.T, ctx context.Context, c *clock, state func(since time.Time) (bool, time.Time), stopped <-chan struct{}) (bool, time.Duration, error) {
 	t.Helper()
 	start := c.now
 	wait := settle{
 		timeouts: testTimeouts,
-		poll:     100 * time.Millisecond,
+		poll:     testPoll,
 		now:      func() time.Time { return c.now },
 		sleep:    c.sleep,
 		state:    state,
+		stopped:  stopped,
 	}
 	converged, err := wait.wait(ctx)
 	return converged, c.now.Sub(start), err
@@ -44,7 +62,7 @@ func TestSettleConvergesOnceTheRunHoldsStill(t *testing.T) {
 	c := newClock()
 	quiet := func(since time.Time) (bool, time.Time) { return true, since }
 
-	converged, elapsed, err := waitOn(t, t.Context(), c, quiet)
+	converged, elapsed, err := waitOn(t, t.Context(), c, quiet, neverStops)
 
 	if err != nil || !converged {
 		t.Fatalf("The wait returned (%t, %v), want convergence.", converged, err)
@@ -59,7 +77,7 @@ func TestSettleWaitsForTStableAfterTheLastChange(t *testing.T) {
 	const lastChange = time.Second
 	changedOnce := func(since time.Time) (bool, time.Time) { return true, since.Add(lastChange) }
 
-	converged, elapsed, err := waitOn(t, t.Context(), c, changedOnce)
+	converged, elapsed, err := waitOn(t, t.Context(), c, changedOnce, neverStops)
 
 	if err != nil || !converged {
 		t.Fatalf("The wait returned (%t, %v), want convergence.", converged, err)
@@ -73,7 +91,7 @@ func TestSettleGivesUpWhileTheRunKeepsChanging(t *testing.T) {
 	c := newClock()
 	churning := func(time.Time) (bool, time.Time) { return true, c.now }
 
-	converged, elapsed, err := waitOn(t, t.Context(), c, churning)
+	converged, elapsed, err := waitOn(t, t.Context(), c, churning, neverStops)
 
 	if err != nil || converged {
 		t.Fatalf("The wait returned (%t, %v), want no convergence: the run never holds still.", converged, err)
@@ -87,7 +105,7 @@ func TestSettleGivesUpWhileTheTargetIsNotReady(t *testing.T) {
 	c := newClock()
 	notReady := func(since time.Time) (bool, time.Time) { return false, since }
 
-	converged, elapsed, err := waitOn(t, t.Context(), c, notReady)
+	converged, elapsed, err := waitOn(t, t.Context(), c, notReady, neverStops)
 
 	if err != nil || converged {
 		t.Fatalf("The wait returned (%t, %v), want no convergence: the target is not ready.", converged, err)
@@ -97,12 +115,35 @@ func TestSettleGivesUpWhileTheTargetIsNotReady(t *testing.T) {
 	}
 }
 
+// A target that stopped will never converge, and the ops behind the wait would
+// run against nothing, so the wait ends at the exit rather than at T_settle.
+func TestSettleEndsWhereTheTargetStopped(t *testing.T) {
+	c := newClock()
+	stopped := make(chan struct{})
+	polls := 0
+	diesOnTheSecondPoll := func(since time.Time) (bool, time.Time) {
+		if polls++; polls == 2 {
+			close(stopped)
+		}
+		return false, since
+	}
+
+	converged, elapsed, err := waitOn(t, t.Context(), c, diesOnTheSecondPoll, stopped)
+
+	if err != nil || converged {
+		t.Fatalf("The wait returned (%t, %v), want no convergence: the target stopped.", converged, err)
+	}
+	if elapsed != testPoll {
+		t.Errorf("The wait took %v, want the %v it took the target to stop.", elapsed, testPoll)
+	}
+}
+
 func TestSettleEndsWithTheContext(t *testing.T) {
 	c := newClock()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 
-	converged, _, err := waitOn(t, ctx, c, func(since time.Time) (bool, time.Time) { return false, since })
+	converged, _, err := waitOn(t, ctx, c, func(since time.Time) (bool, time.Time) { return false, since }, neverStops)
 
 	if !errors.Is(err, context.Canceled) || converged {
 		t.Errorf("The wait returned (%t, %v), want the context's error.", converged, err)

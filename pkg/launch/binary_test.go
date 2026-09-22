@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -415,4 +416,115 @@ func TestStatusWithNoTargetRunning(t *testing.T) {
 	if status := binary.Status(); status.Running || status.Exit != nil {
 		t.Errorf("Status reported %+v after Stop.", status)
 	}
+}
+
+func requireOpen(t *testing.T, exited <-chan struct{}, while string) {
+	t.Helper()
+	select {
+	case <-exited:
+		t.Fatalf("Exited was closed while %s.", while)
+	default:
+	}
+}
+
+func requireClosed(t *testing.T, exited <-chan struct{}, when string) {
+	t.Helper()
+	select {
+	case <-exited:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("Exited was still open %s.", when)
+	}
+}
+
+// A settle wait ends where the target stopped, so its caller waits on the
+// process rather than polling Status (DESIGN.md §5.5).
+func TestExitedClosesWhenTheTargetStops(t *testing.T) {
+	quit := filepath.Join(t.TempDir(), "quit")
+	binary, log := newBinary(t, 0, `echo started; until [ -e "$1" ]; do sleep 0.05; done; exit 3`, quit)
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+	exited := binary.Exited()
+	requireOpen(t, exited, "the target was running")
+
+	if err := os.WriteFile(quit, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	requireClosed(t, exited, "after the target exited")
+}
+
+// Before Start and after Stop botbox runs no target, and a caller has nothing
+// to wait for.
+func TestExitedWithNoTargetRunning(t *testing.T) {
+	binary, log := newBinary(t, 0, "echo started; "+forever)
+	requireClosed(t, binary.Exited(), "before Start")
+
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+	requireOpen(t, binary.Exited(), "the target was running")
+	if err := binary.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	requireClosed(t, binary.Exited(), "after Stop")
+}
+
+// Restart execs a second process, and a caller waits on that one.
+func TestExitedAfterARestart(t *testing.T) {
+	binary, log := newBinary(t, 0, "echo started; "+forever)
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+	killed := binary.Exited()
+
+	if err := binary.Restart(t.Context()); err != nil {
+		t.Fatalf("Restart failed: %v", err)
+	}
+
+	requireClosed(t, killed, "after the target it belonged to was killed")
+	waitForLogCount(t, log, "started", 2)
+	requireOpen(t, binary.Exited(), "the replacement was running")
+}
+
+// A caller reads why the target stopped as soon as Exited closes, so the exit
+// is set before the close.
+func TestStatusIsSetWhereExitedCloses(t *testing.T) {
+	for range 20 {
+		binary, _ := newBinary(t, 0, "exit 3")
+		mustStart(t, binary)
+
+		<-binary.Exited()
+
+		if status := binary.Status(); status.Running || status.Exit == nil {
+			t.Fatalf("Status reported %+v where Exited closed, want the exit that closed it.", status)
+		}
+	}
+}
+
+// Restart replaces the process a caller is waiting on, while it waits.
+func TestExitedWhileTheTargetRestarts(t *testing.T) {
+	binary, log := newBinary(t, 0, "echo started; "+forever)
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+	restarting, read := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(read)
+		for {
+			select {
+			case <-restarting:
+				return
+			default:
+				binary.Exited()
+			}
+		}
+	}()
+
+	err := binary.Restart(t.Context())
+
+	close(restarting)
+	<-read
+	if err != nil {
+		t.Fatalf("Restart failed: %v", err)
+	}
+	waitForLogCount(t, log, "started", 2)
+	requireOpen(t, binary.Exited(), "the replacement was running")
 }

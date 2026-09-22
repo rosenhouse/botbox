@@ -712,7 +712,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   `--kubeconfig` selects an existing cluster instead of envtest; `KUBEBUILDER_ASSETS`
   locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
-  harness error.
+  harness error, or a deadline that stopped the invocation before its last run.
 - **Output.** `--out` defaults to `botbox-out/`. Each invocation writes
   `<out>/<timestamp>-<seed>/`, taking the next free name where a second invocation of one
   seed opens a directory in the same second. Each failing run writes `run-<n>/` under it

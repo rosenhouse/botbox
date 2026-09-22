@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -431,6 +432,9 @@ func TestTheG4OfAnExpiredWaitCarriesTheEvidence(t *testing.T) {
 	}
 	if result.Violation == nil || result.Violation.ID != "G4" {
 		t.Fatalf("The run reported %+v, want a G4 violation.", result.Violation)
+	}
+	if wait := result.Timeline.Ops[0].Settled; wait == nil || !result.Violation.At.Equal(wait.Window.End) {
+		t.Errorf("The violation is stamped %v, want the instant the settle wait expired.", result.Violation.At)
 	}
 	versions := result.Violation.Versions
 	if len(versions) != 20 {
@@ -1171,18 +1175,21 @@ func TestTheG4OfAnExpiredWaitCountsTheManagedObjects(t *testing.T) {
 	if want := "the target managed 3 objects of the kinds it declares"; !strings.Contains(result.Violation.Evidence, want) {
 		t.Errorf("The G4's evidence is %q, want it to say %q.", result.Violation.Evidence, want)
 	}
-	if result.Violation.Managed == nil || *result.Violation.Managed != 3 {
+	if result.Violation.ManagedTotal == nil || *result.Violation.ManagedTotal != 3 {
 		t.Errorf("The G4 carried out no count of 3, and its evidence quotes one.")
 	}
 }
 
-// The G4 an expired wait raised quotes the children too, since the object a
-// readiness finding is about is usually one of them (#20).
+// The G4 an expired wait raised quotes the children as a table of their own,
+// bounded and newest first, since the object a readiness finding is about is
+// usually one of them (#24).
 func TestTheG4OfAnExpiredWaitQuotesTheManagedObjects(t *testing.T) {
 	h := newFakeHarness()
 	h.converged = false
 	h.recordCR("widget", "11")
-	h.recordChild("widget-0", "12")
+	for i := range 25 {
+		h.recordChild(fmt.Sprintf("widget-%d", i), strconv.Itoa(12+i))
+	}
 
 	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
 
@@ -1192,11 +1199,24 @@ func TestTheG4OfAnExpiredWaitQuotesTheManagedObjects(t *testing.T) {
 	if result.Violation == nil || result.Violation.ID != "G4" {
 		t.Fatalf("The run reported %v, want a G4 violation.", result.Violation)
 	}
-	versions := result.Violation.Versions
-	if !slices.ContainsFunc(versions, func(v observe.Version) bool { return v.GVK == configMapKind }) {
-		t.Errorf("The violation carries %d versions and no managed object: %v", len(versions), versions)
+	managed := result.Violation.Managed
+	if len(managed) != invariant.MaxEvidence {
+		t.Fatalf("The violation quotes %d managed objects, want the bound of %d.", len(managed), invariant.MaxEvidence)
 	}
+	if managed[0].Name != "widget-24" {
+		t.Errorf("The state opens at %s, want widget-24, the child recorded last.", managed[0].Name)
+	}
+	if result.Violation.ManagedTotal == nil || *result.Violation.ManagedTotal != 25 {
+		t.Errorf("The violation counts %v managed objects, want 25.", result.Violation.ManagedTotal)
+	}
+	if want := kindName(widgetKind) + " widget"; result.Violation.VersionsOf != want {
+		t.Errorf("The timeline is of %q, want %q.", result.Violation.VersionsOf, want)
+	}
+	versions := result.Violation.Versions
 	if !slices.ContainsFunc(versions, func(v observe.Version) bool { return v.GVK == widgetKind }) {
-		t.Errorf("The violation carries %d versions and not the CR the statement names.", len(versions))
+		t.Errorf("The timeline holds %d versions and not the CR the statement names.", len(versions))
+	}
+	if slices.ContainsFunc(versions, func(v observe.Version) bool { return v.GVK == configMapKind }) {
+		t.Errorf("The timeline holds %v, want the CR's history alone.", versions)
 	}
 }

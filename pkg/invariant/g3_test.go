@@ -43,8 +43,29 @@ func TestG3FiresOnAnOrphanTheCollectorCannotReach(t *testing.T) {
 	if !strings.Contains(violation.Statement, "w-0") || !strings.Contains(violation.Statement, "ownerReference") {
 		t.Errorf("The statement is %q, want it to name the orphan w-0.", violation.Statement)
 	}
+	if want := timelineOf(configMapGVK, "w-0"); violation.VersionsOf != want {
+		t.Errorf("The timeline is of %q, want %q.", violation.VersionsOf, want)
+	}
 	if len(violation.Versions) == 0 || violation.Versions[0].Name != "w-0" {
 		t.Fatalf("The evidence holds %v, want the orphan's timeline.", violation.Versions)
+	}
+}
+
+// A count of zero is a finding, so a check that never asked what the target
+// managed leaves none (#24).
+func TestG3QuotesNoStateOfItsOwn(t *testing.T) {
+	in := deletedRun().
+		record(time.Second, child("w-0", "12", orphaned)).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		through(21 * time.Second)
+
+	violation := fired(t, invariant.CleanDeletion, in)
+
+	if violation.ManagedTotal != nil {
+		t.Errorf("G3 counted %v managed objects, want none: it judges one deletion, not the state.", managed(violation))
+	}
+	if len(violation.Managed) > 0 {
+		t.Errorf("G3 quotes the state %v, want none.", state(violation))
 	}
 }
 
@@ -68,6 +89,9 @@ func TestG3FiresOnAFinalizerThatNeverClears(t *testing.T) {
 
 	if !strings.Contains(violation.Statement, cleanup) {
 		t.Errorf("The statement is %q, want it to name the finalizer.", violation.Statement)
+	}
+	if want := timelineOf(widgetGVK, widgetName); violation.VersionsOf != want {
+		t.Errorf("The timeline is of %q, want %q.", violation.VersionsOf, want)
 	}
 	if len(violation.Versions) == 0 || violation.Versions[0].GVK != widgetGVK {
 		t.Fatalf("The evidence holds %v, want the CR's timeline.", violation.Versions)

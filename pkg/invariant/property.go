@@ -2,10 +2,8 @@ package invariant
 
 import (
 	"fmt"
-	"slices"
 	"time"
 
-	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
@@ -27,27 +25,18 @@ func Property(declared target.Property) Check {
 			if holds {
 				continue
 			}
-			out.violate(Violation{
+			violation := Violation{
 				Statement: fmt.Sprintf("the property did not hold: %s", declared.Description),
 				At:        s.at,
-				Managed:   counted(managed),
-			}.quotingVersions(excerpt(read(cr, found, managed))))
+			}.quotingManaged(Sample(managed))
+			if found {
+				violation = violation.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), s.at)))
+			}
+			out.violate(violation)
 			return out, nil // A run ends at its first violation (DESIGN.md §5.5).
 		}
 		return out, nil
 	}
-}
-
-// read is the state the property saw, as the report quotes it, in the order
-// the table reads.
-func read(cr observe.Version, found bool, managed []observe.Version) []observe.Version {
-	state := managed
-	if found {
-		state = append([]observe.Version{cr}, managed...)
-	}
-	state = slices.Clone(state)
-	slices.SortStableFunc(state, byTime)
-	return state
 }
 
 // evaluationPoints are the instants a property is evaluated at, in order.

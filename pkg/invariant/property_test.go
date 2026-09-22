@@ -2,7 +2,6 @@ package invariant_test
 
 import (
 	"errors"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -11,7 +10,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
-	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
@@ -169,29 +167,45 @@ func TestPropertyEvaluatedAlwaysFiresOnAnEventTheTeardownCameAfter(t *testing.T)
 	fired(t, invariant.Property(in.Target.Properties[0]), in)
 }
 
-// A property about the children says how many there were and quotes them in
-// the order the table reads (#20).
-func TestAPropertyCountsAndOrdersTheStateItSaw(t *testing.T) {
-	in := newRun().
-		op(invariant.OpCreate, 0).
-		record(3*time.Second, child("w-1", "12")).
-		record(4*time.Second, child("w-0", "13")).
-		record(5*time.Second, widget("14", spec(3), status(3, 1))).
-		checkpoint(5*time.Second, invariant.Converged).
+// A property about the children says how many there were and quotes their
+// state beside the CR's timeline, one from each kind in turn and newest first
+// (#24).
+func TestAPropertyQuotesTheStateItSawBesideTheTimeline(t *testing.T) {
+	r := newRunManaging(configMapGVK, secretGVK).op(invariant.OpCreate, 0)
+	for i := range 25 {
+		r.record(time.Duration(1000+i)*time.Millisecond, secret("s-"+strconv.Itoa(i), strconv.Itoa(100+i)))
+	}
+	for i := range 3 {
+		r.record(time.Duration(2000+i)*time.Millisecond, child("w-"+strconv.Itoa(i), strconv.Itoa(200+i)))
+	}
+	in := r.record(3*time.Second, widget("300", spec(40), status(40, 1))).
+		checkpoint(4*time.Second, invariant.Converged).
 		through(8 * time.Second)
 
 	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
 
-	if violation.Managed == nil || *violation.Managed != 2 {
-		t.Errorf("The violation counts %v managed objects, want the 2 the property saw.", managed(violation))
+	if violation.ManagedTotal == nil || *violation.ManagedTotal != 28 {
+		t.Errorf("The violation counts %v managed objects, want the 28 the property saw.", managed(violation))
 	}
-	if !slices.IsSortedFunc(violation.Versions, func(a, b observe.Version) int { return a.Time.Compare(b.Time) }) {
-		t.Errorf("The evidence holds %v, want it in the order the run recorded.", quoted(violation))
+	if len(violation.Managed) != invariant.MaxEvidence {
+		t.Fatalf("The state holds %d objects, want the bound of %d.", len(violation.Managed), invariant.MaxEvidence)
+	}
+	if got := versionsOf(violation.Managed, configMapGVK); len(got) != 3 {
+		t.Errorf("The state holds %d of the 3 ConfigMaps: %v", len(got), state(violation))
+	}
+	if first := state(violation)[0]; first != "w-2" {
+		t.Errorf("The state opens at %s, want w-2, the object recorded last.", first)
+	}
+	if want := timelineOf(widgetGVK, widgetName); violation.VersionsOf != want {
+		t.Errorf("The timeline is of %q, want %q.", violation.VersionsOf, want)
+	}
+	if got := versionsOf(violation.Versions, widgetGVK); len(got) != 1 {
+		t.Errorf("The timeline holds %v, want the CR's history.", quoted(violation))
 	}
 }
 
 // A property's evidence is bounded like any other, so it says how much it
-// chose from (#22).
+// chose from (#22, #24).
 func TestAPropertySaysHowMuchEvidenceItChoseFrom(t *testing.T) {
 	r := newRun().op(invariant.OpCreate, 0)
 	for i := range 25 {
@@ -203,10 +217,99 @@ func TestAPropertySaysHowMuchEvidenceItChoseFrom(t *testing.T) {
 
 	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
 
+	if len(violation.Managed) != invariant.MaxEvidence {
+		t.Errorf("The property quotes %d managed objects, want the bound of %d.", len(violation.Managed), invariant.MaxEvidence)
+	}
+	if violation.ManagedTotal == nil || *violation.ManagedTotal != 25 {
+		t.Errorf("The property says the target managed %v objects, want the 25 it saw.", managed(violation))
+	}
+	if len(violation.Versions) != 1 || violation.VersionsTotal != 1 {
+		t.Errorf("The timeline holds %v of %d, want the CR's one version.", quoted(violation), violation.VersionsTotal)
+	}
+}
+
+// A property's timeline is the CR versions nearest the violation, as every
+// timeline is (#24, D35).
+func TestAPropertyQuotesTheCRVersionsNearestTheViolation(t *testing.T) {
+	r := newRun().op(invariant.OpCreate, 0)
+	for i := range 25 {
+		r.record(time.Duration(i)*100*time.Millisecond, widget(strconv.Itoa(10+i), spec(2), status(2, 1)))
+	}
+	in := r.checkpoint(5*time.Second, invariant.Converged).through(8 * time.Second)
+
+	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
+
 	if len(violation.Versions) != invariant.MaxEvidence {
-		t.Errorf("The property quotes %d versions, want the bound of %d.", len(violation.Versions), invariant.MaxEvidence)
+		t.Fatalf("The timeline holds %d versions, want the bound of %d.", len(violation.Versions), invariant.MaxEvidence)
 	}
-	if want := 26; violation.VersionsTotal != want {
-		t.Errorf("The property says it chose from %d versions, want the %d it saw.", violation.VersionsTotal, want)
+	if last := violation.Versions[invariant.MaxEvidence-1]; last.ResourceVersion != "34" {
+		t.Errorf("The timeline ends at resourceVersion %s, want the CR's latest, 34.", last.ResourceVersion)
 	}
+	if want := 25; violation.VersionsTotal != want {
+		t.Errorf("The timeline says it chose from %d versions, want the %d the CR has.", violation.VersionsTotal, want)
+	}
+}
+
+// A report of what the run looked like where the property failed cannot quote
+// what came after it (#24).
+func TestAPropertyQuotesNoVersionRecordedAfterTheViolation(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1))).
+		checkpoint(3*time.Second, invariant.Converged).
+		record(4*time.Second, widget("11", spec(2), status(2, 1))).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
+
+	for _, v := range violation.Versions {
+		if v.Time.After(violation.At) {
+			t.Errorf("The timeline quotes %s at %s, after the violation at %s.", v.Name, v.Time, violation.At)
+		}
+	}
+	if violation.VersionsTotal != 1 {
+		t.Errorf("The timeline says it chose from %d versions, want the 1 recorded by then.", violation.VersionsTotal)
+	}
+}
+
+// A run the Observer never recorded has no CR and no timeline, and the
+// property that failed is still reported (#24).
+func TestAPropertyFiresOnARunWithNoHistory(t *testing.T) {
+	in := invariant.Input{
+		Target:      toyTarget(),
+		Checkpoints: []invariant.Checkpoint{{Op: 0, Time: at(5 * time.Second), Settle: invariant.Expired}},
+		End:         at(5 * time.Second),
+	}
+	in.Target.Properties = []target.Property{property(target.Checkpoint, crExists)}
+
+	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
+
+	if len(violation.Versions) > 0 {
+		t.Errorf("The timeline holds %v, want none: the run recorded nothing.", quoted(violation))
+	}
+}
+
+// A property whose CR is gone has no timeline to quote, and the state is still
+// the finding (#24).
+func TestAPropertyThatFoundNoCRQuotesTheStateAlone(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, child("w-0", "11")).
+		checkpoint(4*time.Second, invariant.Converged).
+		through(8 * time.Second)
+	in.Target.Properties = []target.Property{property(target.Checkpoint, crExists)}
+
+	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
+
+	if len(violation.Versions) > 0 {
+		t.Errorf("The timeline holds %v, want none: the run has no CR.", quoted(violation))
+	}
+	if got := state(violation); len(got) != 1 || got[0] != "w-0" {
+		t.Errorf("The state holds %v, want the child the property read.", got)
+	}
+}
+
+// crExists is a property of the CR itself, which a run that has none breaks.
+func crExists(cr *unstructured.Unstructured, _ []*unstructured.Unstructured) (bool, error) {
+	return cr != nil, nil
 }

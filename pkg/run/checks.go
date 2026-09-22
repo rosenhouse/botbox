@@ -3,7 +3,6 @@ package run
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -29,12 +28,15 @@ func (Engine) Check(in Input) (Findings, error) {
 			found.Violations = append(found.Violations, Violation{
 				ID:            violation.ID,
 				Statement:     violation.Statement,
+				At:            violation.At,
 				Evidence:      evidence(violation),
 				Requests:      violation.Requests,
 				RequestsTotal: violation.RequestsTotal,
 				Versions:      violation.Versions,
 				VersionsTotal: violation.VersionsTotal,
+				VersionsOf:    violation.VersionsOf,
 				Managed:       violation.Managed,
+				ManagedTotal:  violation.ManagedTotal,
 			})
 		}
 		found.Notes = append(found.Notes, result.Notes...)
@@ -134,10 +136,11 @@ func count(n int, noun string) string {
 	return fmt.Sprintf("%d %ss", n, noun)
 }
 
-// evidence is the line the CLI prints under a violation. The whole request
-// log and version history stay in the run directory (DESIGN.md §5.7).
+// evidence is what a violation quotes, in one line. The instant it judged is
+// a field of its own, and the whole request log and version history stay in
+// the run directory (DESIGN.md §5.7).
 func evidence(violation invariant.Violation) string {
-	quoted := []string{"at " + violation.At.Format(time.RFC3339Nano)}
+	var quoted []string
 	if requests := violation.Requests; len(requests) > 0 {
 		quoted = append(quoted, fmt.Sprintf("%s, the first %s %s %d",
 			part(len(requests), violation.RequestsTotal, "request"), requests[0].Verb, requests[0].Path, requests[0].Status))
@@ -146,8 +149,8 @@ func evidence(violation invariant.Violation) string {
 		quoted = append(quoted, fmt.Sprintf("%s, the first %s %s",
 			part(len(versions), violation.VersionsTotal, "version"), kindName(versions[0].GVK), versions[0].Name))
 	}
-	if violation.Managed != nil {
-		quoted = append(quoted, managedClause(*violation.Managed))
+	if violation.ManagedTotal != nil {
+		quoted = append(quoted, managedClause(*violation.ManagedTotal))
 	}
 	return strings.Join(quoted, "; ")
 }

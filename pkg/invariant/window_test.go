@@ -2,6 +2,7 @@ package invariant_test
 
 import (
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -42,25 +43,54 @@ func TestRecentSaysHowMuchItChoseFrom(t *testing.T) {
 	}
 }
 
-func TestReadinessSaysHowMuchItChoseFrom(t *testing.T) {
-	history := make([]observe.Version, 25)
-	for i := range history {
-		history[i] = observe.Version{Key: observe.Key{GVK: widgetGVK, Name: "w"}, Time: at(time.Duration(i) * time.Second)}
+func TestSampleQuotesOneFromEachKindInTurnNewestFirst(t *testing.T) {
+	var managed []observe.Version
+	for i := range 3 {
+		managed = append(managed,
+			version(configMapGVK, "w-"+strconv.Itoa(i), time.Duration(i)*time.Second),
+			version(secretGVK, "s-"+strconv.Itoa(i), time.Duration(i)*time.Second))
 	}
-	managed := make([]observe.Version, 5)
-	for i := range managed {
-		managed[i] = observe.Version{
-			Key:  observe.Key{GVK: configMapGVK, Name: "w-" + strconv.Itoa(i)},
-			Time: at(30 * time.Second),
+
+	got := invariant.Sample(managed).Quoted
+
+	want := []string{"w-2", "s-2", "w-1", "s-1", "w-0", "s-0"}
+	if names := names(got); strings.Join(names, ",") != strings.Join(want, ",") {
+		t.Errorf("Sample quotes %v, want %v.", names, want)
+	}
+}
+
+func TestSampleBoundsTheStateAndSaysHowManyThereWere(t *testing.T) {
+	for _, objects := range []int{3, invariant.MaxEvidence, 25} {
+		var managed []observe.Version
+		for i := range objects {
+			managed = append(managed, version(configMapGVK, "w-"+strconv.Itoa(i), time.Duration(i)*time.Second))
+		}
+
+		got := invariant.Sample(managed)
+
+		if got.Total != objects {
+			t.Errorf("Sample over %d objects says the target managed %d.", objects, got.Total)
+		}
+		if want := min(objects, invariant.MaxEvidence); len(got.Quoted) != want {
+			t.Errorf("Sample over %d objects quotes %d, want %d.", objects, len(got.Quoted), want)
 		}
 	}
+}
 
-	got := invariant.Readiness(history, managed)
-
-	if want := len(history) + len(managed); got.Total != want {
-		t.Errorf("Readiness says it chose from %d versions, want the %d it was given.", got.Total, want)
+// A timeline of one object's history names it, so that no site spells the
+// subject out (#24).
+func TestRecentHistoryNamesTheObjectItQuotes(t *testing.T) {
+	history := make([]observe.Version, 25)
+	for i := range history {
+		history[i] = version(widgetGVK, widgetName, time.Duration(i)*time.Second)
 	}
-	if len(got.Quoted) != invariant.MaxEvidence {
-		t.Errorf("Readiness quotes %d versions, want the bound of %d.", len(got.Quoted), invariant.MaxEvidence)
+
+	got := invariant.RecentHistory(history[0].Key, history)
+
+	if want := "toy.botbox/v1/Widget w"; got.Of != want {
+		t.Errorf("RecentHistory quotes the versions of %q, want %q.", got.Of, want)
+	}
+	if len(got.Quoted) != invariant.MaxEvidence || got.Total != len(history) {
+		t.Errorf("RecentHistory quotes %d of %d, want %d of %d.", len(got.Quoted), got.Total, invariant.MaxEvidence, len(history))
 	}
 }

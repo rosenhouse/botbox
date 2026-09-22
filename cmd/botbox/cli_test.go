@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -378,6 +379,7 @@ func TestADeadlineDuringTheShrinkPassLeavesTheDrawnSequence(t *testing.T) {
 func TestAFailingRunWritesItsReport(t *testing.T) {
 	violation := run.Violation{
 		ID: "G4", Statement: "the target converges", Evidence: "the settle wait expired",
+		At:       time.Date(2026, 9, 21, 5, 59, 8, 980624165, time.UTC),
 		Requests: []proxy.Request{{Verb: "get", Path: "/api/v1/namespaces/ns/configmaps/w-0", Status: 404}},
 		Versions: []observe.Version{{Key: observe.Key{
 			GVK:  schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"},
@@ -387,12 +389,15 @@ func TestAFailingRunWritesItsReport(t *testing.T) {
 	note := "G3 is not evaluated for the deletion of widget"
 	session := &fakeSession{results: []run.Result{{Violation: &violation, Notes: []string{note}}}}
 
-	code, _, stderr := invokeWith(t, session, countingGenerator(nil),
+	code, stdout, stderr := invokeWith(t, session, countingGenerator(nil),
 		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42",
 		"--launch-arg", "--bug=7")
 
 	if code != exitViolation {
 		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "at 2026-09-21T05:59:08.980624165Z") {
+		t.Errorf("botbox printed\n%s\nwant the instant the violation carries.", stdout)
 	}
 	for _, name := range []string{report.JSONFile, report.MarkdownFile} {
 		if _, err := os.Stat(filepath.Join(session.dirs[0], name)); err != nil {
@@ -408,8 +413,9 @@ func TestAFailingRunWritesItsReport(t *testing.T) {
 	// else (DESIGN.md §5.7).
 	want = append(want, "botbox replay --target "+toyTargetYAML+" --launch-arg --bug=7 "+
 		filepath.Join(session.dirs[0], sequenceFile))
-	// §5.7 also asks for what ran, the seed, and the evidence the check named.
-	want = append(want, version(), "seed 42",
+	// §5.7 also asks for what ran, the seed, the instant it judged, and the
+	// evidence the check named.
+	want = append(want, version(), "seed 42", "2026-09-21T05:59:08.980624165Z",
 		violation.Requests[0].Path, violation.Versions[0].Name)
 	for _, want := range want {
 		if !strings.Contains(string(written), want) {
@@ -927,10 +933,63 @@ func TestARunEvaluatesTheInvariants(t *testing.T) {
 	}
 }
 
-// The count reaches report.json, and not only the line the CLI prints (#13).
-func TestTheReportCountsWhatTheTargetManaged(t *testing.T) {
-	none := 0
-	violation := run.Violation{ID: "G4", Statement: "the target converges", Managed: &none}
+// The state and its count reach report.json, and not only the line the CLI
+// prints (#13, #24).
+func TestTheReportQuotesTheStateAtTheVerdict(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		state []observe.Version
+	}{
+		{name: "the state the verdict quoted", state: []observe.Version{{Key: observe.Key{
+			GVK:  schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"},
+			Name: "widget-0",
+		}, ResourceVersion: "12"}}},
+		{name: "a target that managed nothing"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			managed := len(c.state)
+			violation := run.Violation{ID: "G4", Statement: "the target converges",
+				Managed: c.state, ManagedTotal: &managed}
+			session := &fakeSession{results: []run.Result{{Violation: &violation}}}
+
+			code, _, stderr := invokeWith(t, session, countingGenerator(nil, run.OpSettle),
+				"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+			if code != exitViolation {
+				t.Fatalf("botbox run exited %d, want %d: %s", code, exitViolation, stderr)
+			}
+			encoded, err := os.ReadFile(filepath.Join(session.dirs[0], report.JSONFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var carried struct {
+				Managed      []observe.Version
+				ManagedTotal *int
+			}
+			if err := json.Unmarshal(encoded, &carried); err != nil {
+				t.Fatal(err)
+			}
+			if len(carried.Managed) != managed {
+				t.Errorf("report.json is\n%s\nwant the %d objects the violation quoted.", encoded, managed)
+			}
+			if carried.ManagedTotal == nil || *carried.ManagedTotal != managed {
+				t.Errorf("report.json is\n%s\nwant the count of the objects the target managed.", encoded)
+			}
+		})
+	}
+}
+
+// The report says what the check's own bound left out, which only the check
+// knows (#22).
+func TestTheReportSaysWhatTheChecksBoundLeftOut(t *testing.T) {
+	violation := run.Violation{
+		ID: "G4", Statement: "the target converges",
+		Requests:      []proxy.Request{{Verb: "get", Path: "/api/v1/widgets"}},
+		RequestsTotal: 133,
+		Versions:      []observe.Version{{Key: observe.Key{Name: "widget"}, ResourceVersion: "11"}},
+		VersionsTotal: 41,
+		VersionsOf:    "toy.botbox/v1/Widget widget",
+	}
 	session := &fakeSession{results: []run.Result{{Violation: &violation}}}
 
 	code, _, stderr := invokeWith(t, session, countingGenerator(nil, run.OpSettle),
@@ -944,44 +1003,17 @@ func TestTheReportCountsWhatTheTargetManaged(t *testing.T) {
 		t.Fatal(err)
 	}
 	var carried struct {
-		Check struct{ Managed *int }
+		RequestsTotal, VersionsTotal int
+		VersionsOf                   string
 	}
-	if err := json.Unmarshal(encoded, &carried); err != nil {
-		t.Fatal(err)
-	}
-	if carried.Check.Managed == nil || *carried.Check.Managed != 0 {
-		t.Errorf("report.json is\n%s\nwant the check to count the objects the target managed.", encoded)
-	}
-}
-
-// The report says what the check's own bound left out, which only the check
-// knows (#22).
-func TestTheReportSaysWhatTheChecksBoundLeftOut(t *testing.T) {
-	violation := run.Violation{
-		ID: "G4", Statement: "the target converges",
-		Requests:      []proxy.Request{{Verb: "get", Path: "/api/v1/widgets"}},
-		RequestsTotal: 133,
-		Versions:      []observe.Version{{Key: observe.Key{Name: "widget"}, ResourceVersion: "11"}},
-		VersionsTotal: 41,
-	}
-	session := &fakeSession{results: []run.Result{{Violation: &violation}}}
-
-	code, _, stderr := invokeWith(t, session, countingGenerator(nil, run.OpSettle),
-		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
-
-	if code != exitViolation {
-		t.Fatalf("botbox run exited %d, want %d: %s", code, exitViolation, stderr)
-	}
-	encoded, err := os.ReadFile(filepath.Join(session.dirs[0], report.JSONFile))
-	if err != nil {
-		t.Fatal(err)
-	}
-	var carried struct{ RequestsTotal, VersionsTotal int }
 	if err := json.Unmarshal(encoded, &carried); err != nil {
 		t.Fatal(err)
 	}
 	if carried.VersionsTotal != 41 || carried.RequestsTotal != 133 {
 		t.Errorf("report.json says it chose from %d requests and %d versions, want the 133 and 41 the check did.",
 			carried.RequestsTotal, carried.VersionsTotal)
+	}
+	if carried.VersionsOf != violation.VersionsOf {
+		t.Errorf("report.json says the timeline is of %q, want %q.", carried.VersionsOf, violation.VersionsOf)
 	}
 }

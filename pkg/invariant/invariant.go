@@ -120,10 +120,16 @@ type Violation struct {
 	// each pair together.
 	RequestsTotal int `json:"requestsTotal,omitempty"`
 	VersionsTotal int `json:"versionsTotal,omitempty"`
-	// Managed is how many objects the target managed at At, which the checks
-	// that judge the CR's readiness count (DESIGN.md §5.7). A check that did
-	// not ask leaves it nil, because a count of zero is a finding.
-	Managed *int `json:"managed,omitempty"`
+	// VersionsOf names the object the timeline is the history of, and is
+	// empty where the versions are of several.
+	VersionsOf string `json:"versionsOf,omitempty"`
+	// Managed is the state at At: one version of each object the target
+	// managed, which a check that judges the CR's readiness quotes as a table
+	// of its own. ManagedTotal is how many it was chosen from. A check that
+	// did not ask leaves the total nil, because a count of zero is a finding
+	// (DESIGN.md §5.7, D39).
+	Managed      []observe.Version `json:"managed,omitempty"`
+	ManagedTotal *int              `json:"managedTotal,omitempty"`
 }
 
 // Result is what one check found.
@@ -171,7 +177,14 @@ func (v Violation) quotingRequests(e Excerpt[proxy.Request]) Violation {
 
 // quotingVersions does the same for a timeline of object versions.
 func (v Violation) quotingVersions(e Excerpt[observe.Version]) Violation {
-	v.Versions, v.VersionsTotal = e.Quoted, e.Total
+	v.Versions, v.VersionsTotal, v.VersionsOf = e.Quoted, e.Total, e.Of
+	return v
+}
+
+// quotingManaged does the same for the state at the verdict. The total it
+// carries is never nil: the check asked.
+func (v Violation) quotingManaged(e Excerpt[observe.Version]) Violation {
+	v.Managed, v.ManagedTotal = e.Quoted, &e.Total
 	return v
 }
 

@@ -47,6 +47,9 @@ func TestG5FiresOnAnObjectOnlyTheRestartBroughtBack(t *testing.T) {
 	if !strings.Contains(violation.Statement, "w-0") {
 		t.Errorf("The statement is %q, want it to name the ConfigMap the restart brought back.", violation.Statement)
 	}
+	if want := timelineOf(configMapGVK, "w-0"); violation.VersionsOf != want {
+		t.Errorf("The timeline is of %q, want %q.", violation.VersionsOf, want)
+	}
 	if len(violation.Versions) == 0 || violation.Versions[0].Name != "w-0" {
 		t.Fatalf("The evidence holds %v, want the ConfigMap's timeline.", violation.Versions)
 	}

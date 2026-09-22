@@ -326,8 +326,7 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 	}
 	violation := *result.Violation
 	return report.Write(dir, report.Report{
-		Check: report.Check{ID: violation.ID, Statement: violation.Statement,
-			Evidence: violation.Evidence, Managed: violation.Managed},
+		Check:         report.Check{ID: violation.ID, Statement: violation.Statement, At: violation.At, Evidence: violation.Evidence},
 		Target:        report.Target{Name: t.Name, Version: t.Version},
 		Botbox:        version(),
 		Seed:          sequence.Seed,
@@ -340,6 +339,9 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 		RequestsTotal: violation.RequestsTotal,
 		Versions:      violation.Versions,
 		VersionsTotal: violation.VersionsTotal,
+		VersionsOf:    violation.VersionsOf,
+		Managed:       violation.Managed,
+		ManagedTotal:  violation.ManagedTotal,
 	})
 }
 
@@ -364,10 +366,23 @@ func newSeed() int64 { return rand.Int64() }
 
 func (c *cli) report(number int, violation run.Violation, dir string) {
 	fmt.Fprintf(c.stdout, "run %d: %s %s\n", number, violation.ID, violation.Statement)
-	if violation.Evidence != "" {
-		fmt.Fprintf(c.stdout, "  %s\n", violation.Evidence)
+	if said := quotes(violation); said != "" {
+		fmt.Fprintf(c.stdout, "  %s\n", said)
 	}
 	fmt.Fprintf(c.stdout, "  the evidence is in %s\n", dir)
+}
+
+// quotes is what the CLI prints under a violation: when the check judged, and
+// what it quoted (DESIGN.md §5.7).
+func quotes(violation run.Violation) string {
+	var said []string
+	if !violation.At.IsZero() {
+		said = append(said, "at "+violation.At.Format(time.RFC3339Nano))
+	}
+	if violation.Evidence != "" {
+		said = append(said, violation.Evidence)
+	}
+	return strings.Join(said, "; ")
 }
 
 func (c *cli) fail(err error) int {

@@ -170,7 +170,7 @@ func TestReportQuotesTheRequestsAndVersionsTheViolationNamed(t *testing.T) {
 				t.Errorf("The report's %s do not name %q:\n%s", excerpt.heading, want, body)
 			}
 		}
-		if strings.Contains(body, "nearest it") {
+		if strings.Contains(body, "the last") {
 			t.Errorf("The report says it bounded evidence it quoted whole:\n%s", body)
 		}
 	}
@@ -251,7 +251,7 @@ func TestReportBoundsTheEvidenceAndSaysHowMuchThereWas(t *testing.T) {
 		if rows := strings.Count(body, excerpt.row); rows != 20 {
 			t.Errorf("The report quotes %d %s, want 20.", rows, excerpt.key)
 		}
-		if want := fmt.Sprintf("The violation chose from %d %s and quotes 20 of them.", quoted, excerpt.key); !strings.Contains(body, want) {
+		if want := fmt.Sprintf("The violation quotes the last 20 of %d %s.", quoted, excerpt.key); !strings.Contains(body, want) {
 			t.Errorf("The report does not say %q:\n%s", want, body)
 		}
 		var held []json.RawMessage
@@ -264,6 +264,38 @@ func TestReportBoundsTheEvidenceAndSaysHowMuchThereWas(t *testing.T) {
 		if total := field(t, encoded, excerpt.key+"Total"); total != fmt.Sprint(quoted) {
 			t.Errorf("report.json says %s of %s, want %d.", total, excerpt.key, quoted)
 		}
+	}
+}
+
+// The two kinds of row a readiness verdict carries are tables of their own, so
+// a reader can tell a history from a state (#24).
+func TestReportQuotesTheTimelineAndTheStateApart(t *testing.T) {
+	failure := failingRun()
+	failure.Versions = []observe.Version{{
+		Key:             observe.Key{GVK: schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}, Name: "widget"},
+		ResourceVersion: "219",
+	}}
+	failure.Managed = []observe.Version{{
+		Key:             observe.Key{GVK: schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, Name: "widget-0"},
+		ResourceVersion: "221",
+	}}
+	failure.ManagedTotal = ptr(1)
+	failure.VersionsOf = "toy.botbox/v1/Widget widget"
+
+	md, encoded := write(t, failure)
+
+	if want := "The violation quotes 1 version of `toy.botbox/v1/Widget widget`."; !strings.Contains(md, want) {
+		t.Errorf("The report does not say %q:\n%s", want, md)
+	}
+	if got := field(t, encoded, "versionsOf"); got != `"toy.botbox/v1/Widget widget"` {
+		t.Errorf("report.json says the timeline is of %s, want the CR it quotes.", got)
+	}
+	timeline, state := section(md, "Object versions"), section(md, "Managed objects at the verdict")
+	if !strings.Contains(timeline, "| widget | 219 |") || strings.Contains(timeline, "widget-0") {
+		t.Errorf("The timeline is\n%s\nwant the CR's versions alone.", timeline)
+	}
+	if !strings.Contains(state, "| widget-0 | 221 |") || strings.Contains(state, "| widget | 219 |") {
+		t.Errorf("The state is\n%s\nwant the managed objects alone.", state)
 	}
 }
 
@@ -289,12 +321,12 @@ func TestReportQuotesTheVersionTimelineWithoutTheObjects(t *testing.T) {
 func TestReportOmitsTheSectionsWithNothingToSay(t *testing.T) {
 	md, encoded := write(t, failingRun())
 
-	for _, absent := range []string{"## Requests", "## Object versions", "## Notes"} {
+	for _, absent := range []string{"## Requests", "## Object versions", "## Managed objects at the verdict", "## Notes"} {
 		if strings.Contains(md, absent) {
 			t.Errorf("The report holds an empty %q section:\n%s", absent, md)
 		}
 	}
-	for _, absent := range []string{"requests", "versions", "notes"} {
+	for _, absent := range []string{"requests", "versions", "managed", "managedTotal", "notes"} {
 		if strings.Contains(encoded, `"`+absent+`"`) {
 			t.Errorf("report.json holds an empty %q:\n%s", absent, encoded)
 		}
@@ -412,6 +444,35 @@ func sameJSON(t *testing.T, a, b string) bool {
 
 func ptr[T any](v T) *T { return &v }
 
+// The two tables are aligned on the instant the check judged, so the report
+// says it once, under the statement (#24).
+func TestReportStampsTheViolation(t *testing.T) {
+	failure := failingRun()
+	failure.Check.At = time.Date(2026, 9, 21, 5, 59, 8, 980624165, time.UTC)
+
+	md, encoded := write(t, failure)
+
+	want := failure.Check.Statement + "\n\nThe violation is at 2026-09-21T05:59:08.980624165Z.\n"
+	if !strings.Contains(md, want) {
+		t.Errorf("The report reads\n%s\nwant the statement followed by %q.", md, want)
+	}
+	if got := field(t, encoded, "check"); !strings.Contains(got, `"at": "2026-09-21T05:59:08.980624165Z"`) {
+		t.Errorf("report.json names the check as\n%s\nwant the instant it judged.", got)
+	}
+}
+
+// A violation that carries no instant is stamped with none.
+func TestReportStampsNoViolationThatCarriesNoInstant(t *testing.T) {
+	md, encoded := write(t, failingRun())
+
+	if strings.Contains(md, "The violation is at") {
+		t.Errorf("The report stamps a violation that carries none:\n%s", md)
+	}
+	if strings.Contains(encoded, `"at"`) {
+		t.Errorf("report.json holds an empty instant:\n%s", encoded)
+	}
+}
+
 // A run ends at its first violation, so the sequence a report carries can hold
 // ops that never ran. A reader who attributes the finding to all of them has
 // been told the wrong thing (DESIGN.md §5.7).
@@ -438,25 +499,116 @@ func TestReportSaysHowManyOpsTheRunApplied(t *testing.T) {
 	}
 }
 
-// A readiness verdict's count is a number in report.json (#13).
-func TestReportJSONCountsWhatTheTargetManaged(t *testing.T) {
-	failure := failingRun()
-	failure.Check.Managed = ptr(0)
+// A readiness verdict quotes the state as a table of its own, within a bound
+// of its own (#24).
+func TestReportQuotesTheStateAtTheVerdict(t *testing.T) {
+	for _, c := range []struct {
+		name        string
+		objects     int
+		total       int
+		wantLead    string
+		wantNoTable bool
+	}{
+		{name: "a state quoted whole", objects: 3, total: 3,
+			wantLead: "The target managed 3 objects of the kinds it declares; the violation quotes them all."},
+		{name: "a state the bound cut", objects: 20, total: 35,
+			wantLead: "The target managed 35 objects of the kinds it declares; the violation quotes 20 of them, the newest of each kind first."},
+		{name: "a target that managed nothing", objects: 0, total: 0, wantNoTable: true,
+			wantLead: "The target managed no objects of the kinds it declares."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			failure := failingRun()
+			for i := range c.objects {
+				failure.Managed = append(failure.Managed, observe.Version{
+					Key:             observe.Key{GVK: schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, Name: fmt.Sprintf("widget-%d", i)},
+					ResourceVersion: fmt.Sprint(100 + i),
+				})
+			}
+			failure.ManagedTotal = ptr(c.total)
 
-	_, encoded := write(t, failure)
+			md, encoded := write(t, failure)
 
-	if got := field(t, encoded, "check"); !strings.Contains(got, `"managed": 0`) {
-		t.Errorf("report.json names the check as\n%s\nwant it to count what the target managed.", got)
+			body := section(md, "Managed objects at the verdict")
+			if !strings.Contains(body, c.wantLead) {
+				t.Errorf("The state section does not say %q:\n%s", c.wantLead, body)
+			}
+			// A target that managed nothing leaves nothing to look up.
+			if named := strings.Contains(body, "objects.jsonl"); named == (c.total == 0) {
+				t.Errorf("The state section is\n%s\nand the target managed %d objects.", body, c.total)
+			}
+			if held := strings.Contains(body, "| time | kind |"); held == c.wantNoTable {
+				t.Errorf("The state section is\n%s\nand the target managed %d objects.", body, c.total)
+			}
+			if rows := strings.Count(body, "| v1/ConfigMap |"); rows != c.objects {
+				t.Errorf("The state section holds %d rows, want %d:\n%s", rows, c.objects, body)
+			}
+			if total := field(t, encoded, "managedTotal"); total != fmt.Sprint(c.total) {
+				t.Errorf("report.json says the target managed %s objects, want %d.", total, c.total)
+			}
+		})
 	}
 }
 
-// A check that counted nothing leaves the count out, so that a reader can tell
-// a zero from a check that never asked.
-func TestReportJSONOmitsTheCountNoCheckMade(t *testing.T) {
-	_, encoded := write(t, failingRun())
+// A state a caller bounded and did not count is still quoted, and both files
+// say how many objects it holds (#24).
+func TestReportCountsAStateItWasHandedWithoutATotal(t *testing.T) {
+	failure := failingRun()
+	failure.Managed = []observe.Version{{
+		Key: observe.Key{GVK: schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, Name: "widget-0"},
+	}}
 
-	if got := field(t, encoded, "check"); strings.Contains(got, "managed") {
-		t.Errorf("report.json names the check as\n%s\nwant no count: G3 made none.", got)
+	md, encoded := write(t, failure)
+
+	if want := "The target managed 1 object of the kinds it declares"; !strings.Contains(md, want) {
+		t.Errorf("The report does not say %q:\n%s", want, md)
+	}
+	if total := field(t, encoded, "managedTotal"); total != "1" {
+		t.Errorf("report.json says the target managed %s objects, want the 1 it quotes.", total)
+	}
+}
+
+// A check that never asked what the target managed quotes no state, and a
+// reader can tell that from a target that managed nothing (#24).
+func TestReportQuotesNoStateWhereNoCheckAsked(t *testing.T) {
+	md, encoded := write(t, failingRun())
+
+	if strings.Contains(md, "## Managed objects at the verdict") {
+		t.Errorf("The report holds a state section G3 never filled:\n%s", md)
+	}
+	if strings.Contains(encoded, "managedTotal") {
+		t.Errorf("report.json counts objects no check counted:\n%s", encoded)
+	}
+}
+
+// The state is bounded and its rows leave their bodies to objects.jsonl, as
+// the timeline does. A report never counts fewer objects than it quotes (#24).
+func TestReportBoundsTheStateItWasHanded(t *testing.T) {
+	failure := failingRun()
+	for i := range 25 {
+		failure.Managed = append(failure.Managed, observe.Version{
+			Key:    observe.Key{GVK: schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, Name: fmt.Sprintf("widget-%d", i)},
+			Object: object(fmt.Sprintf("widget-%d", i)),
+		})
+	}
+	failure.ManagedTotal = ptr(3)
+
+	_, encoded := write(t, failure)
+
+	var held []json.RawMessage
+	if err := json.Unmarshal([]byte(field(t, encoded, "managed")), &held); err != nil {
+		t.Fatalf("report.json's managed objects do not parse: %v", err)
+	}
+	if len(held) != 20 {
+		t.Errorf("report.json holds %d managed objects, want the bound of 20.", len(held))
+	}
+	if first := string(held[0]); !strings.Contains(first, `"widget-0"`) {
+		t.Errorf("report.json opens the state at %s, want the object the check put first.", first)
+	}
+	if total := field(t, encoded, "managedTotal"); total != "25" {
+		t.Errorf("report.json says the target managed %s objects, want the 25 it was handed.", total)
+	}
+	if strings.Contains(encoded, "botbox-the-whole-object") {
+		t.Errorf("report.json embeds the object bodies:\n%s", encoded)
 	}
 }
 
@@ -472,6 +624,7 @@ func TestReportSaysWhatTheChecksOwnBoundLeftOut(t *testing.T) {
 		})
 	}
 	failure.RequestsTotal, failure.VersionsTotal = 133, 41
+	failure.VersionsOf = "toy.botbox/v1/Widget widget"
 
 	md, encoded := write(t, failure)
 
@@ -480,7 +633,11 @@ func TestReportSaysWhatTheChecksOwnBoundLeftOut(t *testing.T) {
 		chose        int
 	}{{"Requests", "requests", 133}, {"Object versions", "versions", 41}} {
 		body := section(md, excerpt.heading)
-		if want := fmt.Sprintf("The violation chose from %d %s and quotes 20 of them.", excerpt.chose, excerpt.key); !strings.Contains(body, want) {
+		subject := ""
+		if excerpt.key == "versions" {
+			subject = " of `toy.botbox/v1/Widget widget`"
+		}
+		if want := fmt.Sprintf("The violation quotes the last 20 of %d %s%s.", excerpt.chose, excerpt.key, subject); !strings.Contains(body, want) {
 			t.Errorf("The report does not say %q:\n%s", want, body)
 		}
 		if total := field(t, encoded, excerpt.key+"Total"); total != fmt.Sprint(excerpt.chose) {

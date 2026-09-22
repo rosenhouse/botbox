@@ -31,13 +31,12 @@ func Convergence(in Input) (Result, error) {
 		if ready && err == nil {
 			continue
 		}
-		managed := seen.managed(in)
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the CR %s was not ready %s after %s%s",
 				cr.Name, in.timeouts().Settle, from.what, quoted(err)),
-			At:      deadline,
-			Managed: counted(managed),
-		}.quotingVersions(Readiness(upTo(in.History.History(cr.Key), deadline), managed)))
+			At: deadline,
+		}.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), deadline))).
+			quotingManaged(Sample(seen.managed(in))))
 	}
 	out.reportExpiredWaits(in)
 	return out, nil
@@ -80,17 +79,19 @@ func (out *Result) reportExpiredWaits(in Input) {
 		if checkpoint.Settle != Expired {
 			continue
 		}
-		started := in.waitStart(checkpoint)
-		if in.faulted(started, checkpoint.Time) {
+		if in.faulted(in.waitStart(checkpoint), checkpoint.Time) {
 			continue
 		}
-		managed := in.stateAt(checkpoint.Time).managed(in)
-		out.violate(Violation{
+		seen := in.stateAt(checkpoint.Time)
+		violation := Violation{
 			Statement: fmt.Sprintf("the settle wait after %s expired with no fault active",
 				in.describeOp(checkpoint.Op)),
-			At:      checkpoint.Time,
-			Managed: counted(managed),
-		}.quotingVersions(Readiness(in.versionsIn(started, checkpoint.Time), managed)))
+			At: checkpoint.Time,
+		}.quotingManaged(Sample(seen.managed(in)))
+		if cr, found := seen.cr(in.Target.Primary); found {
+			violation = violation.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), checkpoint.Time)))
+		}
+		out.violate(violation)
 	}
 }
 
@@ -114,13 +115,6 @@ func (in Input) describeOp(index int) string {
 // the run looked like at that instant cannot quote.
 func upTo(versions []observe.Version, t time.Time) []observe.Version {
 	return slices.DeleteFunc(slices.Clone(versions), func(v observe.Version) bool { return v.Time.After(t) })
-}
-
-// counted is the count a violation carries, which is never nil where a check
-// asked: a run in which the target managed nothing is the finding.
-func counted(managed []observe.Version) *int {
-	n := len(managed)
-	return &n
 }
 
 func describe(op Op) string { return fmt.Sprintf("op %d (%s)", op.Index, op.Type) }

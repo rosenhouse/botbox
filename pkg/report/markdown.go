@@ -18,6 +18,9 @@ func (d document) markdown() []byte {
 	var md strings.Builder
 	fmt.Fprintf(&md, "# %s failed on %s\n", d.Check.ID, d.Target.describe())
 	fmt.Fprintf(&md, "\n%s\n", d.Check.Statement)
+	if !d.Check.At.IsZero() {
+		fmt.Fprintf(&md, "\nThe violation is at %s.\n", stamp(d.Check.At))
+	}
 	if d.Check.Evidence != "" {
 		fmt.Fprintf(&md, "\n%s\n", d.Check.Evidence)
 	}
@@ -32,28 +35,56 @@ func (d document) markdown() []byte {
 	fmt.Fprintf(&md, "\n## Sequence\n\n```json\n%s\n```\n", strings.TrimRight(string(d.Sequence), "\n"))
 	if len(d.Requests) > 0 {
 		md.WriteString("\n## Requests\n\n")
-		md.WriteString(quotedLine(d.RequestsTotal, len(d.Requests), "request", "requests.jsonl", "every request the run made"))
+		md.WriteString(quotedLine(d.RequestsTotal, len(d.Requests), "request", "", "requests.jsonl", "every request the run made"))
 		table(&md, []string{"start", "verb", "path", "status", "fault"}, requestRows(d.Requests))
 	}
 	if len(d.Versions) > 0 {
 		md.WriteString("\n## Object versions\n\n")
-		md.WriteString(quotedLine(d.VersionsTotal, len(d.Versions), "version", "objects.jsonl", "every version the Observer saw"))
-		table(&md, []string{"time", "kind", "name", "resourceVersion", "generation", "observed", "finalizers", "deleted"},
-			versionRows(d.Versions))
+		md.WriteString(quotedLine(d.VersionsTotal, len(d.Versions), "version", d.VersionsOf, "objects.jsonl", "every version the Observer saw"))
+		table(&md, versionHeader, versionRows(d.Versions))
+	}
+	if d.ManagedTotal != nil {
+		md.WriteString("\n## Managed objects at the verdict\n\n")
+		md.WriteString(managedLine(*d.ManagedTotal, len(d.Managed)))
+		if len(d.Managed) > 0 {
+			table(&md, versionHeader, versionRows(d.Managed))
+		}
 	}
 	return []byte(md.String())
 }
 
-// quotedLine says what the violation quoted and what its own bound left out. A
-// check bounds its evidence before the report sees it, so the total is what it
-// chose from (D35). Which entries it kept is the check's own rule, and not
-// always the nearest, so the line does not claim one (D39).
-func quotedLine(total, shown int, noun, recording, holds string) string {
+// versionHeader names the columns both version tables carry.
+var versionHeader = []string{"time", "kind", "name", "resourceVersion", "generation", "observed", "finalizers", "deleted"}
+
+// quotedLine says what the violation quoted of a timeline and what the bound
+// left out. A check bounds its evidence before the report sees it, at the
+// latest entries of what it chose from (D35). A timeline of one object's
+// history names it; evidence drawn from several names none.
+func quotedLine(total, shown int, noun, of, recording, holds string) string {
+	subject := ""
+	if of != "" {
+		subject = fmt.Sprintf(" of `%s`", of)
+	}
 	held := fmt.Sprintf(" `%s` holds %s.\n\n", recording, holds)
 	if shown < total {
-		return fmt.Sprintf("The violation chose from %s and quotes %d of them.", count(total, noun), shown) + held
+		return fmt.Sprintf("The violation quotes the last %d of %s%s.", shown, count(total, noun), subject) + held
 	}
-	return fmt.Sprintf("The violation quotes %s.", count(shown, noun)) + held
+	return fmt.Sprintf("The violation quotes %s%s.", count(shown, noun), subject) + held
+}
+
+// managedLine says what the target held at the verdict and how much of it the
+// table quotes. The state has a bound of its own, so it does not crowd out the
+// timeline beside it (D39).
+func managedLine(total, shown int) string {
+	if total == 0 {
+		return "The target managed no objects of the kinds it declares.\n\n"
+	}
+	held := " `objects.jsonl` holds every version the Observer saw.\n\n"
+	managed := "The target managed " + count(total, "object") + " of the kinds it declares; "
+	if shown < total {
+		return managed + fmt.Sprintf("the violation quotes %d of them, the newest of each kind first.", shown) + held
+	}
+	return managed + "the violation quotes them all." + held
 }
 
 // count writes a number of things, in the singular where there is one.

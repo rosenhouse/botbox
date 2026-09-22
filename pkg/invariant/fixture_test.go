@@ -434,12 +434,32 @@ func statements(result invariant.Result) []string {
 }
 
 // managed renders a violation's count of managed objects for a message, and
-// "no" where the check counted none.
+// "no" where no check asked.
 func managed(v invariant.Violation) string {
-	if v.Managed == nil {
+	if v.ManagedTotal == nil {
 		return "no"
 	}
-	return strconv.Itoa(*v.Managed)
+	return strconv.Itoa(*v.ManagedTotal)
+}
+
+// timelineOf is the object a violation's timeline quotes, as the report
+// names it.
+func timelineOf(gvk schema.GroupVersionKind, name string) string { return kindOf(gvk) + " " + name }
+
+// state names the managed objects a violation quotes, for a message.
+func state(v invariant.Violation) []string { return names(v.Managed) }
+
+// version is one recorded version of an object, for a message or a sample.
+func version(gvk schema.GroupVersionKind, name string, when time.Duration) observe.Version {
+	return observe.Version{Key: observe.Key{GVK: gvk, Name: name}, Time: at(when)}
+}
+
+func names(versions []observe.Version) []string {
+	out := make([]string, len(versions))
+	for i, v := range versions {
+		out[i] = v.Name
+	}
+	return out
 }
 
 // quoted names the versions a violation carries, for a message.
@@ -451,9 +471,9 @@ func quoted(v invariant.Violation) []string {
 	return names
 }
 
-func versionsOf(v invariant.Violation, gvk schema.GroupVersionKind) []observe.Version {
+func versionsOf(versions []observe.Version, gvk schema.GroupVersionKind) []observe.Version {
 	var found []observe.Version
-	for _, version := range v.Versions {
+	for _, version := range versions {
 		if version.GVK == gvk {
 			found = append(found, version)
 		}
@@ -461,4 +481,9 @@ func versionsOf(v invariant.Violation, gvk schema.GroupVersionKind) []observe.Ve
 	return found
 }
 
-func kindOf(gvk schema.GroupVersionKind) string { return gvk.Version + "/" + gvk.Kind }
+func kindOf(gvk schema.GroupVersionKind) string {
+	if gvk.Group == "" {
+		return gvk.Version + "/" + gvk.Kind
+	}
+	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
+}

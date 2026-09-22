@@ -404,10 +404,20 @@ func TestTheChecksQuoteWhatTheRunDid(t *testing.T) {
 	if !strings.Contains(first.Evidence, "toy.botbox/v1/Widget widget") {
 		t.Errorf("G4's evidence is %q, want the object version it read.", first.Evidence)
 	}
+	// The instant is a field of its own, which the report renders once (#24).
+	if !first.At.Equal(at(5)) {
+		t.Errorf("G4 is stamped %v, want the checkpoint it judged at.", first.At)
+	}
+	if strings.Contains(first.Evidence, "at 2") {
+		t.Errorf("G4's evidence repeats the instant: %q", first.Evidence)
+	}
 	// A report quotes the versions themselves, not only this summary of them
 	// (DESIGN.md §5.7).
 	if len(first.Versions) == 0 {
 		t.Errorf("G4 carried out no versions, and its evidence quotes one.")
+	}
+	if want := "toy.botbox/v1/Widget widget"; first.VersionsOf != want {
+		t.Errorf("G4 says its timeline is of %q, want %q.", first.VersionsOf, want)
 	}
 }
 
@@ -463,6 +473,8 @@ func TestTheChecksSayHowManyObjectsTheTargetManaged(t *testing.T) {
 	}{
 		{0, "the target managed 0 objects of the kinds it declares"},
 		{1, "the target managed 1 object of the kinds it declares"},
+		// The state is bounded, and the count is what it was chosen from.
+		{25, "the target managed 25 objects of the kinds it declares"},
 	} {
 		t.Run(c.want, func(t *testing.T) {
 			store := history()
@@ -491,8 +503,11 @@ func TestTheChecksSayHowManyObjectsTheTargetManaged(t *testing.T) {
 			if got := strings.Count(first.Evidence, "the target managed"); got != 1 {
 				t.Errorf("G4's evidence says what the target managed %d times: %q", got, first.Evidence)
 			}
-			if first.Managed == nil || *first.Managed != c.children {
+			if first.ManagedTotal == nil || *first.ManagedTotal != c.children {
 				t.Errorf("G4 carried out no count of %d, and its evidence quotes one.", c.children)
+			}
+			if want := min(c.children, invariant.MaxEvidence); len(first.Managed) != want {
+				t.Errorf("G4 carried out %d managed objects, want %d.", len(first.Managed), want)
 			}
 		})
 	}

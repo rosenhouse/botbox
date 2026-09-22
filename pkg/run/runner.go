@@ -69,6 +69,9 @@ type Violation struct {
 	ID string
 	// Statement is what the check requires and the run broke.
 	Statement string
+	// At is the instant the check judged, which aligns the evidence below
+	// (DESIGN.md §5.7).
+	At time.Time
 	// Evidence quotes what the run did, in one line.
 	Evidence string
 	// Requests and Versions are the evidence the violation named, which a
@@ -76,11 +79,15 @@ type Violation struct {
 	Requests []proxy.Request
 	Versions []observe.Version
 	// RequestsTotal and VersionsTotal are what the check chose each excerpt
-	// from (pkg/invariant).
+	// from, and VersionsOf names the object the timeline is the history of
+	// (pkg/invariant).
 	RequestsTotal, VersionsTotal int
-	// Managed is how many objects the target managed at the violation
-	// (DESIGN.md §5.7).
-	Managed *int
+	VersionsOf                   string
+	// Managed is the state at the violation, one version per object the target
+	// managed, and ManagedTotal how many there were. A check that did not ask
+	// leaves the total nil (DESIGN.md §5.7, D39).
+	Managed      []observe.Version
+	ManagedTotal *int
 }
 
 // quotingRequests carries an excerpt of the request log into the violation
@@ -92,7 +99,14 @@ func (v Violation) quotingRequests(e invariant.Excerpt[proxy.Request]) Violation
 
 // quotingVersions does the same for a timeline of object versions.
 func (v Violation) quotingVersions(e invariant.Excerpt[observe.Version]) Violation {
-	v.Versions, v.VersionsTotal = e.Quoted, e.Total
+	v.Versions, v.VersionsTotal, v.VersionsOf = e.Quoted, e.Total, e.Of
+	return v
+}
+
+// quotingManaged does the same for the state at the verdict, whose total the
+// check always knows: it asked.
+func (v Violation) quotingManaged(e invariant.Excerpt[observe.Version]) Violation {
+	v.Managed, v.ManagedTotal = e.Quoted, &e.Total
 	return v
 }
 
@@ -435,18 +449,19 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		}
 		if !r.faultActive() {
 			// One read of the managed objects answers both, so that the count
-			// cannot disagree with the versions quoted beside it.
+			// cannot disagree with the state quoted beside it.
 			managed := r.h.objects().Managed()
-			count := len(managed)
+			cr := observe.Key{GVK: r.target.Primary, Namespace: r.timeline.Namespace, Name: r.cr}
 			r.violate(Violation{
 				ID: "G4",
 				Statement: fmt.Sprintf("the settle wait after op %d (%s) expired with no fault active",
 					op.Index, op.Type),
+				At: wait.Window.End,
 				Evidence: fmt.Sprintf("in %v of T_settle the target never held its Ready predicate with %v of quiet behind it; %s",
-					r.target.Timeouts.Settle, r.target.Timeouts.Stable, managedClause(count)),
-				Managed: &count,
+					r.target.Timeouts.Settle, r.target.Timeouts.Stable, managedClause(len(managed))),
 			}.quotingRequests(invariant.Recent(r.h.requests())).
-				quotingVersions(invariant.Readiness(r.h.objects().HistoryOf(r.target.Primary, r.cr), managed)))
+				quotingVersions(invariant.RecentHistory(cr, r.h.objects().History(cr))).
+				quotingManaged(invariant.Sample(managed)))
 		}
 	}
 	return r.checkpoint(op.Index, converged)

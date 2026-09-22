@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"time"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -55,17 +56,25 @@ type Report struct {
 	Requests                     []proxy.Request
 	Versions                     []observe.Version
 	RequestsTotal, VersionsTotal int
+	// VersionsOf names the object the timeline is the history of, and is
+	// empty where the versions are of several.
+	VersionsOf string
+	// Managed is the state at the violation, one version per object the target
+	// managed, and ManagedTotal how many there were. A check that did not ask
+	// leaves the total nil, because a count of zero is a finding
+	// (DESIGN.md §5.7, D39).
+	Managed      []observe.Version
+	ManagedTotal *int
 }
 
 // Check is the invariant or property the run broke (DESIGN.md §6).
 type Check struct {
 	ID        string `json:"id"`
 	Statement string `json:"statement"`
-	Evidence  string `json:"evidence,omitempty"`
-	// Managed is how many objects the target managed at the violation
-	// (DESIGN.md §5.7). A violation that did not count them leaves it nil,
-	// because a count of zero is a finding.
-	Managed *int `json:"managed,omitempty"`
+	// At is the instant the check judged, which the evidence below is aligned
+	// on (DESIGN.md §5.7).
+	At       time.Time `json:"at,omitzero"`
+	Evidence string    `json:"evidence,omitempty"`
 }
 
 // Target is the controller the run exercised (DESIGN.md §8.1).
@@ -112,6 +121,9 @@ type document struct {
 	RequestsTotal int               `json:"requestsTotal,omitempty"`
 	Versions      []observe.Version `json:"versions,omitempty"`
 	VersionsTotal int               `json:"versionsTotal,omitempty"`
+	VersionsOf    string            `json:"versionsOf,omitempty"`
+	Managed       []observe.Version `json:"managed,omitempty"`
+	ManagedTotal  *int              `json:"managedTotal,omitempty"`
 }
 
 func (r Report) document() document {
@@ -129,26 +141,53 @@ func (r Report) document() document {
 		RequestsTotal: max(r.RequestsTotal, len(r.Requests)),
 		Versions:      timeline(r.Versions),
 		VersionsTotal: max(r.VersionsTotal, len(r.Versions)),
+		VersionsOf:    r.VersionsOf,
+		Managed:       state(r.Managed),
+		ManagedTotal:  managedTotal(r.ManagedTotal, len(r.Managed)),
 	}
 }
 
 // timeline quotes when each version appeared and what it carried, and drops
 // the object bodies that objects.jsonl holds in full.
-func timeline(versions []observe.Version) []observe.Version {
-	excerpt := slices.Clone(recent(versions))
-	for i := range excerpt {
-		excerpt[i].Object = nil
+func timeline(versions []observe.Version) []observe.Version { return quoting(recent(versions)) }
+
+// state quotes what the target managed at the violation. The check ordered it
+// by what a reader needs first, so the bound keeps the entries it opens with.
+func state(versions []observe.Version) []observe.Version {
+	if len(versions) > maxEvidence {
+		versions = versions[:maxEvidence]
 	}
-	return excerpt
+	return quoting(versions)
 }
 
-// recent keeps the maxEvidence entries nearest the violation, which are the
-// last. Those are the ones the report says it quotes.
+func quoting(versions []observe.Version) []observe.Version {
+	quoted := slices.Clone(versions)
+	for i := range quoted {
+		quoted[i].Object = nil
+	}
+	return quoted
+}
+
+// recent keeps the maxEvidence last entries, which are the ones the report
+// says it quotes.
 func recent[T any](evidence []T) []T {
 	if len(evidence) > maxEvidence {
 		return evidence[len(evidence)-maxEvidence:]
 	}
 	return evidence
+}
+
+// managedTotal is what the state was chosen from, and nil only where no check
+// asked: a report that quotes a state counts it, whatever the caller named.
+func managedTotal(total *int, rows int) *int {
+	if total == nil && rows == 0 {
+		return nil
+	}
+	held := rows
+	if total != nil {
+		held = max(*total, rows)
+	}
+	return &held
 }
 
 // marshal renders report.json: two spaces of indentation and a trailing

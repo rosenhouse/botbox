@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 
@@ -13,6 +14,9 @@ import (
 // unreachable points at nothing, so these tests fail unless Start validates
 // before it touches the API server.
 func unreachable() *rest.Config { return &rest.Config{Host: "http://127.0.0.1:1"} }
+
+// knowsNothing resolves no kind at all.
+func knowsNothing() meta.RESTMapper { return meta.NewDefaultRESTMapper(nil) }
 
 func requireStartRejects(t *testing.T, opts observe.Options, reason string) {
 	t.Helper()
@@ -30,9 +34,29 @@ func requireStartRejects(t *testing.T, opts observe.Options, reason string) {
 }
 
 func TestStartRejectsOptionsWithoutANamespace(t *testing.T) {
-	requireStartRejects(t, observe.Options{Manages: []schema.GroupVersionKind{configMapGVK}}, "namespace")
+	requireStartRejects(t, observe.Options{
+		Kinds:  []schema.GroupVersionKind{configMapGVK},
+		Mapper: knowsNothing(),
+	}, "namespace")
 }
 
 func TestStartRejectsOptionsWithNoKindToWatch(t *testing.T) {
-	requireStartRejects(t, observe.Options{Namespace: namespace}, "kind")
+	requireStartRejects(t, observe.Options{Namespace: namespace, Mapper: knowsNothing()}, "kind")
+}
+
+func TestStartRejectsOptionsWithoutARESTMapper(t *testing.T) {
+	requireStartRejects(t, observe.Options{
+		Namespace: namespace,
+		Kinds:     []schema.GroupVersionKind{configMapGVK},
+	}, "RESTMapper")
+}
+
+// The Observer resolves what it watches through the mapper the run built, and
+// never discovers for itself.
+func TestStartResolvesTheWatchedKindsThroughTheGivenMapper(t *testing.T) {
+	requireStartRejects(t, observe.Options{
+		Namespace: namespace,
+		Kinds:     []schema.GroupVersionKind{configMapGVK},
+		Mapper:    knowsNothing(),
+	}, "resolving the resource of")
 }

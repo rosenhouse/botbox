@@ -5,13 +5,17 @@ package cluster_test
 import (
 	"os"
 	"path/filepath"
-	"slices"
 	"testing"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
+)
+
+var (
+	thingKind     = schema.GroupVersionKind{Group: "test.botbox", Version: "v1", Kind: "Thing"}
+	thingResource = schema.GroupVersionResource{Group: "test.botbox", Version: "v1", Resource: "things"}
 )
 
 const thingCRD = `apiVersion: apiextensions.k8s.io/v1
@@ -61,11 +65,16 @@ func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
 		t.Error("The server reported an empty GitVersion.")
 	}
 
-	groups, err := dc.ServerGroups()
+	// A mapper built after Start knows the kinds the CRDs installed.
+	mapper, err := cluster.NewRESTMapper(c.Config())
 	if err != nil {
-		t.Fatalf("Listing API groups failed: %v", err)
+		t.Fatalf("Building the RESTMapper failed: %v", err)
 	}
-	if !slices.ContainsFunc(groups.Groups, func(g metav1.APIGroup) bool { return g.Name == "test.botbox" }) {
-		t.Error("The CRD group test.botbox was not installed.")
+	mapping, err := mapper.RESTMapping(thingKind.GroupKind(), thingKind.Version)
+	if err != nil {
+		t.Fatalf("The mapper does not resolve the installed %s: %v", thingKind.Kind, err)
+	}
+	if mapping.Resource != thingResource {
+		t.Errorf("The mapper resolves %s to %v, want %v.", thingKind.Kind, mapping.Resource, thingResource)
 	}
 }

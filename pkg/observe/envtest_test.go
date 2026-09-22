@@ -10,10 +10,12 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -54,6 +56,15 @@ func startCluster(t *testing.T) (*cluster.Cluster, *kubernetes.Clientset) {
 		t.Fatalf("Building a client failed: %v", err)
 	}
 	return c, client
+}
+
+func restMapper(t *testing.T, config *rest.Config) meta.RESTMapper {
+	t.Helper()
+	mapper, err := cluster.NewRESTMapper(config)
+	if err != nil {
+		t.Fatalf("Building the RESTMapper failed: %v", err)
+	}
+	return mapper
 }
 
 func createNamespace(t *testing.T, ctx context.Context, client *kubernetes.Clientset) string {
@@ -112,7 +123,9 @@ func TestObserverRecordsTheRunNamespace(t *testing.T) {
 
 	obs, err := observe.Start(c.Config(), observe.Options{
 		Namespace: ns,
+		Kinds:     []schema.GroupVersionKind{configMapGVK},
 		Manages:   []schema.GroupVersionKind{configMapGVK},
+		Mapper:    restMapper(t, c.Config()),
 	})
 	if err != nil {
 		t.Fatalf("Starting the observer failed: %v", err)
@@ -164,7 +177,8 @@ func TestObserverRecordsTheRunNamespace(t *testing.T) {
 		// never sync.
 		_, err := observe.Start(c.Config(), observe.Options{
 			Namespace: ns,
-			Manages:   []schema.GroupVersionKind{{Version: "v1", Kind: "Namespace"}},
+			Kinds:     []schema.GroupVersionKind{{Version: "v1", Kind: "Namespace"}},
+			Mapper:    restMapper(t, c.Config()),
 		})
 		if err == nil {
 			t.Fatal("Start accepted a cluster-scoped kind.")

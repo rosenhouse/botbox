@@ -2,10 +2,12 @@ package run
 
 import (
 	"errors"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -16,9 +18,23 @@ import (
 )
 
 var (
-	widgetKind    = schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
-	configMapKind = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
+	widgetKind        = schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
+	configMapKind     = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
+	widgetResource    = schema.GroupVersionResource{Group: "toy.botbox", Version: "v1", Resource: "widgets"}
+	configMapResource = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
 )
+
+// unreachable points at nothing, so a test that reaches it fails rather than
+// discovering the resources for itself.
+func unreachable() *rest.Config { return &rest.Config{Host: "http://127.0.0.1:1"} }
+
+func mapperFor(kinds ...schema.GroupVersionKind) meta.RESTMapper {
+	mapper := meta.NewDefaultRESTMapper(nil)
+	for _, gvk := range kinds {
+		mapper.Add(gvk, meta.RESTScopeNamespace)
+	}
+	return mapper
+}
 
 func TestValidateOptions(t *testing.T) {
 	toy := &target.Target{Name: "toy-widget", Primary: widgetKind}
@@ -74,14 +90,81 @@ func TestNewNamespaceNameIsFreshAndServable(t *testing.T) {
 	}
 }
 
-func TestWatchedKindsHoldThePrimaryOnce(t *testing.T) {
-	watched := watchedKinds(&target.Target{
-		Primary: widgetKind,
-		Manages: []schema.GroupVersionKind{configMapKind, widgetKind},
-	})
+// The Observer watches what the Runner and the collector act on.
+func TestTheObserverWatchesTheTargetsKinds(t *testing.T) {
+	h := &Harness{
+		Namespace: "botbox-run-1",
+		mapper:    mapperFor(),
+		target:    &target.Target{Primary: widgetKind, Manages: []schema.GroupVersionKind{configMapKind}},
+	}
 
-	if want := []schema.GroupVersionKind{widgetKind, configMapKind}; !slices.Equal(watched, want) {
-		t.Errorf("The harness watches %v, want %v.", watched, want)
+	opts := h.observeOptions()
+
+	if want := []schema.GroupVersionKind{widgetKind, configMapKind}; !slices.Equal(opts.Kinds, want) {
+		t.Errorf("The Observer watches %v, want %v.", opts.Kinds, want)
+	}
+}
+
+// Start builds the run's one mapper, so a discovery that fails ends the run.
+func TestStartReportsADiscoveryThatFailed(t *testing.T) {
+	toy := &target.Target{Name: "toy-widget", Primary: widgetKind}
+
+	h, err := Start(t.Context(), toy, Options{Dir: t.TempDir(), Config: unreachable()})
+
+	if err == nil {
+		t.Fatal("Start discovered the API resources of a server that is not listening.")
+	}
+	if h != nil {
+		t.Error("Start returned a Harness together with an error.")
+	}
+	if !strings.Contains(err.Error(), "discovering") {
+		t.Errorf("Start returned %q, which does not say that discovery failed.", err)
+	}
+}
+
+// The Runner resolves the kinds it acts on through the run's one mapper, and
+// never discovers for itself.
+func TestNewLiveRunResolvesThroughTheHarnessMapper(t *testing.T) {
+	h := &Harness{
+		Namespace: "botbox-run-1",
+		Config:    unreachable(),
+		mapper:    mapperFor(widgetKind, configMapKind),
+	}
+	toy := &target.Target{Primary: widgetKind, Manages: []schema.GroupVersionKind{configMapKind}}
+
+	live, err := newLiveRun(h, toy)
+
+	if err != nil {
+		t.Fatalf("newLiveRun returned an error: %v", err)
+	}
+	want := map[schema.GroupVersionKind]schema.GroupVersionResource{
+		widgetKind:    widgetResource,
+		configMapKind: configMapResource,
+	}
+	if !maps.Equal(live.resources, want) {
+		t.Errorf("The Runner resolved %v, want %v.", live.resources, want)
+	}
+}
+
+// The fixtures resolve through the same mapper.
+func TestApplyFixturesResolvesThroughTheHarnessMapper(t *testing.T) {
+	fixture := &unstructured.Unstructured{}
+	fixture.SetGroupVersionKind(configMapKind)
+	fixture.SetName("fixture")
+	h := &Harness{
+		Namespace: "botbox-run-1",
+		Config:    unreachable(),
+		mapper:    mapperFor(widgetKind),
+		target:    &target.Target{Primary: widgetKind, Fixtures: []*unstructured.Unstructured{fixture}},
+	}
+
+	err := h.applyFixtures(t.Context())
+
+	if err == nil {
+		t.Fatal("applyFixtures applied a fixture whose kind the mapper cannot resolve.")
+	}
+	if !strings.Contains(err.Error(), "resolving the fixture") {
+		t.Errorf("applyFixtures returned %q, which does not say it could not resolve the fixture.", err)
 	}
 }
 

@@ -43,13 +43,9 @@ func newLiveRun(h *Harness, t *target.Target) (*liveRun, error) {
 	if err != nil {
 		return nil, fmt.Errorf("building botbox's dynamic client: %w", err)
 	}
-	mapper, err := restMapper(h.Config)
-	if err != nil {
-		return nil, err
-	}
 	resources := map[schema.GroupVersionKind]schema.GroupVersionResource{}
-	for _, gvk := range watchedKinds(t) {
-		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	for _, gvk := range t.WatchedKinds() {
+		mapping, err := h.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
 			return nil, fmt.Errorf("resolving the resource of %s: %w", kindName(gvk), err)
 		}
@@ -184,7 +180,7 @@ func (l *liveRun) awaitClean(ctx context.Context, within time.Duration) (bool, e
 func (l *liveRun) forceFinalizers(ctx context.Context) ([]string, error) {
 	var forced []string
 	var failures []error
-	for _, gvk := range watchedKinds(l.target) {
+	for _, gvk := range l.target.WatchedKinds() {
 		list, err := l.of(gvk).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			failures = append(failures, fmt.Errorf("listing the %s left behind: %w", kindName(gvk), err))
@@ -210,7 +206,7 @@ func (l *liveRun) forceFinalizers(ctx context.Context) ([]string, error) {
 // empty deletes what the run left in the namespace (DESIGN.md §5.5).
 func (l *liveRun) empty(ctx context.Context) error {
 	var failures []error
-	for _, gvk := range watchedKinds(l.target) {
+	for _, gvk := range l.target.WatchedKinds() {
 		err := l.of(gvk).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
 			failures = append(failures, fmt.Errorf("deleting the %s left behind: %w", kindName(gvk), err))

@@ -4,6 +4,7 @@
 package target
 
 import (
+	"slices"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -93,4 +94,17 @@ type Target struct {
 	Launch      LaunchSpec
 	Timeouts    Timeouts
 	Thresholds  Thresholds
+}
+
+// WatchedKinds are the kinds botbox watches: the primary CR and every managed
+// kind. The collector resolves an owner only among them (DESIGN.md §5.8), and
+// managed objects are commonly owned by the CR.
+func (t *Target) WatchedKinds() []schema.GroupVersionKind {
+	kinds := []schema.GroupVersionKind{t.Primary}
+	for _, gvk := range t.Manages {
+		if !slices.Contains(kinds, gvk) {
+			kinds = append(kinds, gvk)
+		}
+	}
+	return kinds
 }

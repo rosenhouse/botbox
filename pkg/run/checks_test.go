@@ -45,7 +45,6 @@ func checkTarget() *target.Target {
 func history() *observe.Store {
 	store := observe.NewStore(observe.Options{
 		Namespace: fakeNamespace,
-		Primary:   widgetKind,
 		Manages:   []schema.GroupVersionKind{configMapKind},
 	})
 	store.MarkBotboxCreated(widgetKind, "widget") // botbox creates the CR, so it is never managed.

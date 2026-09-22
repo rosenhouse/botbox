@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"sync"
 	"time"
 
@@ -12,11 +11,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -28,32 +25,30 @@ const noResync = 0
 type Options struct {
 	// Namespace is the run namespace. The Observer watches nothing else.
 	Namespace string
-	// Primary is the target's primary CR kind.
-	Primary schema.GroupVersionKind
+	// Kinds are what the Observer watches. They include Manages, or what the
+	// target manages goes unseen.
+	Kinds []schema.GroupVersionKind
 	// Manages are the kinds the target declares it manages (DESIGN.md §8.1).
+	// The Observer attributes only those to the target.
 	Manages []schema.GroupVersionKind
+	// Mapper resolves each watched kind to the resource its informer lists.
+	Mapper meta.RESTMapper
 	// Selector optionally refines attribution to the objects it matches (§6).
 	Selector labels.Selector
 }
 
-// kinds returns what to watch: the primary CR and every managed kind.
-func (o Options) kinds() ([]schema.GroupVersionKind, error) {
+// validate reports why the options cannot start an Observer.
+func (o Options) validate() error {
 	if o.Namespace == "" {
-		return nil, errors.New("the run namespace is empty")
+		return errors.New("the run namespace is empty")
 	}
-	var kinds []schema.GroupVersionKind
-	if !o.Primary.Empty() {
-		kinds = append(kinds, o.Primary)
+	if len(o.Kinds) == 0 {
+		return errors.New("there is no kind to watch")
 	}
-	for _, gvk := range o.Manages {
-		if !slices.Contains(kinds, gvk) {
-			kinds = append(kinds, gvk)
-		}
+	if o.Mapper == nil {
+		return errors.New("a RESTMapper is required")
 	}
-	if len(kinds) == 0 {
-		return nil, errors.New("there is no kind to watch")
-	}
-	return kinds, nil
+	return nil
 }
 
 // Observer records the version history of the run namespace from the real API
@@ -71,17 +66,12 @@ type Observer struct {
 // Start watches every kind in opts and records what it sees. The caller must
 // call Stop.
 func Start(cfg *rest.Config, opts Options) (*Observer, error) {
-	kinds, err := opts.kinds()
-	if err != nil {
+	if err := opts.validate(); err != nil {
 		return nil, fmt.Errorf("starting the observer: %w", err)
 	}
 	client, err := dynamic.NewForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("building the observer's dynamic client: %w", err)
-	}
-	mapper, err := restMapper(cfg)
-	if err != nil {
-		return nil, err
 	}
 
 	o := &Observer{
@@ -89,8 +79,8 @@ func Start(cfg *rest.Config, opts Options) (*Observer, error) {
 		factory: dynamicinformer.NewFilteredDynamicSharedInformerFactory(client, noResync, opts.Namespace, nil),
 		stop:    make(chan struct{}),
 	}
-	for _, gvk := range kinds {
-		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	for _, gvk := range opts.Kinds {
+		mapping, err := opts.Mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
 			return nil, fmt.Errorf("resolving the resource of %s: %w", kindName(gvk), err)
 		}
@@ -144,18 +134,4 @@ func (o *Observer) handler(gvk schema.GroupVersionKind) cache.ResourceEventHandl
 			record(obj, true)
 		},
 	}
-}
-
-// restMapper resolves a kind to the resource its informer lists. Discovery runs
-// once, so the target's CRDs must already be installed.
-func restMapper(cfg *rest.Config) (meta.RESTMapper, error) {
-	client, err := discovery.NewDiscoveryClientForConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("building the observer's discovery client: %w", err)
-	}
-	groups, err := restmapper.GetAPIGroupResources(client)
-	if err != nil {
-		return nil, fmt.Errorf("discovering the API resources: %w", err)
-	}
-	return restmapper.NewDiscoveryRESTMapper(groups), nil
 }

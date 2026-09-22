@@ -12,11 +12,9 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/metadata/metadatainformer"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
 	"k8s.io/client-go/tools/cache"
 )
 
@@ -37,6 +35,8 @@ type CollectorOptions struct {
 	// Kinds are the namespaced kinds the collector watches. An owner of any
 	// other kind counts as live.
 	Kinds []schema.GroupVersionKind
+	// Mapper resolves those kinds to the resources the collector lists.
+	Mapper apimeta.RESTMapper
 	// Log defaults to slog.Default().
 	Log *slog.Logger
 }
@@ -48,6 +48,9 @@ func (o CollectorOptions) Validate() error {
 	}
 	if len(o.Kinds) == 0 {
 		return errors.New("at least one kind to watch is required")
+	}
+	if o.Mapper == nil {
+		return errors.New("a RESTMapper is required")
 	}
 	return nil
 }
@@ -85,7 +88,7 @@ func StartCollector(config *rest.Config, opts CollectorOptions) (*Collector, err
 	if err != nil {
 		return nil, fmt.Errorf("building the collector's client: %w", err)
 	}
-	resources, err := namespacedResources(config, opts.Kinds)
+	resources, err := namespacedResources(opts.Mapper, opts.Kinds)
 	if err != nil {
 		return nil, err
 	}
@@ -143,16 +146,7 @@ func collectorConfig(config *rest.Config) *rest.Config {
 
 // namespacedResources maps each kind to the resource it is served at.
 // Cluster-scoped kinds are out of scope in phase 1 (DESIGN.md §15, D13).
-func namespacedResources(config *rest.Config, kinds []schema.GroupVersionKind) (map[schema.GroupVersionKind]schema.GroupVersionResource, error) {
-	client, err := discovery.NewDiscoveryClientForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("building the collector's discovery client: %w", err)
-	}
-	groups, err := restmapper.GetAPIGroupResources(client)
-	if err != nil {
-		return nil, fmt.Errorf("discovering the API resources: %w", err)
-	}
-	mapper := restmapper.NewDiscoveryRESTMapper(groups)
+func namespacedResources(mapper apimeta.RESTMapper, kinds []schema.GroupVersionKind) (map[schema.GroupVersionKind]schema.GroupVersionResource, error) {
 	resources := map[schema.GroupVersionKind]schema.GroupVersionResource{}
 	for _, gvk := range kinds {
 		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)

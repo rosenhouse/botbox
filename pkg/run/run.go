@@ -12,19 +12,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"slices"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/launch"
@@ -88,6 +84,9 @@ type Harness struct {
 	Observer *observe.Observer
 	Launcher launch.Launcher
 
+	// mapper resolves a kind to the resource it is served at. The run builds
+	// one for everything it starts, once the CRDs are installed.
+	mapper meta.RESTMapper
 	target *target.Target
 	dir    string
 	down   teardown
@@ -138,6 +137,9 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 		h.down.push("stopping the test cluster", func(context.Context) error { return started.Stop() })
 		h.Config = started.Config()
 	}
+	if h.mapper, err = cluster.NewRESTMapper(h.Config); err != nil {
+		return err
+	}
 
 	core, err := kubernetes.NewForConfig(h.Config)
 	if err != nil {
@@ -159,12 +161,7 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 		return err
 	}
 
-	h.Observer, err = observe.Start(h.Config, observe.Options{
-		Namespace: h.Namespace,
-		Primary:   h.target.Primary,
-		Manages:   h.target.Manages,
-		Selector:  h.target.Selector,
-	})
+	h.Observer, err = observe.Start(h.Config, h.observeOptions())
 	if err != nil {
 		return err
 	}
@@ -176,7 +173,8 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 	if !opts.GarbageCollected {
 		collector, err := cluster.StartCollector(h.Config, cluster.CollectorOptions{
 			Namespace: h.Namespace,
-			Kinds:     watchedKinds(h.target),
+			Kinds:     h.target.WatchedKinds(),
+			Mapper:    h.mapper,
 		})
 		if err != nil {
 			return err
@@ -231,17 +229,16 @@ func newNamespaceName() string {
 	return namespacePrefix + strings.ToLower(rand.Text()[:8])
 }
 
-// watchedKinds are the kinds botbox watches: the primary CR and every managed
-// kind. The collector resolves an owner only among them (DESIGN.md §5.8), and
-// managed objects are commonly owned by the CR.
-func watchedKinds(t *target.Target) []schema.GroupVersionKind {
-	kinds := []schema.GroupVersionKind{t.Primary}
-	for _, gvk := range t.Manages {
-		if !slices.Contains(kinds, gvk) {
-			kinds = append(kinds, gvk)
-		}
+// observeOptions ask the Observer to watch what the Runner and the collector
+// act on, and to attribute only the managed kinds to the target.
+func (h *Harness) observeOptions() observe.Options {
+	return observe.Options{
+		Namespace: h.Namespace,
+		Kinds:     h.target.WatchedKinds(),
+		Manages:   h.target.Manages,
+		Mapper:    h.mapper,
+		Selector:  h.target.Selector,
 	}
-	return kinds
 }
 
 // applyFixtures creates the target's fixtures in the run namespace and tells
@@ -255,15 +252,11 @@ func (h *Harness) applyFixtures(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("building botbox's dynamic client: %w", err)
 	}
-	mapper, err := restMapper(h.Config)
-	if err != nil {
-		return err
-	}
 	for _, declared := range h.target.Fixtures {
 		fixture := declared.DeepCopy()
 		fixture.SetNamespace(h.Namespace)
 		gvk := fixture.GroupVersionKind()
-		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+		mapping, err := h.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
 			return fmt.Errorf("resolving the fixture %s %s: %w", gvk.Kind, fixture.GetName(), err)
 		}
@@ -278,19 +271,6 @@ func (h *Harness) applyFixtures(ctx context.Context) error {
 		h.Observer.MarkBotboxCreated(gvk, created.GetName())
 	}
 	return nil
-}
-
-// restMapper resolves a fixture's kind to the resource it is served at.
-func restMapper(config *rest.Config) (meta.RESTMapper, error) {
-	client, err := discovery.NewDiscoveryClientForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("building botbox's discovery client: %w", err)
-	}
-	groups, err := restmapper.GetAPIGroupResources(client)
-	if err != nil {
-		return nil, fmt.Errorf("discovering the API resources: %w", err)
-	}
-	return restmapper.NewDiscoveryRESTMapper(groups), nil
 }
 
 func (h *Harness) writeRecordings() error {

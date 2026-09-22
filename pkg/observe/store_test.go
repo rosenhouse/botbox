@@ -33,7 +33,7 @@ func key(gvk schema.GroupVersionKind, name string) observe.Key {
 
 // managing returns Options for a target whose primary CR is a Widget.
 func managing(kinds ...schema.GroupVersionKind) observe.Options {
-	return observe.Options{Namespace: namespace, Primary: widgetGVK, Manages: kinds}
+	return observe.Options{Namespace: namespace, Manages: kinds}
 }
 
 func object(gvk schema.GroupVersionKind, name, resourceVersion string) *unstructured.Unstructured {

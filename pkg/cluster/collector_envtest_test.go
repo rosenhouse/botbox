@@ -10,6 +10,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -118,6 +119,7 @@ func TestCollector(t *testing.T) {
 		collector, err := cluster.StartCollector(c.Config(), cluster.CollectorOptions{
 			Namespace: newNamespace(t, client),
 			Kinds:     []schema.GroupVersionKind{clusterScoped},
+			Mapper:    restMapper(t, c.Config()),
 		})
 
 		if err == nil {
@@ -145,11 +147,21 @@ func startCollector(t *testing.T, config *rest.Config, namespace string, kind sc
 	collector, err := cluster.StartCollector(config, cluster.CollectorOptions{
 		Namespace: namespace,
 		Kinds:     []schema.GroupVersionKind{kind},
+		Mapper:    restMapper(t, config),
 	})
 	if err != nil {
 		t.Fatalf("StartCollector returned an error: %v", err)
 	}
 	t.Cleanup(collector.Stop)
+}
+
+func restMapper(t *testing.T, config *rest.Config) meta.RESTMapper {
+	t.Helper()
+	mapper, err := cluster.NewRESTMapper(config)
+	if err != nil {
+		t.Fatalf("Building the RESTMapper failed: %v", err)
+	}
+	return mapper
 }
 
 func createConfigMap(t *testing.T, client kubernetes.Interface, namespace, name string, owners ...metav1.OwnerReference) *corev1.ConfigMap {

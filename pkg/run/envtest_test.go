@@ -48,8 +48,8 @@ var (
 	configMapKind  = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
 )
 
-// TestHarness runs both cases against one control plane, because each start
-// costs seconds.
+// TestHarness shares one control plane between its cases, because each start
+// costs seconds. The last case starts its own, which is what it is about.
 func TestHarness(t *testing.T) {
 	ctx := t.Context()
 	binary := buildToy(t)
@@ -123,6 +123,22 @@ func TestHarness(t *testing.T) {
 			t.Errorf("Start returned %q, want a rollback that itself succeeded.", err)
 		}
 		requireNoRunNamespaceLive(t, ctx, testCluster.Config())
+	})
+
+	// A run given no cluster starts one and installs the target's CRDs in it.
+	// Everything the run then starts resolves those kinds, so nothing comes up
+	// unless the run built its mapper after the install.
+	t.Run("starts against a cluster of its own", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+
+		h, err := run.Start(ctx, toy, run.Options{Dir: t.TempDir()})
+
+		if err != nil {
+			t.Fatalf("Starting the harness failed: %v", err)
+		}
+		if err := h.Stop(ctx); err != nil {
+			t.Errorf("Stopping the harness failed: %v", err)
+		}
 	})
 }
 

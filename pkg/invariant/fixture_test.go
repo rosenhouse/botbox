@@ -95,7 +95,7 @@ func newRun() *run { return newRunManaging(configMapGVK) }
 func newRunManaging(kinds ...schema.GroupVersionKind) *run {
 	t := toyTarget()
 	t.Manages = kinds
-	store := observe.NewStore(observe.Options{Namespace: namespace, Primary: t.Primary, Manages: kinds})
+	store := observe.NewStore(observe.Options{Namespace: namespace, Manages: kinds})
 	store.MarkBotboxCreated(widgetGVK, widgetName)
 	return &run{in: invariant.Input{Target: t, History: store}, store: store}
 }

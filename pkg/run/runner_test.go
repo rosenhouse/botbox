@@ -64,7 +64,7 @@ func newFakeHarness() *fakeHarness {
 	return &fakeHarness{
 		converged: true,
 		clean:     true,
-		store:     observe.NewStore(observe.Options{Namespace: fakeNamespace, Primary: widgetKind, Manages: []schema.GroupVersionKind{configMapKind}}),
+		store:     observe.NewStore(observe.Options{Namespace: fakeNamespace, Manages: []schema.GroupVersionKind{configMapKind}}),
 		managed:   map[schema.GroupVersionKind][]string{configMapKind: {"widget-0", "widget-1"}},
 		fail:      map[string]error{},
 		applied:   map[proxy.FaultSpec]time.Time{},

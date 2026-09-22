@@ -12,6 +12,7 @@ import (
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -28,6 +29,9 @@ var (
 )
 
 const runNamespace = "run-1"
+
+// knowsNothing resolves no kind at all.
+func knowsNothing() apimeta.RESTMapper { return apimeta.NewDefaultRESTMapper(nil) }
 
 func configMapOwner(name string, uid types.UID) metav1.OwnerReference {
 	return metav1.OwnerReference{APIVersion: "v1", Kind: "ConfigMap", Name: name, UID: uid}
@@ -362,22 +366,49 @@ func TestUnresolvedOwnersAreLoggedOncePerRun(t *testing.T) {
 
 func TestCollectorOptionsValidate(t *testing.T) {
 	kinds := []schema.GroupVersionKind{configMapKind}
+	mapper := knowsNothing()
 
-	if err := (CollectorOptions{Namespace: runNamespace, Kinds: kinds}).Validate(); err != nil {
+	if err := (CollectorOptions{Namespace: runNamespace, Kinds: kinds, Mapper: mapper}).Validate(); err != nil {
 		t.Errorf("Validate rejected complete options: %v", err)
 	}
-	if err := (CollectorOptions{Kinds: kinds}).Validate(); err == nil {
+	if err := (CollectorOptions{Kinds: kinds, Mapper: mapper}).Validate(); err == nil {
 		t.Error("Validate accepted options with no namespace.")
 	}
-	if err := (CollectorOptions{Namespace: runNamespace}).Validate(); err == nil {
+	if err := (CollectorOptions{Namespace: runNamespace, Mapper: mapper}).Validate(); err == nil {
 		t.Error("Validate accepted options with no kinds to watch.")
+	}
+	if err := (CollectorOptions{Namespace: runNamespace, Kinds: kinds}).Validate(); err == nil {
+		t.Error("Validate accepted options with no RESTMapper.")
+	}
+}
+
+// The collector resolves what it watches through the mapper the run built, and
+// never discovers for itself.
+func TestStartCollectorResolvesTheWatchedKindsThroughTheGivenMapper(t *testing.T) {
+	unreachable := &rest.Config{Host: "http://127.0.0.1:1"}
+
+	c, err := StartCollector(unreachable, CollectorOptions{
+		Namespace: runNamespace,
+		Kinds:     []schema.GroupVersionKind{configMapKind},
+		Mapper:    knowsNothing(),
+	})
+
+	if err == nil {
+		c.Stop()
+		t.Fatal("StartCollector watched a kind its mapper cannot resolve.")
+	}
+	if !strings.Contains(err.Error(), "resolving the kind") {
+		t.Errorf("StartCollector returned %q, which does not say it could not resolve the kind.", err)
 	}
 }
 
 func TestStartCollectorValidatesBeforeReachingTheAPIServer(t *testing.T) {
 	unreachable := &rest.Config{Host: "http://127.0.0.1:1"}
 
-	c, err := StartCollector(unreachable, CollectorOptions{Kinds: []schema.GroupVersionKind{configMapKind}})
+	c, err := StartCollector(unreachable, CollectorOptions{
+		Kinds:  []schema.GroupVersionKind{configMapKind},
+		Mapper: knowsNothing(),
+	})
 	if err == nil {
 		c.Stop()
 		t.Fatal("StartCollector accepted options with no namespace.")
@@ -404,15 +435,16 @@ func TestCollectorConfigIsItsOwn(t *testing.T) {
 }
 
 func TestStartCollectorLeavesTheCallersConfigAlone(t *testing.T) {
-	unreachable := &rest.Config{Host: "http://127.0.0.1:1"}
+	callers := &rest.Config{Host: "http://127.0.0.1:1"}
 
-	if _, err := StartCollector(unreachable, CollectorOptions{
+	if _, err := StartCollector(callers, CollectorOptions{
 		Namespace: runNamespace,
 		Kinds:     []schema.GroupVersionKind{configMapKind},
+		Mapper:    knowsNothing(),
 	}); err == nil {
-		t.Fatal("StartCollector reached an API server that is not listening.")
+		t.Fatal("StartCollector started with a mapper that resolves nothing.")
 	}
-	if unreachable.UserAgent != "" {
-		t.Errorf("StartCollector set the caller's user agent to %q.", unreachable.UserAgent)
+	if callers.UserAgent != "" {
+		t.Errorf("StartCollector set the caller's user agent to %q.", callers.UserAgent)
 	}
 }

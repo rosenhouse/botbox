@@ -98,6 +98,7 @@ type Launcher interface {
     Stop(ctx context.Context) error                     // graceful: SIGTERM, then SIGKILL after a grace period
     Restart(ctx context.Context) error                  // crash: SIGKILL, then Start
     Status() Status                    // is the target still running, and why it stopped if not
+    Exited() <-chan struct{}           // closed once the running target has stopped
 }
 ```
 
@@ -194,12 +195,17 @@ The Runner executes one sequence:
    `Ready` predicate holds and neither the CR nor a managed object has changed for
    `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
    that expires while no fault is active records a G4 violation, where a fault counts as
-   active once the proxy has applied it and until the proxy stops (D36).
+   active once the proxy has applied it and until the proxy stops (D36). A wait also ends
+   where the target's process exits, and the Runner checks the target is running before it
+   applies each op. A target that stopped ends the run as a harness error naming the op it
+   was at (§11), because the ops behind it would run against nothing.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
 4. Tear down. Clear every active fault and wait `T_stable`, which is the last quiet
-   window (§6). Delete the primary CR if it still exists and wait for the G3 window. Then
+   window (§6). Delete the primary CR if it still exists and wait for the G3 window. A
+   target that stopped cleaned nothing up, so the run ends as that harness error rather
+   than at a verdict on the deletion. Then
    force-remove any finalizer still present in the run namespace; the report notes each one
    (D37). G3 judged the deletion window, which closed before this. Delete every remaining
    object

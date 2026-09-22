@@ -4,9 +4,11 @@ package run_test
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +31,16 @@ const toySequence = `{
     {"i": 3, "t": "restart"},
     {"i": 4, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
     {"i": 5, "t": "delete"}
+  ]
+}`
+
+// oneCreate settles, so the run waits for a reaction from a target that has
+// stopped.
+const oneCreate = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}}
   ]
 }`
 
@@ -142,6 +154,52 @@ func TestRunner(t *testing.T) {
 		requireRunFiles(t, out.RunDir(1))
 		requireNamespaceEmpty(t, ctx, testCluster.Config(), result.Timeline.Namespace)
 	})
+
+	// A target that dies mid-run takes the run with it, and no wait outlives
+	// it (DESIGN.md §5.5).
+	t.Run("ends the settle wait where the target stopped", func(t *testing.T) {
+		const ranFor = 2 * time.Second
+		toy := loadTarget(t, diesAfter(t, ranFor, "toy-widget: bind: address already in use"))
+		// A target that is gone never converges, so a wait that ignored its
+		// exit would take all of T_settle.
+		toy.Timeouts.Settle = 30 * time.Second
+		toy.Timeouts.Stable = time.Second
+		toy.Timeouts.Delete = time.Second
+
+		result, err := run.Run(ctx, toy, readSequence(t, oneCreate), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: &recordingChecker{},
+		})
+
+		if err == nil {
+			t.Fatal("The run reported no error although the target had stopped.")
+		}
+		for _, want := range []string{"op 0 (create)", "no longer running", "bind: address already in use"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("The run reported %q, which does not mention %q.", err, want)
+			}
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %+v against the target; a target that stopped is the harness's failure.", result.Violation)
+		}
+		if len(result.Timeline.Ops) != 1 || result.Timeline.Ops[0].Settled == nil {
+			t.Fatalf("The run recorded %+v, want the create and the wait that followed it.", result.Timeline.Ops)
+		}
+		window := result.Timeline.Ops[0].Settled.Window
+		if waited := window.End.Sub(window.Start); waited > ranFor+5*time.Second {
+			t.Errorf("The settle wait took %v, want it to end where the target stopped, %v in.", waited, ranFor)
+		}
+	})
+}
+
+// diesAfter is a target that runs for d, says why it is stopping and exits.
+func diesAfter(t *testing.T, d time.Duration, says string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "dies-after")
+	script := fmt.Sprintf("#!/bin/sh\nsleep %v\necho %q >&2\nexit 1\n", d.Seconds(), says)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // requireCheckpointsOfSection4 asserts a checkpoint where each settle wait

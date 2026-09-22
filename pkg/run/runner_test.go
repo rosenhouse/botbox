@@ -55,8 +55,10 @@ type fakeHarness struct {
 	deleteCRDelay time.Duration
 	deletedCRAt   time.Time
 
-	// targetGone makes the harness report a target that has stopped.
+	// targetGone makes the harness report a target that has stopped, and
+	// stopsAfter is the call it stops at.
 	targetGone bool
+	stopsAfter string
 	targetExit error
 }
 
@@ -73,6 +75,9 @@ func newFakeHarness() *fakeHarness {
 
 func (f *fakeHarness) record(call string) error {
 	f.calls = append(f.calls, call)
+	if call == f.stopsAfter {
+		f.targetGone = true
+	}
 	return f.fail[call]
 }
 
@@ -1049,12 +1054,73 @@ func TestTheTeardownIsStampedBeforeItChangesAnything(t *testing.T) {
 	}
 }
 
+// A target that stopped takes the run with it, so the ops behind it never
+// reach the cluster: they would run against nothing.
+func TestTheRunnerAppliesNoOpToATargetThatStopped(t *testing.T) {
+	h := &fakeHarness{converged: true, clean: true, stopsAfter: "createCR widget", targetExit: errors.New("exit status 1")}
+	dir := t.TempDir()
+	written := "toy-widget: listen tcp 127.0.0.1:9440: bind: address already in use"
+	if err := os.WriteFile(filepath.Join(dir, targetLogFile), []byte(written+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget"), NoSettle: true},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+	)
+
+	result, err := runSequence(t.Context(), toyTarget, sequence, Options{Check: &fakeChecker{}, Dir: dir}, h)
+
+	if err == nil {
+		t.Fatal("The run reported no error although the target had stopped.")
+	}
+	for _, want := range []string{"op 1 (update)", "no longer running", "exit status 1", written} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("The error is %q, which does not mention %q.", err, want)
+		}
+	}
+	if got, want := h.opCalls(), []string{"createCR widget"}; !slices.Equal(got, want) {
+		t.Errorf("The run did %v, want %v: an op is never applied to a target that stopped.", got, want)
+	}
+	if len(result.Timeline.Ops) != 1 {
+		t.Errorf("The run recorded %d ops, want the one it applied while the target ran.", len(result.Timeline.Ops))
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %+v against the target; a target that stopped is the harness's failure.", result.Violation)
+	}
+}
+
+// The teardown judges the deletion it asked for. A target that stopped cleaned
+// nothing up, so the window is not its to answer for.
+func TestTheTeardownJudgesNoDeletionWithATargetThatStopped(t *testing.T) {
+	h := &fakeHarness{converged: true, stopsAfter: "deleteCR widget", targetExit: errors.New("exit status 1")}
+	g3 := Violation{ID: "G3", Statement: "the CR widget still carried its finalizers"}
+	check := &fakeChecker{violations: [][]Violation{nil, {g3}}}
+
+	result, err := runSequence(t.Context(), toyTarget, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}),
+		Options{Check: check, Dir: t.TempDir()}, h)
+
+	if err == nil {
+		t.Fatal("The run reported no error although the target had stopped.")
+	}
+	for _, want := range []string{"teardown", "no longer running", "exit status 1"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("The error is %q, which does not mention %q.", err, want)
+		}
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %+v; a target that stopped answers for no deletion.", result.Violation)
+	}
+	if got := checkpointsAt(result.Timeline); !slices.Equal(got, []int{0}) {
+		t.Errorf("The run checkpointed at %v, want the ops it judged while the target ran.", got)
+	}
+}
+
 // TestASettleExpiryWithADeadTargetIsAHarnessError pins the difference between
 // the target failing and the harness failing. A target that is gone cannot
 // converge, so reporting G4 would accuse a controller of a fault that is ours:
 // a port collision reads exactly this way (DESIGN.md §5.1).
 func TestASettleExpiryWithADeadTargetIsAHarnessError(t *testing.T) {
-	h := &fakeHarness{clean: true, targetGone: true, targetExit: errors.New("exit status 1")}
+	h := &fakeHarness{clean: true, stopsAfter: "settle", targetExit: errors.New("exit status 1")}
 	sequence := sequenceOf(Op{Type: OpCreate, Obj: widget("widget")})
 	// A target that refuses its own flags says so on the way out, and that
 	// line is what the reader acts on.
@@ -1075,6 +1141,22 @@ func TestASettleExpiryWithADeadTargetIsAHarnessError(t *testing.T) {
 	}
 	if result.Violation != nil {
 		t.Errorf("The run reported %+v against the target; a dead target is the harness's failure.", result.Violation)
+	}
+}
+
+// A launcher holding no process knows no exit status, and the error says what
+// it knows.
+func TestTheStoppedTargetsErrorWithoutAnExitStatus(t *testing.T) {
+	h := &fakeHarness{clean: true, targetGone: true}
+
+	_, err := runSequence(t.Context(), toyTarget, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}),
+		Options{Check: &fakeChecker{}, Dir: t.TempDir()}, h)
+
+	if err == nil {
+		t.Fatal("The run reported no error although the target had stopped.")
+	}
+	if !strings.Contains(err.Error(), "no longer running") || strings.Contains(err.Error(), "<nil>") {
+		t.Errorf("The error is %q, want it to say what the launcher knows.", err)
 	}
 }
 

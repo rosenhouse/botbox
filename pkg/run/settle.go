@@ -22,6 +22,7 @@ func (h *Harness) Settle(ctx context.Context) (bool, error) {
 		now:      time.Now,
 		sleep:    sleep,
 		state:    h.state,
+		stopped:  h.Launcher.Exited(),
 	}.wait(ctx)
 }
 
@@ -35,6 +36,8 @@ type settle struct {
 	// state reports whether the target is ready, and when the run namespace
 	// last changed, which is never before since.
 	state func(since time.Time) (ready bool, changed time.Time)
+	// stopped is closed once the target's process has stopped.
+	stopped <-chan struct{}
 }
 
 func (s settle) wait(ctx context.Context) (bool, error) {
@@ -46,12 +49,22 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 		if ready && !now.Before(changed.Add(s.timeouts.Stable)) {
 			return true, nil
 		}
-		if !now.Before(deadline) {
+		// A target that stopped will never converge, so the wait ends there.
+		if !now.Before(deadline) || closed(s.stopped) {
 			return false, nil
 		}
 		if err := s.sleep(ctx, s.poll); err != nil {
 			return false, err
 		}
+	}
+}
+
+func closed(c <-chan struct{}) bool {
+	select {
+	case <-c:
+		return true
+	default:
+		return false
 	}
 }
 

@@ -131,6 +131,46 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: botbox-out
+          name: botbox-out-cert-manager
+          path: botbox-out/
+          if-no-files-found: ignore
+
+  # The external-secrets adoption example of DESIGN.md §10 (M7), on the same
+  # fixed seeds. The tier measures about six minutes, and the timeout adds the
+  # cold clone and build of the controller, about 150 seconds, that a cache miss
+  # pays for.
+  example-external-secrets:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Cache envtest control-plane binaries
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin/envtest
+            bin/setup-envtest
+          key: envtest-${{ runner.os }}-${{ hashFiles('Makefile') }}
+      - name: Read the external-secrets pin
+        id: pin
+        run: echo "version=$(make --no-print-directory external-secrets-version)" >>"$GITHUB_OUTPUT"
+      - name: Cache the external-secrets controller
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin/external-secrets
+            bin/external-secrets-${{ steps.pin.outputs.version }}.built
+          key: external-secrets-${{ runner.os }}-${{ steps.pin.outputs.version }}
+      - name: The external-secrets example and its negative control
+        run: make test-example-external-secrets
+      - name: Keep the failing run's evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: botbox-out-external-secrets
           path: botbox-out/
           if-no-files-found: ignore

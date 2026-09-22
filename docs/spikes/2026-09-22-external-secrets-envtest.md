@@ -1,7 +1,7 @@
 # Spike: external-secrets as a black-box target under envtest
 
-Date: 2026-09-22. It measures the fallback target `DESIGN.md` §12 names against the
-contract §8 sets, the way the 2026-09-20 spike measured cert-manager.
+Date: 2026-09-22. It measures external-secrets against the contract `DESIGN.md` §8 sets,
+the way the 2026-09-20 spike measured cert-manager, and it fed D40 and D41.
 
 ## Question
 
@@ -51,10 +51,7 @@ are `refreshPolicy: OnChange`, `refreshInterval: 1h0m0s` and the CRD's own
 | Secrets left 10 s after the delete | 1 | 1 | — | 2 | 0 |
 
 This spike runs no garbage collector, so the last row counts what the controller itself
-left. Under `deletionPolicy: Retain` it leaves the target Secret, which still carries an
-ownerReference to the deleted ExternalSecret, so botbox's collector (§5.8) removes it.
-Under `Orphan` there is no ownerReference to resolve, and both the renamed Secret and the
-one it replaced survive.
+left.
 
 The ExternalSecret carries the finalizer
 `externalsecrets.external-secrets.io/externalsecret-cleanup`, so the delete does not

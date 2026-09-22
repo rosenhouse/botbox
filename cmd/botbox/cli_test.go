@@ -654,21 +654,25 @@ func TestADeadlineThatEndsARunNamesTheFlag(t *testing.T) {
 	}
 }
 
-// DESIGN.md §11: the deadline is what the invocation has.
-func TestTheDeadlineStopsTheInvocationBetweenRuns(t *testing.T) {
+// DESIGN.md §11: the deadline is what the invocation has. An invocation it
+// ended early tested less than asked, so it does not pass.
+func TestADeadlineThatStopsTheInvocationBetweenRunsExitsTwo(t *testing.T) {
 	session := &fakeSession{}
 
 	code, stdout, stderr := invokeWith(t, session, countingGenerator(nil),
 		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3", "--deadline", "1ns")
 
-	if code != exitOK {
-		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	if code != exitError {
+		t.Errorf("botbox run exited %d, want %d.", code, exitError)
 	}
 	if len(session.sequences) != 1 {
 		t.Errorf("The session executed %d sequences, want the first alone: the deadline had passed.", len(session.sequences))
 	}
-	if !strings.Contains(stdout, "deadline") {
-		t.Errorf("botbox run printed %q, want the deadline named.", stdout)
+	if want := "the --deadline of 1ns stopped the invocation after 1 of 3 runs"; !strings.Contains(stderr, want) {
+		t.Errorf("botbox run printed %q on stderr, want %q.", stderr, want)
+	}
+	if strings.Contains(stdout, "every run passed") {
+		t.Errorf("botbox run printed %q, but not every run ran.", stdout)
 	}
 }
 

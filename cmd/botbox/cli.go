@@ -152,11 +152,11 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	defer cancel()
 	for i, planned := range runs {
 		// The deadline is the invocation's budget (DESIGN.md §11): a run that
-		// began keeps its own, and the next does not start. The first always
-		// runs, so an invocation is never vacuously green.
+		// began keeps its own, and the next does not start. An invocation it
+		// stopped tested less than asked, so it exits 2 rather than passing.
 		if i > 0 && ctx.Err() != nil {
-			fmt.Fprintf(c.stdout, "the deadline stopped the invocation after %d runs.\n", i)
-			break
+			return c.fail(fmt.Errorf("the --deadline of %s stopped the invocation after %d of %d runs",
+				opts.deadline, i, len(runs)))
 		}
 		number := i + 1
 		fmt.Fprintf(c.stdout, "run %d: seed %d, %s\n", number, planned.sequence.Seed, planned.source())

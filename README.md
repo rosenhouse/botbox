@@ -8,7 +8,7 @@ restarts the controller where a sequence says to, and records every request the 
 It then checks six generic invariants that need no per-controller configuration, plus properties a
 target declares. If your controller talks to an API server, botbox can test it.
 
-**Status:** M0–M6 are merged. `botbox run` draws sequences, runs them, and minimizes the first
+**Status:** M0–M7 are merged. `botbox run` draws sequences, runs them, and minimizes the first
 failure; `botbox replay` re-executes one. A failing run writes a report naming what broke and
 how to see it again ([DESIGN.md §5.7](DESIGN.md#57-report)).
 
@@ -98,6 +98,35 @@ Seed 23 draws a single op, so there is nothing to minimize. A longer sequence is
 the failure needs before it is reported, which costs a replay each: give `--deadline` room for
 that. `make test-example` runs this same control, and fails unless the default configuration
 passes and the control fails on G3 naming that Secret. A nightly workflow draws its own seeds.
+
+## A second example: external-secrets
+
+`examples/external-secrets/` drives [external-secrets](https://github.com/external-secrets/external-secrets)
+v2.11.0, pinned and built from its own source the same way.
+
+```sh
+examples/external-secrets/quickstart.sh --seed 23
+```
+
+It shows three things cert-manager does not.
+
+- Every port this controller binds is ephemeral, so two runs may overlap and the quickstart
+  needs no port guard.
+- An ExternalSecret carries no `observedGeneration`, so `ready` proves the controller saw this
+  generation from a version string: `status.syncedResourceVersion` is `"<generation>-<hash>"`,
+  and the predicate matches its prefix.
+- The negative control is a sequence rather than a flag. No flag makes the controller orphan
+  the Secret it manages. `spec.target.creationPolicy: Orphan` in the CR does.
+
+`make test-example-external-secrets` runs the drawn sequences, then the pinned ones, then
+that control, and fails unless the control reports G3:
+
+```
+run 1: seed 20260922, sequence examples/external-secrets/sequences/orphan.json
+run 1: G3 the v1/Secret example-secret was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR
+  at 2026-09-22T16:43:05.836050746Z; 1 version, the first v1/Secret example-secret
+  the evidence is in botbox-out/20260922T164150Z-20260922/run-1
+```
 
 ## Your own controller
 
@@ -236,7 +265,7 @@ Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generi
 ## Development and internals
 
 - `make setup` installs the envtest control plane, and `make help` lists every target.
-- `make test`, `make test-envtest` and `make test-example` are the three tiers CI runs on every PR.
+- `make test`, `make test-envtest`, `make test-example` and `make test-example-external-secrets` are the tiers CI runs on every PR.
 - A block after `<!-- embed: path -->` holds that file byte for byte, and `make test` enforces it.
 - [DESIGN.md](DESIGN.md) is the governing design. Code and docs must not contradict it.
 - [docs/journal.md](docs/journal.md) and [docs/spikes/](docs/spikes/) hold the milestone journal and the experiments behind DESIGN.md §15.

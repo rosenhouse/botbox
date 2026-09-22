@@ -401,3 +401,89 @@ controller.
 
 M6 outcome: a failing run writes a report that quotes its evidence, a fault shrinks toward
 a shorter duration, and a fault makes the toy fail an invariant it otherwise passes.
+
+## M7 — 2026-09-22
+
+### Right
+
+external-secrets v2.11.0 runs unmodified, and this adoption changed no Go code in botbox.
+A spike measured the controller against §8's contract before anything was written
+(`docs/spikes/2026-09-22-external-secrets-envtest.md`), so the target file was right the
+first time. `make test-example-external-secrets` passes from a checkout holding no binary,
+in 6m24s including the clone and a 16 s build, and in 6m19s warm. The spike measured 150 s
+for that build on empty caches, and this machine's module and build caches already held
+external-secrets' dependencies.
+
+The negative control is again the controller's own documented behaviour rather than a
+seeded bug. Under `spec.target.creationPolicy: Orphan` the Secret carries no
+ownerReference, the collector of §5.8 has nothing to resolve, and G3 reports that `the
+v1/Secret example-secret was still there 1m0s after the CR was deleted, orphaned`.
+
+### Wrong in the first draft
+
+The negative control's match was `G3 .*Secret example-secret`, which the renamed Secret
+`example-secret-renamed` also satisfies. The control never renames, so nothing passed that
+should not have. cert-manager's control carried the same loose match, and both now quote
+the clause `pkg/invariant/g3.go` writes.
+
+Both `verify-*-pin` targets checked the declared version and the asset digest and never
+the commit, and the tag check lived in the build rule alone, which a warm CI cache skips.
+A moved tag would have passed. Each verify target resolves the tag with `git ls-remote`
+now.
+
+The nightly matrix gave both examples one label and one issue title, so two legs failing
+on the same night raced to file duplicates. The label and the title name the example.
+
+### What an adopter supplies
+
+The same six keys M4 listed, and each of them differed from cert-manager's.
+
+- `crds` names the release asset, which here is a whole install manifest. envtest reads
+  the file and keeps the 25 CustomResourceDefinitions, so nothing has to be extracted.
+- `sample` is one valid primary CR, and its `refreshPolicy` is what makes the controller
+  quiet enough to judge (D40).
+- `fixtures` is a SecretStore on the `fake` provider, carrying two keys so that a sequence
+  can switch `remoteRef.key`.
+- `manages` names `v1/Secret` and not `v1/Event`. The controller leaves Events behind and
+  posts two more on every start.
+- `ready` is CEL over `status.syncedResourceVersion`, a `"<generation>-<hash>"` string,
+  because an ExternalSecret carries no `observedGeneration` anywhere.
+- `launch` gives the binary and its flags. There is no `--kubeconfig` flag: the controller
+  reads the `$KUBECONFIG` the launcher exports, and passing the flag kills it.
+
+No Go code was written against external-secrets.
+
+### Findings
+
+Nothing. The second adoption found no harness bug, where cert-manager's found two. Every
+key the target needed was already in §8.1, and every check reached the verdict the spike
+predicted.
+
+What it did surface is design, not defect. §14's first open question has a real instance:
+under `refreshPolicy: Periodic` the controller rewrites status every `refreshInterval`. A
+10 s interval never lets the quiet window close, so G4 reports the settle wait expiring
+before G2 ever counts the writes as churn. The answer taken is a target-side setting
+rather than a G2 exemption list (D40), and the question stands for a controller that
+offers no such setting. And a negative control need not be a launch flag: this one is a
+sequence, because ownership is a field of the CR (D41).
+
+### Process notes
+
+The spike did the discovery, so the adoption was transcription, and its facts held: the
+release asset hashed to the pinned digest, the tag named the pinned commit, the readiness
+predicate drove every run, and the negative control printed the G3 line the spike quoted.
+
+Naming `v1/Event` in `manages` fails on G5 before it reaches G3, because the two Events
+the controller posts on start appear only after a `Restart` op. The spike predicted the
+G3 failure and not which check fires first.
+
+The generated runs are not vacuous. Widening the `spec.target.name` overlay to a pattern
+the CRD rejects made seed 31 fail at admission on op 5, an `update` on that path, so
+generation reaches the API server with mutated values on a seed the spike never drew.
+
+cert-manager's fixed healthz port keeps its runs sequential and external-secrets' do not,
+which is worth having in the repo: the first example's port guard could be read as
+something botbox requires rather than something one controller forces.
+
+M7 outcome: `make test-example-external-secrets` runs on every pull request, and one
+nightly workflow draws seeds for both examples.

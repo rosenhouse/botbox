@@ -45,8 +45,8 @@ All fixtures, targets, and examples in this repo are either (a) upstream open-so
 projects referenced by name and version, or (b) designs original to this repo. No
 employer code, documentation, cluster topology, or customer configuration is an input
 to this project. The toy target (§9) is deliberately generic and exists only to
-exercise the harness. The adoption example (§10, M4) drives cert-manager, an upstream
-open-source project, unmodified and pinned by version.
+exercise the harness. The adoption examples (§10, M4 and M7) drive cert-manager and
+external-secrets, upstream open-source projects, unmodified and pinned by version.
 
 ## 4. Vocabulary
 
@@ -113,7 +113,7 @@ Implementations:
   startup.
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
 - `Image` — run a container image against a kind cluster, with the proxy in-cluster or
-  reached by port-forward. Phase 2 (§10, M7).
+  reached by port-forward. Phase 2 (§10, M8).
 
 ### 5.2 Proxy
 
@@ -150,7 +150,7 @@ Two details that matter for any client-go based target:
 
 Watch-event dropping requires parsing the watch stream (chunked JSON, or length-delimited
 protobuf frames for typed clients) and filtering events. This is the hardest fault and
-lands in phase 2 (§10, M7). Until then, `DeleteManaged` ops simulate a missed event by
+lands in phase 2 (§10, M8). Until then, `DeleteManaged` ops simulate a missed event by
 deleting an object behind the target's back.
 
 ### 5.3 Observer
@@ -664,9 +664,24 @@ generated runs, with fixed seeds on PRs and random seeds nightly.
 `report.md`. Acceptance: a fault makes the toy fail an invariant it passes without the
 fault, and its report names the invariant, the minimized sequence and the evidence.
 
-**M7 (phase 2) — Second target.** A multi-cluster sync controller as `Binary` target,
-forcing two-API-server envtest and cross-cluster faults; watch-event dropping in the
-proxy; the `Image` launcher. Separate design addendum.
+**M7 — Adoption: external-secrets.** `examples/external-secrets/` with `target.yaml`,
+`crds/external-secrets.yaml` (the release asset for the pinned version, a whole install
+manifest of which envtest keeps the 25 CRDs), `secretstore.yaml`, `externalsecret.yaml`,
+hand-written sequences, `quickstart.sh`, and a `Makefile` that obtains the controller by
+shallow-cloning the pinned tag and running `go build -tags fake` at the repository root,
+where its main package lives (about 2 s to clone and 150 s to build cold; cached in CI).
+The second adoption is against a controller unlike the first: it binds every port
+ephemerally, so its runs may overlap; it carries no `observedGeneration`, so readiness
+reads a version string; and no flag makes it orphan the Secret it manages, so the
+negative control is a sequence whose CR sets `spec.target.creationPolicy: Orphan`. On
+every PR, `make test-example-external-secrets` runs `quickstart.sh` and the pinned
+sequences, which must pass, and then that control, which must fail G3. Acceptance:
+`make test-example-external-secrets` passes on a clean checkout, the orphan control fails
+G3 naming the Secret, and both are green in CI.
+
+**M8 (phase 2) — Multi-cluster target.** A multi-cluster sync controller as `Binary`
+target, forcing two-API-server envtest and cross-cluster faults; watch-event dropping in
+the proxy; the `Image` launcher. Separate design addendum.
 
 ## 11. Repo conventions
 
@@ -676,18 +691,18 @@ proxy; the `Image` launcher. Separate design addendum.
   `sigs.k8s.io/controller-runtime` v0.25.x, `pgregory.net/rapid` v1.3.x,
   `github.com/google/cel-go` v0.30.x. Tool and target pins live in one Makefile variable
   each: `ENVTEST_K8S_VERSION`, `SETUP_ENVTEST_VERSION`, `CONTROLLER_GEN_VERSION` (which
-  also pins the envtest release index), and, from
-  M4, `CERT_MANAGER_VERSION` with the `CERT_MANAGER_COMMIT` the tag must name and the
-  `CERT_MANAGER_CRDS_SHA256` of its checked-in CRDs, so a moved tag or an edited asset
-  fails rather than passing quietly. Values live in the Makefile only. Bumps are their own PRs,
-  never mixed with features.
+  also pins the envtest release index), and one trio per adopted example:
+  `CERT_MANAGER_VERSION` and `EXTERNAL_SECRETS_VERSION`, each with the `_COMMIT` the tag
+  must name and the `_CRDS_SHA256` of its checked-in CRDs, so a moved tag or an edited
+  asset fails rather than passing quietly. Values live in the Makefile only. Bumps are
+  their own PRs, never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
   import it. The rule covers the root module; the spike modules under `docs/spikes/` are
   separate and exempt. Everything else uses client-go and apimachinery.
 - **Layout.** `cmd/botbox/`, `pkg/cluster`, `pkg/proxy`, `pkg/observe`,
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
-  `targets/toy-widget/`, `examples/cert-manager/`, `docs/`, and `bin/` for git-ignored
-  build output.
+  `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`, `docs/`,
+  and `bin/` for git-ignored build output.
 - **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]... [<sequence.json>...]`;
   `botbox replay --target <yaml> [--deadline D] <sequence.json>`; `botbox version`.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
@@ -706,10 +721,11 @@ proxy; the `Image` launcher. Separate design addendum.
   where the deadline ended the shrink pass before its result could be run there. Passing
   runs are not persisted.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
-  5 minutes on CI. `make test-example` = the cert-manager example under envtest, under 10
-  minutes on CI including obtaining the binary (cached). All three run on every PR.
-  `make test-example-nightly` = the same example on seeds botbox draws, nightly, with the
-  negative control. `make test-kind` = kind, nightly or on demand.
+  5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
+  adopted examples under envtest, each under 10 minutes on CI including obtaining the
+  binary (cached). All four run on every PR. The `-nightly` target beside each example
+  runs it on seeds botbox draws, with the negative control. `make test-kind` = kind,
+  nightly or on demand.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
@@ -718,9 +734,10 @@ proxy; the `Image` launcher. Separate design addendum.
   as a GitHub release asset, and are pinned.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
-  (five lines); install; quickstart against cert-manager; writing `target.yaml` for your
-  own controller; reading a report; a CI recipe for adopters; a one-line-per-invariant
-  table linking to §6; a closing "Design and internals" link to this document and to
+  (five lines); install; quickstart against cert-manager, then what the second example
+  adds; writing `target.yaml` for your own controller; reading a report; a CI recipe for
+  adopters; a one-line-per-invariant table linking to §6; a closing "Design and
+  internals" link to this document and to
   `docs/bug-matrix.md`. A fenced block preceded by `<!-- embed: <path> -->` has content,
   excluding the two fence lines, byte-identical to that file including its trailing
   newline; `<path>` is relative to the repository root; `make test` enforces it.
@@ -760,7 +777,7 @@ proxy; the `Image` launcher. Separate design addendum.
   This includes invariant statements in §6.
 - The coding agent stops and asks before: changing the license, the module path or other
   public names; editing `CLAUDE.md`; changing CI secrets or permissions; publishing a
-  release; replacing cert-manager as the adoption example.
+  release; replacing an adoption example.
 - **Merging.** The agent merges its own PR once CI is green on the head commit, with a
   squash merge. Before it merges, the PR description must record the adversarial reviews
   it ran, what they found and how each finding was addressed, so the trail is auditable
@@ -777,10 +794,10 @@ proxy; the `Image` launcher. Separate design addendum.
   sub-tasks and every adversarial review to subagents with fresh context, picks a cheaper
   model where the task allows (Sonnet for mechanical work, Opus for design-heavy work),
   and keeps its own coordinating context small.
-- **Fallback.** If cert-manager cannot satisfy M4 under envtest for a reason on
-  cert-manager's side, the agent records the blocker in the journal and asks before
-  switching targets. external-secrets with its `fake` provider is the pre-vetted
-  alternative.
+- **Fallback.** cert-manager and external-secrets are both adopted (§10, M4 and M7), so
+  an example that stops working under envtest for a reason on its own side leaves the
+  other standing. The agent records the blocker in the journal and asks before dropping
+  either.
 
 ## 13. Prior art
 
@@ -797,7 +814,11 @@ proxy; the `Image` launcher. Separate design addendum.
 ## 14. Open questions
 
 1. Does G2 need a per-target exemption list for controllers that write heartbeat-style
-   status fields? Decide when a real target trips it.
+   status fields? external-secrets under `refreshPolicy: Periodic` is the first real
+   target that writes them, and only at an interval longer than `T_stable` does G2 see
+   them: a shorter one keeps the settle wait from converging, and G4 reports it first
+   (D40). D40 answered this target with a target-side setting. The question stands for a
+   controller that offers no such setting.
 2. How is a cluster-scoped primary CR (ClusterIssuer-like) isolated per run?
 3. Should a later phase run the target's admission webhook in envtest, so that generation
    can widen beyond `generate.mutate`?
@@ -805,7 +826,7 @@ proxy; the `Image` launcher. Separate design addendum.
 
 ## 15. Decision log
 
-All decisions below were taken on 2026-09-20. D1–D17 were made with the
+D1–D17 were taken on 2026-09-20 with the
 maintainer and rest on a spike in this sandbox, written up in
 `docs/spikes/2026-09-20-cert-manager-envtest.md`: envtest 1.37.0, cert-manager v1.21.2
 built from source and run as a black-box binary.
@@ -1018,3 +1039,24 @@ built from source and run as a black-box binary.
   instant the trigger ran out. A fault that matched no request has no window: it changed
   nothing, so it excuses nothing. This is the vacuity §9.1's control row exists to catch,
   one layer up: a run that reports nothing because nothing was judged.
+- **D40 The external-secrets sample sets `refreshPolicy: OnChange`.** Under the CRD's
+  `Periodic` the controller rewrites the ExternalSecret's status on every
+  `refreshInterval`. Which check reports those writes depends on the interval. At `10s`,
+  shorter than `T_stable`, the quiet window never closes: the run fails G4, not G2, with
+  "the settle wait after op 0 (create) expired with no fault active", and the request log
+  holds the ten status writes that kept it open. At an interval longer than `T_stable`
+  the settle wait converges and G2 counts them as churn. `refreshInterval: 0s` stops the
+  writes and convergence with them, because the controller then skips a spec change
+  unless it renames the target Secret, so readiness never reaches the new generation.
+  `OnChange` syncs when the generation, the labels or the annotations change and writes
+  nothing in between. It costs coverage: nothing botbox does reaches the periodic refresh
+  path. This is the first real target to raise §14 question 1, and the answer taken here
+  is a target-side setting rather than a per-target G2 exemption list.
+- **D41 external-secrets' negative control is a sequence, not a launch flag.**
+  cert-manager orphans its Secret under `--enable-certificate-owner-ref=false`, which
+  `--launch-arg` carries (D17). external-secrets decides ownership per CR, in
+  `spec.target.creationPolicy`, so the control is `sequences/orphan.json`, whose create
+  sets `Orphan`. The Secret then carries no ownerReference, the collector of §5.8 has
+  nothing to resolve, and G3 names the Secret. `deletionPolicy` is not a second control:
+  its default `Retain` leaves a Secret that still carries an ownerReference, which the
+  collector removes.

@@ -60,7 +60,7 @@ type timeoutsDeclaration struct {
 
 type thresholdsDeclaration struct {
 	ErrLoop *int `json:"errloop"`
-	Quiet   int  `json:"quiet"`
+	Quiet   *int `json:"quiet"`
 }
 
 // Load reads target.yaml at path. Paths inside it resolve against the file's
@@ -271,7 +271,9 @@ func thresholds(declared thresholdsDeclaration) (Thresholds, error) {
 	if parsed.ErrLoop <= 0 {
 		return Thresholds{}, fmt.Errorf("thresholds: errloop %d must be positive", parsed.ErrLoop)
 	}
-	parsed.Quiet = declared.Quiet
+	if declared.Quiet != nil {
+		parsed.Quiet = *declared.Quiet
+	}
 	if parsed.Quiet < 0 {
 		return Thresholds{}, fmt.Errorf("thresholds: quiet %d must not be negative", parsed.Quiet)
 	}

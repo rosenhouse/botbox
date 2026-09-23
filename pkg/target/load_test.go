@@ -443,13 +443,18 @@ func TestLoadDefaultsEachTimeoutSeparately(t *testing.T) {
 	}
 }
 
+// A threshold the target leaves out takes its default.
 func TestLoadThresholds(t *testing.T) {
+	defaults := target.DefaultThresholds
+	t.Cleanup(func() { target.DefaultThresholds = defaults })
+	target.DefaultThresholds = target.Thresholds{ErrLoop: 9, Quiet: 4}
 	for _, tc := range []struct {
 		declared string
 		want     target.Thresholds
 	}{
-		{"thresholds:\n  quiet: 3\n", target.Thresholds{ErrLoop: 20, Quiet: 3}},
+		{"thresholds:\n  quiet: 3\n", target.Thresholds{ErrLoop: 9, Quiet: 3}},
 		{"thresholds:\n  quiet: 0\n  errloop: 7\n", target.Thresholds{ErrLoop: 7, Quiet: 0}},
+		{"thresholds:\n  errloop: 7\n", target.Thresholds{ErrLoop: 7, Quiet: 4}},
 	} {
 		t.Run(tc.declared, func(t *testing.T) {
 			path := writeTarget(t, minimalTarget+tc.declared, map[string]string{"widget.yaml": sampleWidget})

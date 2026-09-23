@@ -181,14 +181,15 @@ func (p Path) Remove(object map[string]any) {
 	}
 }
 
-// remove reports whether node is left empty.
+// remove reports whether node is left empty. A list cannot empty in place, so
+// the caller empties it.
 func remove(node any, p Path) bool {
 	step, rest := p[0], p[1:]
 	switch node := node.(type) {
 	case map[string]any:
 		switch {
 		case step.Each && len(rest) == 0:
-			return true
+			clear(node)
 		case step.Each:
 			for key, value := range node {
 				node[key] = removeFromItem(value, rest)

@@ -4,9 +4,11 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
@@ -107,6 +109,53 @@ func TestCleanUpFindsChildrenTheCacheHasMissed(t *testing.T) {
 	if !slices.Contains(deleting.Finalizers, Finalizer) {
 		t.Errorf("cleanUp left the finalizers %v, want it to hold %s until the child is gone.",
 			deleting.Finalizers, Finalizer)
+	}
+}
+
+func TestCleanUpWaitsOutTheCleanupDelay(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		deletedAgo  time.Duration
+		wantRequeue time.Duration
+		wantConfigs []string
+	}{
+		{"within the delay", time.Minute, 59 * time.Minute, []string{"w-0"}},
+		{"past the delay", 2 * time.Hour, 0, []string{}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			scheme, err := NewScheme()
+			if err != nil {
+				t.Fatal(err)
+			}
+			widget := deletingWidget(1)
+			widget.DeletionTimestamp = &metav1.Time{Time: time.Now().Add(-testCase.deletedAgo)}
+			configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: widget.Namespace, Name: "w-0"}}
+			if err := controllerutil.SetControllerReference(widget, configMap, scheme); err != nil {
+				t.Fatal(err)
+			}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(widget, configMap).Build()
+			r := &Reconciler{Client: c, APIReader: c, Scheme: scheme, CleanupDelay: time.Hour}
+
+			result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(widget)})
+
+			if err != nil {
+				t.Fatalf("Reconcile returned an error: %v", err)
+			}
+			if requeue := result.RequeueAfter; requeue > testCase.wantRequeue || requeue < testCase.wantRequeue-time.Minute {
+				t.Errorf("Reconcile asked to requeue after %v, want about %v.", requeue, testCase.wantRequeue)
+			}
+			configMaps := &corev1.ConfigMapList{}
+			if err := c.List(t.Context(), configMaps); err != nil {
+				t.Fatal(err)
+			}
+			names := []string{}
+			for _, item := range configMaps.Items {
+				names = append(names, item.Name)
+			}
+			if !slices.Equal(names, testCase.wantConfigs) {
+				t.Errorf("Reconcile left the ConfigMaps %v, want %v.", names, testCase.wantConfigs)
+			}
+		})
 	}
 }
 

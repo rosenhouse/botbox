@@ -691,6 +691,8 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   when none remain. Children also carry ownerReferences, so the collector and the
   finalizer are two independent cleanup paths.
 - The controller sets those ownerReferences **except** where a seeded bug says otherwise.
+- `--cleanup-delay` holds a deleted Widget's finalizer that long past its
+  deletionTimestamp before the cleanup begins. The controller stays correct, only slower.
 - `ready`: `has(status.observedGeneration) && status.observedGeneration ==
   metadata.generation && has(status.ready) && status.ready == spec.count`.
 - `P1`, `when: checkpoint`: `status.ready` never exceeds the number of Widget-owned ConfigMaps
@@ -713,6 +715,7 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 | B9 | Removes the finalizer on the first deletion reconcile, before deleting children, and omits ownerReferences on every child, so no path cleans up | cleanup-ordering | G3 |
 | B10 | Writes status only from an in-memory flag set when it created children. After a `Restart` the flag is gone, so a later scale-down converges the children but leaves `status` stale (a scale-up creates a child and re-arms the flag) | intermediate-state | G4 |
 | B11 | Believes a child is present from the moment it asks the API server to create it, and never asks again. The belief outlives whatever removed the child, so a refused create, a scale-down or a `DeleteManaged` leaves the toy one child short for good, with no error and no requeue | unconfirmed-write | G4 |
+| B12 | Never runs its cleanup, so a deleted Widget keeps its finalizer and its children for good | stuck-finalizer | G3 |
 
 Three of the classes are Sieve's bug patterns (§13): intermediate-state, stale-state,
 and unobserved-state. The other classes are this repo's own.

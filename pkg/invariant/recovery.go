@@ -16,13 +16,14 @@ func (in Input) Owed(t time.Time) time.Time {
 	recovered := in.lastConverged(t)
 	var first, last time.Time
 	for _, fault := range in.Faults {
-		if !fault.End.IsZero() && !fault.End.After(recovered) {
+		// An active fault's zero End is never after recovered.
+		if fault.End.After(t) || !fault.End.After(recovered) {
 			continue
 		}
 		if first.IsZero() || fault.Start.Before(first) {
 			first = fault.Start
 		}
-		if !fault.End.IsZero() && !fault.End.After(t) && fault.End.After(last) {
+		if fault.End.After(last) {
 			last = fault.End
 		}
 	}

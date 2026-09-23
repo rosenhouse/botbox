@@ -1245,14 +1245,14 @@ func checkpointsAt(timeline Timeline) []int {
 	return ops
 }
 
-// The Runner knows when each fault op injected its spec and when the fault was
-// cleared, which is the window the checks ignore what happened in.
+// The Runner knows when each fault op injected its fault and when the fault
+// was removed, which is the window the checks ignore what happened in.
 func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 	h := newFakeHarness()
 	h.faulting = true
 	sequence := sequenceOf(
-		Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: "secrets"}, Action: Action{Drop: true}}},
 		Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: "configmaps"}, Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
+		Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: "secrets"}, Action: Action{Drop: true}}},
 		Op{Type: OpSettle},
 		Op{Type: OpSettle},
 	)
@@ -1267,20 +1267,33 @@ func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 		t.Fatalf("The run recorded %d fault windows, want one per fault op.", len(faults))
 	}
 	ops := result.Timeline.Ops
-	if !between(faults[0].Start, ops[0].At, ops[1].At) || !faults[0].End.After(ops[2].At) {
-		t.Errorf("The first fault was active %+v, want from op 0 until the teardown cleared it.", faults[0])
+	if !between(faults[0].Start, ops[0].At, ops[1].At) || !between(faults[0].End, ops[1].At, ops[2].At) {
+		t.Errorf("The first fault was active %+v, want from op 0 until op 2 removed it.", faults[0])
 	}
-	if !between(faults[1].Start, ops[1].At, ops[2].At) || !between(faults[1].End, ops[1].At, ops[2].At) {
-		t.Errorf("The second fault was active %+v, want from op 1 until op 2 cleared it.", faults[1])
+	if !between(faults[1].Start, ops[1].At, ops[2].At) || !faults[1].End.After(ops[3].At) {
+		t.Errorf("The second fault was active %+v, want from op 1 until the teardown cleared it.", faults[1])
 	}
-	var removals []string
-	for _, call := range h.calls {
-		if strings.HasPrefix(call, "removeFault") {
-			removals = append(removals, call)
-		}
+	want := []string{"addFault 0", "addFault 1", "removeFault 0", "settle", "settle"}
+	if got := h.opCalls(); !slices.Equal(got, want) {
+		t.Errorf("The run did %v, want %v.", got, want)
 	}
-	if !slices.Equal(removals, []string{"removeFault 1"}) {
-		t.Errorf("The run did %v, want the second fault removed once.", removals)
+}
+
+// A fault whose op trigger names its own op ends at the next one.
+func TestRunEndsAFaultWhoseOpTriggerNamesItsOwnOp(t *testing.T) {
+	h := newFakeHarness()
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(0)}}},
+		Op{Type: OpSettle},
+	)
+
+	_, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if got, want := h.opCalls(), []string{"addFault 0", "removeFault 0", "settle"}; !slices.Equal(got, want) {
+		t.Errorf("The run did %v, want %v.", got, want)
 	}
 }
 

@@ -182,7 +182,10 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
 - **Hand-written generators** per target override schema-driven ones for fields with
   semantics the schema does not capture. In-repo targets only.
 
-Every sequence is serializable to JSON (§7) so it can be replayed without rapid.
+Every sequence is serializable to JSON (§7) so it can be replayed without rapid. A seed
+names a sequence for one build of botbox and one target declaration. A golden test records
+what the seeds the repository runs by number draw, so a change to a draw is deliberate
+(D@55).
 
 ### 5.5 Runner
 
@@ -1188,3 +1191,10 @@ built from source and run as a black-box binary.
   fault by its spec, so a spent fault displaced an equal one, and the toy with no bug failed
   G4. Each fault has an ID, and a removed fault keeps its window. The Runner drops a fault
   once its window is closed, so a request faulted just before a removal stays in it.
+- **D@55 A golden test pins what fixed seeds draw.** Draws come from rapid's
+  `Example(seed)`, which rapid documents as fit only for examples and which promises nothing
+  across versions. A draw also depends on the CRD schema, the sample and `generate`. The
+  Makefile, the README and the envtest tier rely on what particular seeds draw, and nothing
+  checked it. `pkg/generate` now records the draws of those seeds for the toy, cert-manager
+  and external-secrets. A change to generation or to rapid that moves a draw fails until the
+  test is rerun with `-update`.

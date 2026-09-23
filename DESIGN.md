@@ -195,7 +195,10 @@ The Runner executes one sequence:
    still owed time to recover from a fault that stopped (§6). The wait ends once the
    `Ready` predicate holds and neither the CR nor a managed object has changed for
    `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
-   that expires while no fault excuses it records a G4 violation. A fault excuses it while
+   that expires while no fault excuses it records a G4 violation, which says why from the
+   Observer's history of the wait: `Ready` never held, held and then stopped, or held while
+   the namespace kept changing within `T_stable`. The Runner and the engine raise it with
+   one function, so they agree. A fault excuses it while
    active, which is once the proxy has applied it and until the proxy stops (D36), and
    while the target is still owed time to recover from it (§6). A wait also ends
    where the target's process exits, and the Runner checks the target is running before it
@@ -253,7 +256,12 @@ missing one turns on (D39).
 Every violation says how many entries it chose each excerpt from, because a report that
 counted only what it was handed would claim every bounded excerpt was whole. It also says
 the instant it judged, which aligns the two tables, and whose history a one-object
-timeline is.
+timeline is. A readiness verdict also quotes the `ready` expression, the error evaluating
+it, and the CR's status there. A status holds whatever its controller wrote, so the report
+bounds it: twenty conditions as a table, 200 bytes of each field, and 1000 bytes of the
+rest as JSON. A readiness verdict and a G1 name the failing request the target repeated
+most in their window, with its count, because an error loop that backs off can stay under
+`N_errloop` and surface only as G4 or G1 (D@49).
 
 A report is a snapshot taken where the check failed, and the recordings beside it are
 finalized when the run ends. A request still open at the snapshot, which a watch usually
@@ -553,6 +561,7 @@ type Target struct {
     Manages       []schema.GroupVersionKind
     Selector      labels.Selector
     Ready         func(*unstructured.Unstructured) bool // compiled from `ready`, or a hook
+    ReadyExpr     string                                // `ready` as declared, the default, or go:<name>
     Equal         func(a, b Snapshot) bool              // §6 default plus `equalIgnore`, or a hook
     Properties    []Property
     Generate      GenerateSpec
@@ -604,10 +613,12 @@ macros (`exists`, `all`, `has`, `map`, `filter`) and the string extensions are a
 Observer cache, so cross-informer ordering cannot produce a false finding.
 
 A compile error or a non-boolean result is a configuration error (exit code 2, §11), never
-a finding. An expression is evaluated against objects that may not yet carry the fields it
-reads, so it must guard optional fields with `has()`. An evaluation error while polling
-for readiness means "not ready"; it becomes a G4 finding only if it persists past
-`T_settle`, and the report quotes the CEL error. An evaluation error in a property is a
+a finding. `ready` is typed dynamically, so a non-boolean result can first appear at run
+time; the run ends there. An expression is evaluated against objects that may not yet
+carry the fields it reads, so it must guard optional fields with `has()`. An evaluation
+error while polling for readiness means "not ready"; it becomes a G4 finding only if it
+persists past `T_settle`. The finding quotes the CEL error, and the report quotes the
+expression and the CR's status beside it (§5.7). An evaluation error in a property is a
 configuration error.
 
 A Go hook is a function registered under a name in `pkg/target` and referenced as
@@ -1080,9 +1091,10 @@ built from source and run as a black-box binary.
   timeline's last entries, and the report says so rather than calling them the nearest: a
   violation is stamped where its evidence opens as often as where it closes. A state is
   bounded and counted on its own (D39). Quoted versions leave their object bodies to
-  `objects.jsonl`. The report also carries what no check could judge, for D31's reason: a
-  report that omits "G3 could not be judged" reads like one where G3 passed, and it is the
-  artefact a human actually reads.
+  `objects.jsonl`, except that a readiness verdict quotes the CR's status its predicate
+  read, bounded (D@49). The report also carries what no check could judge, for D31's
+  reason: a report that omits "G3 could not be judged" reads like one where G3 passed, and
+  it is the artefact a human actually reads.
 - **D38 G3 credits no cleanup botbox performed.** A `DeleteManaged` op deletes a managed
   object behind the target's back (§5.4). Inside a CR deletion's window that deletes the
   evidence: G3 asked whether the object was gone by the deadline and never asked who
@@ -1181,3 +1193,16 @@ built from source and run as a black-box binary.
   resolve it either. G5 has no mapper, so it ignores the version. Each unresolved reference
   is a run note that names the object it keeps, because G3 reports that object and the
   report is what a reader acts on.
+- **D@49 A G4 says why `Ready` never held, and quotes the predicate and the CR's status.**
+  A misspelled `ready`, a controller that never converges and one that never stops writing
+  each printed the same line and exited 1. The CEL error §8.4 promised was dropped, and a
+  `ready` that yields an int read as "not ready". The expired wait now walks `Ready` over
+  the CR's versions in the wait and names the cause. The Runner calls the engine's
+  function for it, so the two agree, and a checkpoint sits where its wait ended, where the
+  engine stamps the verdict. The walk counts a missing CR as not holding, because a
+  create's wait can begin before the Observer sees the CR. The report quotes the CR's
+  status, which D35 left to `objects.jsonl`, because a reason such as "0/10 replicas
+  available" lives there. A controller can copy anything into its status, so the quote is
+  bounded. A non-bool ends the run at its first evaluation. The same verdicts name a
+  failing request the target repeated, which #46 found behind G4 and G1 under
+  controller-runtime's default backoff.

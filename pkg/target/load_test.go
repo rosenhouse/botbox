@@ -68,7 +68,11 @@ func TestLoadToyWidget(t *testing.T) {
 	if len(toy.Generate.Mutate) != 0 || len(toy.Generate.Overlay) != 0 {
 		t.Errorf("Load read generate %+v from a target that declares none.", toy.Generate)
 	}
-	wantLaunch := target.LaunchSpec{Binary: "bin/toy-widget", Args: []string{"--kubeconfig=$KUBECONFIG", "--bug=0"}}
+	wantLaunch := target.LaunchSpec{
+		Binary: "bin/toy-widget",
+		Args:   []string{"--kubeconfig=$KUBECONFIG", "--bug=0"},
+		Env:    map[string]string{"WATCH_NAMESPACE": "$NAMESPACE"},
+	}
 	if !reflect.DeepEqual(toy.Launch, wantLaunch) {
 		t.Errorf("Load read launch %+v, want %+v.", toy.Launch, wantLaunch)
 	}

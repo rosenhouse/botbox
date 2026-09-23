@@ -4,8 +4,10 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -57,6 +59,24 @@ func TestRestConfigFallsBackToTheEnvironment(t *testing.T) {
 	}
 	if config.Host != "https://environment.example" {
 		t.Errorf("restConfig used the server %q, want the one from $KUBECONFIG.", config.Host)
+	}
+}
+
+func TestManagerOptionsWatchOnlyWatchNamespace(t *testing.T) {
+	t.Setenv("WATCH_NAMESPACE", "botbox-run-x")
+
+	watched := managerOptions(nil, "0").Cache.DefaultNamespaces
+
+	if namespaces := slices.Collect(maps.Keys(watched)); !slices.Equal(namespaces, []string{"botbox-run-x"}) {
+		t.Errorf("The manager watches %v, want only $WATCH_NAMESPACE.", namespaces)
+	}
+}
+
+func TestManagerOptionsWatchEveryNamespaceWithoutWatchNamespace(t *testing.T) {
+	t.Setenv("WATCH_NAMESPACE", "")
+
+	if watched := managerOptions(nil, "0").Cache.DefaultNamespaces; watched != nil {
+		t.Errorf("The manager watches %v, want every namespace.", watched)
 	}
 }
 

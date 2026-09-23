@@ -9,9 +9,11 @@ import (
 	"os"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
@@ -58,11 +60,7 @@ func run(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	manager, err := ctrl.NewManager(config, ctrl.Options{
-		Scheme:         scheme,
-		Metrics:        metricsserver.Options{BindAddress: *metricsAddress},
-		LeaderElection: false,
-	})
+	manager, err := ctrl.NewManager(config, managerOptions(scheme, *metricsAddress))
 	if err != nil {
 		return fmt.Errorf("creating the manager: %w", err)
 	}
@@ -80,6 +78,20 @@ func run(args []string, out io.Writer) error {
 
 	ctrl.Log.WithName("toy-widget").Info("starting", "bug", int(bug))
 	return manager.Start(ctrl.SetupSignalHandler())
+}
+
+// managerOptions watch only $WATCH_NAMESPACE where it is set, as an
+// operator-sdk operator does.
+func managerOptions(scheme *runtime.Scheme, metricsAddress string) ctrl.Options {
+	options := ctrl.Options{
+		Scheme:         scheme,
+		Metrics:        metricsserver.Options{BindAddress: metricsAddress},
+		LeaderElection: false,
+	}
+	if namespace := os.Getenv("WATCH_NAMESPACE"); namespace != "" {
+		options.Cache.DefaultNamespaces = map[string]cache.Config{namespace: {}}
+	}
+	return options
 }
 
 // restConfig prefers the --kubeconfig path, then $KUBECONFIG, then the

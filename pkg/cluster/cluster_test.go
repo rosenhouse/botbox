@@ -72,6 +72,13 @@ func TestValidateNamesTheControlPlaneBinaryItCannotRun(t *testing.T) {
 			}
 			return []string{"KUBEBUILDER_ASSETS is not set", "/usr/local/kubebuilder/bin/etcd", "setup-envtest"}
 		}},
+		// envtest then looks in the working directory.
+		{"KUBEBUILDER_ASSETS is empty", func(t *testing.T) []string {
+			installControlPlane(t)
+			t.Setenv("KUBEBUILDER_ASSETS", "")
+			t.Chdir(t.TempDir())
+			return []string{"KUBEBUILDER_ASSETS is empty; install", "setup-envtest"}
+		}},
 		{"the directory holds etcd alone", func(t *testing.T) []string {
 			dir := installControlPlane(t, "etcd")
 			return []string{filepath.Join(dir, "kube-apiserver")}
@@ -96,6 +103,12 @@ func TestValidateNamesTheControlPlaneBinaryItCannotRun(t *testing.T) {
 			t.Setenv("TEST_ASSET_ETCD", missing)
 			return []string{"TEST_ASSET_ETCD", missing}
 		}},
+		{"TEST_ASSET_KUBE_APISERVER names a missing file", func(t *testing.T) []string {
+			installControlPlane(t, "etcd", "kube-apiserver")
+			missing := filepath.Join(t.TempDir(), "kube-apiserver")
+			t.Setenv("TEST_ASSET_KUBE_APISERVER", missing)
+			return []string{"TEST_ASSET_KUBE_APISERVER", missing}
+		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			want := test.setup(t)
@@ -111,6 +124,20 @@ func TestValidateNamesTheControlPlaneBinaryItCannotRun(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A TEST_ASSET_ variable wins over KUBEBUILDER_ASSETS.
+func TestValidateSaysToFixAnOverrideItCannotRun(t *testing.T) {
+	for _, value := range []string{"", "/no/such/etcd"} {
+		installControlPlane(t, "etcd", "kube-apiserver")
+		t.Setenv("TEST_ASSET_ETCD", value)
+
+		err := cluster.Options{}.Validate()
+
+		if err == nil || !strings.Contains(err.Error(), "fix or unset TEST_ASSET_ETCD") || strings.Contains(err.Error(), "KUBEBUILDER_ASSETS") {
+			t.Errorf("With TEST_ASSET_ETCD=%q, Validate returned %v, want it to say to fix or unset TEST_ASSET_ETCD.", value, err)
+		}
 	}
 }
 

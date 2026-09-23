@@ -41,24 +41,34 @@ func (o Options) Validate() error {
 // findBinary looks for a control plane binary where envtest does.
 func findBinary(name string) error {
 	override := "TEST_ASSET_" + strings.ToUpper(strings.ReplaceAll(name, "-", "_"))
-	var path, lookedUp string
-	if value, set := os.LookupEnv(override); set {
-		path, lookedUp = value, fmt.Sprintf("%s is %s", override, value)
-	} else if dir, set := os.LookupEnv("KUBEBUILDER_ASSETS"); set {
-		path, lookedUp = filepath.Join(dir, name), "KUBEBUILDER_ASSETS is "+dir
-	} else {
-		path, lookedUp = filepath.Join("/usr/local/kubebuilder/bin", name), "KUBEBUILDER_ASSETS is not set"
+	variable, fix := override, "fix or unset "+override
+	value, set := os.LookupEnv(override)
+	path := value
+	if !set {
+		variable, fix = "KUBEBUILDER_ASSETS", "install the control plane with setup-envtest, and set KUBEBUILDER_ASSETS to the directory it prints"
+		value, set = os.LookupEnv(variable)
+		path = filepath.Join(value, name)
+		if !set {
+			path = filepath.Join("/usr/local/kubebuilder/bin", name)
+		}
 	}
 	info, err := os.Stat(path)
+	var problem string
 	switch {
 	case err != nil:
-		lookedUp += fmt.Sprintf(", and envtest found no %s at %s", name, path)
+		problem = fmt.Sprintf("envtest found no %s at %s", name, path)
 	case info.IsDir() || info.Mode().Perm()&0o111 == 0:
-		lookedUp += fmt.Sprintf(", and %s is not executable", path)
+		problem = path + " is not executable"
 	default:
 		return nil
 	}
-	return fmt.Errorf("%s; install the control plane with setup-envtest, and set KUBEBUILDER_ASSETS to the directory it prints", lookedUp)
+	switch {
+	case !set:
+		return fmt.Errorf("%s is not set, and %s; %s", variable, problem, fix)
+	case value == "":
+		return fmt.Errorf("%s is empty; %s", variable, fix)
+	}
+	return fmt.Errorf("%s is %s, and %s; %s", variable, value, problem, fix)
 }
 
 // Cluster is a running test cluster.

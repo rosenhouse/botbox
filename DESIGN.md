@@ -1219,10 +1219,11 @@ built from source and run as a black-box binary.
   `k8s.io/apiextensions-apiserver`, as the API server does, and undoes or redraws what the
   CRD refuses. Reimplementing the rules on cel-go alone was rejected. Kubernetes CEL types
   each rule against the structural schema, escapes property names, adds its own libraries
-  and sees defaults first, and each divergence would be a false refusal or a refused run.
-  The API server's code moves no selected module version, because controller-runtime
-  v0.25.1 already requires `k8s.io/apiserver` and `k8s.io/component-base` at v0.37.0. It
-  adds seven modules to the graph that nothing builds, and 4.6 MB to the binary. An
+  and sees defaults first. Each divergence would undo a valid draw or pass one the API
+  server refuses. The API server's code moves no selected module version, because
+  controller-runtime v0.25.1 already requires `k8s.io/apiserver` and
+  `k8s.io/component-base` at v0.37.0. Naming them in `go.mod` adds seven modules to the
+  module graph, none of them built, and the binary grows by 4.6 MB. An
   envtest test applies 200 drawn sequences per target to a real API server with no
   controller, so the two cannot drift apart unseen. A refusal still exits 2, since a rule
   botbox cannot see belongs in the target declaration (§8.3), and it now names the run and

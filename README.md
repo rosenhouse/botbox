@@ -315,10 +315,11 @@ Exit 2 means botbox could not test your controller, and the message says what to
 - A controller that stops before its first settle wait converges ends the invocation,
   whether a flag, a taken port or the first CR stopped it. botbox quotes the line it wrote
   as it stopped, above any stack trace, and `target.log` in the run directory holds the
-  rest. If botbox had created the CR, the controller may have crashed on it, and the
-  message names the run's `sequence.json` for `botbox replay`. A controller that binds a
-  fixed port, such as a health probe on `:8081`, collides with a second invocation of
-  itself. Give it a free port in `launch.args`, or with `--launch-arg`.
+  rest. If botbox had created the CR and the controller had requested a resource from the
+  API server, the CR may have crashed it, and the message names the run's `sequence.json`
+  for `botbox replay`. A controller that binds a fixed port, such as a health probe on
+  `:8081`, collides with a second invocation of itself. Give it a free port in
+  `launch.args`, or with `--launch-arg`.
 
 ## Running in CI
 

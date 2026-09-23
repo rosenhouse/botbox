@@ -213,8 +213,9 @@ The Runner executes one sequence:
    error quotes the line in `target.log` that says why: the line the last Go panic opens
    with, or else the last line above any stack trace, since a logger's trace ends in a
    frame. The log holds every process a `restart` started, and the last one is the one
-   that stopped. Where botbox had created the CR, the error says the CR may have crashed
-   the target and names the run's `sequence.json`. Once a wait has converged, the target
+   that stopped. Where botbox had created the CR and the target had requested a resource,
+   the error says the CR may have crashed the target and names the run's `sequence.json`,
+   unless the target wrote that its port was taken. Once a wait has converged, the target
    has shown it runs, and the Launcher supervises it (§5.1). The run notes each exit and
    the line the target wrote as it stopped. A wait does not converge while the target
    waits to restart, and a restart counts as a change, so a restarted target runs for

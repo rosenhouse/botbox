@@ -1765,22 +1765,30 @@ func TestASettleExpiryWithADeadTargetIsAHarnessError(t *testing.T) {
 }
 
 // A target that stopped once botbox had created the CR, and before it ran
-// supervised, may have crashed on it. The run directory holds the sequence
-// that replays it. A supervised target stops only where a restart failed.
+// supervised, may have crashed on it if it had read a resource. The run
+// directory holds the sequence that replays it. A supervised target stops only
+// where a restart failed.
 func TestAStoppedTargetsErrorSaysWhetherTheCRMayHaveCrashedIt(t *testing.T) {
+	watched := []proxy.Request{{Verb: "watch", Resource: "widgets", Watch: true}}
+	const crashed = "panic: runtime error\n"
 	for _, test := range []struct {
 		name    string
 		h       *fakeHarness
+		log     string
 		created bool
 	}{
-		{"before the CR", &fakeHarness{clean: true, targetGone: true}, false},
-		{"after the CR", &fakeHarness{clean: true, stopsAfter: "createCR widget"}, true},
-		{"once a restart failed", &fakeHarness{clean: true, converged: true, restartFails: true, stopsAfter: "deleteCR widget"}, false},
+		{"before the CR", &fakeHarness{clean: true, targetGone: true, logged: watched}, crashed, false},
+		{"after the CR", &fakeHarness{clean: true, stopsAfter: "createCR widget", logged: watched}, crashed, true},
+		{"after the CR, having read nothing", &fakeHarness{clean: true, stopsAfter: "createCR widget"}, crashed, false},
+		{"after the CR, over a taken port", &fakeHarness{clean: true, stopsAfter: "createCR widget", logged: watched},
+			"listen tcp :8081: bind: address already in use\n", false},
+		{"once a restart failed", &fakeHarness{clean: true, converged: true, restartFails: true, stopsAfter: "deleteCR widget", logged: watched},
+			crashed, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			test.h.targetExit = errors.New("exit status 2")
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, targetLogFile), []byte("panic: runtime error\n"), 0o644); err != nil {
+			if err := os.WriteFile(filepath.Join(dir, targetLogFile), []byte(test.log), 0o644); err != nil {
 				t.Fatal(err)
 			}
 

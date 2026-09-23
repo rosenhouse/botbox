@@ -217,7 +217,7 @@ func TestG5NotesAnIgnoredKeyThatMeetsAList(t *testing.T) {
 	if len(result.Violations) != 1 {
 		t.Errorf("G5 reported %v, want the heartbeat it could not ignore.", statements(result))
 	}
-	want := "G5 could not follow equalIgnore status.conditions.lastHeartbeatTime: status.conditions is a list; write status.conditions[*].lastHeartbeatTime"
+	want := "G5 could not follow equalIgnore status.conditions.lastHeartbeatTime: status.conditions is a list; write status.conditions[*].lastHeartbeatTime; a path with brackets goes in a block-style list"
 	if len(result.Notes) != 1 || result.Notes[0] != want {
 		t.Errorf("G5 noted %q, want only %q.", result.Notes, want)
 	}

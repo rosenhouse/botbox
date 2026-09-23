@@ -30,7 +30,7 @@ func ParsePath(text string) (Path, error) {
 		var err error
 		switch {
 		case isStringMap(path) && !strings.HasPrefix(rest, "[") && strings.ContainsAny(rest, "./"):
-			return nil, at(text, i, "%s maps keys to strings, so %s is one key; quote it, as in %s",
+			return nil, at(text, i, "%s maps keys to strings, so %s is one key; quote it, as in %s"+inBlockStyle,
 				path, rest, append(path, Step{Key: rest}))
 		case strings.HasPrefix(rest, "[") && !strings.HasSuffix(text[:i], "."):
 			step, i, err = bracket(text, i)
@@ -56,6 +56,10 @@ func ParsePath(text string) (Path, error) {
 		}
 	}
 }
+
+// inBlockStyle ends a message that suggests brackets, which end a one-line
+// YAML list.
+const inBlockStyle = "; a path with brackets goes in a block-style list"
 
 // MustParsePath is ParsePath for a path known to be valid.
 func MustParsePath(text string) Path {
@@ -85,11 +89,11 @@ func bare(text string, i int, path Path) (Step, int, error) {
 	case key == "":
 		return Step{}, 0, at(text, i, "want a key")
 	case key == "*":
-		return Step{}, 0, at(text, i, "use [*] for every item of a list or value of a map")
+		return Step{}, 0, at(text, i, "use [*] for every item of a list or value of a map"+inBlockStyle)
 	case strings.Contains(key, "/"):
-		return Step{}, 0, at(text, i, `%s holds a /, so it likely ends a key that the dots split; quote the whole key, as in ["example.com/name"]`, key)
+		return Step{}, 0, at(text, i, `%s holds a /, so it likely ends a key that the dots split; quote the whole key, as in ["example.com/name"]`+inBlockStyle, key)
 	case !isBare(key):
-		return Step{}, 0, at(text, i, "quote the key, as in %s", append(path, Step{Key: key}))
+		return Step{}, 0, at(text, i, "quote the key, as in %s"+inBlockStyle, append(path, Step{Key: key}))
 	}
 	return Step{Key: key}, i + end, nil
 }
@@ -217,7 +221,7 @@ func (r *removal) remove(node any, p Path) bool {
 			}
 		default:
 			list := r.path[:len(r.path)-len(p)]
-			r.err = fmt.Errorf("%s is a list; write %s", list, slices.Concat(list, Path{{Each: true}}, p))
+			r.err = fmt.Errorf("%s is a list; write %s"+inBlockStyle, list, slices.Concat(list, Path{{Each: true}}, p))
 		}
 		return len(node) == 0
 	}

@@ -21,6 +21,9 @@ func SelfHealing(in Input) (Result, error) {
 		}
 		end := checkpoint.Time
 		seen := in.stateAt(end)
+		if _, back := seen.version(deleted); back {
+			continue
+		}
 		if cr, found := seen.cr(in.Target.Primary); !found || cr.DeletionTimestamp != nil {
 			continue // No CR asks for the object back.
 		}
@@ -33,9 +36,6 @@ func SelfHealing(in Input) (Result, error) {
 		if in.faulted(op.Time, end) {
 			out.note("for %s: a fault was active in the wait after it, so the target may have been unable to recreate the %s",
 				describe(op), object)
-			continue
-		}
-		if _, back := seen.version(deleted); back {
 			continue
 		}
 		out.violate(Violation{

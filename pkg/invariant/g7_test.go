@@ -119,6 +119,42 @@ func TestG7FiresWhereTheWaitExpired(t *testing.T) {
 	fired(t, invariant.SelfHealing, in)
 }
 
+// An object that is back satisfies G7 whatever else happened.
+func TestG7PassesAnObjectThatCameBack(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		in   invariant.Input
+	}{
+		{"after a fault", childDeleted().
+			fault(10050*time.Millisecond, 11*time.Second).
+			record(11500*time.Millisecond, child("w-0", "16", uid("uid-w-0-again"))).
+			checkpoint(13500*time.Millisecond, invariant.Converged).
+			through(13500 * time.Millisecond)},
+		{"after an update", converged().
+			op(invariant.OpUpdate, 10*time.Second).
+			record(10050*time.Millisecond, widget("20", spec(2), generation(2), status(2, 1), finalizers(cleanup))).
+			deletedManaged(10100*time.Millisecond, "w-0").
+			remove(10150*time.Millisecond, child("w-0", "21")).
+			record(10200*time.Millisecond, child("w-0", "22", uid("uid-w-0-again"))).
+			record(10300*time.Millisecond, widget("23", spec(2), generation(2), status(2, 2), finalizers(cleanup))).
+			checkpoint(12300*time.Millisecond, invariant.Converged).
+			through(12300 * time.Millisecond)},
+		{"after a restart", converged().
+			op(invariant.OpRestart, 9*time.Second).
+			deletedManaged(10*time.Second, "w-0").
+			remove(10100*time.Millisecond, child("w-0", "15")).
+			record(11*time.Second, child("w-0", "16", uid("uid-w-0-again"))).
+			checkpoint(13*time.Second, invariant.Converged).
+			through(13 * time.Second)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if notes := silent(t, invariant.SelfHealing, c.in).Notes; len(notes) > 0 {
+				t.Errorf("G7 noted %v, want the object's return to settle it.", notes)
+			}
+		})
+	}
+}
+
 // An index that resolved to nothing deleted nothing, which the Runner notes.
 func TestG7IgnoresAnOpThatDeletedNothing(t *testing.T) {
 	in := converged().

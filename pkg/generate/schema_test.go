@@ -164,6 +164,34 @@ func TestPathsTheSchemaDoesNotDescribeAreConfigurationErrors(t *testing.T) {
 	}
 }
 
+func TestAnOverlayKeywordBotboxDoesNotReadIsAConfigurationError(t *testing.T) {
+	for _, testCase := range []struct {
+		path, dotted string
+		overlay      map[string]any
+		unread       string
+	}{
+		{toyTarget, "spec.count", map[string]any{"maximun": 0}, "maximun"},
+		{certManagerTarget, "spec.dnsNames", map[string]any{"items": map[string]any{"patern": "^a$"}}, "items.patern"},
+		{certManagerTarget, "spec.privateKey",
+			map[string]any{"properties": map[string]any{"algorithm": map[string]any{"enumm": []any{"RSA"}}}},
+			"properties.algorithm.enumm"},
+	} {
+		t.Run(testCase.unread, func(t *testing.T) {
+			loaded := loadTarget(t, testCase.path)
+			loaded.Generate.Overlay = map[string]map[string]any{testCase.dotted: testCase.overlay}
+			_, err := New(loaded, Options{})
+			if err == nil {
+				t.Fatalf("New accepted the overlay %v, whose %s botbox does not read.", testCase.overlay, testCase.unread)
+			}
+			for _, want := range []string{testCase.dotted, testCase.unread, "maximum", "pattern"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("New reported %q, which does not mention %q.", err, want)
+				}
+			}
+		})
+	}
+}
+
 func TestMutateIsAnAllowlistOfSchemaPaths(t *testing.T) {
 	loaded := loadTarget(t, certManagerTarget)
 	loaded.Generate.Mutate = []string{"spec.privateKey.algorithm"}

@@ -10,6 +10,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 
@@ -62,11 +63,16 @@ func primarySchema(t *target.Target) (*schema, error) {
 		return nil, err
 	}
 	for _, dotted := range slices.Sorted(maps.Keys(t.Generate.Overlay)) {
+		overlay := t.Generate.Overlay[dotted]
+		if unread := unreadKeywords(overlay, ""); len(unread) > 0 {
+			return nil, fmt.Errorf("generate.overlay %s: botbox does not read %s; it reads %s",
+				dotted, strings.Join(unread, ", "), strings.Join(keywords, ", "))
+		}
 		node, err := schemaNode(root, strings.Split(dotted, "."))
 		if err != nil {
 			return nil, fmt.Errorf("generate.overlay %s: %w", dotted, err)
 		}
-		mergeInto(node, t.Generate.Overlay[dotted])
+		mergeInto(node, overlay)
 	}
 	return asSchema(root)
 }
@@ -172,6 +178,38 @@ func readDocuments(path string) ([]map[string]any, error) {
 			documents = append(documents, decoded)
 		}
 	}
+}
+
+// keywords are the schema keywords the generator reads.
+var keywords = func() []string {
+	var read []string
+	fields := reflect.TypeFor[schema]()
+	for i := range fields.NumField() {
+		read = append(read, fields.Field(i).Tag.Get("json"))
+	}
+	slices.Sort(read)
+	return read
+}()
+
+// unreadKeywords are the keywords in an overlay that the generator ignores,
+// as dotted paths inside it.
+func unreadKeywords(overlay map[string]any, prefix string) []string {
+	var unread []string
+	for _, key := range slices.Sorted(maps.Keys(overlay)) {
+		nested, _ := overlay[key].(map[string]any)
+		switch {
+		case !slices.Contains(keywords, key):
+			unread = append(unread, prefix+key)
+		case key == "items":
+			unread = append(unread, unreadKeywords(nested, prefix+key+".")...)
+		case key == "properties":
+			for _, name := range slices.Sorted(maps.Keys(nested)) {
+				property, _ := nested[name].(map[string]any)
+				unread = append(unread, unreadKeywords(property, prefix+key+"."+name+".")...)
+			}
+		}
+	}
+	return unread
 }
 
 // schemaNode walks a dotted path into a schema's properties (DESIGN.md §8.1).

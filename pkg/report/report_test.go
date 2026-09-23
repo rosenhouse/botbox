@@ -715,18 +715,57 @@ func TestReportQuotesAStatusWithoutConditionsWhole(t *testing.T) {
 }
 
 // A ready that evaluated on a CR with no status leaves nothing to quote but
-// the expression.
+// the expression, and the report says the CR had no status.
 func TestReportQuotesNoStatusOrErrorItWasNotGiven(t *testing.T) {
+	for name, status := range map[string]map[string]any{"no status": nil, "an empty status": {}} {
+		t.Run(name, func(t *testing.T) {
+			failure := deploymentBacked()
+			failure.Ready.Error, failure.Ready.Status = "", status
+
+			md, _ := write(t, failure)
+
+			body := section(md, "Ready predicate")
+			if want := "The CR carried no status at the verdict."; !strings.Contains(body, want) {
+				t.Errorf("The Ready predicate section does not say %q:\n%s", want, body)
+			}
+			for _, absent := range []string{"failed:", "The CR's status", "rest of its status", "conditions at the verdict", "```json"} {
+				if strings.Contains(body, absent) {
+					t.Errorf("The Ready predicate section says %q:\n%s", absent, body)
+				}
+			}
+		})
+	}
+}
+
+func TestReportQuotesAStatusOfConditionsAlone(t *testing.T) {
 	failure := deploymentBacked()
-	failure.Ready.Error, failure.Ready.Status = "", nil
+	failure.Ready.Status = map[string]any{"conditions": failure.Ready.Status["conditions"]}
 
 	md, _ := write(t, failure)
 
 	body := section(md, "Ready predicate")
-	for _, absent := range []string{"failed:", "status at the verdict", "rest of its status", "conditions at the verdict", "```json"} {
+	if want := "| Ready | False | Pending | 0/10 replicas available | 1 |"; !strings.Contains(body, want) {
+		t.Errorf("The Ready predicate section does not quote %q:\n%s", want, body)
+	}
+	for _, absent := range []string{"no status", "rest of its status"} {
 		if strings.Contains(body, absent) {
 			t.Errorf("The Ready predicate section says %q:\n%s", absent, body)
 		}
+	}
+}
+
+func TestReportQuotesAStatusOfNoConditions(t *testing.T) {
+	failure := deploymentBacked()
+	failure.Ready.Status = map[string]any{"conditions": []any{}}
+
+	md, _ := write(t, failure)
+
+	body := section(md, "Ready predicate")
+	if want := "The CR's status at the verdict:\n\n```json\n{\"conditions\":[]}\n```"; !strings.Contains(body, want) {
+		t.Errorf("The Ready predicate section does not say %q:\n%s", want, body)
+	}
+	if strings.Contains(body, "no status") {
+		t.Errorf("The Ready predicate section says the CR carried no status:\n%s", body)
 	}
 }
 

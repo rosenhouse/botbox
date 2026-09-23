@@ -46,7 +46,7 @@ func quoteReady(r *invariant.Readiness) *ready {
 	}
 	quoted := &ready{Expr: r.Expr, CR: r.CR, Error: r.Error}
 	rest := maps.Clone(r.Status)
-	if listed, isList := rest["conditions"].([]any); isList {
+	if listed, isList := rest["conditions"].([]any); isList && len(listed) > 0 {
 		delete(rest, "conditions")
 		quoted.ConditionsTotal = len(listed)
 		for _, entry := range listed[:min(len(listed), maxEvidence)] {
@@ -118,6 +118,9 @@ func (r *ready) markdown(md *strings.Builder) {
 			status += fmt.Sprintf(", cut to %d of %d bytes", len(strings.TrimSuffix(r.Status, "…")), r.StatusBytes)
 		}
 		fmt.Fprintf(md, "\n%s:\n\n%s\n", status, fenced("json", r.Status))
+	}
+	if r.ConditionsTotal == 0 && r.Status == "" {
+		md.WriteString("\nThe CR carried no status at the verdict.\n")
 	}
 	md.WriteString("\n`objects.jsonl` holds every version of the CR whole.\n")
 }

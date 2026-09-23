@@ -713,7 +713,7 @@ func (r *runner) teardown(ctx context.Context) error {
 // cannot resolve as live.
 func unresolvedNote(u cluster.Unresolved) string {
 	why := "it does not watch " + kindName(u.OwnerKind)
-	if u.Watched {
+	if u.Unserved {
 		why = "the API server does not serve " + kindName(u.OwnerKind)
 	}
 	return fmt.Sprintf("botbox's garbage collector never deletes %s %s, because %s, the kind of its owner %s",

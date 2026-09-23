@@ -88,7 +88,7 @@ func TestCollector(t *testing.T) {
 		want := []cluster.Unresolved{
 			{DependentKind: configMapKind, DependentName: unservedVersion.Name,
 				OwnerKind: schema.GroupVersionKind{Group: gadgetKind.Group, Version: "v1beta9", Kind: gadgetKind.Kind}, OwnerName: gadget.GetName(),
-				Watched: true},
+				Unserved: true},
 			{DependentKind: configMapKind, DependentName: unwatchedOwner.Name,
 				OwnerKind: schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, OwnerName: "absent"},
 		}

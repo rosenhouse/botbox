@@ -94,10 +94,9 @@ type Unresolved struct {
 	// OwnerKind is the kind at the version the reference names.
 	OwnerKind schema.GroupVersionKind
 	OwnerName string
-	// Watched says the collector watches the owner's group and kind, and the
-	// API server does not serve OwnerKind. Otherwise the collector does not
-	// watch the owner's kind.
-	Watched bool
+	// Unserved says the API server does not serve OwnerKind. Otherwise the
+	// collector does not watch the owner's kind.
+	Unserved bool
 }
 
 // StartCollector runs the collector over opts.Namespace until Stop.
@@ -280,9 +279,9 @@ func (c *Collector) liveOwners(ctx context.Context, objects []object) owners {
 	for _, obj := range objects {
 		for _, ref := range obj.meta.OwnerReferences {
 			key := keyOf(ref)
-			kind, resolvable, _ := live.resolve(ref)
+			kind, how := live.resolve(ref)
 			_, alreadyRead := live.resolved[key]
-			if !resolvable || alreadyRead {
+			if how != resolvable || alreadyRead {
 				continue
 			}
 			found, err := c.client.Resource(kind.resource).Namespace(c.namespace).
@@ -356,17 +355,27 @@ type owners struct {
 	resolved map[ownerKey]owner
 }
 
+// resolution says whether the collector can resolve an owner, or why not.
+type resolution int
+
+const (
+	resolvable resolution = iota
+	unwatchedKind
+	unservedVersion
+)
+
 // resolve finds the watched kind a reference names. Like the garbage
 // collector, it resolves a reference only at a version the API server serves.
-func (o owners) resolve(ref metav1.OwnerReference) (kind watchedKind, resolvable, watched bool) {
+func (o owners) resolve(ref metav1.OwnerReference) (watchedKind, resolution) {
 	gvk := schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind)
-	if kind, watched = o.watched[gvk.GroupKind()]; !watched {
-		return watchedKind{}, false, false
+	kind, watched := o.watched[gvk.GroupKind()]
+	if !watched {
+		return watchedKind{}, unwatchedKind
 	}
 	if _, err := o.mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
-		return watchedKind{}, false, true
+		return watchedKind{}, unservedVersion
 	}
-	return kind, true, true
+	return kind, resolvable
 }
 
 // collectible reports whether obj must be deleted: it has at least one
@@ -379,13 +388,13 @@ func (o owners) collectible(obj object) (bool, []Unresolved) {
 	collect := len(refs) > 0
 	var unresolved []Unresolved
 	for _, ref := range refs {
-		if _, resolvable, watched := o.resolve(ref); !resolvable {
+		if _, how := o.resolve(ref); how != resolvable {
 			unresolved = append(unresolved, Unresolved{
 				DependentKind: obj.kind,
 				DependentName: obj.meta.Name,
 				OwnerKind:     schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind),
 				OwnerName:     ref.Name,
-				Watched:       watched,
+				Unserved:      how == unservedVersion,
 			})
 			collect = false
 			continue

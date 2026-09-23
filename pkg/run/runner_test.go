@@ -1009,7 +1009,7 @@ func TestRunNotesEachOwnerTheCollectorCouldNotResolve(t *testing.T) {
 		{
 			DependentKind: configMapKind, DependentName: "widget-cfg",
 			OwnerKind: schema.GroupVersionKind{Group: "toy.botbox", Version: "v1alpha9", Kind: "Widget"}, OwnerName: "widget",
-			Watched: true,
+			Unserved: true,
 		},
 		{
 			DependentKind: configMapKind, DependentName: "widget-tls",

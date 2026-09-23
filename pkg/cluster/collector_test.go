@@ -184,7 +184,7 @@ func TestCollectibleKeepsAnObjectWhoseOwnerNamesAVersionNotServed(t *testing.T) 
 	if collect {
 		t.Error("collectible chose to delete an object whose owner names a version the API server does not serve.")
 	}
-	want := []Unresolved{{DependentKind: configMapKind, DependentName: "child", OwnerKind: unserved, OwnerName: parent.Name, Watched: true}}
+	want := []Unresolved{{DependentKind: configMapKind, DependentName: "child", OwnerKind: unserved, OwnerName: parent.Name, Unserved: true}}
 	if !slices.Equal(unresolved, want) {
 		t.Errorf("collectible reported %+v as unresolved, want %+v.", unresolved, want)
 	}

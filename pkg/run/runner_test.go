@@ -67,6 +67,9 @@ type fakeHarness struct {
 	// applyingInWait replaces applying once a wait begins.
 	owed           []time.Time
 	applyingInWait []proxy.FaultWindow
+	// retiresInWait has the proxy retire the first fault this long into a
+	// wait, which then runs in real time until the target owes nothing.
+	retiresInWait time.Duration
 	// cancel ends the run's context at the call cancelsAfter names.
 	cancel       context.CancelFunc
 	cancelsAfter string
@@ -101,6 +104,11 @@ func (f *fakeHarness) namespace() string { return fakeNamespace }
 func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time) (bool, error) {
 	if f.applyingInWait != nil {
 		f.applying = f.applyingInWait
+	}
+	if f.retiresInWait > 0 {
+		time.Sleep(f.retiresInWait)
+		f.applying[0].Retired = time.Now()
+		time.Sleep(time.Until(owed()))
 	}
 	f.owed = append(f.owed, owed())
 	if f.faultingInWait {
@@ -623,6 +631,33 @@ func TestRunExcusesAWaitAFaultFirstReachedPartWayThrough(t *testing.T) {
 	}
 	if result.Violation == nil || !strings.Contains(result.Violation.Statement, "after the last fault stopped") {
 		t.Errorf("The run reported %v, want only the G4 of the wait after the last fault stopped.", result.Violation)
+	}
+}
+
+// A fault active as a wait began excuses the wait only while the target is
+// still owed time to recover from it when the wait ends.
+func TestRunRecordsG4WhenAWaitOutlastsTheRecoveryTheFaultOwed(t *testing.T) {
+	h := newFakeHarness()
+	h.converged = false
+	h.applying = []proxy.FaultWindow{{First: time.Now()}}
+	h.retiresInWait = time.Millisecond
+	short := *toyTarget
+	short.Timeouts.Settle = 10 * time.Millisecond
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 30}}},
+		Op{Type: OpCreate, Obj: widget("widget")},
+	)
+
+	result, err := runSequence(t.Context(), &short, sequence, Options{Check: &fakeChecker{}}, h)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if fault, wait := result.Timeline.Faults[0], result.Timeline.Ops[1].Settled.Window; fault.Start.After(wait.Start) || !fault.End.After(wait.Start) {
+		t.Fatalf("The fault was active from %v to %v, want it active as the wait began at %v.", fault.Start, fault.End, wait.Start)
+	}
+	if result.Violation == nil || !strings.Contains(result.Violation.Statement, "after op 1 (create)") {
+		t.Errorf("The run reported %v, want the G4 of the create's wait.", result.Violation)
 	}
 }
 

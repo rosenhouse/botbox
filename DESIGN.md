@@ -257,7 +257,7 @@ missing one turns on (D39). A G5 violation names the two states it compared and 
 a table of its own, each field that differs between them: the object, the resourceVersions
 compared, the path in the form `equalIgnore` takes, and the value on each side, cut to 80
 runes. An object only one state holds is one row, which names no path. The table holds at
-most twenty rows, taken from each object in turn (D@52).
+most twenty rows, taken from each object in turn (D50).
 Every violation says how many entries it chose each excerpt from, because a report that
 counted only what it was handed would claim every bounded excerpt was whole. It also says
 the instant it judged, which aligns a timeline with the state at the verdict, and whose
@@ -267,7 +267,7 @@ whatever its controller wrote, so the report bounds it: twenty conditions as a t
 bytes of each field, and 1000 bytes of the rest as JSON. Each code block's fence is longer
 than any run of backticks inside it. A readiness verdict and a G1 name the failing request
 the target repeated most in their window, with its count, because an error loop that
-backs off can stay under `N_errloop` and surface only as G4 or G1 (D@49).
+backs off can stay under `N_errloop` and surface only as G4 or G1 (D48).
 
 A report's version rows carry no object body. G5's table quotes a Secret's values as the
 markers `objects.jsonl` writes (§11). A report's sequence and replay command hold the sample
@@ -825,7 +825,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   history keeps the values, so G5 compares them exactly, and its report quotes the
   markers. Nothing else is redacted: a Secret's labels, every other object, `target.log`,
   `sequence.json`, and a report's sequence and replay command hold what the target, the
-  sample and the command line gave them (D@64).
+  sample and the command line gave them (D49).
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -1115,8 +1115,8 @@ built from source and run as a black-box binary.
   violation is stamped where its evidence opens as often as where it closes. A state is
   bounded and counted on its own (D39). Quoted versions leave their object bodies to
   `objects.jsonl`, except that a readiness verdict quotes the CR's status its predicate
-  read, bounded (D@49), and G5 quotes the value of each field it found changed, bounded
-  and counted in the same way (D@52). The report also carries what no check could judge,
+  read, bounded (D48), and G5 quotes the value of each field it found changed, bounded
+  and counted in the same way (D50). The report also carries what no check could judge,
   for D31's reason: a report that omits "G3 could not be judged" reads like one where G3
   passed, and it is the artefact a human actually reads.
 - **D38 G3 credits no cleanup botbox performed.** A `DeleteManaged` op deletes a managed
@@ -1221,7 +1221,7 @@ built from source and run as a black-box binary.
   fault by its spec, so a spent fault displaced an equal one, and the toy with no bug failed
   G4. Each fault has an ID, and a removed fault keeps its window. The Runner drops a fault
   once its window is closed, so a request faulted just before a removal stays in it.
-- **D@49 A G4 says why `Ready` never held, and quotes the predicate and the CR's status.**
+- **D48 A G4 says why `Ready` never held, and quotes the predicate and the CR's status.**
   A misspelled `ready`, a controller that never converges and one that never stops writing
   need different fixes, so the G4 of an expired wait names its cause. It walks `Ready`
   over the CR's versions in the wait. The Runner calls the engine's function for it, so
@@ -1236,7 +1236,7 @@ built from source and run as a black-box binary.
   quotes the CEL error, and a non-bool ends the run at its first evaluation. The same
   verdicts name a failing request the target repeated, which #46 found behind G4 and G1
   under controller-runtime's default backoff.
-- **D@64 A Secret's values are written as keyed markers.** CI uploads `botbox-out/` when a
+- **D49 A Secret's values are written as keyed markers.** CI uploads `botbox-out/` when a
   tier fails, and `objects.jsonl` held the external-secrets control's token and the
   cert-manager control's private keys. A marker still shows a reader which value changed.
   An unkeyed hash would let anyone confirm a guessed value. external-secrets annotates its
@@ -1245,7 +1245,7 @@ built from source and run as a black-box binary.
   against them. Only core Secrets are redacted, because botbox cannot tell a credential
   anywhere else from other data. No flag writes the raw values. Each example tier fails if
   its control's evidence holds its Secret's value.
-- **D@52 A G5 violation names each field that differs.** A G5 report named the object and
+- **D50 A G5 violation names each field that differs.** A G5 report named the object and
   the restart, so an adopter diffed two versions in `objects.jsonl` by hand to learn what
   changed and whether it belonged in `equalIgnore`. G5 now diffs the forms it compared,
   after the default and `equalIgnore` reductions, so nothing it ignores appears. A path

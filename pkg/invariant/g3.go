@@ -91,11 +91,9 @@ func (in Input) crDeletionsBy(t time.Time) []deletion {
 	if in.History == nil {
 		return nil
 	}
-	crs := in.History.WindowOf(in.Target.Primary, time.Time{}, t)
-	slices.SortStableFunc(crs, func(a, b observe.Version) int { return a.Time.Compare(b.Time) })
 	var deletions []deletion
 	seen := map[types.UID]bool{}
-	for _, v := range crs {
+	for _, v := range in.History.VersionsOf(in.Target.Primary, t) {
 		if seen[v.UID] || (v.DeletionTimestamp == nil && !v.Deleted) {
 			continue
 		}

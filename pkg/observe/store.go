@@ -147,18 +147,18 @@ func (s *Store) Window(from, to time.Time) []Version {
 	return window
 }
 
-// WindowOf returns every version of one kind recorded in [from, to], in the
-// order recorded.
-func (s *Store) WindowOf(gvk schema.GroupVersionKind, from, to time.Time) []Version {
+// VersionsOf returns every version of one kind recorded by t, in the order
+// recorded.
+func (s *Store) VersionsOf(gvk schema.GroupVersionKind, t time.Time) []Version {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	var window []Version
+	var versions []Version
 	for _, v := range s.versions {
-		if v.GVK == gvk && !v.Time.Before(from) && !v.Time.After(to) {
-			window = append(window, v)
+		if v.GVK == gvk && !v.Time.After(t) {
+			versions = append(versions, v)
 		}
 	}
-	return window
+	return versions
 }
 
 // SnapshotAt returns the latest version of every object live at t, ordered by

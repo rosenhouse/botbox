@@ -1764,6 +1764,39 @@ func TestASettleExpiryWithADeadTargetIsAHarnessError(t *testing.T) {
 	}
 }
 
+// A target that stopped once botbox had created the CR may have crashed on it,
+// and the run directory holds the sequence that replays it.
+func TestAStoppedTargetsErrorSaysWhetherTheCRWasCreated(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		h       *fakeHarness
+		created bool
+	}{
+		{"before the CR", &fakeHarness{clean: true, targetGone: true}, false},
+		{"after the CR", &fakeHarness{clean: true, stopsAfter: "createCR widget"}, true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			test.h.targetExit = errors.New("exit status 2")
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, targetLogFile), []byte("panic: runtime error\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := runSequence(t.Context(), toyTarget, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}),
+				Options{Check: &fakeChecker{}, Dir: dir}, test.h)
+
+			if err == nil {
+				t.Fatal("The run reported no error although the target had stopped.")
+			}
+			pointer := "botbox had created the CR, so the CR may have crashed the target, and " +
+				filepath.Join(dir, "sequence.json") + " replays the run"
+			if says := strings.Contains(err.Error(), pointer); says != test.created {
+				t.Errorf("The error is %q; want it to say %q: %t.", err, pointer, test.created)
+			}
+		})
+	}
+}
+
 // A launcher holding no process knows no exit status, and the error says what
 // it knows.
 func TestTheStoppedTargetsErrorWithoutAnExitStatus(t *testing.T) {

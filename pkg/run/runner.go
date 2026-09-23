@@ -584,12 +584,16 @@ func (r *runner) targetStopped(status launch.Status) error {
 		stopped += ": " + status.Exit.Error()
 	}
 	said, _ := whyItStopped(log, 0)
-	if said == "" {
-		return fmt.Errorf("%s; its output is in %s", stopped, log)
+	err := fmt.Errorf("%s; its output is in %s", stopped, log)
+	if said != "" {
+		err = fmt.Errorf("%s; it wrote %q, and the rest of its output is in %s", stopped, said, log)
 	}
-	err := fmt.Errorf("%s; it wrote %q, and the rest of its output is in %s", stopped, said, log)
 	if strings.Contains(said, "address already in use") {
 		err = fmt.Errorf("%w; another process holds that port, perhaps a concurrent run of this target, so give the target a free one in launch.args", err)
+	}
+	if r.cr != "" {
+		err = fmt.Errorf("%w; botbox had created the CR, so the CR may have crashed the target, and %s replays the run",
+			err, filepath.Join(r.dir, sequenceFile))
 	}
 	return err
 }

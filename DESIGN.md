@@ -175,10 +175,19 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   `DeleteManaged{kind, index}` (delete one managed object behind the target's back, §7).
   The Runner issues `DeleteManaged` directly to the API server, as it does the CR ops.
 - **Schema-driven mutation** from the CRD's OpenAPI v3 schema: numeric ranges, enums,
-  string patterns, optional-field presence, list length. Generic and works on any CRD.
+  string patterns, optional-field presence, list length, map size. Generic and works on
+  any CRD.
+- **Valid by the CRD's own rules.** Every create, recreate and update the generator draws
+  passes the CRD as the API server judges it: defaults, value validations, list types and
+  `x-kubernetes-validations` rules, transition rules included. The generator runs the API
+  server's own code for this (D@48). A create keeps a drawn field only if the CRD accepts
+  it. A refused update is drawn again up to eight times, then becomes a `Settle`. Judging
+  consumes no randomness. The sample must pass its CRD.
 - Generation starts from the target's `sample` object. When the target declares
   `generate.mutate`, only those paths are mutated, and `generate.overlay` tightens the
-  schema for a path (§8.3).
+  schema for a path (§8.3). An overlay keyword the generator does not read is a
+  configuration error. Without `generate.mutate`, botbox prints each spec path whose
+  schema says too little to draw from, such as an int-or-string, and leaves it alone.
 - **Hand-written generators** per target override schema-driven ones for fields with
   semantics the schema does not capture. In-repo targets only.
 
@@ -585,16 +594,18 @@ against its predecessor.
 
 ### 8.3 Generation constraints and admission webhooks
 
-botbox generates from the CRD's OpenAPI v3 schema, and phase 1 does not install the
-target's admission webhooks. Rules that only a webhook enforces are therefore invisible to
-the generator. For cert-manager these include: a Certificate needs at least one of
+botbox generates from the CRD's OpenAPI v3 schema and keeps every rule the CRD states,
+`x-kubernetes-validations` included (§5.4). Phase 1 does not install the target's
+admission webhooks. Rules that only a webhook enforces are therefore invisible to the
+generator. For cert-manager these include: a Certificate needs at least one of
 `commonName`, `dnsNames`, `ipAddresses`, `uris` or `emailAddresses`; `duration` must
 parse as a Go duration; `renewBefore` must be shorter than `duration`; a `dnsNames` entry
 must be a DNS name, which neither the CRD schema nor the API server checks, so the
 overlay spells out an RFC 1123 label. The target keeps generation inside the valid subset
 with `sample`, `generate.mutate` and `generate.overlay`. A generated spec that the target rejects or ignores because it
 violates such a rule is a target-declaration bug, not a finding; the journal records each
-rule that had to be encoded this way.
+rule that had to be encoded this way. A CR op the API server refuses ends the invocation as
+a configuration error that names the run and the sequence file holding the op.
 
 ### 8.4 Predicates
 
@@ -763,7 +774,8 @@ the proxy; the `Image` launcher. Separate design addendum.
 
 - **Language and pins.** Go `1.26.0` in `go.mod` (cert-manager v1.21.2 and the
   Kubernetes 0.37 libraries require it); CI uses `go-version-file: go.mod`. Library pins
-  live in `go.mod` only: `k8s.io/{api,apimachinery,client-go}` v0.37.x,
+  live in `go.mod` only: `k8s.io/{api,apimachinery,client-go,apiextensions-apiserver,apiserver}`
+  v0.37.x,
   `sigs.k8s.io/controller-runtime` v0.25.x, `pgregory.net/rapid` v1.3.x,
   `github.com/google/cel-go` v0.30.x. Tool and target pins live in one Makefile variable
   each: `ENVTEST_K8S_VERSION`, `SETUP_ENVTEST_VERSION`, `CONTROLLER_GEN_VERSION` (which
@@ -1198,3 +1210,23 @@ built from source and run as a black-box binary.
   checked it. `pkg/generate` now records the draws of those seeds for the toy, cert-manager
   and external-secrets. A change to generation or to rapid that moves a draw fails until the
   test is rerun with `-update`.
+- **D@48 Generation keeps the CRD's own rules, judged by the API server's code.** The
+  generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
+  rule `self.maxUnavailable <= self.count`, 15 of 100 drawn sequences broke it, and the
+  first refusal ended the invocation with exit 2 and no word of where the sequence was.
+  Real CRDs carry such rules: the external-secrets bundle holds 50, and cert-manager's
+  Issuer states "exactly one of" in CEL. The generator now judges each drawn CR op with
+  `k8s.io/apiextensions-apiserver`, as the API server does, and undoes or redraws what the
+  CRD refuses. Reimplementing the rules on cel-go alone was rejected. Kubernetes CEL types
+  each rule against the structural schema, escapes property names, adds its own libraries
+  and sees defaults first, and each divergence would be a false refusal or a refused run.
+  The API server's code moves no selected module version, because controller-runtime
+  v0.25.1 already requires `k8s.io/apiserver` and `k8s.io/component-base` at v0.37.0. It
+  adds seven modules to the graph that nothing builds, and 4.6 MB to the binary. An
+  envtest test applies 200 drawn sequences per target to a real API server with no
+  controller, so the two cannot drift apart unseen. A refusal still exits 2, since a rule
+  botbox cannot see belongs in the target declaration (§8.3), and it now names the run and
+  its `sequence.json`. Undoing a refused field biases draws away from a rule's boundary: a
+  sample that sets one of two exclusive fields never switches to the other. Map fields are
+  drawn now, an int-or-string names the overlay it needs, an overlay keyword the generator
+  does not read is an error, and a spec path generation leaves alone is printed.

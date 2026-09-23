@@ -191,12 +191,18 @@ it and waits for the controller before it tears the run down. The proxy tries fa
 order, the first that applies to a request wins, and each runs out on its own `until`. A fault
 that matches no request changes nothing and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
 
-Field values come from the CRD's own schema: its numeric ranges, enums, patterns and list
-lengths. A schema that says only `type: string` yields a random word, so the schema is not a
+Field values come from the CRD's own schema: its numeric ranges, enums, patterns, list
+lengths and maps. Every CR botbox writes also passes the CRD's validation rules, CEL
+`x-kubernetes-validations` included, because botbox checks each draw with the API server's
+own code. A schema that says only `type: string` yields a random word, so the schema is not a
 safety net. Where it allows more than your controller does, `generate.mutate`
 lists the only paths a sequence changes and `generate.overlay` tightens one path's schema, as
-`examples/cert-manager/target.yaml` does. Naming a path botbox cannot draw from is a
-configuration error, not a silent skip ([DESIGN.md §8.3](DESIGN.md#83-generation-constraints-and-admission-webhooks)).
+`examples/cert-manager/target.yaml` does. An int-or-string field needs an overlay that says
+which it is: `type: integer`, or `type: string` with a `pattern` or an `enum`. Naming a path
+or an overlay keyword botbox cannot draw from is a configuration error, not a silent skip.
+Without `generate.mutate`, botbox prints each spec path it leaves alone, and why. If the API
+server still refuses a CR, as a webhook might, botbox exits 2 and names the `sequence.json`
+that holds the op ([DESIGN.md §8.3](DESIGN.md#83-generation-constraints-and-admission-webhooks)).
 
 G5 compares what your controller manages before and after a restart. It already skips what
 every restart moves, such as `metadata.resourceVersion`. If your controller stamps a field of

@@ -65,6 +65,11 @@ type Report struct {
 	// (DESIGN.md §5.7, D39).
 	Managed      []observe.Version
 	ManagedTotal *int
+	// Differences are what G5 found changed across a restart, DifferencesTotal
+	// how many there were, and Compared names the two states.
+	Differences      []invariant.Difference
+	DifferencesTotal int
+	Compared         string
 }
 
 // Check is the invariant or property the run broke (DESIGN.md §6).
@@ -124,6 +129,10 @@ type document struct {
 	VersionsOf    string            `json:"versionsOf,omitempty"`
 	Managed       []observe.Version `json:"managed,omitempty"`
 	ManagedTotal  *int              `json:"managedTotal,omitempty"`
+
+	Differences      []invariant.Difference `json:"differences,omitempty"`
+	DifferencesTotal int                    `json:"differencesTotal,omitempty"`
+	Compared         string                 `json:"compared,omitempty"`
 }
 
 func (r Report) document() document {
@@ -144,6 +153,10 @@ func (r Report) document() document {
 		VersionsOf:    r.VersionsOf,
 		Managed:       state(r.Managed),
 		ManagedTotal:  managedTotal(r.ManagedTotal, len(r.Managed)),
+
+		Differences:      leading(r.Differences),
+		DifferencesTotal: max(r.DifferencesTotal, len(r.Differences)),
+		Compared:         r.Compared,
 	}
 }
 
@@ -153,12 +166,7 @@ func timeline(versions []observe.Version) []observe.Version { return quoting(rec
 
 // state quotes what the target managed at the violation. The check ordered it
 // by what a reader needs first, so the bound keeps the entries it opens with.
-func state(versions []observe.Version) []observe.Version {
-	if len(versions) > maxEvidence {
-		versions = versions[:maxEvidence]
-	}
-	return quoting(versions)
-}
+func state(versions []observe.Version) []observe.Version { return quoting(leading(versions)) }
 
 func quoting(versions []observe.Version) []observe.Version {
 	quoted := slices.Clone(versions)
@@ -167,6 +175,9 @@ func quoting(versions []observe.Version) []observe.Version {
 	}
 	return quoted
 }
+
+// leading keeps the maxEvidence first entries.
+func leading[T any](evidence []T) []T { return evidence[:min(len(evidence), maxEvidence)] }
 
 // recent keeps the maxEvidence last entries, which are the ones the report
 // says it quotes.

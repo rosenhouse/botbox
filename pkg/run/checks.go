@@ -26,17 +26,20 @@ func (Engine) Check(in Input) (Findings, error) {
 	for _, result := range results {
 		for _, violation := range result.Violations {
 			found.Violations = append(found.Violations, Violation{
-				ID:            violation.ID,
-				Statement:     violation.Statement,
-				At:            violation.At,
-				Evidence:      evidence(violation),
-				Requests:      violation.Requests,
-				RequestsTotal: violation.RequestsTotal,
-				Versions:      violation.Versions,
-				VersionsTotal: violation.VersionsTotal,
-				VersionsOf:    violation.VersionsOf,
-				Managed:       violation.Managed,
-				ManagedTotal:  violation.ManagedTotal,
+				ID:               violation.ID,
+				Statement:        violation.Statement,
+				At:               violation.At,
+				Evidence:         evidence(violation),
+				Requests:         violation.Requests,
+				RequestsTotal:    violation.RequestsTotal,
+				Versions:         violation.Versions,
+				VersionsTotal:    violation.VersionsTotal,
+				VersionsOf:       violation.VersionsOf,
+				Managed:          violation.Managed,
+				ManagedTotal:     violation.ManagedTotal,
+				Differences:      violation.Differences,
+				DifferencesTotal: violation.DifferencesTotal,
+				Compared:         violation.Compared,
 			})
 		}
 		found.Notes = append(found.Notes, result.Notes...)
@@ -141,6 +144,14 @@ func count(n int, noun string) string {
 // the run directory (DESIGN.md §5.7).
 func evidence(violation invariant.Violation) string {
 	var quoted []string
+	if differences := violation.Differences; len(differences) > 0 {
+		first := differences[0]
+		clause := fmt.Sprintf("%s was %s, is %s", first.Path, first.Before, first.After)
+		if violation.DifferencesTotal > 1 {
+			clause += fmt.Sprintf(" (1 of %s)", count(violation.DifferencesTotal, "difference"))
+		}
+		quoted = append(quoted, clause)
+	}
 	if requests := violation.Requests; len(requests) > 0 {
 		quoted = append(quoted, fmt.Sprintf("%s, the first %s %s %d",
 			part(len(requests), violation.RequestsTotal, "request"), requests[0].Verb, requests[0].Path, requests[0].Status))

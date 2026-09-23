@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/report"
@@ -318,15 +319,89 @@ func TestReportQuotesTheVersionTimelineWithoutTheObjects(t *testing.T) {
 	}
 }
 
+func TestReportQuotesWhatARestartChanged(t *testing.T) {
+	failure := failingRun()
+	failure.Differences = []invariant.Difference{
+		{Object: "v1/ConfigMap widget-0", ResourceVersions: [2]string{"11", "21"},
+			Path: `metadata.annotations["probe.example.com/started-at"]`, Before: `"1"`, After: `"2"`},
+		{Object: "v1/ConfigMap widget-1", ResourceVersions: [2]string{"", "22"}, Path: "(object)", Before: "(absent)", After: "(present)"},
+	}
+	failure.DifferencesTotal = 3
+	failure.Compared = "the state converged after op 0 (create) and the one after op 2 (settle)"
+
+	md, encoded := write(t, failure)
+
+	body := section(md, "What changed across the restart")
+	for _, want := range []string{
+		"The violation quotes 2 of 3 differences between the state converged after op 0 (create) and the one after op 2 (settle). " +
+			"`equalIgnore` takes each path as written, and `objects.jsonl` holds every version the Observer saw.\n",
+		"| object | resourceVersion | path | before | after |\n",
+		"| v1/ConfigMap widget-0 | 11 → 21 | `metadata.annotations[\"probe.example.com/started-at\"]` | `\"1\"` | `\"2\"` |\n",
+		"| v1/ConfigMap widget-1 | (absent) → 22 | `(object)` | `(absent)` | `(present)` |\n",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("The section is\n%s\nwant it to hold %q.", body, want)
+		}
+	}
+	if strings.Index(md, "## What changed across the restart") > strings.Index(md, "## Sequence") {
+		t.Errorf("The report is\n%s\nwant what changed ahead of the sequence.", md)
+	}
+	var carried []invariant.Difference
+	if err := json.Unmarshal([]byte(field(t, encoded, "differences")), &carried); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(carried, failure.Differences) {
+		t.Errorf("report.json holds %+v, want %+v.", carried, failure.Differences)
+	}
+	if got := field(t, encoded, "differencesTotal"); got != "3" {
+		t.Errorf("report.json counts %s differences, want 3.", got)
+	}
+	if got := field(t, encoded, "compared"); got != `"`+failure.Compared+`"` {
+		t.Errorf("report.json says it compared %s, want %q.", got, failure.Compared)
+	}
+}
+
+func TestReportBoundsTheDifferencesItWasHanded(t *testing.T) {
+	failure := failingRun()
+	for i := range 25 {
+		failure.Differences = append(failure.Differences, invariant.Difference{Object: "v1/ConfigMap widget-0", Path: fmt.Sprintf("data.k%02d", i)})
+	}
+
+	md, encoded := write(t, failure)
+
+	body := section(md, "What changed across the restart")
+	if !strings.Contains(body, "The violation quotes 20 of 25 differences.") {
+		t.Errorf("The section is\n%s\nwant it to say it quotes 20 of 25 differences.", body)
+	}
+	if !strings.Contains(body, "`data.k19`") || strings.Contains(body, "`data.k20`") {
+		t.Errorf("The section is\n%s\nwant the first 20 differences.", body)
+	}
+	if got := field(t, encoded, "differencesTotal"); got != "25" {
+		t.Errorf("report.json counts %s differences, want 25.", got)
+	}
+}
+
+// A table cell holds a value whatever it quotes.
+func TestReportQuotesAValueAsCode(t *testing.T) {
+	failure := failingRun()
+	failure.Differences = []invariant.Difference{{Object: "v1/ConfigMap widget-0", Path: "data.a`", Before: `"a|b"`, After: `"*x*"`}}
+
+	md, _ := write(t, failure)
+
+	if want := "| `` data.a` `` | `\"a\\|b\"` | `\"*x*\"` |"; !strings.Contains(md, want) {
+		t.Errorf("The report is\n%s\nwant the row to end %q.", md, want)
+	}
+}
+
 func TestReportOmitsTheSectionsWithNothingToSay(t *testing.T) {
 	md, encoded := write(t, failingRun())
 
-	for _, absent := range []string{"## Requests", "## Object versions", "## Managed objects at the verdict", "## Notes"} {
+	for _, absent := range []string{"## Requests", "## Object versions", "## Managed objects at the verdict", "## Notes", "## What changed across the restart"} {
 		if strings.Contains(md, absent) {
 			t.Errorf("The report holds an empty %q section:\n%s", absent, md)
 		}
 	}
-	for _, absent := range []string{"requests", "versions", "managed", "managedTotal", "notes"} {
+	for _, absent := range []string{"requests", "versions", "managed", "managedTotal", "notes", "differences", "differencesTotal", "compared"} {
 		if strings.Contains(encoded, `"`+absent+`"`) {
 			t.Errorf("report.json holds an empty %q:\n%s", absent, encoded)
 		}

@@ -434,6 +434,64 @@ func TestTheChecksQuoteWhatTheRunDid(t *testing.T) {
 	}
 }
 
+func TestTheChecksNameWhatARestartChanged(t *testing.T) {
+	for _, c := range []struct {
+		changed []string
+		clause  string
+	}{
+		{[]string{"a"}, `data.a was "0", is "1"`},
+		{[]string{"a", "b"}, `data.a was "0", is "1" (1 of 2 differences)`},
+	} {
+		t.Run(c.clause, func(t *testing.T) {
+			store := history()
+			recordWidget(store, at(0.1), "11", 1)
+			recordData(store, at(0.2), "12", map[string]any{"a": "0", "b": "0"})
+			after := map[string]any{"a": "0", "b": "0"}
+			for _, key := range c.changed {
+				after[key] = "1"
+			}
+			recordData(store, at(3.5), "22", after)
+			in := Input{
+				Target:  checkTarget(),
+				Objects: store,
+				Timeline: Timeline{
+					Ops: []AppliedOp{appliedOp(0, OpCreate, at(0)), appliedOp(1, OpRestart, at(3)), appliedOp(2, OpSettle, at(3.1))},
+					Checkpoints: []Checkpoint{
+						{At: at(2.1), Op: 0, Converged: true},
+						{At: at(5.1), Op: 2, Converged: true},
+					},
+				},
+			}
+
+			violations := checked(t, in)
+
+			if ids := ids(violations); len(ids) != 1 || ids[0] != "G5" {
+				t.Fatalf("The checks reported %v, want G5 alone.", ids)
+			}
+			restart := violations[0]
+			if len(restart.Differences) != len(c.changed) || restart.DifferencesTotal != len(c.changed) {
+				t.Errorf("G5 carried out %+v of %d differences, want %d.", restart.Differences, restart.DifferencesTotal, len(c.changed))
+			}
+			if want := "the state converged after op 0 (create) and the one after op 2 (settle)"; restart.Compared != want {
+				t.Errorf("G5 carried out that it compared %q, want %q.", restart.Compared, want)
+			}
+			if !strings.HasPrefix(restart.Evidence, c.clause+"; ") {
+				t.Errorf("G5's evidence is %q, want it to open with %q.", restart.Evidence, c.clause)
+			}
+		})
+	}
+}
+
+// recordData records the ConfigMap widget-0 holding the data.
+func recordData(store *observe.Store, when time.Time, resourceVersion string, data map[string]any) {
+	child := &unstructured.Unstructured{Object: map[string]any{"data": data}}
+	child.SetGroupVersionKind(configMapKind)
+	child.SetNamespace(fakeNamespace)
+	child.SetName("widget-0")
+	child.SetResourceVersion(resourceVersion)
+	store.Record(configMapKind, child, when)
+}
+
 // A property that cannot be evaluated is a configuration error, never a
 // finding (DESIGN.md §8.4).
 func TestTheChecksReportAPropertyThatCannotBeEvaluated(t *testing.T) {

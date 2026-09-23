@@ -91,6 +91,11 @@ type Violation struct {
 	// leaves the total nil (DESIGN.md §5.7, D39).
 	Managed      []observe.Version
 	ManagedTotal *int
+	// Differences are what G5 found changed across a restart, DifferencesTotal
+	// how many there were, and Compared names the two states.
+	Differences      []invariant.Difference
+	DifferencesTotal int
+	Compared         string
 }
 
 // quotingRequests carries an excerpt of the request log into the violation

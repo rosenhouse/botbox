@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -17,6 +18,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/report"
@@ -1103,6 +1105,38 @@ func TestTheReportQuotesTheStateAtTheVerdict(t *testing.T) {
 				t.Errorf("report.json is\n%s\nwant the count of the objects the target managed.", encoded)
 			}
 		})
+	}
+}
+
+func TestTheReportSaysWhatARestartChanged(t *testing.T) {
+	violation := run.Violation{
+		ID: "G5", Statement: "the v1/ConfigMap widget-0 changed across the Restart at op 1 (restart)",
+		Differences:      []invariant.Difference{{Object: "v1/ConfigMap widget-0", ResourceVersions: [2]string{"11", "21"}, Path: "data.index", Before: `"0"`, After: `"1"`}},
+		DifferencesTotal: 7,
+		Compared:         "the state converged after op 0 (create) and the one after op 2 (settle)",
+	}
+	session := &fakeSession{results: []run.Result{{Violation: &violation}}}
+
+	code, _, stderr := invokeWith(t, session, countingGenerator(nil, run.OpSettle),
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d, want %d: %s", code, exitViolation, stderr)
+	}
+	encoded, err := os.ReadFile(filepath.Join(session.dirs[0], report.JSONFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var carried struct {
+		Differences      []invariant.Difference
+		DifferencesTotal int
+		Compared         string
+	}
+	if err := json.Unmarshal(encoded, &carried); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(carried.Differences, violation.Differences) || carried.DifferencesTotal != 7 || carried.Compared != violation.Compared {
+		t.Errorf("report.json is\n%s\nwant the differences the violation carried.", encoded)
 	}
 }
 

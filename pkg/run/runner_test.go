@@ -2050,6 +2050,27 @@ func TestACrashLoopIsAG4ThatQuotesTheLastExit(t *testing.T) {
 	}
 }
 
+// One exit is evidence too.
+func TestAG4QuotesTheOneExitSinceTheTargetConverged(t *testing.T) {
+	h := crashLoop()
+	h.settles = []bool{true, false}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(0)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	want := `the target exited 1 time since it last converged, last with exit status 2 after writing ` +
+		`"panic: runtime error: integer divide by zero"`
+	if result.Violation == nil || !strings.Contains(result.Violation.Evidence, want) {
+		t.Errorf("The run reported %+v, want a G4 whose evidence says %q.", result.Violation, want)
+	}
+}
+
 // A target that converges after it exited passes, and the exit is noted.
 func TestATargetThatConvergesAfterItExitedPasses(t *testing.T) {
 	h := crashLoop()
@@ -2121,21 +2142,25 @@ func TestAnExitWhileTheTeardownAwaitsRecoveryIsTheTeardowns(t *testing.T) {
 }
 
 // The teardown judges the deletion of a target that exited during it, and the
-// note says where the exit came.
+// note says where the exit came. The teardown begins as it clears the faults.
 func TestAnExitDuringTheTeardownIsNotedAsSuch(t *testing.T) {
-	h := crashLoop()
-	h.exitsInWait, h.stopsAfter, h.says = 0, "deleteCR widget", nil
-	check := &fakeChecker{}
+	for _, call := range []string{"clearFaults", "deleteCR widget"} {
+		t.Run(call, func(t *testing.T) {
+			h := crashLoop()
+			h.exitsInWait, h.stopsAfter, h.says = 0, call, nil
+			check := &fakeChecker{}
 
-	result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+			result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
 
-	if err != nil {
-		t.Fatalf("The run failed: %v", err)
-	}
-	if want := "the target exited during the teardown with exit status 2"; !slices.Contains(result.Notes, want) {
-		t.Errorf("The run noted %q, want %q.", result.Notes, want)
-	}
-	if got := checkpointsAt(result.Timeline); !slices.Equal(got, []int{0, Teardown}) {
-		t.Errorf("The run checkpointed at %v, want the deletion judged too.", got)
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if want := "the target exited during the teardown with exit status 2"; !slices.Contains(result.Notes, want) {
+				t.Errorf("The run noted %q, want %q.", result.Notes, want)
+			}
+			if got := checkpointsAt(result.Timeline); !slices.Equal(got, []int{0, Teardown}) {
+				t.Errorf("The run checkpointed at %v, want the deletion judged too.", got)
+			}
+		})
 	}
 }

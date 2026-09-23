@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/metadata/fake"
+	"k8s.io/client-go/metadata/metadatainformer"
 	"k8s.io/client-go/rest"
 	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
@@ -450,6 +451,33 @@ func TestASweepIsRetriedAfterAFailedCall(t *testing.T) {
 			t.Fatal("The collector never swept again after a call to the API server failed.")
 		case <-time.After(retryDelay / 10):
 		}
+	}
+}
+
+func TestStopNamesTheOwnersTheSweepItCutShortCouldNotResolve(t *testing.T) {
+	c, client, _ := fakeCollector(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	c.cancel = cancel
+	c.informers = metadatainformer.NewSharedInformerFactory(client, noResync)
+	reading := make(chan struct{})
+	client.PrependReactor("get", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+		close(reading)
+		<-ctx.Done()
+		return true, nil, ctx.Err()
+	})
+	child := configMapObject("child", "uid-child", configMapOwner("parent", "uid-parent"), secretOwner("tls"))
+	c.watched = map[schema.GroupKind]watchedKind{
+		configMapKind.GroupKind(): {kind: configMapKind, resource: configMapResource, store: seededStore(t, child.meta)},
+	}
+	go c.run(ctx)
+	c.notify()
+	<-reading
+
+	got := c.Stop()
+
+	want := []Unresolved{{DependentKind: configMapKind, DependentName: "child", OwnerKind: secretKind, OwnerName: "tls"}}
+	if !slices.Equal(got, want) {
+		t.Errorf("Stop returned %+v, want %+v.", got, want)
 	}
 }
 

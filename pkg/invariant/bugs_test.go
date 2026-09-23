@@ -32,7 +32,7 @@ func TestTheSeededBugsTripTheChecksTheCatalogNames(t *testing.T) {
 		{bug: "B5", catalog: []string{"G1", "G6"}, fires: []string{"G1", "G4", "G6"}, in: b5()},
 		{bug: "B6", catalog: []string{"G1", "G2"}, fires: []string{"G1", "G2", "G4"}, in: b6()},
 		{bug: "B7", catalog: []string{"G4"}, fires: []string{"G4"}, in: b7()},
-		{bug: "B8", catalog: []string{"G5", "P1"}, fires: []string{"G5", "P1"}, in: b8()},
+		{bug: "B8", catalog: []string{"G5", "G7", "P1"}, fires: []string{"G5", "G7", "P1"}, in: b8()},
 		{bug: "B9", catalog: []string{"G3"}, fires: []string{"G3", "G4"}, in: b9()},
 		{bug: "B10", catalog: []string{"G4"}, fires: []string{"G4", "P1"}, in: b10()},
 	} {

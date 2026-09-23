@@ -203,7 +203,7 @@ type Check func(Input) (Result, error)
 
 // Generic returns the invariants of DESIGN.md §6, in ID order.
 func Generic() []Check {
-	return []Check{BoundedReconciliation, NoChurn, CleanDeletion, Convergence, RestartStable, NoErrorLoop}
+	return []Check{BoundedReconciliation, NoChurn, CleanDeletion, Convergence, RestartStable, NoErrorLoop, SelfHealing}
 }
 
 // Evaluate runs every generic invariant and every property the target

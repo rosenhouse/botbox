@@ -182,12 +182,62 @@ func TestRunner(t *testing.T) {
 		}
 	})
 
+	// B8 never recreates the child botbox deleted, and the toy's P1 is not
+	// what catches it.
+	t.Run("fails G7 where b8.json deletes a child B8 never recreates", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		toy.Launch.Args = append(toy.Launch.Args, "--bug=8")
+		toy.Properties = nil
+		sequence, err := run.ReadSequence(repoRoot + "/targets/toy-widget/sequences/b8.json")
+		if err != nil {
+			t.Fatalf("Reading the sequence failed: %v", err)
+		}
+
+		result, err := run.Run(ctx, toy, sequence, run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation == nil || result.Violation.ID != "G7" {
+			t.Fatalf("The run reported %v, want G7.", result.Violation)
+		}
+		if want := "the v1/ConfigMap widget-0 that op 1 (deleteManaged) deleted never came back"; !strings.HasPrefix(result.Violation.Statement, want) {
+			t.Errorf("G7 says %q, want it to begin %q.", result.Violation.Statement, want)
+		}
+	})
+
+	t.Run("passes the toy without a bug on b8.json", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		sequence, err := run.ReadSequence(repoRoot + "/targets/toy-widget/sequences/b8.json")
+		if err != nil {
+			t.Fatalf("Reading the sequence failed: %v", err)
+		}
+
+		result, err := run.Run(ctx, toy, sequence, run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy runs without a bug.", result.Violation)
+		}
+		if len(result.Notes) > 0 {
+			t.Errorf("The run noted %q, want every check to judge.", result.Notes)
+		}
+	})
+
 	// B8 never recreates the child botbox deleted until a restart does. P1
-	// would end the run before the restart, so the target declares none.
+	// and G7 would end the run before the restart, so the target declares no
+	// property and leaves ConfigMaps deleted.
 	t.Run("names what the restart of b8.json brought back", func(t *testing.T) {
 		toy := loadTarget(t, binary)
 		toy.Launch.Args = append(toy.Launch.Args, "--bug=8")
 		toy.Properties = nil
+		toy.NotRecreated = toy.Manages
 		sequence, err := run.ReadSequence(repoRoot + "/targets/toy-widget/sequences/b8.json")
 		if err != nil {
 			t.Fatalf("Reading the sequence failed: %v", err)

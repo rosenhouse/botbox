@@ -276,14 +276,18 @@ service accounts appear, and no pods run. Consequences:
 
 - **Garbage-collector emulation.** In envtest mode botbox runs a minimal collector over
   the run namespace: it deletes a managed object that has at least one ownerReference
-  once every owner in its `ownerReferences` is gone; an object with none is never touched. An owner is resolved by (apiVersion, kind, name) in the run
-  namespace and then by UID; a name match with a different UID counts as gone. An owner of
-  a kind botbox does not watch is treated as live, so the emulator never deletes an object
-  whose owners it cannot resolve; it logs each unresolved reference once per run. The
-  emulator is watch-driven and deletes within 1 s of the owner's deletion event. It does
-  not patch dangling ownerReferences off a dependent that still has a live owner.
-  `blockOwnerDeletion`, foreground and orphan policies are not modelled. Its writes bypass
-  the proxy and never count as target traffic. On a kubeconfig cluster it is off.
+  once every owner in its `ownerReferences` is gone; an object with none is never touched.
+  Like kube's garbage collector, it maps a reference's apiVersion and kind through
+  discovery, so any version the API server serves resolves. It then finds the owner by
+  (group, kind, name) in the run namespace and compares the UID; a name match with a
+  different UID counts as gone. An owner of a kind botbox does not watch, or named at a
+  version the API server does not serve, is treated as live, so the emulator never deletes
+  an object whose owners it cannot resolve. The run notes each unresolved reference once
+  per object that carries it (§6). The emulator is watch-driven and deletes within 1 s of
+  the owner's deletion event. It does not patch dangling ownerReferences off a dependent
+  that still has a live owner. `blockOwnerDeletion`, foreground and orphan policies are
+  not modelled. Its writes bypass the proxy and never count as target traffic. On a
+  kubeconfig cluster it is off.
 - **Self-cleanup.** The Runner empties the run namespace itself (§5.5, step 4).
 - **No admission webhooks.** See §8.3.
 
@@ -365,7 +369,10 @@ deletion whose deadline the run did not reach, that a fault reached into, or tha
 took an object inside, G5 for a `Restart` missing a snapshot or with a change of botbox's
 or a fault between its snapshots. The Runner carries the last checkpoint's notes out and
 `botbox` prints them at the end of the run, because a check that was skipped otherwise
-reads like one that passed.
+reads like one that passed. G5 also notes an `equalIgnore` path it could not follow
+(§8.1), since it then compares a field the target meant it to skip. The Runner also notes
+each ownerReference the collector could not resolve (§5.8), since the object that carries
+it stays, and G3 would report it without saying why.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
@@ -387,8 +394,12 @@ Snapshots are keyed by kind and name.
 **G5 equality.** The default ignores exactly `metadata.resourceVersion`, `metadata.uid`,
 `metadata.creationTimestamp`, `metadata.generation`, `metadata.managedFields`,
 `status.conditions[*].lastTransitionTime`, and any ownerReference whose owner no longer
-exists. It compares everything else, including labels, annotations, finalizers and the
-remaining ownerReferences. A target excludes further paths with `equalIgnore` (§8.1).
+exists. G5 finds an owner by group, kind and name, whatever version the reference names,
+and then by UID. It compares everything else, including labels, annotations, finalizers
+and the remaining ownerReferences. A target excludes further paths with `equalIgnore`,
+written in the form of the paths above (§8.1). Along an ignored path, a map or a list
+left empty counts as absent, so an ignored annotation that only one side carries compares
+equal. An item that `[*]` names stays even when left empty, so the items still count.
 
 ## 7. Sequence format
 
@@ -494,9 +505,31 @@ that writes then expires. Loading such a target is a configuration error rather 
 that reports G4 against a target that did nothing wrong.
 
 `manages` names kinds as `group/version/Kind`, with `v1/Kind` for the core group. An
-optional `selector` (label selector) refines attribution (§6). Paths under `generate` and
-in `equalIgnore` are dotted paths into the object. A Go hook may replace the equality
-predicate as `equal: go:<name>` (§8.4).
+optional `selector` (label selector) refines attribution (§6). Paths under `generate` are
+dotted schema property names, which the CRD schema validates. A Go hook may replace the
+equality predicate as `equal: go:<name>` (§8.4). A hook takes no `equalIgnore`, since
+nothing would read it.
+
+`equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
+holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
+and `[*]` names every item of a list or value of a map:
+
+```yaml
+equalIgnore:
+  - status.lastSyncTime
+  - metadata.annotations["probe.example.com/started-at"]
+  - status.conditions[*].lastHeartbeatTime
+```
+
+YAML gives `[`, `]`, `: ` and ` #` meanings of their own, so the list is written in block
+style, and a path that starts with `[` or holds `: ` or ` #` goes in single quotes. The
+loader refuses a malformed path, naming the offset. It refuses a list index such as `[0]`,
+since a restart can reorder a list. It refuses a key that the dots split where it can
+tell: a key outside brackets that holds `/`, such as the `io/name` of
+`app.kubernetes.io/name`, and a path that goes more than one step below the `labels` or
+`annotations` of any `metadata`, which map keys to strings. A key names nothing inside a
+list, and only an object shows where a list is. G5 therefore notes a key that meets a list
+and names the path with `[*]` in its place (§6).
 
 A property's `when` says where it is evaluated: `always` on every Observer event before
 the teardown boundary (§6), `checkpoint` at each checkpoint (§4), `end` at the last
@@ -1130,3 +1163,21 @@ built from source and run as a black-box binary.
   earlier than its last convergence. The Runner's waits and the engine share the rule, and
   the teardown's recovery wait is judged as an op's wait is. This is the teardown that
   settles first that D32 deferred, for faults only.
+- **D@42 `equalIgnore` paths have a grammar that the loader checks.** A dotted path
+  cannot name an annotation key, which holds dots, and the loader accepted a path that
+  named nothing. `["key"]` quotes a key as a CEL map index does, and `[*]` follows §6 and
+  kubectl's JSONPath. A child created after the operator started carries no annotation
+  until a restart stamps one, so an empty map or list along an ignored path counts as
+  absent. `generate` keeps dotted schema property names, which the schema already checks.
+  A key that meets a list is a note and not a configuration error, because `equalIgnore`
+  applies to every managed kind, and one kind's list can be another kind's map.
+- **D@43 An owner resolves through any served version, and an unresolved one is a run
+  note.** An operator that migrates between API versions can name its owner at `v1alpha1`
+  while the target declares `v1`. The collector keyed an owner by its apiVersion, so it
+  kept that child, G3 fired on a correct controller, and only a warning on stderr said why.
+  kube's garbage collector maps a reference's apiVersion and kind through discovery and
+  then compares the UID. The collector now does the same with the run's RESTMapper. A
+  version the API server does not serve stays unresolved, because kube's collector cannot
+  resolve it either. G5 has no mapper, so it ignores the version. Each unresolved reference
+  is a run note that names the object it keeps, because G3 reports that object and the
+  report is what a reader acts on.

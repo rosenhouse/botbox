@@ -13,6 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -274,6 +275,9 @@ type harness interface {
 	// stopped if it is not.
 	targetStatus() launch.Status
 	stop(ctx context.Context) error
+	// unresolvedOwners names each owner the collector could not resolve. It
+	// is complete once stop has returned.
+	unresolvedOwners() []cluster.Unresolved
 }
 
 // runner executes one sequence. It always tears the run down.
@@ -751,7 +755,21 @@ func (r *runner) teardown(ctx context.Context) error {
 			strings.Join(forced, ", ")))
 	}
 	failures = append(failures, err, r.h.empty(ctx), r.h.stop(ctx))
+	for _, owner := range r.h.unresolvedOwners() {
+		r.skipped = append(r.skipped, unresolvedNote(owner))
+	}
 	return errors.Join(failures...)
+}
+
+// unresolvedNote says why the collector kept an object: it counts an owner it
+// cannot resolve as live.
+func unresolvedNote(u cluster.Unresolved) string {
+	why := "it does not watch " + kindName(u.OwnerKind)
+	if u.Unserved {
+		why = "the API server does not serve " + kindName(u.OwnerKind)
+	}
+	return fmt.Sprintf("botbox's garbage collector never deletes %s %s, because %s, the kind of its owner %s",
+		kindName(u.DependentKind), u.DependentName, why, u.OwnerName)
 }
 
 // teardownCheckpoint judges the deletion window, unless the target stopped: a

@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -51,6 +52,8 @@ type fakeHarness struct {
 	count   int
 	forced  []string
 	fail    map[string]error
+	// unresolved is what the collector reports once the harness has stopped.
+	unresolved []cluster.Unresolved
 
 	// deleteCRDelay holds the CR delete open, and deletedCRAt is when it began.
 	// Together they show whether the teardown was stamped before the delete.
@@ -205,6 +208,13 @@ func (f *fakeHarness) forceFinalizers(context.Context) ([]string, error) {
 func (f *fakeHarness) empty(context.Context) error { return f.record("empty") }
 func (f *fakeHarness) objects() *observe.Store     { return f.store }
 func (f *fakeHarness) stop(context.Context) error  { return f.record("stop") }
+
+func (f *fakeHarness) unresolvedOwners() []cluster.Unresolved {
+	if !slices.Contains(f.calls, "stop") {
+		return nil
+	}
+	return f.unresolved
+}
 
 // requests grows with the run, so that a log sampled late is longer than one
 // sampled at a checkpoint. Each entry the run adds names the call it followed.
@@ -1280,6 +1290,37 @@ func TestRunCarriesTheNotesTheLastCheckpointLeft(t *testing.T) {
 	if want := check.notes[1]; !slices.Equal(result.Notes, want) {
 		t.Errorf("The run carried the notes %v, want %v: each checkpoint reads the whole run so far.",
 			result.Notes, want)
+	}
+}
+
+// A child the collector keeps would fail G3 with no reason given.
+func TestRunNotesEachOwnerTheCollectorCouldNotResolve(t *testing.T) {
+	h := newFakeHarness()
+	h.unresolved = []cluster.Unresolved{
+		{
+			DependentKind: configMapKind, DependentName: "widget-cfg",
+			OwnerKind: schema.GroupVersionKind{Group: "toy.botbox", Version: "v1alpha9", Kind: "Widget"}, OwnerName: "widget",
+			Unserved: true,
+		},
+		{
+			DependentKind: schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, DependentName: "widget-tls",
+			OwnerKind: schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, OwnerName: "issuer",
+		},
+	}
+	check := &fakeChecker{notes: [][]string{nil, {"G3 is not evaluated for the deletion of widget"}}}
+
+	result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	want := []string{
+		"botbox's garbage collector never deletes v1/ConfigMap widget-cfg, because the API server does not serve toy.botbox/v1alpha9/Widget, the kind of its owner widget",
+		"botbox's garbage collector never deletes v1/Secret widget-tls, because it does not watch apps/v1/Deployment, the kind of its owner issuer",
+		"G3 is not evaluated for the deletion of widget",
+	}
+	if !slices.Equal(result.Notes, want) {
+		t.Errorf("The run carried the notes\n\t%q\nwant\n\t%q", result.Notes, want)
 	}
 }
 

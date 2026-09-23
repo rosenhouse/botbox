@@ -1,14 +1,17 @@
 package invariant_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
+	"github.com/rosenhouse/botbox/pkg/target"
 )
 
 // restartRun converges at 5s, restarts the target at 10s and converges again
@@ -88,10 +91,65 @@ func TestG5IgnoresThePathsSection6Names(t *testing.T) {
 	}
 }
 
-func TestG5IgnoresAnOwnerReferenceWhoseOwnerIsGone(t *testing.T) {
-	in := restarted(child("w-0", "11", ownedByGhost), child("w-0", "21", orphaned))
+func TestG5CountsAnEmptyConditionListAsNone(t *testing.T) {
+	noConditions := func(u *unstructured.Unstructured) { u.Object["status"] = map[string]any{"conditions": []any{}} }
+	in := restarted(child("w-0", "11", noConditions), child("w-0", "21"))
 
 	silent(t, invariant.RestartStable, in)
+}
+
+func TestG5IgnoresAnOwnerReferenceWhoseOwnerIsGone(t *testing.T) {
+	for _, gone := range []struct {
+		kind  string
+		owner option
+	}{
+		{"the primary kind", ownedByGhost},
+		{"a managed kind", ownedBy(metav1.OwnerReference{APIVersion: "v1", Kind: "ConfigMap", Name: "gone", UID: "uid-gone"})},
+	} {
+		t.Run(gone.kind, func(t *testing.T) {
+			in := restarted(child("w-0", "11", gone.owner), child("w-0", "21", orphaned))
+
+			silent(t, invariant.RestartStable, in)
+		})
+	}
+}
+
+// An ownerReference may name any version the API server serves.
+func TestG5IgnoresADanglingOwnerReferenceThatNamesAnotherVersion(t *testing.T) {
+	live := metav1.OwnerReference{APIVersion: "toy.botbox/v1", Kind: "Widget", Name: widgetName, UID: widgetUID}
+	for _, dangling := range []struct {
+		name string
+		ref  metav1.OwnerReference
+	}{
+		{"the owner is gone", metav1.OwnerReference{APIVersion: "toy.botbox/v1alpha1", Kind: "Widget", Name: "gone", UID: "uid-gone"}},
+		{"the owner's name has a new UID", metav1.OwnerReference{APIVersion: "toy.botbox/v1alpha1", Kind: "Widget", Name: widgetName, UID: "uid-w-before"}},
+	} {
+		t.Run(dangling.name, func(t *testing.T) {
+			in := restarted(child("w-0", "11", ownedBy(dangling.ref, live)), child("w-0", "21", ownedBy(live)))
+
+			silent(t, invariant.RestartStable, in)
+		})
+	}
+}
+
+func TestG5ComparesALiveOwnerReferenceThatNamesAnotherVersion(t *testing.T) {
+	live := metav1.OwnerReference{APIVersion: "toy.botbox/v1alpha1", Kind: "Widget", Name: widgetName, UID: widgetUID}
+	in := restarted(child("w-0", "11", ownedBy(live)), child("w-0", "21", orphaned))
+
+	fired(t, invariant.RestartStable, in)
+}
+
+// botbox cannot tell that an owner of a kind the target does not declare is
+// gone.
+func TestG5ComparesAnOwnerReferenceOfAnUndeclaredKind(t *testing.T) {
+	absent := metav1.OwnerReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "absent", UID: "uid-absent"}
+	in := restarted(child("w-0", "11", ownedBy(absent)), child("w-0", "21", orphaned))
+
+	fired(t, invariant.RestartStable, in)
+}
+
+func ownedBy(refs ...metav1.OwnerReference) option {
+	return func(u *unstructured.Unstructured) { u.SetOwnerReferences(refs) }
 }
 
 func TestG5ComparesEverythingElse(t *testing.T) {
@@ -118,10 +176,107 @@ func TestG5ComparesEverythingElse(t *testing.T) {
 }
 
 func TestG5IgnoresThePathsTheTargetExcludes(t *testing.T) {
-	in := restarted(child("w-0", "11", data("0")), child("w-0", "21", data("1")))
-	in.Target.EqualIgnore = []string{"data.index"}
+	in := restarted(
+		child("w-0", "11", data("0"), annotations(map[string]string{startedAt: "1"})),
+		child("w-0", "21", data("1"), annotations(map[string]string{startedAt: "2"})))
+	in.Target.EqualIgnore = []target.Path{
+		target.MustParsePath("data.index"),
+		target.MustParsePath(`metadata.annotations["` + startedAt + `"]`),
+	}
 
 	silent(t, invariant.RestartStable, in)
+}
+
+// The owner's UID is what tells a live owner from a dangling reference, so
+// G5 reads it before it ignores it.
+func TestG5ComparesALiveOwnerWhoseUIDItIgnores(t *testing.T) {
+	in := restarted(child("w-0", "11", ownedByWidget), child("w-0", "21", orphaned))
+	in.Target.EqualIgnore = []target.Path{target.MustParsePath("metadata.ownerReferences[*].uid")}
+
+	fired(t, invariant.RestartStable, in)
+}
+
+const startedAt = "probe.example.com/started-at"
+
+func annotations(values map[string]string) option {
+	return func(u *unstructured.Unstructured) { u.SetAnnotations(values) }
+}
+
+func TestG5IgnoresAnAnnotationWhoseKeyHoldsADot(t *testing.T) {
+	for _, stamped := range []struct {
+		name          string
+		before, after option
+	}{
+		{"again", annotations(map[string]string{startedAt: "1", "note": "a"}), annotations(map[string]string{startedAt: "2", "note": "a"})},
+		{"only by the restart", nothing, annotations(map[string]string{startedAt: "2"})},
+	} {
+		t.Run(stamped.name, func(t *testing.T) {
+			in := restarted(child("w-0", "11", stamped.before), child("w-0", "21", stamped.after))
+			in.Target.EqualIgnore = []target.Path{target.MustParsePath(`metadata.annotations["` + startedAt + `"]`)}
+
+			silent(t, invariant.RestartStable, in)
+		})
+	}
+}
+
+func TestG5ComparesTheAnnotationsTheTargetDoesNotIgnore(t *testing.T) {
+	in := restarted(
+		child("w-0", "11", annotations(map[string]string{startedAt: "1", "note": "a"})),
+		child("w-0", "21", annotations(map[string]string{startedAt: "2", "note": "b"})))
+	in.Target.EqualIgnore = []target.Path{target.MustParsePath(`metadata.annotations["` + startedAt + `"]`)}
+
+	fired(t, invariant.RestartStable, in)
+}
+
+// conditions sets two conditions, each with the heartbeat and the message.
+func conditions(heartbeat time.Duration, message string) option {
+	return func(u *unstructured.Unstructured) {
+		stamp := at(heartbeat).Format(time.RFC3339)
+		u.Object["status"] = map[string]any{"conditions": []any{
+			map[string]any{"type": "Ready", "status": "True", "lastHeartbeatTime": stamp, "message": message},
+			map[string]any{"type": "Synced", "status": "True", "lastHeartbeatTime": stamp, "message": message},
+		}}
+	}
+}
+
+func TestG5IgnoresAFieldOfEveryCondition(t *testing.T) {
+	heartbeats := []target.Path{target.MustParsePath("status.conditions[*].lastHeartbeatTime")}
+
+	t.Run("the ignored field", func(t *testing.T) {
+		in := restarted(child("w-0", "11", conditions(0, "ok")), child("w-0", "21", conditions(12*time.Second, "ok")))
+		in.Target.EqualIgnore = heartbeats
+
+		if notes := silent(t, invariant.RestartStable, in).Notes; len(notes) > 0 {
+			t.Errorf("G5 noted %v, want nothing.", notes)
+		}
+	})
+	t.Run("another field", func(t *testing.T) {
+		in := restarted(child("w-0", "11", conditions(0, "ok")), child("w-0", "21", conditions(12*time.Second, "retrying")))
+		in.Target.EqualIgnore = heartbeats
+
+		fired(t, invariant.RestartStable, in)
+	})
+}
+
+func TestG5NotesEachIgnoredKeyThatMeetsAList(t *testing.T) {
+	in := restarted(child("w-0", "11", conditions(0, "ok")), child("w-0", "21", conditions(12*time.Second, "ok")))
+	in.Target.EqualIgnore = []target.Path{
+		target.MustParsePath("status.conditions.lastHeartbeatTime"),
+		target.MustParsePath("metadata.ownerReferences.uid"),
+	}
+
+	result := evaluate(t, invariant.RestartStable, in)
+
+	if len(result.Violations) != 1 {
+		t.Errorf("G5 reported %v, want the heartbeat it could not ignore.", statements(result))
+	}
+	want := []string{
+		"G5 could not follow equalIgnore status.conditions.lastHeartbeatTime: status.conditions is a list; write status.conditions[*].lastHeartbeatTime; a path with brackets goes in a block-style list",
+		"G5 could not follow equalIgnore metadata.ownerReferences.uid: metadata.ownerReferences is a list; write metadata.ownerReferences[*].uid; a path with brackets goes in a block-style list",
+	}
+	if !slices.Equal(result.Notes, want) {
+		t.Errorf("G5 noted %q, want %q.", result.Notes, want)
+	}
 }
 
 func TestG5UsesTheTargetsOwnEquality(t *testing.T) {

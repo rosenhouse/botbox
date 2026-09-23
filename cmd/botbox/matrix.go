@@ -114,7 +114,7 @@ func (c *cli) exerciseUnder(ctx context.Context, s session, t *target.Target, ro
 		return checked{}, fmt.Errorf("%s: %w", ran, err)
 	}
 	var found checked
-	var notes []string
+	notes := slices.Clone(result.Notes)
 	for _, check := range results {
 		if len(check.Violations) > 0 {
 			found.fired = append(found.fired, check.ID)

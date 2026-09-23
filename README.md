@@ -167,6 +167,17 @@ window sits inside the settle budget, so the controller has `settle - stable` to
 writing. A `stable` at least as wide as `settle` leaves it none, so botbox refuses to load
 that target rather than reporting G4 against your controller.
 
+envtest runs no garbage collector, so botbox runs its own over the kinds your target
+declares. It deletes an object once every owner the object names is gone. It finds an owner
+by group, kind and name, at any version the API server serves, and then compares the UID.
+It counts as live an owner of a kind your target does not declare, or one named at a version
+the API server does not serve, so it never deletes an object that names one. The run prints
+a note for each such object and owner, and the report carries it. A real garbage collector
+cannot resolve an unserved version either, so fix that reference in your controller. If your
+controller creates an owner of an undeclared kind, add the kind to `manages`. Otherwise,
+point `botbox run --kubeconfig` at a cluster such as kind, whose garbage collector resolves
+every kind.
+
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the
 controller's back. A sequence you write yourself can also carry a `fault`, which makes the
@@ -196,6 +207,23 @@ safety net. Where it allows more than your controller does, `generate.mutate`
 lists the only paths a sequence changes and `generate.overlay` tightens one path's schema, as
 `examples/cert-manager/target.yaml` does. Naming a path botbox cannot draw from is a
 configuration error, not a silent skip ([DESIGN.md §8.3](DESIGN.md#83-generation-constraints-and-admission-webhooks)).
+
+G5 compares what your controller manages before and after a restart. It already skips what
+every restart moves, such as `metadata.resourceVersion`. If your controller stamps a field of
+its own at startup, name it in `equalIgnore`. Quote a key that holds a dot or a slash, and write
+`[*]` for every item of a list:
+
+```yaml
+equalIgnore:
+  - metadata.annotations["example.com/started-at"]
+  - status.conditions[*].lastHeartbeatTime
+```
+
+Keep the list in block style, because YAML claims the brackets inside a one-line `[...]` list.
+botbox refuses a list index such as `[0]`, and a label or annotation key that the dots split,
+when it loads the target ([DESIGN.md §8.1](DESIGN.md#81-targetyaml)). A key names nothing
+inside a list, so a run notes a path such as `status.conditions.lastHeartbeatTime` and says
+where the `[*]` goes.
 
 A sequence file runs as written and is never minimized. This is
 `examples/cert-manager/sequences/issue.json`, reflowed ([DESIGN.md §7](DESIGN.md#7-sequence-format)):

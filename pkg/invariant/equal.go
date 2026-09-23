@@ -1,27 +1,35 @@
 package invariant
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/rosenhouse/botbox/pkg/observe"
+	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// ignoredMetadata are the metadata fields the §6 default equality ignores.
-// It compares everything else, labels, annotations, ownerReferences and
-// finalizers among them.
-var ignoredMetadata = []string{"resourceVersion", "uid", "creationTimestamp", "generation", "managedFields"}
+// ignoredByDefault are the paths the default equality ignores. It compares
+// everything else, labels, annotations, ownerReferences and finalizers among
+// them.
+var ignoredByDefault = []target.Path{
+	target.MustParsePath("metadata.resourceVersion"),
+	target.MustParsePath("metadata.uid"),
+	target.MustParsePath("metadata.creationTimestamp"),
+	target.MustParsePath("metadata.generation"),
+	target.MustParsePath("metadata.managedFields"),
+	target.MustParsePath("status.conditions[*].lastTransitionTime"),
+}
 
 // equality compares the snapshots around one Restart. A target that declares
 // a hook replaces the whole predicate (DESIGN.md §8.4); otherwise this is the
 // §6 default, which needs both snapshots to tell a live owner from a dangling
 // reference.
-func (in Input) equality(before, after state) func(a, b observe.Version) bool {
+func (in Input) equality(before, after state, out *Result) func(a, b observe.Version) bool {
 	if in.Target.Equal != nil {
 		return func(a, b observe.Version) bool {
 			return in.Target.Equal(snapshot(a), snapshot(b))
@@ -30,8 +38,8 @@ func (in Input) equality(before, after state) func(a, b observe.Version) bool {
 	liveBefore, liveAfter := in.owners(before), in.owners(after)
 	return func(a, b observe.Version) bool {
 		return reflect.DeepEqual(
-			in.comparable(a.Object, liveBefore),
-			in.comparable(b.Object, liveAfter),
+			in.comparable(a.Object, liveBefore, out),
+			in.comparable(b.Object, liveAfter, out),
 		)
 	}
 }
@@ -41,61 +49,48 @@ func snapshot(v observe.Version) observe.Snapshot {
 }
 
 // comparable reduces an object to what §6 compares.
-func (in Input) comparable(obj *unstructured.Unstructured, live ownerSet) map[string]any {
+func (in Input) comparable(obj *unstructured.Unstructured, live ownerSet, out *Result) map[string]any {
 	content := obj.DeepCopy().Object
-	metadata, _, _ := unstructured.NestedMap(content, "metadata")
-	for _, field := range ignoredMetadata {
-		delete(metadata, field)
+	for _, path := range ignoredByDefault {
+		path.Remove(content)
 	}
+	metadata, _ := content["metadata"].(map[string]any)
 	live.pruneDangling(metadata)
-	delete(content, "metadata")
-	if len(metadata) > 0 {
-		content["metadata"] = metadata
-	}
-	dropTransitionTimes(content)
 	for _, path := range in.Target.EqualIgnore {
-		unstructured.RemoveNestedField(content, strings.Split(path, ".")...)
+		if err := path.Remove(content); err != nil {
+			out.noteOnce(fmt.Sprintf("%s could not follow equalIgnore %s: %v", out.ID, path, err))
+		}
 	}
 	return content
 }
 
-// dropTransitionTimes removes status.conditions[*].lastTransitionTime, which
-// moves whenever a controller re-decides the same condition.
-func dropTransitionTimes(content map[string]any) {
-	conditions, found, err := unstructured.NestedFieldNoCopy(content, "status", "conditions")
-	if !found || err != nil {
-		return
-	}
-	entries, ok := conditions.([]any)
-	if !ok {
-		return
-	}
-	for _, entry := range entries {
-		if condition, ok := entry.(map[string]any); ok {
-			delete(condition, "lastTransitionTime")
-		}
+func (out *Result) noteOnce(note string) {
+	if !slices.Contains(out.Notes, note) {
+		out.Notes = append(out.Notes, note)
 	}
 }
 
-// ownerSet holds the owners a snapshot can resolve, the way the collector
-// resolves them: by apiVersion, kind and name, then by UID (DESIGN.md §5.8).
+// ownerSet holds the owners a snapshot can resolve: by group, kind and name,
+// whatever version a reference names, then by UID.
 type ownerSet struct {
 	uids map[ownerKey]types.UID
 	// watched are the kinds botbox observes. An owner of any other kind is
 	// unresolvable, so it counts as live.
-	watched map[ownerKey]bool
+	watched map[schema.GroupKind]bool
 }
 
-type ownerKey struct{ apiVersion, kind, name string }
+type ownerKey struct {
+	kind schema.GroupKind
+	name string
+}
 
 func (in Input) owners(s state) ownerSet {
-	set := ownerSet{uids: map[ownerKey]types.UID{}, watched: map[ownerKey]bool{}}
+	set := ownerSet{uids: map[ownerKey]types.UID{}, watched: map[schema.GroupKind]bool{}}
 	for _, gvk := range append([]schema.GroupVersionKind{in.Target.Primary}, in.Target.Manages...) {
-		set.watched[ownerKey{apiVersion: gvk.GroupVersion().String(), kind: gvk.Kind}] = true
+		set.watched[gvk.GroupKind()] = true
 	}
 	for _, v := range s.live {
-		key := ownerKey{apiVersion: v.GVK.GroupVersion().String(), kind: v.GVK.Kind, name: v.Name}
-		set.uids[key] = v.UID
+		set.uids[ownerKey{kind: v.GVK.GroupKind(), name: v.Name}] = v.UID
 	}
 	return set
 }
@@ -119,8 +114,9 @@ func (o ownerSet) pruneDangling(metadata map[string]any) {
 }
 
 func (o ownerSet) exists(ref map[string]any) bool {
-	key := ownerKey{apiVersion: text(ref["apiVersion"]), kind: text(ref["kind"]), name: text(ref["name"])}
-	if !o.watched[ownerKey{apiVersion: key.apiVersion, kind: key.kind}] {
+	gvk := schema.FromAPIVersionAndKind(text(ref["apiVersion"]), text(ref["kind"]))
+	key := ownerKey{kind: gvk.GroupKind(), name: text(ref["name"])}
+	if !o.watched[key.kind] {
 		return true // botbox does not watch the kind, so it cannot say the owner is gone.
 	}
 	uid, found := o.uids[key]

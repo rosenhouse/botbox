@@ -1,5 +1,5 @@
 # The toy's CRD and sample, managing every kind whose status envtest never
-# changes, and two kinds whose status it does. Nothing launches this target.
+# changes, and two kinds outside that list. Nothing launches this target.
 name: toy-widget
 crds:
   - ../../../../targets/toy-widget/crds/

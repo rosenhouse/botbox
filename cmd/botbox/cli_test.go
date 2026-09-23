@@ -45,11 +45,14 @@ type fakeSession struct {
 	// writesNothing leaves the run directory unmade, as a run that fails
 	// before it starts does.
 	writesNothing bool
-	sequences     []run.Sequence
-	checks        []run.Checker
-	dirs          []string
-	args          [][]string
-	closed        bool
+	// stderrAtOpen is what botbox had printed on stderr when it opened the
+	// session.
+	stderrAtOpen string
+	sequences    []run.Sequence
+	checks       []run.Checker
+	dirs         []string
+	args         [][]string
+	closed       bool
 }
 
 func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
@@ -102,9 +105,12 @@ func invokeCtx(t *testing.T, ctx context.Context, fake *fakeSession,
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	c := &cli{
-		stdout:       &stdout,
-		stderr:       &stderr,
-		open:         func(options, *target.Target) (session, error) { return fake, nil },
+		stdout: &stdout,
+		stderr: &stderr,
+		open: func(options, *target.Target) (session, error) {
+			fake.stderrAtOpen = stderr.String()
+			return fake, nil
+		},
 		newGenerator: newGenerator,
 	}
 	return c.main(ctx, args), stdout.String(), stderr.String()
@@ -1249,7 +1255,8 @@ func TestAnEnvtestInvocationWarnsOnceOfTheWorkloadsItManages(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			args := append([]string{"run", "--out", t.TempDir(), "--runs", "3"}, test.args...)
 
-			code, _, stderr := invoke(t, &fakeSession{}, args...)
+			session := &fakeSession{}
+			code, _, stderr := invoke(t, session, args...)
 
 			if code != exitOK {
 				t.Fatalf("botbox run exited %d: %s", code, stderr)
@@ -1265,6 +1272,10 @@ func TestAnEnvtestInvocationWarnsOnceOfTheWorkloadsItManages(t *testing.T) {
 			if !test.warns {
 				return
 			}
+			if session.stderrAtOpen != stderr {
+				t.Errorf("botbox run had printed %q when it opened the session, want the warning %q first.",
+					session.stderrAtOpen, stderr)
+			}
 			// The target also manages a ConfigMap and an example.com Deployment.
 			static := ": Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob, ReplicationController, Pod, PersistentVolumeClaim."
 			for _, want := range []string{static, "--kubeconfig", "kind cluster"} {
@@ -1277,31 +1288,42 @@ func TestAnEnvtestInvocationWarnsOnceOfTheWorkloadsItManages(t *testing.T) {
 }
 
 func TestAG4ReportFromEnvtestRepeatsTheWorkloadWarning(t *testing.T) {
+	const runNote = "G3 is not evaluated for the deletion of widget"
 	for _, test := range []struct {
-		name, check string
-		args        []string
-		notes       bool
+		name, check, target string
+		args                []string
+		repeats             bool
 	}{
-		{name: "G4 on envtest", check: "G4", notes: true},
-		{name: "G4 on a kubeconfig cluster", check: "G4", args: []string{"--kubeconfig", "kind.kubeconfig"}},
-		{name: "G3 on envtest", check: "G3"},
+		{name: "G4 on envtest", check: "G4", target: workloadsTargetYAML, repeats: true},
+		{name: "G4 on a kubeconfig cluster", check: "G4", target: workloadsTargetYAML, args: []string{"--kubeconfig", "kind.kubeconfig"}},
+		{name: "G4 with no workloads", check: "G4", target: toyTargetYAML},
+		{name: "G3 on envtest", check: "G3", target: workloadsTargetYAML},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			violation := run.Violation{ID: test.check}
-			session := &fakeSession{results: []run.Result{{Violation: &violation}}}
-			args := append([]string{"replay", "--target", workloadsTargetYAML, "--out", t.TempDir()}, test.args...)
+			session := &fakeSession{results: []run.Result{{Violation: &violation, Notes: []string{runNote}}}}
+			args := append([]string{"replay", "--target", test.target, "--out", t.TempDir()}, test.args...)
 
 			code, _, stderr := invoke(t, session, append(args, writeSequence(t, 1))...)
 
 			if code != exitViolation {
 				t.Fatalf("botbox replay exited %d, want %d: %s", code, exitViolation, stderr)
 			}
-			written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+			want := []string{runNote}
+			if test.repeats {
+				warning, _ := strings.CutPrefix(strings.TrimSuffix(stderr, "\n"), "botbox: ")
+				want = append(want, warning)
+			}
+			encoded, err := os.ReadFile(filepath.Join(session.dirs[0], report.JSONFile))
 			if err != nil {
 				t.Fatal(err)
 			}
-			if noted := strings.Contains(string(written), "kubelet"); noted != test.notes {
-				t.Errorf("The report is\n%s\nand says what envtest never runs: %v, want %v.", written, noted, test.notes)
+			var carried struct{ Notes []string }
+			if err := json.Unmarshal(encoded, &carried); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(carried.Notes, want) {
+				t.Errorf("report.json carries the notes %q, want %q.", carried.Notes, want)
 			}
 		})
 	}

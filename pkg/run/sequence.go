@@ -88,8 +88,8 @@ type Action struct {
 	Drop  bool     `json:"drop,omitempty"`
 }
 
-// Trigger ends a fault at an op index, after a count of matched requests, or
-// after a duration (DESIGN.md §5.2).
+// Trigger ends a fault at an op index, once it has applied to a count of
+// requests, or after a duration (DESIGN.md §5.2).
 type Trigger struct {
 	Op    *int     `json:"op,omitempty"`
 	Count int      `json:"count,omitempty"`

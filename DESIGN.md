@@ -135,7 +135,7 @@ Responsibilities:
 type FaultSpec struct {
     Match  RequestMatcher // verb, resource, name pattern, fraction
     Action FaultAction    // Error{code}, Delay{d}, Drop{}, DropWatchEvents{kinds}
-    Until  Trigger        // op index, duration, or count of matched requests
+    Until  Trigger        // op index, duration, or count of requests it applied to
 }
 ```
 

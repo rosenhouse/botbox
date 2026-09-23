@@ -156,9 +156,10 @@ window sits inside the settle budget, so the controller has `settle - stable` to
 writing. A `stable` at least as wide as `settle` leaves it none, so botbox refuses to load
 that target rather than reporting G4 against your controller.
 
-Each run creates its own namespace. The kubeconfig botbox hands your controller names it,
-and botbox substitutes it for `$NAMESPACE` in `launch.args` and in `launch.env`, which sets
-your controller's environment. An operator-sdk operator reads its namespace from there:
+Each run creates its own namespace, and the kubeconfig botbox hands your controller names
+it. botbox also substitutes it for `$NAMESPACE` in `launch.args` and in `launch.env`, which
+sets variables for your controller. An operator-sdk operator watches the namespace that
+`WATCH_NAMESPACE` names:
 
 ```yaml
 launch:

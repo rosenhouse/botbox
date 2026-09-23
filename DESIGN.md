@@ -110,8 +110,8 @@ Implementations:
   `$NAMESPACE`, the run namespace, in `launch.args` and in the values of `launch.env`.
   `launch.env` sets variables over the environment the target inherits from botbox, and
   may not set `KUBECONFIG`. The target's stdout and stderr go to `target.log` in the run
-  directory. `Restart` sends SIGKILL, waits for the
-  process to be reaped, then execs again, so fixed ports and lock files are released.
+  directory. `Restart` sends SIGKILL, waits for the process to be reaped, then execs
+  again, so fixed ports and lock files are released.
   botbox does not probe the target for health; the settle wait after the first op absorbs
   startup.
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
@@ -248,8 +248,9 @@ evidence (request log excerpt, object version timeline), the target and versions
 seed, and a one-line replay command. That command repeats the target, the kubeconfig and
 every launch argument the run had, quoted so that `sh` and `zsh` read each word as
 written. It does not record what the target inherits from botbox's environment, so a
-target declares what it needs in `launch.env` (§8.1). The run directory also holds recordings of the run (§11), so a report can be
-re-examined without re-running. A readiness verdict and a
+target declares what it needs in `launch.env` (§8.1). The run directory also holds
+recordings of the run (§11), so a report can be re-examined without re-running. A
+readiness verdict and a
 property violation also quote the state of the objects the target managed where it failed,
 in a table of its own, bounded on its own, and say how many there were: a child the
 target never created has no version to quote, and the count is what a report about a
@@ -512,10 +513,10 @@ that writes then expires. Loading such a target is a configuration error rather 
 that reports G4 against a target that did nothing wrong.
 
 `launch.env` sets environment variables for the target, over those it inherits from botbox.
-Its values and `launch.args` take two placeholders: `$KUBECONFIG`, the kubeconfig botbox
-writes, and `$NAMESPACE`, the run namespace, which that kubeconfig also names (§5.1).
-botbox sets no namespace variable of its own, because frameworks name it differently. An
-operator-sdk operator declares:
+Its values and `launch.args` take two placeholders: `$KUBECONFIG`, the path of the
+kubeconfig botbox writes, and `$NAMESPACE`, the run namespace, which that kubeconfig also
+names (§5.1). botbox sets no namespace variable of its own, because frameworks name it
+differently. An operator-sdk operator declares:
 
 ```yaml
 launch:
@@ -1211,10 +1212,11 @@ built from source and run as a black-box binary.
   namespace (§5.5), and an operator-sdk operator watches only `WATCH_NAMESPACE`. botbox
   substituted only `$KUBECONFIG`, and its kubeconfig named no namespace, so such an
   operator watched the wrong one and every run failed G4 with 0 managed objects. The
-  placeholder `$NAMESPACE` and the key `launch.env` now carry the run namespace, and the
-  kubeconfig's context names it, which kube-rs, clientcmd and kubectl read unconfigured.
-  botbox exports no `WATCH_NAMESPACE` of its own, because the name differs by framework
-  and operator-sdk reads an empty one as every namespace. The target still inherits
-  botbox's environment, since it may need `PATH`, `HOME` or proxy settings, but the replay
-  command does not record it. `launch.env` is in the target file, which the replay reads.
-  The toy reads `WATCH_NAMESPACE`, so every toy run depends on the substitution.
+  placeholder `$NAMESPACE` and the key `launch.env` now carry the run namespace. The
+  kubeconfig's context names it too, and kube-rs, clientcmd and kubectl read it there with
+  no configuration. botbox exports no `WATCH_NAMESPACE` of its own, because the name
+  differs by framework and operator-sdk reads an empty one as every namespace. The target
+  still inherits botbox's environment, since it may need `PATH`, `HOME` or proxy settings,
+  but the replay command does not record it. `launch.env` is in the target file, which
+  the replay reads. The toy reads `WATCH_NAMESPACE`, so every toy run depends on the
+  substitution.

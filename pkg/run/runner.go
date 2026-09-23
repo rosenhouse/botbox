@@ -301,11 +301,12 @@ type runner struct {
 	failed  bool
 	// cr is the primary CR the CR ops act on.
 	cr     string
-	faults []activeFault
+	faults []heldFault
 }
 
-// activeFault is a fault op's fault while the proxy applies it.
-type activeFault struct {
+// heldFault is a fault op's fault. The Runner holds it to read its window from
+// the proxy.
+type heldFault struct {
 	id proxy.FaultID
 	// until is the op index the fault ends at, or nil if only the proxy's own
 	// trigger ends it (DESIGN.md §5.2).
@@ -626,7 +627,7 @@ func (r *runner) violate(violation Violation) {
 // where the proxy first applies it, which may be never (D36).
 func (r *runner) inject(op Op) {
 	r.timeline.Faults = append(r.timeline.Faults, Window{})
-	r.faults = append(r.faults, activeFault{
+	r.faults = append(r.faults, heldFault{
 		id:     r.h.addFault(op.Fault.spec()),
 		until:  op.Fault.Until.Op,
 		window: len(r.timeline.Faults) - 1,
@@ -643,7 +644,7 @@ func (r *runner) expireFaults(op int) {
 		}
 	}
 	r.readFaultWindows()
-	r.faults = slices.DeleteFunc(r.faults, func(fault activeFault) bool { return fault.retired })
+	r.faults = slices.DeleteFunc(r.faults, func(fault heldFault) bool { return fault.retired })
 }
 
 // readFaultWindows writes what the proxy has done with each fault into the

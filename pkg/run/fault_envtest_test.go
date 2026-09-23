@@ -5,6 +5,7 @@ package run_test
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -77,6 +78,72 @@ func TestAFaultMakesTheToyFailAnInvariantItOtherwisePasses(t *testing.T) {
 		t.Errorf("The control reports %+v, so the %s the faulted run found is not the fault's.",
 			clean.Violation, found.Violation.ID)
 	}
+}
+
+// The toy with no bug retries a refused create, backing off as it goes, so it
+// recovers once the fault stops, however the fault stopped. B11 never asks
+// again. fault.json is the README's example: the teardown clears its fault.
+func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
+	ctx := t.Context()
+	binary := buildToy(t)
+	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
+	const example = "../../targets/toy-widget/sequences/fault.json"
+	runUnder := func(t *testing.T, launchArgs []string, sequence run.Sequence) run.Result {
+		t.Helper()
+		toy := loadTarget(t, binary)
+		toy.Launch.Args = append(toy.Launch.Args, launchArgs...)
+		result, err := run.Run(ctx, toy, sequence, run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		return result
+	}
+	readExample := func(t *testing.T) run.Sequence {
+		t.Helper()
+		sequence, err := run.ReadSequence(example)
+		if err != nil {
+			t.Fatalf("Reading the sequence failed: %v", err)
+		}
+		return sequence
+	}
+
+	t.Run("after the teardown clears the fault", func(t *testing.T) {
+		result := runUnder(t, nil, readExample(t))
+
+		if result.Violation != nil {
+			t.Errorf("The run reported %v, and the toy with no bug recovers.", result.Violation)
+		}
+		if recovery := result.Timeline.Recovery; recovery == nil || !recovery.Converged {
+			t.Errorf("The teardown recorded the recovery %+v, want a wait that converged.", recovery)
+		}
+	})
+
+	t.Run("after the fault runs out inside a settle wait", func(t *testing.T) {
+		// Ten refusals back the toy off for 2.56s before its next create,
+		// which then needs T_stable of quiet: more than T_settle after the
+		// update.
+		sequence := readExample(t)
+		sequence.Ops[1].Fault.Until.Count = 10
+
+		result := runUnder(t, nil, sequence)
+
+		if result.Violation != nil {
+			t.Errorf("The run reported %v, and the toy with no bug recovers.", result.Violation)
+		}
+		settle := loadTarget(t, binary).Timeouts.Settle
+		if wait := result.Timeline.Ops[2].Settled; wait == nil || wait.Window.End.Sub(wait.Window.Start) <= settle {
+			t.Errorf("The update's wait was %+v, want one that ran past T_settle of %v.", wait, settle)
+		}
+	})
+
+	t.Run("never, under a bug that never asks again", func(t *testing.T) {
+		result := runUnder(t, []string{seededBugB11}, readExample(t))
+
+		if result.Violation == nil || result.Violation.ID != "G4" ||
+			!strings.Contains(result.Violation.Statement, "after the last fault stopped") {
+			t.Errorf("The run reported %v, want the G4 of the wait after the last fault stopped.", result.Violation)
+		}
+	})
 }
 
 // configMapCreates counts what the toy asked the API server to create and how

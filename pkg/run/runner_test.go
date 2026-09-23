@@ -1283,6 +1283,9 @@ func TestTheTeardownReportsNoCleanWhenTheNamespaceStaysDirty(t *testing.T) {
 		t.Errorf("The timeline reports the namespace clean at %v, and the teardown never saw it empty.",
 			result.Timeline.Cleaned)
 	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %v, and a namespace that stays dirty is for G3 to judge.", result.Violation)
+	}
 }
 
 // The checks name what they could not judge, and the run carries it out, so

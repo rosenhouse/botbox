@@ -197,6 +197,12 @@ func TestReady(t *testing.T) {
 		return false, &target.EvalError{Predicate: "ready", Expr: "status.ready", Err: fmt.Errorf("%w: it yielded int64", target.ErrNotBool)}
 	}
 	widget := observe.Version{Object: &unstructured.Unstructured{}}
+	named := func(name string) observe.Version {
+		cr := &unstructured.Unstructured{}
+		cr.SetName(name)
+		return observe.Version{Object: cr}
+	}
+	holdsOnReady := func(cr *unstructured.Unstructured) (bool, error) { return cr.GetName() == "ready", nil }
 
 	for _, test := range []struct {
 		name      string
@@ -207,6 +213,7 @@ func TestReady(t *testing.T) {
 	}{
 		{name: "it holds on the one CR", predicate: holds, observed: []observe.Version{widget}, want: true},
 		{name: "it fails on one of two CRs", predicate: fails, observed: []observe.Version{widget, widget}},
+		{name: "it fails on the second of two CRs", predicate: holdsOnReady, observed: []observe.Version{named("ready"), named("unready")}},
 		{name: "it cannot be evaluated", predicate: errs, observed: []observe.Version{widget}},
 		{name: "no CR is left to be ready", predicate: fails, want: true},
 		{name: "it yields no bool", predicate: yieldsAnInt, observed: []observe.Version{widget}, wantErr: true},

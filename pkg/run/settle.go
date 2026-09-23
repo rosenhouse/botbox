@@ -97,8 +97,7 @@ func (h *Harness) state(since time.Time) (bool, time.Time, error) {
 
 // ready reports whether the predicate holds on every primary CR observed. An
 // evaluation error means "not ready", and a result that is not a bool is a
-// configuration error (DESIGN.md §8.4). A run whose CR is gone has nothing
-// left to be ready.
+// configuration error. A run whose CR is gone has nothing left to be ready.
 func ready(predicate target.ReadyFunc, observed []observe.Version) (bool, error) {
 	for _, cr := range observed {
 		ready, err := predicate(cr.Object)

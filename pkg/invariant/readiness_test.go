@@ -180,8 +180,8 @@ func TestAnExpiredWaitQuotesNoRequestMadeAfterIt(t *testing.T) {
 	}
 }
 
-// DESIGN.md §8.4 makes a ready that yields a non-bool a configuration error,
-// wherever it is first evaluated.
+// A ready that yields a non-bool is a configuration error wherever it is first
+// evaluated.
 func TestAReadyThatYieldsNoBoolIsAConfigurationError(t *testing.T) {
 	for name, r := range map[string]*run{
 		"at a deadline":      unreadyCreate(0, 1),

@@ -171,7 +171,7 @@ func TestApplyFixturesResolvesThroughTheHarnessMapper(t *testing.T) {
 }
 
 // A settle wait ends at the first reading of a ready that yields no bool,
-// rather than waiting out T_settle on it.
+// rather than waiting out settle on it.
 func TestTheHarnessReadsAReadyThatYieldsNoBoolAsAnError(t *testing.T) {
 	store := observe.NewStore(observe.Options{Namespace: "botbox-run-x"})
 	store.Record(widgetKind, widget("widget"), time.Now())

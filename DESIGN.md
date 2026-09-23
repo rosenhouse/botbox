@@ -105,9 +105,12 @@ type Launcher interface {
 Implementations:
 
 - `Binary` — the primary launcher and the only one required through M6. Exec a local
-  binary. botbox writes a kubeconfig whose server is the proxy URL, exports it as
-  `KUBECONFIG`, and substitutes `$KUBECONFIG` in `launch.args`. The target's stdout and
-  stderr go to `target.log` in the run directory. `Restart` sends SIGKILL, waits for the
+  binary. botbox writes a kubeconfig whose server is the proxy URL and whose context names
+  the run namespace, and exports it as `KUBECONFIG`. It substitutes `$KUBECONFIG` and
+  `$NAMESPACE`, the run namespace, in `launch.args` and in the values of `launch.env`.
+  `launch.env` sets variables over the environment the target inherits from botbox, and
+  may not set `KUBECONFIG`. The target's stdout and stderr go to `target.log` in the run
+  directory. `Restart` sends SIGKILL, waits for the
   process to be reaped, then execs again, so fixed ports and lock files are released.
   botbox does not probe the target for health; the settle wait after the first op absorbs
   startup.
@@ -244,7 +247,8 @@ how many of its ops the run reached, the violated invariant or property with the
 evidence (request log excerpt, object version timeline), the target and versions, the
 seed, and a one-line replay command. That command repeats the target, the kubeconfig and
 every launch argument the run had, quoted so that `sh` and `zsh` read each word as
-written. The run directory also holds recordings of the run (§11), so a report can be
+written. It does not record what the target inherits from botbox's environment, so a
+target declares what it needs in `launch.env` (§8.1). The run directory also holds recordings of the run (§11), so a report can be
 re-examined without re-running. A readiness verdict and a
 property violation also quote the state of the objects the target managed where it failed,
 in a table of its own, bounded on its own, and say how many there were: a child the
@@ -507,6 +511,19 @@ window has to open. A `stable` at least as wide as `settle` leaves it none, and 
 that writes then expires. Loading such a target is a configuration error rather than a run
 that reports G4 against a target that did nothing wrong.
 
+`launch.env` sets environment variables for the target, over those it inherits from botbox.
+Its values and `launch.args` take two placeholders: `$KUBECONFIG`, the kubeconfig botbox
+writes, and `$NAMESPACE`, the run namespace, which that kubeconfig also names (§5.1).
+botbox sets no namespace variable of its own, because frameworks name it differently. An
+operator-sdk operator declares:
+
+```yaml
+launch:
+  binary: bin/manager
+  env:
+    WATCH_NAMESPACE: $NAMESPACE
+```
+
 `manages` names kinds as `group/version/Kind`, with `v1/Kind` for the core group. An
 optional `selector` (label selector) refines attribution (§6). Paths under `generate` are
 dotted schema property names, which the CRD schema validates. A Go hook may replace the
@@ -637,6 +654,8 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   present. In CEL, `!has(status.ready) || status.ready <= managed.filter(o, o.kind ==
   "ConfigMap").size()`.
 - `timeouts: {settle: 5s, stable: 2s, delete: 10s}`. The toy converges in milliseconds.
+- The toy watches only `WATCH_NAMESPACE` where it is set, and its target sets it to
+  `$NAMESPACE` (§8.1).
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 
@@ -793,8 +812,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   seed opens a directory in the same second. Each failing run writes `run-<n>/` under it
   with `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl`,
   `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
-  where the deadline ended the shrink pass before its result could be run there. Passing
-  runs are not persisted.
+  where the deadline ended the shrink pass before its result could be run there. The
+  `kubeconfig` names the proxy and the run namespace. Passing runs are not persisted.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -1188,3 +1207,14 @@ built from source and run as a black-box binary.
   fault by its spec, so a spent fault displaced an equal one, and the toy with no bug failed
   G4. Each fault has an ID, and a removed fault keeps its window. The Runner drops a fault
   once its window is closed, so a request faulted just before a removal stays in it.
+- **D@37 A target learns the run namespace from botbox.** Each run takes a fresh
+  namespace (§5.5), and an operator-sdk operator watches only `WATCH_NAMESPACE`. botbox
+  substituted only `$KUBECONFIG`, and its kubeconfig named no namespace, so such an
+  operator watched the wrong one and every run failed G4 with 0 managed objects. The
+  placeholder `$NAMESPACE` and the key `launch.env` now carry the run namespace, and the
+  kubeconfig's context names it, which kube-rs, clientcmd and kubectl read unconfigured.
+  botbox exports no `WATCH_NAMESPACE` of its own, because the name differs by framework
+  and operator-sdk reads an empty one as every namespace. The target still inherits
+  botbox's environment, since it may need `PATH`, `HOME` or proxy settings, but the replay
+  command does not record it. `launch.env` is in the target file, which the replay reads.
+  The toy reads `WATCH_NAMESPACE`, so every toy run depends on the substitution.

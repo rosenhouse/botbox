@@ -156,6 +156,21 @@ window sits inside the settle budget, so the controller has `settle - stable` to
 writing. A `stable` at least as wide as `settle` leaves it none, so botbox refuses to load
 that target rather than reporting G4 against your controller.
 
+Each run creates its own namespace. The kubeconfig botbox hands your controller names it,
+and botbox substitutes it for `$NAMESPACE` in `launch.args` and in `launch.env`, which sets
+your controller's environment. An operator-sdk operator reads its namespace from there:
+
+```yaml
+launch:
+  binary: bin/manager
+  env:
+    WATCH_NAMESPACE: $NAMESPACE
+```
+
+Your controller also inherits botbox's environment, but a report's replay command does not
+record it. Declare what your controller needs in `launch.env`, so that a replay reproduces
+the run.
+
 envtest runs no garbage collector, so botbox runs its own over the kinds your target
 declares. It deletes an object once every owner the object names is gone. It finds an owner
 by group, kind and name, at any version the API server serves, and then compares the UID.
@@ -247,7 +262,7 @@ target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `requests.jsonl` — every request the target made, as the proxy saw it.
 - `objects.jsonl` — every version of every object the Observer saw.
 - `target.log` — the target's own output.
-- `kubeconfig` — what the target was pointed at, which is the proxy and not the cluster.
+- `kubeconfig` — what the target was pointed at: the proxy, not the cluster, and the run namespace.
 
 The report quotes the last twenty requests and the last twenty object versions the check
 chose from, says how many that was, and names the file holding the rest. A G4 or a

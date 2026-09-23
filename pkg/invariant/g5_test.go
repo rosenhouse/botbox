@@ -151,6 +151,80 @@ func TestG5QuotesAnAnnotationKeyThatHoldsADot(t *testing.T) {
 	}
 }
 
+// A map only one version holds compares as an empty one, so a restart's first
+// stamp names its own key.
+func TestG5NamesEachKeyOfAMapOnlyOneVersionHolds(t *testing.T) {
+	stamped := annotations(map[string]string{startedAt: "1"})
+	nested := func(u *unstructured.Unstructured) {
+		u.Object["spec"] = map[string]any{"a": map[string]any{"b": int64(1)}, "c": map[string]any{}}
+	}
+	for _, c := range []struct {
+		name          string
+		before, after option
+		want          [][3]string
+	}{
+		{"a stamp the restart added", nothing, stamped, [][3]string{{`metadata.annotations["` + startedAt + `"]`, "(absent)", `"1"`}}},
+		{"a stamp the restart dropped", stamped, nothing, [][3]string{{`metadata.annotations["` + startedAt + `"]`, `"1"`, "(absent)"}}},
+		{"nested maps", nothing, nested, [][3]string{{"spec.a.b", "(absent)", "1"}, {"spec.c", "(absent)", "{}"}}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := restarted(child("w-0", "11", c.before), child("w-0", "21", c.after))
+
+			violation := fired(t, invariant.RestartStable, in)
+
+			var got [][3]string
+			for _, d := range violation.Differences {
+				got = append(got, [3]string{d.Path, d.Before, d.After})
+			}
+			if !slices.Equal(got, c.want) {
+				t.Errorf("G5 quoted %q, want %q.", got, c.want)
+			}
+		})
+	}
+}
+
+// Ignoring a path G5 prints drops its rows and those below it, and keeps every
+// row that is neither above nor below it.
+func TestG5PrintsNoPathBroaderThanItsRow(t *testing.T) {
+	rapid.Check(t, func(rt *rapid.T) {
+		in := restarted(child("w-0", "11", drawnFields(rt, "before")), child("w-0", "21", drawnFields(rt, "after")))
+		was := differences(rt, in)
+		if len(was) == 0 {
+			return
+		}
+		ignored := target.MustParsePath(rapid.SampledFrom(was).Draw(rt, "ignored").Path)
+		in.Target.EqualIgnore = []target.Path{ignored}
+		is := differences(rt, in)
+		for _, d := range is {
+			if below(d.Path, ignored) {
+				rt.Fatalf("Ignoring %s left %+v.", ignored, d)
+			}
+		}
+		for _, d := range was {
+			if !below(d.Path, ignored) && !below(ignored.String(), target.MustParsePath(d.Path)) && !slices.Contains(is, d) {
+				rt.Fatalf("Ignoring %s dropped %+v; G5 then quoted %+v.", ignored, d, is)
+			}
+		}
+	})
+}
+
+func differences(rt *rapid.T, in invariant.Input) []invariant.Difference {
+	result, err := invariant.RestartStable(in)
+	if err != nil {
+		rt.Fatal(err)
+	}
+	if len(result.Violations) == 0 {
+		return nil
+	}
+	return result.Violations[0].Differences
+}
+
+// below reports whether path is ancestor or a path under it.
+func below(path string, ancestor target.Path) bool {
+	p := target.MustParsePath(path)
+	return len(p) >= len(ancestor) && slices.Equal(p[:len(ancestor)], ancestor)
+}
+
 // Ignoring each path G5 prints leaves fewer differences, until none remain.
 func TestG5PrintsPathsThatEqualIgnoreTakes(t *testing.T) {
 	rapid.Check(t, func(rt *rapid.T) {
@@ -300,8 +374,9 @@ func TestG5QuotesAValueAsCompactJSON(t *testing.T) {
 		value any
 		want  string
 	}{
-		{"a map", map[string]any{"b": int64(1), "a": "<&>"}, `{"a":"<&>","b":1}`},
+		{"a list", []any{map[string]any{"b": int64(1), "a": "<&>"}}, `[{"a":"<&>","b":1}]`},
 		{"a long string", strings.Repeat("é", 100), `"` + strings.Repeat("é", 79) + "…"},
+		{"null", nil, "null"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			in := restarted(child("w-0", "11"), child("w-0", "21", func(u *unstructured.Unstructured) { u.Object["spec"] = c.value }))

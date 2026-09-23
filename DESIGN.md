@@ -1212,7 +1212,9 @@ built from source and run as a black-box binary.
   changed and whether it belonged in `equalIgnore`. G5 now diffs the forms it compared,
   after the default and `equalIgnore` reductions, so nothing it ignores appears. A path
   writes a list item as `[*]` and ends at a label or an annotation, so every path pastes
-  into `equalIgnore`; a list whose length changed is one row. One violation covers
+  into `equalIgnore`; a list whose length changed is one row. A map only one version holds
+  compares as an empty one, so a stamp on a child that had no annotations (D45) names its
+  key, and pasting it leaves the other annotations compared. One violation covers
   every object a restart changed, because a run keeps its first violation and one per object
   hid the rest. The bound takes each object's rows in turn, so one noisy object does not
   crowd out the others. G5 is stamped at the state after the restart, where it judged. A

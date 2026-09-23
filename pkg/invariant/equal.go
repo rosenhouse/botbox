@@ -41,7 +41,7 @@ func (in Input) differ(before, after state, out *Result) func(object Difference,
 	liveBefore, liveAfter := in.owners(before), in.owners(after)
 	return func(object Difference, a, b observe.Version) []Difference {
 		was, is := in.comparable(a.Object, liveBefore, out), in.comparable(b.Object, liveAfter, out)
-		changes := diff(nil, was, is, observe.Redacted(a.GVK, was), observe.Redacted(b.GVK, is), nil)
+		changes := diff(nil, side{was, observe.Redacted(a.GVK, was), true}, side{is, observe.Redacted(b.GVK, is), true}, nil)
 		differences := make([]Difference, len(changes))
 		for i, c := range changes {
 			differences[i] = c.difference(object)

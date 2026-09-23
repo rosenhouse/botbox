@@ -109,13 +109,11 @@ func differencesLine(differences []invariant.Difference, total int, compared str
 		quoted += " between " + compared
 	}
 	held := "`objects.jsonl` holds every version the Observer saw.\n\n"
-	if slices.ContainsFunc(differences, namesAField) {
+	if slices.ContainsFunc(differences, invariant.Difference.NamesAField) {
 		held = "`equalIgnore` takes each path as written, and " + held
 	}
 	return "The violation quotes " + quoted + ". " + held
 }
-
-func namesAField(d invariant.Difference) bool { return d.Path != "" }
 
 // count writes a number of things, in the singular where there is one.
 func count(n int, noun string) string {
@@ -154,7 +152,7 @@ func differenceRows(differences []invariant.Difference) [][]string {
 	rows := make([][]string, len(differences))
 	for i, d := range differences {
 		path := "(whole object)"
-		if namesAField(d) {
+		if d.NamesAField() {
 			path = code(d.Path)
 		}
 		rows[i] = []string{

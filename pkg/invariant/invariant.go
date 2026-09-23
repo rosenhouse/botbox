@@ -178,6 +178,16 @@ type Difference struct {
 	After            string    `json:"after"`
 }
 
+// NamesAField says whether Path names what differs, which it does unless the
+// difference is of the object taken as one.
+func (d Difference) NamesAField() bool { return d.Path != "" }
+
+// whole is the difference of an object taken as one.
+func whole(object Difference, before, after string) Difference {
+	object.Before, object.After = before, after
+	return object
+}
+
 // Result is what one check found.
 type Result struct {
 	ID         string      `json:"id"`

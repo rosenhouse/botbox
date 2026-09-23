@@ -161,7 +161,7 @@ func count(n int, noun string) string {
 func evidence(violation invariant.Violation) string {
 	var quoted []string
 	// The statement already says how a whole object differs.
-	if differences := violation.Differences; len(differences) > 0 && differences[0].Path != "" {
+	if differences := violation.Differences; len(differences) > 0 && differences[0].NamesAField() {
 		first := differences[0]
 		clause := fmt.Sprintf("%s was %s, is %s", first.Path, first.Before, first.After)
 		if violation.DifferencesTotal > 1 {

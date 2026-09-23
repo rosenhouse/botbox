@@ -218,7 +218,7 @@ func startHarness(t *testing.T, ctx context.Context, toy *target.Target, config 
 
 func requireSettled(t *testing.T, ctx context.Context, h *run.Harness, toy *target.Target) {
 	t.Helper()
-	converged, err := h.Settle(ctx)
+	converged, err := h.Settle(ctx, nil)
 	if err != nil {
 		t.Fatalf("The settle wait failed: %v", err)
 	}

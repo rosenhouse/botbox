@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -153,6 +155,22 @@ func TestHelpPrintsTheUsage(t *testing.T) {
 		if !strings.Contains(stdout, "botbox replay") {
 			t.Errorf("botbox %s printed %q, want the usage.", strings.Join(asked, " "), stdout)
 		}
+	}
+}
+
+func TestTheUsageNamesEveryFlag(t *testing.T) {
+	for _, command := range []string{"run", "replay", "matrix"} {
+		var synopsis string
+		for _, line := range strings.Split(usage, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "botbox "+command+" ") {
+				synopsis = line
+			}
+		}
+		(&options{command: command}).flags().VisitAll(func(f *flag.Flag) {
+			if !strings.Contains(synopsis, "--"+f.Name+" ") {
+				t.Errorf("The usage of botbox %s is %q, want it to name --%s.", command, synopsis, f.Name)
+			}
+		})
 	}
 }
 
@@ -391,7 +409,7 @@ func TestAFailingRunWritesItsReport(t *testing.T) {
 
 	code, stdout, stderr := invokeWith(t, session, countingGenerator(nil),
 		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42",
-		"--launch-arg", "--bug=7")
+		"--kubeconfig", "kind.kubeconfig", "--launch-arg", "--bug=7")
 
 	if code != exitViolation {
 		t.Fatalf("botbox run exited %d: %s", code, stderr)
@@ -411,7 +429,7 @@ func TestAFailingRunWritesItsReport(t *testing.T) {
 	want := []string{violation.ID, violation.Statement, note}
 	// The command has to carry what selected this run, or it replays something
 	// else (DESIGN.md §5.7).
-	want = append(want, "botbox replay --target "+toyTargetYAML+" --launch-arg --bug=7 "+
+	want = append(want, "botbox replay --target "+toyTargetYAML+" --kubeconfig kind.kubeconfig --launch-arg --bug=7 "+
 		filepath.Join(session.dirs[0], sequenceFile))
 	// §5.7 also asks for what ran, the seed, the instant it judged, and the
 	// evidence the check named.
@@ -910,6 +928,111 @@ func TestTheInvocationDirectoryTakesTheSequenceSeedUnlessOneIsGiven(t *testing.T
 			}
 			if invocation := filepath.Base(filepath.Dir(session.dirs[0])); !strings.HasSuffix(invocation, test.want) {
 				t.Errorf("The invocation wrote to %s, want a directory ending in %q.", invocation, test.want)
+			}
+		})
+	}
+}
+
+// shellWords splits a command line the way sh does.
+func shellWords(t *testing.T, line string) []string {
+	t.Helper()
+	printed, err := exec.Command("sh", "-c", `printf '%s\0' `+line).Output()
+	if err != nil {
+		t.Fatalf("sh could not split %q: %v", line, err)
+	}
+	return strings.Split(strings.TrimSuffix(string(printed), "\x00"), "\x00")
+}
+
+func TestTheReplayCommandParsesBackToWhatRan(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		ran  options
+		path string
+	}{
+		{name: "the target alone", ran: options{target: "t.yaml"}, path: "s.json"},
+		{name: "a kubeconfig", ran: options{target: "t.yaml", kubeconfig: "/home/me/.kube/config"}, path: "s.json"},
+		{name: "launch args", ran: options{target: "t.yaml", launchArgs: []string{"--bug=3", "--mode=a=b", "--bug=7"}}, path: "s.json"},
+		{name: "a kubeconfig and launch args", ran: options{target: "t.yaml", kubeconfig: "k", launchArgs: []string{"--x=1"}}, path: "s.json"},
+		{name: "a path with a space", ran: options{target: "my target.yaml"}, path: "botbox-out/run 1/sequence.json"},
+		{name: "what a shell would expand", ran: options{target: "$HOME/t.yaml", launchArgs: []string{"--name=it's", "*"}}, path: "`s`.json"},
+		{name: "an empty launch arg", ran: options{target: "t.yaml", launchArgs: []string{""}}, path: "s.json"},
+		{name: "a path that reads as a flag", ran: options{target: "t.yaml"}, path: "-seqs/b1.json"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			line := test.ran.replayCommand(test.path)
+
+			words := shellWords(t, line)
+			if words[0] != "botbox" {
+				t.Fatalf("The replay command %q runs %q.", line, words[0])
+			}
+			replay, sequences, err := parse(words[1:])
+
+			if err != nil {
+				t.Fatalf("botbox cannot parse the replay command %q: %v", line, err)
+			}
+			if replay.command != "replay" || replay.target != test.ran.target || replay.kubeconfig != test.ran.kubeconfig ||
+				!slices.Equal(replay.launchArgs, test.ran.launchArgs) || len(sequences) != 1 || filepath.Clean(sequences[0]) != test.path {
+				t.Errorf("The replay command %q parses to %s %q, kubeconfig %q, launch args %q, sequences %q; want replay %q, %q, %q, [%q].",
+					line, replay.command, replay.target, replay.kubeconfig, replay.launchArgs, sequences,
+					test.ran.target, test.ran.kubeconfig, test.ran.launchArgs, test.path)
+			}
+		})
+	}
+}
+
+// zsh expands a word that begins with =, and sh does not.
+func TestTheReplayCommandQuotesAWordZshWouldExpand(t *testing.T) {
+	line := options{target: "t.yaml", launchArgs: []string{"=x"}}.replayCommand("s.json")
+
+	if !strings.Contains(line, "'=x'") {
+		t.Errorf("The replay command is %q, want =x quoted.", line)
+	}
+}
+
+// literalBytes are the bytes shellQuote leaves bare. sh and zsh read each as
+// itself, but for a leading =.
+const literalBytes = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./=:@%+,-"
+
+func TestTheReplayCommandLeavesAWordOfLiteralBytesBare(t *testing.T) {
+	words := []string{literalBytes}
+	for _, c := range strings.ReplaceAll(literalBytes, "=", "") {
+		words = append(words, string(c))
+	}
+	for _, word := range words {
+		if quoted := shellQuote(word); quoted != word {
+			t.Errorf("shellQuote(%q) is %q, want it bare.", word, quoted)
+		}
+	}
+}
+
+// A shell reads some of these bytes as themselves, but quoting them costs
+// nothing.
+func TestTheReplayCommandQuotesEveryOtherByte(t *testing.T) {
+	others := []string{"é", " ", "🤖", "\xff"}
+	for c := range rune(0x80) {
+		if !strings.ContainsRune(literalBytes, c) {
+			others = append(others, string(c))
+		}
+	}
+	for _, other := range others {
+		for _, word := range []string{other, "x" + other} {
+			if quoted := shellQuote(word); !strings.HasPrefix(quoted, "'") {
+				t.Errorf("shellQuote(%q) is %q, want it single-quoted.", word, quoted)
+			}
+		}
+	}
+}
+
+// A new flag either changes what a run executes, and the replay command
+// carries it, or it does not. This test makes its author say which.
+func TestEveryFlagIsReplayedOrSelectsNothing(t *testing.T) {
+	replayed := []string{"target", "kubeconfig", "launch-arg"}
+	inert := []string{"runs", "seed", "out", "deadline", "sequences"}
+	for _, command := range []string{"run", "replay", "matrix"} {
+		(&options{command: command}).flags().VisitAll(func(f *flag.Flag) {
+			if !slices.Contains(replayed, f.Name) && !slices.Contains(inert, f.Name) {
+				t.Errorf("botbox %s --%s is neither replayed nor inert: replayCommand must carry it, or this test must say it selects nothing.",
+					command, f.Name)
 			}
 		})
 	}

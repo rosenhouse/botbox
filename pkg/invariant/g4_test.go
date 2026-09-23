@@ -90,18 +90,126 @@ func TestG4IgnoresAWindowALaterSpecChangeCutShort(t *testing.T) {
 	silent(t, invariant.Convergence, in)
 }
 
+// A fault that lasted 3s leaves the target 3s and T_settle to recover.
 func TestG4RequiresConvergenceAfterAFaultStops(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
 		fault(time.Second, 4*time.Second).
 		record(time.Second, widget("10", spec(3), status(0, 1))).
-		through(10 * time.Second)
+		through(13 * time.Second)
 
 	violation := fired(t, invariant.Convergence, in)
 
-	if !strings.Contains(violation.Statement, "fault") {
-		t.Errorf("The statement is %q, want it to name the fault the target had to recover from.", violation.Statement)
+	if !strings.Contains(violation.Statement, "8s after the fault stopped") {
+		t.Errorf("The statement is %q, want it to name the fault and the 8s the target had to recover.", violation.Statement)
 	}
+}
+
+// A target backs off while its requests fail, so it may wait about as long as
+// it has been failing before it tries again.
+func TestG4GivesTheTargetAsLongAsTheFaultLastedToRecover(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		fault(time.Second, 4*time.Second).
+		record(time.Second, widget("10", spec(3), status(0, 1))).
+		record(11*time.Second, widget("11", spec(3), status(3, 1))).
+		through(13 * time.Second)
+
+	silent(t, invariant.Convergence, in)
+}
+
+// A target that converged has recovered from the faults before it, so they no
+// longer lengthen the time it has after a later one.
+func TestG4MeasuresAFaultFromTheLastConvergence(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		fault(time.Second, 4*time.Second).
+		record(5*time.Second, widget("10", spec(2), status(2, 1))).
+		checkpoint(7*time.Second, invariant.Converged).
+		fault(20*time.Second, 21*time.Second).
+		record(21500*time.Millisecond, widget("11", spec(2), status(1, 1))).
+		through(28 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if !strings.Contains(violation.Statement, "6s after the fault stopped") {
+		t.Errorf("The statement is %q, want the 1s the second fault lasted and T_settle.", violation.Statement)
+	}
+}
+
+// A settle wait that converged shows the target recovered, so a spec change
+// made while it was recovering is judged no later than that.
+func TestG4StopsGivingTheTargetTimeOnceItConverged(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		fault(500*time.Millisecond, 10*time.Second).
+		record(time.Second, widget("10", spec(2), status(0, 1))).
+		op(invariant.OpUpdate, 11*time.Second).
+		record(11500*time.Millisecond, widget("11", spec(3), generation(2), status(3, 2))).
+		checkpoint(12*time.Second, invariant.Converged).
+		op(invariant.OpRestart, 20*time.Second).
+		record(20100*time.Millisecond, widget("12", spec(3), generation(2), status(1, 2))).
+		record(26*time.Second, widget("13", spec(3), generation(2), status(3, 2))).
+		checkpoint(27*time.Second, invariant.Converged).
+		through(28 * time.Second)
+
+	silent(t, invariant.Convergence, in)
+}
+
+// A settle wait that expired shows no recovery, so it leaves the target the
+// time the fault left it.
+func TestG4GivesTheTargetItsTimePastAnExpiredWait(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		fault(time.Second, 4*time.Second).
+		record(time.Second, widget("10", spec(3), status(0, 1))).
+		checkpoint(4500*time.Millisecond, invariant.Expired).
+		record(11*time.Second, widget("11", spec(3), status(3, 1))).
+		through(13 * time.Second)
+
+	silent(t, invariant.Convergence, in)
+}
+
+// A target that converged only after the time the fault left it is late.
+func TestG4GivesNoMoreTimeForAConvergenceThatCameLate(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		fault(time.Second, 4*time.Second).
+		record(time.Second, widget("10", spec(3), status(0, 1))).
+		record(12500*time.Millisecond, widget("11", spec(3), status(3, 1))).
+		checkpoint(14500*time.Millisecond, invariant.Converged).
+		through(15 * time.Second)
+
+	fired(t, invariant.Convergence, in)
+}
+
+func TestG4SaysHowLongItGaveTheTargetToTheMillisecond(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		fault(time.Second, 4*time.Second+400*time.Microsecond).
+		record(time.Second, widget("10", spec(3), status(0, 1))).
+		through(13 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if !strings.Contains(violation.Statement, "not ready 8s after the fault stopped") {
+		t.Errorf("The statement is %q, want the 8s it gave the target, rounded.", violation.Statement)
+	}
+}
+
+// The target still owes nothing for a spec change made while it was
+// recovering from a fault, until it has had the time the fault leaves it.
+func TestG4GivesASpecChangeAfterAFaultTheTimeTheFaultLeaves(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		fault(500*time.Millisecond, 4*time.Second).
+		record(time.Second, widget("10", spec(2), status(0, 1))).
+		op(invariant.OpUpdate, 5*time.Second).
+		record(5100*time.Millisecond, widget("11", spec(3), generation(2), status(0, 1))).
+		record(11*time.Second, widget("12", spec(3), generation(2), status(3, 2))).
+		through(13 * time.Second)
+
+	silent(t, invariant.Convergence, in)
 }
 
 func TestG4IgnoresADeadlineWhoseCRIsNotBackYet(t *testing.T) {
@@ -147,16 +255,50 @@ func TestG4NamesTheOpByItsIndexRatherThanItsPosition(t *testing.T) {
 	}
 }
 
-func TestG4MeasuresTheSettleWaitFromTheOpItsCheckpointNames(t *testing.T) {
-	in := invariant.Input{
-		Target:      toyTarget(),
-		Ops:         []invariant.Op{{Index: 1, Type: invariant.OpUpdate, Time: at(10 * time.Second)}},
-		Checkpoints: []invariant.Checkpoint{{Op: 1, Time: at(15200 * time.Millisecond), Settle: invariant.Expired}},
-		Faults:      []invariant.FaultWindow{{Start: at(9500 * time.Millisecond), End: at(10100 * time.Millisecond)}},
-		End:         at(15200 * time.Millisecond),
-	}
+// A fault that lasted 0.6s excuses an expired wait until 5.6s after it stopped,
+// wherever the wait began.
+func TestG4ExcusesAnExpiredWaitUntilTheTargetHadTimeToRecover(t *testing.T) {
+	for _, expiry := range []struct {
+		at      time.Duration
+		excused bool
+	}{
+		{at: 15600 * time.Millisecond, excused: true},
+		{at: 15800 * time.Millisecond, excused: false},
+	} {
+		t.Run(expiry.at.String(), func(t *testing.T) {
+			in := invariant.Input{
+				Target:      toyTarget(),
+				Ops:         []invariant.Op{{Index: 1, Type: invariant.OpUpdate, Time: at(10 * time.Second)}},
+				Checkpoints: []invariant.Checkpoint{{Op: 1, Time: at(expiry.at), Settle: invariant.Expired}},
+				Faults:      []invariant.FaultWindow{{Start: at(9500 * time.Millisecond), End: at(10100 * time.Millisecond)}},
+				End:         at(expiry.at),
+			}
 
-	silent(t, invariant.Convergence, in)
+			if expiry.excused {
+				silent(t, invariant.Convergence, in)
+			} else {
+				fired(t, invariant.Convergence, in)
+			}
+		})
+	}
+}
+
+// The teardown gives the target a settle wait of its own once the last fault
+// stops, and an expired one is named for that.
+func TestG4NamesTheWaitAfterTheLastFaultStopped(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1))).
+		checkpoint(3*time.Second, invariant.Converged).
+		fault(4*time.Second, 5*time.Second).
+		through(12 * time.Second)
+	in.Checkpoints = append(in.Checkpoints, invariant.Checkpoint{Op: invariant.Recovery, Time: at(11 * time.Second), Settle: invariant.Expired})
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if want := "the settle wait after the last fault stopped expired"; !strings.Contains(violation.Statement, want) {
+		t.Errorf("The statement is %q, want %q.", violation.Statement, want)
+	}
 }
 
 // The Observer runs one informer per kind, so the history can arrive out of

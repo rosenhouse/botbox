@@ -187,8 +187,8 @@ func (s Sequence) Validate() error {
 		}
 	}
 	// The teardown's quiet window is the only one such a sequence would be
-	// judged on, and the teardown does not wait for convergence before it opens
-	// that window (DESIGN.md §6).
+	// judged on, and the teardown waits for convergence before it opens that
+	// window only after a fault (DESIGN.md §6).
 	if len(s.Ops) == 0 {
 		return fmt.Errorf("the sequence holds no ops; want at least the create it opens with")
 	}

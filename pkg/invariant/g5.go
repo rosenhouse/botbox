@@ -13,7 +13,8 @@ import (
 // RestartStable is G5: restarting the target does not change converged state
 // (DESIGN.md §6). It compares the last converged snapshot before each Restart
 // with the first converged one after it, keyed by kind and name. A Restart
-// missing either snapshot is not evaluated, and the result says so.
+// missing either snapshot, or with a change of botbox's or a fault between
+// them, is not evaluated, and the result says so.
 func RestartStable(in Input) (Result, error) {
 	out := Result{ID: "G5"}
 	for _, op := range in.Ops {
@@ -25,9 +26,30 @@ func RestartStable(in Input) (Result, error) {
 			out.note("for %s: it has no converged snapshot %s it", describe(op), missing)
 			continue
 		}
+		if changed, found := in.changedBetween(before.at, after.at); found {
+			out.note("for %s: %s ran between the converged states before and after it, so G5 cannot tell what the restart changed; a settle op on each side of a restart lets G5 judge it",
+				describe(op), describe(changed))
+			continue
+		}
+		if in.faulted(before.at, after.at) {
+			out.note("for %s: a fault was active between the converged states before and after it, so G5 cannot tell what the restart changed",
+				describe(op))
+			continue
+		}
 		out.compare(in, op, before, after)
 	}
 	return out, nil
+}
+
+// changedBetween returns the first op that changed the CR or a managed object
+// in [from, to).
+func (in Input) changedBetween(from, to time.Time) (Op, bool) {
+	for _, op := range in.Ops {
+		if op.changesRun() && !op.Time.Before(from) && op.Time.Before(to) {
+			return op, true
+		}
+	}
+	return Op{}, false
 }
 
 // convergedAround returns the states the settle waits converged at on either

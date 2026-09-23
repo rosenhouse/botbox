@@ -168,6 +168,120 @@ func TestG5RunsOncePerRestart(t *testing.T) {
 	}
 }
 
+// changedAcross converges at 5s and at 15s on states that differ, with
+// whatever ops botbox runs in between.
+func changedAcross(ops func(*run) *run) invariant.Input {
+	return ops(newRun().
+		record(time.Second, widget("10", spec(1), status(1, 1)), child("w-0", "11", data("0"))).
+		checkpoint(5*time.Second, invariant.Converged)).
+		record(13*time.Second, widget("20", spec(1), status(1, 1)), child("w-0", "21", data("1"))).
+		checkpoint(15*time.Second, invariant.Converged).
+		through(20 * time.Second)
+}
+
+// changedAround restarts the target at 10s between states converged at 5s and
+// 15s that differ, and then runs whatever ops botbox runs next.
+func changedAround(next func(*run) *run) invariant.Input {
+	return changedAcross(func(r *run) *run { return next(r.op(invariant.OpRestart, 10*time.Second)) })
+}
+
+// updatedAround is changedAround with botbox's update at the given time.
+func updatedAround(update time.Duration) invariant.Input {
+	if update > 10*time.Second {
+		return changedAround(func(r *run) *run { return r.op(invariant.OpUpdate, update) })
+	}
+	return changedAcross(func(r *run) *run {
+		return r.op(invariant.OpUpdate, update).op(invariant.OpRestart, 10*time.Second)
+	})
+}
+
+// An op stamped at the instant a state converged came after that state.
+func TestG5LeavesARestartUnjudgedOnlyForAnUpdateBetweenTheStatesItCompares(t *testing.T) {
+	for _, update := range []struct {
+		at   time.Duration
+		note string
+	}{
+		{0, ""},
+		{5 * time.Second, "for op 1 (restart): op 0 (update) ran"},
+		{7 * time.Second, "for op 1 (restart): op 0 (update) ran"},
+		{11 * time.Second, "for op 0 (restart): op 1 (update) ran"},
+		{15 * time.Second, ""},
+		{16 * time.Second, ""},
+	} {
+		t.Run(update.at.String(), func(t *testing.T) {
+			in := updatedAround(update.at)
+
+			if update.note == "" {
+				fired(t, invariant.RestartStable, in)
+				return
+			}
+			noted(t, invariant.RestartStable, in, update.note)
+		})
+	}
+}
+
+func TestG5LeavesARestartUnjudgedOnlyForAnOpThatChangesTheRun(t *testing.T) {
+	for _, between := range []struct {
+		name     string
+		apply    func(*run) *run
+		confound bool
+	}{
+		{"create", func(r *run) *run { return r.op(invariant.OpCreate, 11*time.Second) }, true},
+		{"update", func(r *run) *run { return r.op(invariant.OpUpdate, 11*time.Second) }, true},
+		{"delete", func(r *run) *run { return r.op(invariant.OpDelete, 11*time.Second) }, true},
+		{"recreate", func(r *run) *run { return r.op(invariant.OpRecreate, 11*time.Second) }, true},
+		{"deleteManaged of w-0", func(r *run) *run { return r.deletedManaged(11*time.Second, "w-0") }, true},
+		{"deleteManaged of nothing", func(r *run) *run { return r.op(invariant.OpDeleteManaged, 11*time.Second) }, false},
+		{"fault", func(r *run) *run { return r.op(invariant.OpFault, 11*time.Second) }, false},
+		{"settle", func(r *run) *run { return r.op(invariant.OpSettle, 11*time.Second) }, false},
+		{"restart", func(r *run) *run { return r.op(invariant.OpRestart, 11*time.Second) }, false},
+	} {
+		t.Run(between.name, func(t *testing.T) {
+			in := changedAround(between.apply)
+
+			if between.confound {
+				noted(t, invariant.RestartStable, in, "for op 0 (restart): op 1 ("+string(in.Ops[1].Type)+") ran")
+				return
+			}
+			result := evaluate(t, invariant.RestartStable, in)
+			if len(result.Violations) == 0 || len(result.Notes) > 0 {
+				t.Fatalf("G5 reported %v and noted %v, want the restart judged.", statements(result), result.Notes)
+			}
+		})
+	}
+}
+
+func TestG5NamesTheFirstOpThatKeptItFromJudgingARestart(t *testing.T) {
+	in := changedAround(func(r *run) *run {
+		return r.op(invariant.OpUpdate, 11*time.Second).op(invariant.OpDelete, 12*time.Second)
+	})
+
+	noted(t, invariant.RestartStable, in, "op 1 (update) ran")
+}
+
+func TestG5LeavesARestartUnjudgedWhereAFaultReachedBetweenTheStatesItCompares(t *testing.T) {
+	for _, fault := range []struct {
+		name     string
+		from, to time.Duration
+		judged   bool
+	}{
+		{"after the state before", 6 * time.Second, 7 * time.Second, false},
+		{"before the state after", 11 * time.Second, 12 * time.Second, false},
+		{"until the state before", 2 * time.Second, 5 * time.Second, true},
+		{"after the state after", 16 * time.Second, 18 * time.Second, true},
+	} {
+		t.Run(fault.name, func(t *testing.T) {
+			in := changedAround(func(r *run) *run { return r.fault(fault.from, fault.to) })
+
+			if fault.judged {
+				fired(t, invariant.RestartStable, in)
+				return
+			}
+			noted(t, invariant.RestartStable, in, "for op 0 (restart): a fault was active")
+		})
+	}
+}
+
 func TestG5ComparesTheMetadataSection6DoesNotIgnore(t *testing.T) {
 	in := restarted(child("w-0", "11", data("0")), child("w-0", "21", data("0"), deleting(12*time.Second)))
 

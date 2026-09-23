@@ -17,27 +17,32 @@ import (
 // defaultMatrix is the bug matrix of DESIGN.md §9.1.
 const defaultMatrix = "docs/bug-matrix.md"
 
-// control is the run without a seeded bug, whose row proves the matrix is not
-// vacuous.
+// control is B0, the row that seeds no bug. It proves the matrix is not vacuous.
 const control = 0
 
 // bugSequence names the sequence of one seeded bug.
 var bugSequence = regexp.MustCompile(`^b(\d+)\.json$`)
 
-// bugRow is one bug, the sequence that exposes it, every check that fired and
-// every check that judged nothing.
+// bugRow is one bug, the sequence that exposes it, and what the checks found
+// over that sequence under the bug and without it. B0 has one run, which is
+// both.
 type bugRow struct {
-	bug      int
-	file     string
-	sequence run.Sequence
-	fired    []string
+	bug             int
+	file            string
+	sequence        run.Sequence
+	bugged, correct checked
+}
+
+// checked is what the checks found over one run.
+type checked struct {
+	fired []string
 	// skipped names the checks that left a note: they judged less than the row
 	// shows, which a blank cell would read as a pass (DESIGN.md §6, D31).
 	skipped []string
 }
 
-// bugMatrix runs one sequence per seeded bug and writes which checks caught it
-// (DESIGN.md §9.1).
+// bugMatrix runs each seeded bug's sequence under the bug and without it, and
+// writes which checks fired (DESIGN.md §9.1).
 func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	exercised, err := target.Load(opts.target)
 	if err != nil {
@@ -67,7 +72,7 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
 	for i := range rows {
-		if err := c.exerciseBug(ctx, s, exercised, &rows[i], dir); err != nil {
+		if err := c.exerciseRow(ctx, s, exercised, &rows[i], dir); err != nil {
 			return c.fail(opts.named(ctx, err))
 		}
 	}
@@ -79,58 +84,99 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	return c.judge(opts, rows)
 }
 
-// exerciseBug runs one bug's sequence and records what the checks found over
-// the whole run.
-func (c *cli) exerciseBug(ctx context.Context, s session, t *target.Target, row *bugRow, dir string) error {
-	bugged := *t
-	bugged.Launch.Args = append(slices.Clone(t.Launch.Args), fmt.Sprintf("--bug=%d", row.bug))
-	result, err := s.execute(ctx, &bugged, row.sequence, filepath.Join(dir, row.name()), observing{})
+// exerciseRow runs the row's sequence under its bug, and then without it.
+func (c *cli) exerciseRow(ctx context.Context, s session, t *target.Target, row *bugRow, dir string) error {
+	var err error
+	if row.bug != control {
+		if row.bugged, err = c.exerciseUnder(ctx, s, t, row, row.bugArgs(), filepath.Join(dir, row.name())); err != nil {
+			return err
+		}
+	}
+	row.correct, err = c.exerciseUnder(ctx, s, t, row, nil, filepath.Join(dir, row.name()+"-no-bug"))
+	if row.bug == control {
+		row.bugged = row.correct
+	}
+	return err
+}
+
+// exerciseUnder runs the row's sequence with bugArgs appended to the target's
+// launch args, and records what the checks found over the whole run.
+func (c *cli) exerciseUnder(ctx context.Context, s session, t *target.Target, row *bugRow, bugArgs []string, dir string) (checked, error) {
+	exercised := *t
+	exercised.Launch.Args = slices.Concat(t.Launch.Args, bugArgs)
+	ran := row.describe(bugArgs)
+	result, err := s.execute(ctx, &exercised, row.sequence, dir, observing{})
 	if err != nil {
-		return fmt.Errorf("%s: %w", row.file, err)
+		return checked{}, fmt.Errorf("%s: %w", ran, err)
 	}
 	results, err := run.Evaluate(result.Recorded)
 	if err != nil {
-		return fmt.Errorf("%s: %w", row.file, err)
+		return checked{}, fmt.Errorf("%s: %w", ran, err)
 	}
+	var found checked
 	var notes []string
 	for _, check := range results {
 		if len(check.Violations) > 0 {
-			row.fired = append(row.fired, check.ID)
+			found.fired = append(found.fired, check.ID)
 		}
 		if len(check.Notes) > 0 {
-			row.skipped = append(row.skipped, check.ID)
+			found.skipped = append(found.skipped, check.ID)
 		}
 		notes = append(notes, check.Notes...)
 	}
-	fmt.Fprintf(c.stdout, "%s: %s fired %s\n", row.name(), row.file, row.summary())
+	fmt.Fprintf(c.stdout, "%s: %s fired %s\n", row.name(), ran, found.summary())
 	for _, note := range notes {
 		fmt.Fprintf(c.stdout, "  %s\n", note)
 	}
-	return nil
+	return found, nil
 }
 
-// judge applies the acceptance of DESIGN.md §10 M3: every bug's row names a
-// check and the control's row is empty.
+// judge applies the acceptance of DESIGN.md §10 M3: some check catches every
+// bug, and no check fires against the toy with no bug.
 func (c *cli) judge(opts options, rows []bugRow) int {
 	code := exitOK
 	for _, row := range rows {
-		wanted := row.bug != control
-		if caught := len(row.fired) > 0; caught != wanted {
+		if row.bug != control && len(row.bugged.fired) == 0 {
 			code = exitViolation
-			fmt.Fprintf(c.stderr, "botbox: %s (%s) fired %s; reproduce it with\n  botbox replay --target %s --launch-arg --bug=%d %s\n",
-				row.name(), row.file, row.summary(), opts.target, row.bug, filepath.Join(opts.sequences, row.file))
+			c.unexpected(opts, row, row.bugged, row.bugArgs())
+		}
+		if len(row.correct.fired) > 0 {
+			code = exitViolation
+			c.unexpected(opts, row, row.correct, nil)
 		}
 	}
 	return code
 }
 
+// unexpected reports a run that broke the acceptance, and how to run it again.
+func (c *cli) unexpected(opts options, row bugRow, found checked, bugArgs []string) {
+	replay := opts
+	replay.launchArgs = slices.Concat(opts.launchArgs, bugArgs)
+	fmt.Fprintf(c.stderr, "botbox: %s: %s fired %s; reproduce it with\n  %s\n",
+		row.name(), row.describe(bugArgs), found.summary(), replay.replayCommand(filepath.Join(opts.sequences, row.file)))
+}
+
 func (r bugRow) name() string { return "B" + strconv.Itoa(r.bug) }
 
-func (r bugRow) summary() string {
-	if len(r.fired) == 0 {
+func (r bugRow) bugArgs() []string { return []string{fmt.Sprintf("--bug=%d", r.bug)} }
+
+// describe names the row's sequence and the bug the matrix added to its launch
+// args or withheld from them.
+func (r bugRow) describe(bugArgs []string) string {
+	switch {
+	case len(bugArgs) > 0:
+		return r.file + " under " + strings.Join(bugArgs, " ")
+	case r.bug == control:
+		return r.file
+	}
+	return r.file + " without " + strings.Join(r.bugArgs(), " ")
+}
+
+func (c checked) summary() string {
+	if len(c.fired) == 0 {
 		return "nothing"
 	}
-	return strings.Join(r.fired, ", ")
+	return strings.Join(c.fired, ", ")
 }
 
 // observing evaluates nothing, so that a matrix run executes its whole
@@ -201,24 +247,32 @@ bug: several bugs trip more than one. B0 is the control, the toy with no bug,
 and its row is empty. A `+"`✓`"+` caught the bug; a `+"`?`"+` left something unjudged,
 which is not the same as a pass.
 
+Each sequence also runs against the toy with no bug. The last column names each
+check that fired there or left something unjudged, with the same marks. CI fails
+if a check fires there.
+
 `, sequences)
-	fmt.Fprintf(&out, "| Bug | %s |\n", strings.Join(checks, " | "))
-	out.WriteString("|---" + strings.Repeat("|---", len(checks)) + "|\n")
+	fmt.Fprintf(&out, "| Bug | %s | No bug |\n", strings.Join(checks, " | "))
+	out.WriteString("|---" + strings.Repeat("|---", len(checks)+1) + "|\n")
 	for _, row := range rows {
 		fmt.Fprintf(&out, "| %s |", row.name())
+		var correct []string
 		for _, check := range checks {
-			fmt.Fprintf(&out, " %s |", fired(row, check))
+			fmt.Fprintf(&out, " %s |", row.bugged.mark(check))
+			if mark := row.correct.mark(check); mark != "" {
+				correct = append(correct, check+" "+mark)
+			}
 		}
-		out.WriteString("\n")
+		fmt.Fprintf(&out, " %s |\n", strings.Join(correct, ", "))
 	}
 	return out.String()
 }
 
-func fired(row bugRow, check string) string {
+func (c checked) mark(check string) string {
 	switch {
-	case slices.Contains(row.fired, check):
+	case slices.Contains(c.fired, check):
 		return "✓"
-	case slices.Contains(row.skipped, check):
+	case slices.Contains(c.skipped, check):
 		return "?"
 	}
 	return ""

@@ -62,7 +62,9 @@ func (l *liveRun) crs() dynamic.ResourceInterface { return l.of(l.target.Primary
 
 func (l *liveRun) namespace() string { return l.h.Namespace }
 
-func (l *liveRun) settle(ctx context.Context) (bool, error) { return l.h.Settle(ctx) }
+func (l *liveRun) settle(ctx context.Context, owed func() time.Time) (bool, error) {
+	return l.h.Settle(ctx, owed)
+}
 
 func (l *liveRun) sleep(ctx context.Context, d time.Duration) error { return sleep(ctx, d) }
 

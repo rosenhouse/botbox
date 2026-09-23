@@ -24,7 +24,7 @@ in DESIGN.md §6 and implemented in `pkg/invariant`. Follow this procedure.
 4. **Add or reuse a seeded bug.** Check whether an existing bug in
    `targets/toy-widget` (§9.1) already trips the new invariant. If none does, add one:
    a new row in the §9.1 bug catalog, a new case behind the `--bug` flag, and a
-   regenerated `docs/bug-matrix.md` with a non-empty row for the new ID (§9.1, the
-   M3/M6 acceptance criteria).
+   regenerated `docs/bug-matrix.md` with a non-empty row for the new ID and no `✓` in
+   its "No bug" cell (§9.1, the M3/M6 acceptance criteria).
 
 5. **Never retry or sleep to make it pass.** Tune the window instead (§5.6, §11).

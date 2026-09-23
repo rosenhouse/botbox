@@ -27,11 +27,11 @@
     },
     {
       "i": 2,
-      "t": "settle"
+      "t": "restart"
     },
     {
       "i": 3,
-      "t": "restart"
+      "t": "settle"
     },
     {
       "i": 4,

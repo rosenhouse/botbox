@@ -50,6 +50,9 @@ type Op struct {
 	Deleted observe.Key
 }
 
+// changesRun reports whether the op changed the CR or a managed object.
+func (op Op) changesRun() bool { return op.Type.touchesCR() || op.Deleted != (observe.Key{}) }
+
 // SettleResult is how the settle wait a checkpoint follows ended (DESIGN.md §5.5).
 type SettleResult string
 
@@ -60,10 +63,17 @@ const (
 	Expired   SettleResult = "expired"
 )
 
+// Teardown and Recovery are the Op of the checkpoints no op opened. Teardown
+// follows the teardown's deletion window. Recovery follows the settle wait the
+// teardown gives a target still owed time to recover from the faults.
+const (
+	Teardown = -1
+	Recovery = -2
+)
+
 // Checkpoint is a point at which the engine evaluates (DESIGN.md §4).
 type Checkpoint struct {
-	// Op is the Index of the op the checkpoint follows, and -1 after the
-	// teardown window.
+	// Op is the Index of the op the checkpoint follows, Teardown or Recovery.
 	Op     int
 	Time   time.Time
 	Settle SettleResult
@@ -76,7 +86,7 @@ type FaultWindow struct{ Start, End time.Time }
 
 // overlaps reports whether the fault was active anywhere in [from, to]. A
 // fault that stopped at from did not reach into the window, which is what
-// makes "within T_settle after faults stop" measurable (§6, G4).
+// lets G4 measure from the instant a fault stopped.
 func (f FaultWindow) overlaps(from, to time.Time) bool {
 	return !f.Start.After(to) && (f.End.IsZero() || f.End.After(from))
 }

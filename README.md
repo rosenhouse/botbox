@@ -170,17 +170,25 @@ that target rather than reporting G4 against your controller.
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the
 controller's back. A sequence you write yourself can also carry a `fault`, which makes the
-proxy refuse, delay or drop the requests it matches:
+proxy refuse, delay or drop the requests it matches. This is
+`targets/toy-widget/sequences/fault.json`:
 
+<!-- embed: targets/toy-widget/sequences/fault.json -->
 ```json
-{"i": 1, "t": "fault",
-  "spec": {"match": {"verb": "create", "resource": "configmaps"},
-           "action": {"error": 500}, "until": {"count": 30}}}
+{"seed": 20260920, "target": "toy-widget", "ops": [
+  {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
+    "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+  {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"},
+    "action": {"error": 500}, "until": {"count": 30}}},
+  {"i": 2, "t": "update", "patch": {"spec": {"count": 3}}}]}
 ```
 
 An invariant ignores any window the proxy applied a fault in, so what a fault tests is how
-the controller behaves once the fault stops. A fault that matches no request changes nothing
-and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
+the controller behaves once the fault stops. A controller backs off while its requests fail,
+so once the faults stop botbox gives it as long as they lasted, plus `settle`, to converge.
+That includes a fault still active when the sequence ends, like the one above: botbox clears
+it and waits for the controller before it tears the run down. A fault that matches no request
+changes nothing and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
 
 Field values come from the CRD's own schema: its numeric ranges, enums, patterns and list
 lengths. A schema that says only `type: string` yields a random word, so the schema is not a
@@ -203,6 +211,10 @@ A sequence file runs as written and is never minimized. This is
 
 `botbox replay --target target.yaml sequence.json` re-executes one, which is how you re-examine
 a failure, and `make test-example` runs both pinned sequences so they cannot rot.
+
+In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
+before it settles. G5 compares the states the controller settled in on either side, and leaves a
+note instead of a verdict when another op changed something in between.
 
 ## Reading a report
 
@@ -256,11 +268,11 @@ Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generi
 | G1 | Bounded reconciliation. The target's request rate falls to zero under an unchanged spec. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
 | G3 | Clean deletion. Deleting the CR removes everything it manages and clears its finalizers. |
-| G4 | Convergence. `ready` holds within `T_settle` of every spec change. |
+| G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
 
-[docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs.
+[docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs. Each bug's sequence also runs against the toy with no bug, and CI fails if a check fires there.
 
 ## Development and internals
 

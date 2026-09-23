@@ -8,14 +8,14 @@ import (
 	"github.com/rosenhouse/botbox/pkg/observe"
 )
 
-// Convergence is G4: within T_settle after any spec change, and within
-// T_settle after faults stop, the target's Ready predicate holds
-// (DESIGN.md §6). A settle wait that expired while no fault was active is a
-// violation of its own (§5.5).
+// Convergence is G4: within T_settle after any spec change, and by what Owed
+// gives after faults stop, the target's Ready predicate holds (DESIGN.md §6).
+// A settle wait that expired while no fault excused it is a violation of its
+// own (§5.5).
 func Convergence(in Input) (Result, error) {
 	out := Result{ID: "G4"}
 	for _, from := range in.convergeAnchors() {
-		deadline := from.at.Add(in.timeouts().Settle)
+		deadline := from.deadline
 		if !in.observed(deadline) || in.faulted(from.at, deadline) || in.tornDown(deadline) || in.respecified(from.at, deadline) {
 			continue
 		}
@@ -33,7 +33,7 @@ func Convergence(in Input) (Result, error) {
 		}
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the CR %s was not ready %s after %s%s",
-				cr.Name, in.timeouts().Settle, from.what, quoted(err)),
+				cr.Name, deadline.Sub(from.at).Round(time.Millisecond), from.what, quoted(err)),
 			At: deadline,
 		}.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), deadline))).
 			quotingManaged(Sample(seen.managed(in))))
@@ -42,26 +42,37 @@ func Convergence(in Input) (Result, error) {
 	return out, nil
 }
 
-// anchor is a moment the target must have converged within T_settle of.
+// anchor is a moment the target must have converged by a deadline after.
 type anchor struct {
-	at   time.Time
-	what string
+	at, deadline time.Time
+	what         string
 }
 
 func (in Input) convergeAnchors() []anchor {
 	var anchors []anchor
 	for _, op := range in.Ops {
 		if op.Type.changesSpec() {
-			anchors = append(anchors, anchor{at: op.Time, what: describe(op)})
+			anchors = append(anchors, anchor{at: op.Time, deadline: in.readyBy(op.Time), what: describe(op)})
 		}
 	}
 	for _, fault := range in.Faults {
 		if !fault.End.IsZero() {
-			anchors = append(anchors, anchor{at: fault.End, what: "the fault stopped"})
+			anchors = append(anchors, anchor{at: fault.End, deadline: in.readyBy(fault.End), what: "the fault stopped"})
 		}
 	}
 	slices.SortFunc(anchors, func(a, b anchor) int { return a.at.Compare(b.at) })
 	return anchors
+}
+
+// readyBy is when the target must be ready after at: T_settle later, or when
+// Owed says if that is later. A settle wait that converged before then shows
+// the target had recovered.
+func (in Input) readyBy(at time.Time) time.Time {
+	owed := in.Owed(at)
+	if converged := in.nextConverged(at); !converged.IsZero() && converged.Before(owed) {
+		owed = converged
+	}
+	return later(at.Add(in.timeouts().Settle), owed)
 }
 
 // respecified reports whether a later op changed the spec inside the window,
@@ -76,10 +87,7 @@ func (in Input) respecified(from, to time.Time) bool {
 // had no fault to blame (DESIGN.md §5.5).
 func (out *Result) reportExpiredWaits(in Input) {
 	for _, checkpoint := range in.Checkpoints {
-		if checkpoint.Settle != Expired {
-			continue
-		}
-		if in.faulted(in.waitStart(checkpoint), checkpoint.Time) {
+		if checkpoint.Settle != Expired || in.Recovering(checkpoint.Time) {
 			continue
 		}
 		seen := in.stateAt(checkpoint.Time)
@@ -95,18 +103,12 @@ func (out *Result) reportExpiredWaits(in Input) {
 	}
 }
 
-// waitStart is when the settle wait a checkpoint ends began: the op it
-// follows, or T_settle back when the Input carries no such op.
-func (in Input) waitStart(checkpoint Checkpoint) time.Time {
-	if op, found := in.op(checkpoint.Op); found {
-		return op.Time
-	}
-	return checkpoint.Time.Add(-in.timeouts().Settle)
-}
-
 func (in Input) describeOp(index int) string {
 	if op, found := in.op(index); found {
 		return describe(op)
+	}
+	if index == Recovery {
+		return "the last fault stopped"
 	}
 	return "teardown"
 }
@@ -118,6 +120,13 @@ func upTo(versions []observe.Version, t time.Time) []observe.Version {
 }
 
 func describe(op Op) string { return fmt.Sprintf("op %d (%s)", op.Index, op.Type) }
+
+func later(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
+}
 
 // quoted renders a predicate's error for the report (DESIGN.md §8.4).
 func quoted(err error) string {

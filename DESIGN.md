@@ -1184,7 +1184,7 @@ built from source and run as a black-box binary.
   resolve it either. G5 has no mapper, so it ignores the version. Each unresolved reference
   is a run note that names the object it keeps, because G3 reports that object and the
   report is what a reader acts on.
-- **D@40 The proxy holds each fault op's fault by identity.** The proxy matched a held
+- **D47 The proxy holds each fault op's fault by identity.** The proxy matched a held
   fault by its spec, so a spent fault displaced an equal one, and the toy with no bug failed
   G4. Each fault has an ID, and a removed fault keeps its window. The Runner drops a fault
   once its window is closed, so a request faulted just before a removal stays in it.

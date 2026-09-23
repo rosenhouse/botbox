@@ -24,7 +24,10 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-const toyTargetYAML = "../../targets/toy-widget/target.yaml"
+const (
+	toyTargetYAML   = "../../targets/toy-widget/target.yaml"
+	rulesTargetYAML = "../../pkg/generate/testdata/rules/target.yaml"
+)
 
 // fakeSession executes nothing: it records what the CLI asked for and answers
 // from results.
@@ -82,14 +85,14 @@ func invoke(t *testing.T, fake *fakeSession, args ...string) (int, string, strin
 	return invokeWith(t, fake, countingGenerator(nil), args...)
 }
 
-func invokeWith(t *testing.T, fake *fakeSession, newGenerator func(*target.Target) (Generator, error), args ...string) (int, string, string) {
+func invokeWith(t *testing.T, fake *fakeSession, newGenerator func(*target.Target) (Generator, []string, error), args ...string) (int, string, string) {
 	t.Helper()
 	return invokeCtx(t, t.Context(), fake, newGenerator, args...)
 }
 
 // invokeCtx is invokeWith under a context the test controls, for the deadline.
 func invokeCtx(t *testing.T, ctx context.Context, fake *fakeSession,
-	newGenerator func(*target.Target) (Generator, error), args ...string) (int, string, string) {
+	newGenerator func(*target.Target) (Generator, []string, error), args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	c := &cli{
@@ -103,11 +106,11 @@ func invokeCtx(t *testing.T, ctx context.Context, fake *fakeSession,
 
 // countingGenerator draws sequences of the ops given, or of one settle, and
 // records every seed it was asked for.
-func countingGenerator(seeds *[]int64, ops ...run.OpType) func(*target.Target) (Generator, error) {
+func countingGenerator(seeds *[]int64, ops ...run.OpType) func(*target.Target) (Generator, []string, error) {
 	if len(ops) == 0 {
 		ops = []run.OpType{run.OpSettle}
 	}
-	return func(t *target.Target) (Generator, error) {
+	return func(t *target.Target) (Generator, []string, error) {
 		return func(seed int64) (run.Sequence, error) {
 			if seeds != nil {
 				*seeds = append(*seeds, seed)
@@ -117,7 +120,7 @@ func countingGenerator(seeds *[]int64, ops ...run.OpType) func(*target.Target) (
 				sequence.Ops = append(sequence.Ops, run.Op{Index: i, Type: opType})
 			}
 			return sequence, nil
-		}, nil
+		}, nil, nil
 	}
 }
 
@@ -698,16 +701,16 @@ func TestAGeneratorThatFailsExitsTwo(t *testing.T) {
 	broken := errors.New("the CRD declares no schema to draw from")
 	for _, test := range []struct {
 		name         string
-		newGenerator func(*target.Target) (Generator, error)
+		newGenerator func(*target.Target) (Generator, []string, error)
 	}{
 		{
 			name:         "building it",
-			newGenerator: func(*target.Target) (Generator, error) { return nil, broken },
+			newGenerator: func(*target.Target) (Generator, []string, error) { return nil, nil, broken },
 		},
 		{
 			name: "drawing a sequence",
-			newGenerator: func(*target.Target) (Generator, error) {
-				return func(int64) (run.Sequence, error) { return run.Sequence{}, broken }, nil
+			newGenerator: func(*target.Target) (Generator, []string, error) {
+				return func(int64) (run.Sequence, error) { return run.Sequence{}, broken }, nil, nil
 			},
 		},
 	} {
@@ -722,6 +725,19 @@ func TestAGeneratorThatFailsExitsTwo(t *testing.T) {
 				t.Errorf("botbox run reported %q, want the generator's error.", stderr)
 			}
 		})
+	}
+}
+
+func TestRunSaysOnceWhichPathsGenerationLeavesAlone(t *testing.T) {
+	code, stdout, stderr := invokeWith(t, &fakeSession{}, rapidGenerator,
+		"run", "--target", rulesTargetYAML, "--out", t.TempDir(), "--runs", "3", "--seed", "1")
+
+	if code != exitOK {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	if said := strings.Count(stdout, "generation leaves spec.surge alone"); said != 1 {
+		t.Errorf("botbox run printed %q, which says %d times that generation leaves spec.surge alone, want once.",
+			stdout, said)
 	}
 }
 

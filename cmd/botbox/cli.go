@@ -62,13 +62,14 @@ const (
 type Generator func(seed int64) (run.Sequence, error)
 
 // rapidGenerator draws sequences from the target's CRD schema (DESIGN.md
-// §5.4). It reads the CRDs once, because a draw itself does no I/O.
-func rapidGenerator(t *target.Target) (Generator, error) {
+// §5.4). It reads the CRDs once, because a draw itself does no I/O. It also
+// says which spec paths generation leaves alone.
+func rapidGenerator(t *target.Target) (Generator, []string, error) {
 	g, err := generate.New(t, generate.Options{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return g.Draw, nil
+	return g.Draw, g.LeftAlone(), nil
 }
 
 // cli is one invocation. Its writers, its generator and its test cluster are
@@ -79,7 +80,7 @@ type cli struct {
 	// newGenerator builds the generator the invocation draws from, once, as
 	// pkg/generate's does: reading the target's CRDs costs I/O, drawing does
 	// not.
-	newGenerator func(*target.Target) (Generator, error)
+	newGenerator func(*target.Target) (Generator, []string, error)
 }
 
 // session executes sequences against one test cluster. Runs share it, because
@@ -211,9 +212,12 @@ func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, e
 		}
 		return runs, nil
 	}
-	draw, err := c.newGenerator(t)
+	draw, leftAlone, err := c.newGenerator(t)
 	if err != nil {
 		return nil, err
+	}
+	for _, note := range leftAlone {
+		fmt.Fprintln(c.stdout, note)
 	}
 	runs := make([]planned, opts.runs)
 	for i := range runs {

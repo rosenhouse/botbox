@@ -32,6 +32,7 @@ type Options struct {
 type Generator struct {
 	target    *target.Target
 	fields    []field
+	leftAlone []string
 	managed   []string
 	maxOps    int
 	sequences *rapid.Generator[run.Sequence]
@@ -44,11 +45,11 @@ func New(t *target.Target, opts Options) (*Generator, error) {
 	if err != nil {
 		return nil, fmt.Errorf("generating for the target %s: %w", t.Name, err)
 	}
-	fields, err := mutableFields(t, primary)
+	fields, leftAlone, err := mutableFields(t, primary)
 	if err != nil {
 		return nil, fmt.Errorf("generating for the target %s: %w", t.Name, err)
 	}
-	g := &Generator{target: t, fields: fields, maxOps: opts.MaxOps}
+	g := &Generator{target: t, fields: fields, leftAlone: leftAlone, maxOps: opts.MaxOps}
 	if g.maxOps < 1 {
 		g.maxOps = defaultMaxOps
 	}
@@ -62,6 +63,10 @@ func New(t *target.Target, opts Options) (*Generator, error) {
 	g.sequences = rapid.Custom(g.sequence)
 	return g, nil
 }
+
+// LeftAlone says which spec paths generation never changes, and why. Only a
+// target without generate.mutate has any.
+func (g *Generator) LeftAlone() []string { return g.leftAlone }
 
 // sequence draws one sequence, which starts by creating the primary CR
 // (DESIGN.md §5.5). It leaves Seed zero; Draw, the only way out of this

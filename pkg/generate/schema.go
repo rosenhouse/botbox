@@ -274,19 +274,21 @@ func asSchema(root map[string]any) (*schema, error) {
 // mutableFields are the paths the generator may change: the allowlist in
 // generate.mutate, or every path under spec where it is absent (DESIGN.md
 // §5.4).
-func mutableFields(t *target.Target, s *schema) ([]field, error) {
+// Without the allowlist, it also says which spec paths it leaves alone and why.
+func mutableFields(t *target.Target, s *schema) ([]field, []string, error) {
 	if len(t.Generate.Mutate) == 0 {
-		return specFields(s, t.Sample.Object), nil
+		fields, leftAlone := specFields(s, t.Sample.Object)
+		return fields, leftAlone, nil
 	}
 	var fields []field
 	for _, dotted := range slices.Compact(slices.Sorted(slices.Values(t.Generate.Mutate))) {
 		mutable, err := mutableField(s, dotted)
 		if err != nil {
-			return nil, fmt.Errorf("generate.mutate %s: %w", dotted, err)
+			return nil, nil, fmt.Errorf("generate.mutate %s: %w", dotted, err)
 		}
 		fields = append(fields, mutable)
 	}
-	return fields, nil
+	return fields, nil, nil
 }
 
 // mutableField reads the schema at a dotted path.
@@ -313,23 +315,27 @@ func mutableField(s *schema, dotted string) (field, error) {
 // metadata are not the target's input, and status is a subresource a CR op
 // cannot write. A path the schema says too little about is left alone rather
 // than guessed at.
-func specFields(s *schema, sample map[string]any) []field {
+func specFields(s *schema, sample map[string]any) ([]field, []string) {
 	spec := s.Properties["spec"]
 	if spec == nil {
-		return nil
+		return nil, nil
 	}
-	return walker{sample}.walk(spec, []string{"spec"}, !slices.Contains(s.Required, "spec"))
+	w := &walker{sample: sample}
+	return w.walk(spec, []string{"spec"}, !slices.Contains(s.Required, "spec")), w.leftAlone
 }
 
 // walker reads the target's sample, which says which objects a field may be
 // set inside.
-type walker struct{ sample map[string]any }
+type walker struct {
+	sample    map[string]any
+	leftAlone []string
+}
 
 // walk descends into an object the sample carries and into one that requires
 // no property of its own. It takes any other object whole, so that a field is
 // never set inside an object the sample lacks and whose required properties
 // would then be missing.
-func (w walker) walk(s *schema, path []string, optional bool) []field {
+func (w *walker) walk(s *schema, path []string, optional bool) []field {
 	if s.Type == "object" && len(s.Properties) > 0 && (len(s.Required) == 0 || w.carries(path)) {
 		var fields []field
 		for _, name := range slices.Sorted(maps.Keys(s.Properties)) {
@@ -338,14 +344,16 @@ func (w walker) walk(s *schema, path []string, optional bool) []field {
 		}
 		return fields
 	}
+	dotted := strings.Join(path, ".")
 	values, err := valuesOf(s)
 	if err != nil {
+		w.leftAlone = append(w.leftAlone, fmt.Sprintf("generation leaves %s alone: %v", dotted, err))
 		return nil
 	}
-	return []field{{path: path, dotted: strings.Join(path, "."), values: values, optional: optional}}
+	return []field{{path: path, dotted: dotted, values: values, optional: optional}}
 }
 
-func (w walker) carries(path []string) bool {
+func (w *walker) carries(path []string) bool {
 	value, found, err := unstructured.NestedFieldNoCopy(w.sample, path...)
 	if err != nil || !found {
 		return false

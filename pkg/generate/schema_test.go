@@ -126,7 +126,7 @@ func TestMutateRestrictsThePathsThatMove(t *testing.T) {
 	} {
 		t.Run(testCase.path, func(t *testing.T) {
 			loaded := loadTarget(t, testCase.path)
-			fields, err := mutableFields(loaded, primarySchemaOf(t, testCase.path))
+			fields, _, err := mutableFields(loaded, primarySchemaOf(t, testCase.path))
 			if err != nil {
 				t.Fatalf("mutableFields failed: %v.", err)
 			}
@@ -196,7 +196,7 @@ func TestAnOverlayKeywordBotboxDoesNotReadIsAConfigurationError(t *testing.T) {
 }
 
 func TestWithoutMutateEverySpecPathTheSchemaDescribesMoves(t *testing.T) {
-	fields, err := mutableFields(loadTarget(t, rulesTarget), primarySchemaOf(t, rulesTarget))
+	fields, _, err := mutableFields(loadTarget(t, rulesTarget), primarySchemaOf(t, rulesTarget))
 	if err != nil {
 		t.Fatalf("mutableFields failed: %v.", err)
 	}
@@ -210,10 +210,24 @@ func TestWithoutMutateEverySpecPathTheSchemaDescribesMoves(t *testing.T) {
 	}
 }
 
+func TestNewReportsTheSpecPathsItLeavesAlone(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	leftAlone := newGenerator(t, loaded, Options{}).LeftAlone()
+	if len(leftAlone) != 1 || !strings.Contains(leftAlone[0], "spec.surge") ||
+		!strings.Contains(leftAlone[0], "x-kubernetes-int-or-string") {
+		t.Errorf("New reports it leaves %q alone, want spec.surge and why.", leftAlone)
+	}
+
+	loaded.Generate.Mutate = []string{"spec.count"}
+	if leftAlone := newGenerator(t, loaded, Options{}).LeftAlone(); len(leftAlone) != 0 {
+		t.Errorf("New reports it leaves %q alone, and generate.mutate names every path that moves.", leftAlone)
+	}
+}
+
 func TestMutateIsAnAllowlistOfSchemaPaths(t *testing.T) {
 	loaded := loadTarget(t, certManagerTarget)
 	loaded.Generate.Mutate = []string{"spec.privateKey.algorithm"}
-	fields, err := mutableFields(loaded, primarySchemaOf(t, certManagerTarget))
+	fields, _, err := mutableFields(loaded, primarySchemaOf(t, certManagerTarget))
 	if err != nil {
 		t.Fatalf("mutableFields failed: %v.", err)
 	}

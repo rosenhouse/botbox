@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/run"
@@ -301,6 +305,66 @@ func TestMatrixReplaysABugNothingCaughtUnderItsBug(t *testing.T) {
 	if len(commands) != 1 || commands[0].kubeconfig != "kind.kubeconfig" ||
 		!slices.Equal(commands[0].launchArgs, []string{"--x=1", "--bug=1"}) {
 		t.Errorf("botbox matrix printed the replay commands %+v, want one with the kubeconfig, --x=1 and --bug=1.", commands)
+	}
+}
+
+// recordedWithABrokenProperty is a run whose property cannot be evaluated.
+func recordedWithABrokenProperty(t *testing.T) run.Result {
+	t.Helper()
+	result := recorded(t, true)
+	broken := *result.Recorded.Target
+	broken.Properties = []target.Property{{ID: "P1", Eval: func(*unstructured.Unstructured, []*unstructured.Unstructured) (bool, error) {
+		return false, errors.New("the predicate broke")
+	}}}
+	result.Recorded.Target = &broken
+	return result
+}
+
+// A run that errored judged nothing, so the matrix neither passes it nor
+// writes it.
+func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
+	stopped := errors.New("the target stopped")
+	for _, test := range []struct {
+		name     string
+		results  []run.Result
+		failures []error
+		want     string
+	}{
+		{
+			name:     "under the bug",
+			results:  []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)},
+			failures: []error{nil, stopped},
+			want:     "b1.json under --bug=1: the target stopped",
+		},
+		{
+			name:     "with no bug",
+			results:  []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)},
+			failures: []error{nil, nil, stopped},
+			want:     "b1.json with no bug: the target stopped",
+		},
+		{
+			name:    "in the checks",
+			results: []run.Result{recorded(t, true), recorded(t, false), recordedWithABrokenProperty(t)},
+			want:    "b1.json with no bug: evaluating property P1: the predicate broke",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			session := &fakeSession{results: test.results, failures: test.failures}
+			out := matrixFile(t)
+
+			code, _, stderr := invoke(t, session, "matrix",
+				"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", out)
+
+			if code != exitError {
+				t.Errorf("botbox matrix exited %d, want %d.", code, exitError)
+			}
+			if !strings.Contains(stderr, test.want) {
+				t.Errorf("botbox matrix reported %q, want %q.", stderr, test.want)
+			}
+			if _, err := os.Stat(out); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("botbox matrix wrote %s, want no matrix of a run that errored.", out)
+			}
+		})
 	}
 }
 

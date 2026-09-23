@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
@@ -101,6 +102,35 @@ func TestG5IgnoresAnOwnerReferenceWhoseOwnerIsGone(t *testing.T) {
 	in := restarted(child("w-0", "11", ownedByGhost), child("w-0", "21", orphaned))
 
 	silent(t, invariant.RestartStable, in)
+}
+
+// An ownerReference may name any version the API server serves.
+func TestG5IgnoresADanglingOwnerReferenceThatNamesAnotherVersion(t *testing.T) {
+	live := metav1.OwnerReference{APIVersion: "toy.botbox/v1", Kind: "Widget", Name: widgetName, UID: widgetUID}
+	for _, dangling := range []struct {
+		name string
+		ref  metav1.OwnerReference
+	}{
+		{"the owner is gone", metav1.OwnerReference{APIVersion: "toy.botbox/v1alpha1", Kind: "Widget", Name: "gone", UID: "uid-gone"}},
+		{"the owner's name has a new UID", metav1.OwnerReference{APIVersion: "toy.botbox/v1alpha1", Kind: "Widget", Name: widgetName, UID: "uid-w-before"}},
+	} {
+		t.Run(dangling.name, func(t *testing.T) {
+			in := restarted(child("w-0", "11", ownedBy(dangling.ref, live)), child("w-0", "21", ownedBy(live)))
+
+			silent(t, invariant.RestartStable, in)
+		})
+	}
+}
+
+func TestG5ComparesALiveOwnerReferenceThatNamesAnotherVersion(t *testing.T) {
+	live := metav1.OwnerReference{APIVersion: "toy.botbox/v1alpha1", Kind: "Widget", Name: widgetName, UID: widgetUID}
+	in := restarted(child("w-0", "11", ownedBy(live)), child("w-0", "21", orphaned))
+
+	fired(t, invariant.RestartStable, in)
+}
+
+func ownedBy(refs ...metav1.OwnerReference) option {
+	return func(u *unstructured.Unstructured) { u.SetOwnerReferences(refs) }
 }
 
 func TestG5ComparesEverythingElse(t *testing.T) {

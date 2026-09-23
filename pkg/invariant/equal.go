@@ -70,25 +70,27 @@ func (out *Result) noteOnce(note string) {
 	}
 }
 
-// ownerSet holds the owners a snapshot can resolve, the way the collector
-// resolves them: by apiVersion, kind and name, then by UID (DESIGN.md §5.8).
+// ownerSet holds the owners a snapshot can resolve: by group, kind and name,
+// whatever version a reference names, then by UID.
 type ownerSet struct {
 	uids map[ownerKey]types.UID
 	// watched are the kinds botbox observes. An owner of any other kind is
 	// unresolvable, so it counts as live.
-	watched map[ownerKey]bool
+	watched map[schema.GroupKind]bool
 }
 
-type ownerKey struct{ apiVersion, kind, name string }
+type ownerKey struct {
+	kind schema.GroupKind
+	name string
+}
 
 func (in Input) owners(s state) ownerSet {
-	set := ownerSet{uids: map[ownerKey]types.UID{}, watched: map[ownerKey]bool{}}
+	set := ownerSet{uids: map[ownerKey]types.UID{}, watched: map[schema.GroupKind]bool{}}
 	for _, gvk := range append([]schema.GroupVersionKind{in.Target.Primary}, in.Target.Manages...) {
-		set.watched[ownerKey{apiVersion: gvk.GroupVersion().String(), kind: gvk.Kind}] = true
+		set.watched[gvk.GroupKind()] = true
 	}
 	for _, v := range s.live {
-		key := ownerKey{apiVersion: v.GVK.GroupVersion().String(), kind: v.GVK.Kind, name: v.Name}
-		set.uids[key] = v.UID
+		set.uids[ownerKey{kind: v.GVK.GroupKind(), name: v.Name}] = v.UID
 	}
 	return set
 }
@@ -112,8 +114,9 @@ func (o ownerSet) pruneDangling(metadata map[string]any) {
 }
 
 func (o ownerSet) exists(ref map[string]any) bool {
-	key := ownerKey{apiVersion: text(ref["apiVersion"]), kind: text(ref["kind"]), name: text(ref["name"])}
-	if !o.watched[ownerKey{apiVersion: key.apiVersion, kind: key.kind}] {
+	gvk := schema.FromAPIVersionAndKind(text(ref["apiVersion"]), text(ref["kind"]))
+	key := ownerKey{kind: gvk.GroupKind(), name: text(ref["name"])}
+	if !o.watched[key.kind] {
 		return true // botbox does not watch the kind, so it cannot say the owner is gone.
 	}
 	uid, found := o.uids[key]

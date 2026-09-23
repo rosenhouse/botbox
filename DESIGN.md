@@ -362,8 +362,9 @@ keyed by kind and name.
 **G5 equality.** The default ignores exactly `metadata.resourceVersion`, `metadata.uid`,
 `metadata.creationTimestamp`, `metadata.generation`, `metadata.managedFields`,
 `status.conditions[*].lastTransitionTime`, and any ownerReference whose owner no longer
-exists. It compares everything else, including labels, annotations, finalizers and the
-remaining ownerReferences. A target excludes further paths with `equalIgnore`, written in
+exists. G5 finds an owner by group, kind and name, whatever version the reference names,
+and then by UID. It compares everything else, including labels, annotations, finalizers
+and the remaining ownerReferences. A target excludes further paths with `equalIgnore`, written in
 the form of the paths above (§8.1). Along an ignored path, a map or a list left empty
 counts as absent, so an ignored annotation that only one side carries compares equal. An
 item that `[*]` names stays even when left empty, so the items still count.

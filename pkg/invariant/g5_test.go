@@ -1,6 +1,7 @@
 package invariant_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -208,18 +209,24 @@ func TestG5IgnoresAFieldOfEveryCondition(t *testing.T) {
 	})
 }
 
-func TestG5NotesAnIgnoredKeyThatMeetsAList(t *testing.T) {
+func TestG5NotesEachIgnoredKeyThatMeetsAList(t *testing.T) {
 	in := restarted(child("w-0", "11", conditions(0, "ok")), child("w-0", "21", conditions(12*time.Second, "ok")))
-	in.Target.EqualIgnore = []target.Path{target.MustParsePath("status.conditions.lastHeartbeatTime")}
+	in.Target.EqualIgnore = []target.Path{
+		target.MustParsePath("status.conditions.lastHeartbeatTime"),
+		target.MustParsePath("metadata.ownerReferences.uid"),
+	}
 
 	result := evaluate(t, invariant.RestartStable, in)
 
 	if len(result.Violations) != 1 {
 		t.Errorf("G5 reported %v, want the heartbeat it could not ignore.", statements(result))
 	}
-	want := "G5 could not follow equalIgnore status.conditions.lastHeartbeatTime: status.conditions is a list; write status.conditions[*].lastHeartbeatTime; a path with brackets goes in a block-style list"
-	if len(result.Notes) != 1 || result.Notes[0] != want {
-		t.Errorf("G5 noted %q, want only %q.", result.Notes, want)
+	want := []string{
+		"G5 could not follow equalIgnore status.conditions.lastHeartbeatTime: status.conditions is a list; write status.conditions[*].lastHeartbeatTime; a path with brackets goes in a block-style list",
+		"G5 could not follow equalIgnore metadata.ownerReferences.uid: metadata.ownerReferences is a list; write metadata.ownerReferences[*].uid; a path with brackets goes in a block-style list",
+	}
+	if !slices.Equal(result.Notes, want) {
+		t.Errorf("G5 noted %q, want %q.", result.Notes, want)
 	}
 }
 

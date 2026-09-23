@@ -153,16 +153,16 @@ func StartCollector(config *rest.Config, opts CollectorOptions) (*Collector, err
 	return c, nil
 }
 
-// Stop stops the collector. A sweep in progress is abandoned.
-func (c *Collector) Stop() {
+// Stop stops the collector and abandons a sweep in progress. It names each
+// owner the collector could not resolve, once per dependent.
+func (c *Collector) Stop() []Unresolved {
 	c.cancel()
 	<-c.stopped
 	c.informers.Shutdown()
+	return c.unresolvedOwners()
 }
 
-// Unresolved names each owner the collector could not resolve, once per
-// dependent. It is complete once Stop has returned.
-func (c *Collector) Unresolved() []Unresolved {
+func (c *Collector) unresolvedOwners() []Unresolved {
 	found := slices.Collect(maps.Keys(c.unresolved))
 	slices.SortFunc(found, func(a, b Unresolved) int {
 		return cmp.Or(

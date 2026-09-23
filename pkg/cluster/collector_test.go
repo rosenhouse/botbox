@@ -473,7 +473,7 @@ func TestNotifyDoesNotBlockWhenASweepIsPending(t *testing.T) {
 // Each pair of neighbours in want ties on the sort keys before the one that
 // orders it, and the keys after would order it the other way. The sweep meets
 // them in reverse.
-func TestUnresolvedNamesEachDependentAndOwnerOnce(t *testing.T) {
+func TestUnresolvedOwnersNameEachDependentAndOwnerOnce(t *testing.T) {
 	c, _, _ := fakeCollector(t)
 	deployment := metav1.OwnerReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "a", UID: "uid-a"}
 	secretX := configMapObject("x", "uid-secret-x", secretOwner("a"))
@@ -501,8 +501,8 @@ func TestUnresolvedNamesEachDependentAndOwnerOnce(t *testing.T) {
 		owned(configMapKind, "y", secretOwner("c")),
 		owned(secretKind, "x", secretOwner("a")),
 	}
-	if got := c.Unresolved(); !slices.Equal(got, want) {
-		t.Errorf("Unresolved returned\n\t%+v\nwant\n\t%+v", got, want)
+	if got := c.unresolvedOwners(); !slices.Equal(got, want) {
+		t.Errorf("unresolvedOwners returned\n\t%+v\nwant\n\t%+v", got, want)
 	}
 }
 

@@ -84,7 +84,7 @@ func TestCollector(t *testing.T) {
 		requirePresent(t, client, namespace, ownerless.Name)
 		requirePresent(t, client, namespace, unwatchedOwner.Name)
 		requirePresent(t, client, namespace, unservedVersion.Name)
-		collector.Stop()
+		unresolved := collector.Stop()
 		want := []cluster.Unresolved{
 			{DependentKind: configMapKind, DependentName: unservedVersion.Name,
 				OwnerKind: schema.GroupVersionKind{Group: gadgetKind.Group, Version: "v1beta9", Kind: gadgetKind.Kind}, OwnerName: gadget.GetName(),
@@ -92,8 +92,8 @@ func TestCollector(t *testing.T) {
 			{DependentKind: configMapKind, DependentName: unwatchedOwner.Name,
 				OwnerKind: schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, OwnerName: "absent"},
 		}
-		if got := collector.Unresolved(); !slices.Equal(got, want) {
-			t.Errorf("Unresolved returned %+v, want %+v.", got, want)
+		if !slices.Equal(unresolved, want) {
+			t.Errorf("Stop returned %+v, want %+v.", unresolved, want)
 		}
 	})
 
@@ -194,7 +194,7 @@ func startCollector(t *testing.T, config *rest.Config, namespace string, kinds .
 	if err != nil {
 		t.Fatalf("StartCollector returned an error: %v", err)
 	}
-	t.Cleanup(collector.Stop)
+	t.Cleanup(func() { collector.Stop() })
 	return collector
 }
 

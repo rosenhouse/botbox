@@ -182,8 +182,7 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 			return err
 		}
 		h.down.push("stopping the collector", func(context.Context) error {
-			collector.Stop()
-			h.unresolved = collector.Unresolved()
+			h.unresolved = collector.Stop()
 			return nil
 		})
 	}

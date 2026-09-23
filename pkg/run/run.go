@@ -90,6 +90,8 @@ type Harness struct {
 	target *target.Target
 	dir    string
 	down   teardown
+	// unresolved is what the collector could not resolve, once it stops.
+	unresolved []cluster.Unresolved
 }
 
 // Start brings the run up in the order DESIGN.md §5.5 requires and leaves the
@@ -179,7 +181,11 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 		if err != nil {
 			return err
 		}
-		h.down.push("stopping the collector", func(context.Context) error { collector.Stop(); return nil })
+		h.down.push("stopping the collector", func(context.Context) error {
+			collector.Stop()
+			h.unresolved = collector.Unresolved()
+			return nil
+		})
 	}
 
 	if err := h.applyFixtures(ctx); err != nil {

@@ -273,8 +273,8 @@ service accounts appear, and no pods run. Consequences:
   will do, and the owner is then found by (group, kind, name) in the run namespace and by
   UID. A name match with a different UID counts as gone. An owner of a kind botbox does not
   watch, or named at a version the API server does not serve, is treated as live, so the
-  emulator never deletes an object whose owners it cannot resolve. It records each
-  unresolved reference once per object that carries it. The emulator is watch-driven and deletes within 1 s of the owner's deletion event. It does
+  emulator never deletes an object whose owners it cannot resolve. The run notes each
+  unresolved reference once per object that carries it (§6). The emulator is watch-driven and deletes within 1 s of the owner's deletion event. It does
   not patch dangling ownerReferences off a dependent that still has a live owner.
   `blockOwnerDeletion`, foreground and orphan policies are not modelled. Its writes bypass
   the proxy and never count as target traffic. On a kubeconfig cluster it is off.
@@ -349,6 +349,8 @@ took an object inside, G5 for a `Restart` missing a snapshot. The Runner carries
 checkpoint's notes out and `botbox` prints them at the end of the run, because a check
 that was skipped otherwise reads like one that passed. G5 also notes an `equalIgnore` path
 it could not follow (§8.1), since it then compares a field the target meant it to skip.
+The Runner also notes each ownerReference the collector could not resolve (§5.8), since
+the object that carries it stays, and G3 would report it without saying why.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
@@ -1098,3 +1100,13 @@ built from source and run as a black-box binary.
   absent. `generate` keeps dotted schema property names, which the schema already checks.
   A key that meets a list is a note and not a configuration error, because `equalIgnore`
   applies to every managed kind, and one kind's list can be another kind's map.
+- **D@43 An owner resolves through any served version, and an unresolved one is a run
+  note.** An operator that migrates between API versions can name its owner at `v1alpha1`
+  while the target declares `v1`. The collector keyed an owner by its apiVersion, so it
+  kept that child, G3 fired on a correct controller, and only a warning on stderr said why.
+  kube's garbage collector maps a reference's apiVersion and kind through discovery and
+  then compares the UID. The collector now does the same with the run's RESTMapper. A
+  version the API server does not serve stays unresolved, because kube's collector cannot
+  resolve it either. G5 has no mapper, so it ignores the version. Each unresolved reference
+  is a run note that names the object it keeps, because G3 reports that object and the
+  report is what a reader acts on.

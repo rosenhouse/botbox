@@ -167,6 +167,13 @@ window sits inside the settle budget, so the controller has `settle - stable` to
 writing. A `stable` at least as wide as `settle` leaves it none, so botbox refuses to load
 that target rather than reporting G4 against your controller.
 
+envtest runs no garbage collector, so botbox runs its own over the kinds your target
+declares. It deletes an object once every owner the object names is gone. It finds an owner
+by group, kind, name and UID, at any version the API server serves. It counts as live an
+owner of a kind your target does not declare, or one named at a version the API server does
+not serve. The run prints a note for each such owner, and the report carries it, because
+botbox then never deletes the object that names it.
+
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the
 controller's back. A sequence you write yourself can also carry a `fault`, which makes the

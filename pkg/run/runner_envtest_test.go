@@ -155,6 +155,28 @@ func TestRunner(t *testing.T) {
 		requireNamespaceEmpty(t, ctx, testCluster.Config(), result.Timeline.Namespace)
 	})
 
+	t.Run("notes an owner the collector cannot resolve", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		ownedBySecret := fixtureConfigMap()
+		ownedBySecret.SetOwnerReferences([]metav1.OwnerReference{{
+			APIVersion: "v1", Kind: "Secret", Name: "absent", UID: "8a1d0f2c-5b3e-4d7a-9c6f-1e2b3c4d5e6f",
+		}})
+		toy.Fixtures = append(toy.Fixtures, ownedBySecret)
+
+		result, err := run.Run(ctx, toy, readSequence(t, oneCreate), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: &recordingChecker{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		want := "botbox's garbage collector never deletes v1/ConfigMap " + fixtureName +
+			", because it does not watch v1/Secret, the kind of its owner absent"
+		if !slices.Equal(result.Notes, []string{want}) {
+			t.Errorf("The run carried the notes %q, want %q.", result.Notes, want)
+		}
+	})
+
 	// A target that dies mid-run takes the run with it, and no wait outlives
 	// it (DESIGN.md §5.5).
 	t.Run("ends the settle wait where the target stopped", func(t *testing.T) {

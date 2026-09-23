@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
+	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/run"
 )
 
@@ -178,6 +179,43 @@ func TestRunner(t *testing.T) {
 			return strings.HasPrefix(note, "G5") && strings.Contains(note, "for op 1 (restart): op 2 (update) ran")
 		}) {
 			t.Errorf("The run noted %q, want G5 to say the update of op 2 kept it from judging the restart of op 1.", result.Notes)
+		}
+	})
+
+	// B8 never recreates the child botbox deleted until a restart does. P1
+	// would end the run before the restart, so the target declares none.
+	t.Run("names what the restart of b8.json brought back", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		toy.Launch.Args = append(toy.Launch.Args, "--bug=8")
+		toy.Properties = nil
+		sequence, err := run.ReadSequence(repoRoot + "/targets/toy-widget/sequences/b8.json")
+		if err != nil {
+			t.Fatalf("Reading the sequence failed: %v", err)
+		}
+
+		result, err := run.Run(ctx, toy, sequence, run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation == nil || result.Violation.ID != "G5" {
+			t.Fatalf("The run reported %v, want G5.", result.Violation)
+		}
+		got := result.Violation.Differences
+		if len(got) != 1 {
+			t.Fatalf("G5 quoted %+v, want the ConfigMap the restart brought back.", got)
+		}
+		want := invariant.Difference{
+			Object: "v1/ConfigMap widget-0", ResourceVersions: [2]string{"", got[0].ResourceVersions[1]},
+			Path: "(object)", Before: "(absent)", After: "(present)",
+		}
+		if got[0] != want || want.ResourceVersions[1] == "" {
+			t.Errorf("G5 quoted %+v, want %+v with the resourceVersion the restart created.", got[0], want)
+		}
+		if want := "the state converged after op 1 (deleteManaged) and the one after op 3 (settle)"; result.Violation.Compared != want {
+			t.Errorf("G5 says it compared %q, want %q.", result.Violation.Compared, want)
 		}
 	})
 

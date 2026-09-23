@@ -51,6 +51,10 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 	for {
 		ready, changed := s.state(start)
 		now := s.now()
+		// A target that stopped will never converge, so the wait ends there.
+		if closed(s.stopped) {
+			return false, nil
+		}
 		if ready && !now.Before(changed.Add(s.timeouts.Stable)) {
 			return true, nil
 		}
@@ -60,8 +64,7 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 				deadline = owed
 			}
 		}
-		// A target that stopped will never converge, so the wait ends there.
-		if !now.Before(deadline) || closed(s.stopped) {
+		if !now.Before(deadline) {
 			return false, nil
 		}
 		if err := s.sleep(ctx, s.poll); err != nil {

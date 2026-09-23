@@ -288,16 +288,18 @@ the count beside it. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-r
 
 Once a settle wait has converged, botbox restarts a controller that exits, as a kubelet
 would: at once, then after 10s, doubling up to 5 minutes. The run prints a note for each
-exit, quoting the line the controller wrote as it stopped. A controller that crashes on
-some input never converges, so G4 reports it and quotes the last exit. The toy controller
-crashes on a count of 0 under `--launch-arg --bug=12`, and
-`targets/toy-widget/sequences/b12.json` sets one:
+exit, quoting the line the controller wrote as it stopped. A settle wait does not converge
+while the controller waits to restart, nor until a restarted controller has run for
+`stable`. A controller that crashes again that soon after each restart never converges,
+even where it wrote its converged state first, so G4 reports it and quotes the last exit.
+The toy controller converges a count of 0 and then crashes under `--launch-arg --bug=12`,
+and `targets/toy-widget/sequences/b12.json` sets one:
 
 ```
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
 run 1: G4 the settle wait after op 1 (update) expired with no fault active
-  at 2026-09-23T19:15:40.484894029Z; in 5.04s the target never held its Ready predicate with 2s of quiet behind it; the target managed 2 objects of the kinds it declares; the target exited 2 times since it last converged, last with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
+  at 2026-09-23T22:39:39.478931922Z; in 5.037s the target never held its Ready predicate with 2s of quiet behind it; the target managed 0 objects of the kinds it declares; the target exited 2 times since it last converged, last with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
 ```
 
 ## When botbox exits 2
@@ -349,7 +351,7 @@ Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generi
 | G1 | Bounded reconciliation. The target's request rate falls to zero under an unchanged spec. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
 | G3 | Clean deletion. Deleting the CR removes everything it manages and clears its finalizers. |
-| G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops. A controller that keeps crashing after it first converged fails it. |
+| G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops. A controller waiting to restart after a crash has not converged. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
 

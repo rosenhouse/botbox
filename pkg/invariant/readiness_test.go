@@ -131,6 +131,20 @@ func TestAnExpiredWaitReadsTheCRAsTheWaitFoundIt(t *testing.T) {
 	requireStatement(t, violation, "in 5s, ready held from 0s on, but the namespace never held still for stable (2s): 1 change")
 }
 
+// The wait holds Ready only where it holds on every CR, as the wait reads it.
+func TestAnExpiredWaitHoldsReadyOnlyOnEveryCR(t *testing.T) {
+	in := newRun().
+		record(500*time.Millisecond, object(widgetGVK, "v", "9", spec(3), status(0, 1))).
+		op(invariant.OpCreate, time.Second).
+		record(1100*time.Millisecond, widget("10", spec(3), status(3, 1))).
+		checkpoint(6*time.Second, invariant.Expired).
+		through(9 * time.Second)
+
+	violation := expiredWait(t, in)
+
+	requireStatement(t, violation, "in 5s, ready never held: it evaluated to false")
+}
+
 func TestAnExpiredWaitSaysWhereNothingChanged(t *testing.T) {
 	in := unreadyCreate(3, 1).checkpoint(5*time.Second, invariant.Expired).through(8 * time.Second)
 

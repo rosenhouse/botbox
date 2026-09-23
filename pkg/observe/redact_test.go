@@ -181,13 +181,18 @@ func TestAnAnnotationsMarkerShowsWhetherItChanged(t *testing.T) {
 	}
 }
 
-func TestAConfigMapIsWrittenAsItIs(t *testing.T) {
-	s := observe.NewStore(managing(configMapGVK))
-	s.Record(configMapGVK, withData(object(configMapGVK, "child", "10"), "czNjcjN0"), at(0))
+func TestAnyOtherKindIsWrittenAsItIs(t *testing.T) {
+	for _, gvk := range []schema.GroupVersionKind{
+		configMapGVK,
+		{Group: "example.io", Version: "v1", Kind: "Secret"},
+	} {
+		s := observe.NewStore(managing(gvk))
+		s.Record(gvk, withData(object(gvk, "child", "10"), "czNjcjN0"), at(0))
 
-	written := line(t, []byte(writeHistory(t, s)[0]))["object"].(map[string]any)
-	if got := field(t, written, "data")["value"]; got != "czNjcjN0" {
-		t.Errorf("A ConfigMap's data.value is written as %v, want it as recorded.", got)
+		written := line(t, []byte(writeHistory(t, s)[0]))["object"].(map[string]any)
+		if got := field(t, written, "data")["value"]; got != "czNjcjN0" {
+			t.Errorf("A %v's data.value is written as %v, want it as recorded.", gvk, got)
+		}
 	}
 }
 

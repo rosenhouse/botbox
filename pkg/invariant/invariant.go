@@ -148,7 +148,7 @@ type Violation struct {
 }
 
 // Difference is one field that differs between two versions of an object,
-// with its value in each. Path is (object) where one version is absent, whose
+// with its value in each. Path is empty where one version is absent, whose
 // resourceVersion is then empty, or where the target's own equality compared
 // the whole object.
 type Difference struct {

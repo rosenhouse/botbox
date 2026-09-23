@@ -70,7 +70,7 @@ func TestG5FiresOnAnObjectOnlyTheRestartBroughtBack(t *testing.T) {
 	}
 	want := []invariant.Difference{{
 		Object: "v1/ConfigMap w-0", ResourceVersions: [2]string{"", "21"},
-		Path: "(object)", Before: "(absent)", After: "(present)",
+		Before: "(absent)", After: "(present)",
 	}}
 	if !reflect.DeepEqual(violation.Differences, want) {
 		t.Errorf("G5 quoted %+v, want %+v.", violation.Differences, want)
@@ -90,7 +90,7 @@ func TestG5FiresOnAnObjectTheRestartDropped(t *testing.T) {
 	}
 	want := []invariant.Difference{{
 		Object: "v1/ConfigMap w-0", ResourceVersions: [2]string{"11", ""},
-		Path: "(object)", Before: "(present)", After: "(absent)",
+		Before: "(present)", After: "(absent)",
 	}}
 	if !reflect.DeepEqual(violation.Differences, want) {
 		t.Errorf("G5 quoted %+v, want %+v.", violation.Differences, want)
@@ -466,7 +466,7 @@ func TestG5NamesAnObjectTheTargetsOwnEqualityFoundChanged(t *testing.T) {
 
 	want := []invariant.Difference{{
 		Object: "v1/ConfigMap w-0", ResourceVersions: [2]string{"11", "21"},
-		Path: "(object)", Before: "(present)", After: "(changed)",
+		Before: "(present)", After: "(changed)",
 	}}
 	if !reflect.DeepEqual(violation.Differences, want) {
 		t.Errorf("G5 quoted %+v, want %+v.", violation.Differences, want)

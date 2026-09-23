@@ -130,9 +130,9 @@ func (out *Result) compare(in Input, op Op, before, after Checkpoint) {
 
 type objectKey struct{ kind, name string }
 
-// whole is the difference of an object taken as one.
+// whole is the difference of an object taken as one, which no path names.
 func whole(object Difference, before, after string) Difference {
-	object.Path, object.Before, object.After = "(object)", before, after
+	object.Before, object.After = before, after
 	return object
 }
 

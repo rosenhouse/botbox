@@ -436,21 +436,25 @@ func TestTheChecksQuoteWhatTheRunDid(t *testing.T) {
 
 func TestTheChecksNameWhatARestartChanged(t *testing.T) {
 	for _, c := range []struct {
-		changed []string
-		clause  string
+		name          string
+		before, after map[string]any
+		differences   int
+		evidence      string
 	}{
-		{[]string{"a"}, `data.a was "0", is "1"`},
-		{[]string{"a", "b"}, `data.a was "0", is "1" (1 of 2 differences)`},
+		{"one field", map[string]any{"a": "0", "b": "0"}, map[string]any{"a": "1", "b": "0"}, 1,
+			`data.a was "0", is "1"; 2 versions, the first v1/ConfigMap widget-0`},
+		{"two fields", map[string]any{"a": "0", "b": "0"}, map[string]any{"a": "1", "b": "1"}, 2,
+			`data.a was "0", is "1" (1 of 2 differences); 2 versions, the first v1/ConfigMap widget-0`},
+		{"a whole object, which the statement names", nil, map[string]any{"a": "0"}, 1,
+			"1 version, the first v1/ConfigMap widget-0"},
 	} {
-		t.Run(c.clause, func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			store := history()
 			recordWidget(store, at(0.1), "11", 1)
-			recordData(store, at(0.2), "12", map[string]any{"a": "0", "b": "0"})
-			after := map[string]any{"a": "0", "b": "0"}
-			for _, key := range c.changed {
-				after[key] = "1"
+			if c.before != nil {
+				recordData(store, at(0.2), "12", c.before)
 			}
-			recordData(store, at(3.5), "22", after)
+			recordData(store, at(3.5), "22", c.after)
 			in := Input{
 				Target:  checkTarget(),
 				Objects: store,
@@ -469,14 +473,14 @@ func TestTheChecksNameWhatARestartChanged(t *testing.T) {
 				t.Fatalf("The checks reported %v, want G5 alone.", ids)
 			}
 			restart := violations[0]
-			if len(restart.Differences) != len(c.changed) || restart.DifferencesTotal != len(c.changed) {
-				t.Errorf("G5 carried out %+v of %d differences, want %d.", restart.Differences, restart.DifferencesTotal, len(c.changed))
+			if len(restart.Differences) != c.differences || restart.DifferencesTotal != c.differences {
+				t.Errorf("G5 carried out %+v of %d differences, want %d.", restart.Differences, restart.DifferencesTotal, c.differences)
 			}
 			if want := "the state converged after op 0 (create) and the one after op 2 (settle)"; restart.Compared != want {
 				t.Errorf("G5 carried out that it compared %q, want %q.", restart.Compared, want)
 			}
-			if !strings.HasPrefix(restart.Evidence, c.clause+"; ") {
-				t.Errorf("G5's evidence is %q, want it to open with %q.", restart.Evidence, c.clause)
+			if restart.Evidence != c.evidence {
+				t.Errorf("G5's evidence is %q, want %q.", restart.Evidence, c.evidence)
 			}
 		})
 	}

@@ -2,6 +2,7 @@ package report
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,7 +36,7 @@ func (d document) markdown() []byte {
 	}
 	if len(d.Differences) > 0 {
 		md.WriteString("\n## What changed across the restart\n\n")
-		md.WriteString(differencesLine(d.DifferencesTotal, len(d.Differences), d.Compared))
+		md.WriteString(differencesLine(d.Differences, d.DifferencesTotal, d.Compared))
 		table(&md, []string{"object", "resourceVersion", "path", "before", "after"}, differenceRows(d.Differences))
 	}
 	fmt.Fprintf(&md, "\n## Sequence\n\n```json\n%s\n```\n", strings.TrimRight(string(d.Sequence), "\n"))
@@ -95,7 +96,8 @@ func managedLine(total, shown int) string {
 
 // differencesLine says what the violation quotes of the differences, and
 // between which states.
-func differencesLine(total, shown int, compared string) string {
+func differencesLine(differences []invariant.Difference, total int, compared string) string {
+	shown := len(differences)
 	quoted := count(shown, "difference")
 	if shown < total {
 		quoted = fmt.Sprintf("%d of %s", shown, count(total, "difference"))
@@ -103,8 +105,14 @@ func differencesLine(total, shown int, compared string) string {
 	if compared != "" {
 		quoted += " between " + compared
 	}
-	return "The violation quotes " + quoted + ". `equalIgnore` takes each path as written, and `objects.jsonl` holds every version the Observer saw.\n\n"
+	held := "`objects.jsonl` holds every version the Observer saw.\n\n"
+	if slices.ContainsFunc(differences, namesAField) {
+		held = "`equalIgnore` takes each path as written, and " + held
+	}
+	return "The violation quotes " + quoted + ". " + held
 }
+
+func namesAField(d invariant.Difference) bool { return d.Path != "" }
 
 // count writes a number of things, in the singular where there is one.
 func count(n int, noun string) string {
@@ -142,9 +150,13 @@ func versionRows(versions []observe.Version) [][]string {
 func differenceRows(differences []invariant.Difference) [][]string {
 	rows := make([][]string, len(differences))
 	for i, d := range differences {
+		path := "(whole object)"
+		if namesAField(d) {
+			path = code(d.Path)
+		}
 		rows[i] = []string{
 			d.Object, resourceVersion(d.ResourceVersions[0]) + " → " + resourceVersion(d.ResourceVersions[1]),
-			code(d.Path), code(d.Before), code(d.After),
+			path, code(d.Before), code(d.After),
 		}
 	}
 	return rows

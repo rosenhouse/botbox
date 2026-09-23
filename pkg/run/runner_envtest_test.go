@@ -209,7 +209,7 @@ func TestRunner(t *testing.T) {
 		}
 		want := invariant.Difference{
 			Object: "v1/ConfigMap widget-0", ResourceVersions: [2]string{"", got[0].ResourceVersions[1]},
-			Path: "(object)", Before: "(absent)", After: "(present)",
+			Before: "(absent)", After: "(present)",
 		}
 		if got[0] != want || want.ResourceVersions[1] == "" {
 			t.Errorf("G5 quoted %+v, want %+v with the resourceVersion the restart created.", got[0], want)

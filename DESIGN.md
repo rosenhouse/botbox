@@ -252,8 +252,8 @@ target never created has no version to quote, and the count is what a report abo
 missing one turns on (D39). A G5 violation names the two states it compared and quotes, in
 a table of its own, each field that differs between them: the object, the resourceVersions
 compared, the path in the form `equalIgnore` takes, and the value on each side, cut to 80
-runes. An object only one state holds is one row. The table is bounded as a timeline is, and
-takes the rows of each object in turn (D@52).
+runes. An object only one state holds is one row, which names no path. The table is bounded
+as a timeline is, and takes the rows of each object in turn (D@52).
 Every violation says how many entries it chose each excerpt from, because a report that
 counted only what it was handed would claim every bounded excerpt was whole. It also says
 the instant it judged, which aligns the two tables, and whose history a one-object
@@ -1219,4 +1219,5 @@ built from source and run as a black-box binary.
   hid the rest. The bound takes each object's rows in turn, so one noisy object does not
   crowd out the others. G5 is stamped at the state after the restart, where it judged. A
   target with its own equality hook gets one row per object, because G5 cannot see what the
-  hook compared.
+  hook compared. A row of a whole object names no path, because `equalIgnore` cannot ignore
+  an object, and the line botbox prints leaves it to the statement.

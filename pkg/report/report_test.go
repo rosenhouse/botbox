@@ -324,7 +324,7 @@ func TestReportQuotesWhatARestartChanged(t *testing.T) {
 	failure.Differences = []invariant.Difference{
 		{Object: "v1/ConfigMap widget-0", ResourceVersions: [2]string{"11", "21"},
 			Path: `metadata.annotations["probe.example.com/started-at"]`, Before: `"1"`, After: `"2"`},
-		{Object: "v1/ConfigMap widget-1", ResourceVersions: [2]string{"", "22"}, Path: "(object)", Before: "(absent)", After: "(present)"},
+		{Object: "v1/ConfigMap widget-1", ResourceVersions: [2]string{"", "22"}, Before: "(absent)", After: "(present)"},
 	}
 	failure.DifferencesTotal = 3
 	failure.Compared = "the state converged after op 0 (create) and the one after op 2 (settle)"
@@ -337,7 +337,7 @@ func TestReportQuotesWhatARestartChanged(t *testing.T) {
 			"`equalIgnore` takes each path as written, and `objects.jsonl` holds every version the Observer saw.\n",
 		"| object | resourceVersion | path | before | after |\n",
 		"| v1/ConfigMap widget-0 | 11 → 21 | `metadata.annotations[\"probe.example.com/started-at\"]` | `\"1\"` | `\"2\"` |\n",
-		"| v1/ConfigMap widget-1 | (absent) → 22 | `(object)` | `(absent)` | `(present)` |\n",
+		"| v1/ConfigMap widget-1 | (absent) → 22 | (whole object) | `(absent)` | `(present)` |\n",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("The section is\n%s\nwant it to hold %q.", body, want)
@@ -358,6 +358,31 @@ func TestReportQuotesWhatARestartChanged(t *testing.T) {
 	}
 	if got := field(t, encoded, "compared"); got != `"`+failure.Compared+`"` {
 		t.Errorf("report.json says it compared %s, want %q.", got, failure.Compared)
+	}
+}
+
+// equalIgnore cannot ignore a whole object, so the report offers no path.
+func TestReportQuotesAWholeObjectWithoutAPath(t *testing.T) {
+	failure := failingRun()
+	failure.Differences = []invariant.Difference{
+		{Object: "v1/ConfigMap widget-0", ResourceVersions: [2]string{"11", ""}, Before: "(present)", After: "(absent)"},
+		{Object: "v1/ConfigMap widget-1", ResourceVersions: [2]string{"12", "22"}, Before: "(present)", After: "(changed)"},
+	}
+	failure.DifferencesTotal = 2
+	failure.Compared = "the state converged after op 0 (create) and the one after op 2 (settle)"
+
+	md, _ := write(t, failure)
+
+	body := section(md, "What changed across the restart")
+	for _, want := range []string{
+		"The violation quotes 2 differences between the state converged after op 0 (create) and the one after op 2 (settle). " +
+			"`objects.jsonl` holds every version the Observer saw.\n",
+		"| v1/ConfigMap widget-0 | 11 → (absent) | (whole object) | `(present)` | `(absent)` |\n",
+		"| v1/ConfigMap widget-1 | 12 → 22 | (whole object) | `(present)` | `(changed)` |\n",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("The section is\n%s\nwant it to hold %q.", body, want)
+		}
 	}
 }
 

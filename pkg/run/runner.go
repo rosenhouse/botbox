@@ -488,8 +488,8 @@ func (r *runner) asOf(t time.Time) invariant.Input {
 	}
 }
 
-// judge checkpoints where a settle wait ended. A wait that expired where
-// excused does not excuse it is a G4 violation, which ends the run.
+// judge checkpoints where a settle wait ended. A wait that expired unexcused
+// is a G4 violation, which ends the run.
 func (r *runner) judge(op int, wait Wait, excused func(invariant.Input, invariant.Checkpoint) bool) error {
 	if !wait.Converged {
 		// A target that is gone cannot converge, so that is the harness's

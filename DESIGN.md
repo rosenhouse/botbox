@@ -1353,4 +1353,5 @@ built from source and run as a black-box binary.
   deletion, G3 only notes it, so G4 still judges that wait and blames the finalizers. A CR
   under deletion is not ready, whatever `Ready` says, because a wait that converged
   mid-cleanup would put the rest of the cleanup in the quiet window. The toy proves both:
-  `--cleanup-delay=7s` passes a `create` and a `delete`, and B12 fails G3 alone.
+  with a `--cleanup-delay` past `T_settle` it passes a `create` and a `delete`, and B12
+  fails G3 alone.

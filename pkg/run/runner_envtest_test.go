@@ -19,6 +19,7 @@ import (
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/run"
+	"github.com/rosenhouse/botbox/pkg/target"
 )
 
 // toySequence drives the toy through every op the Runner executes in M3.
@@ -278,11 +279,12 @@ func TestRunner(t *testing.T) {
 		}
 	})
 
-	// The toy's T_settle is 5s and its T_delete 10s. A deletionTimestamp holds
-	// whole seconds, so a 7s delay holds the finalizer 6s to 7s past the delete.
+	// A deletionTimestamp holds whole seconds, so a 4s delay holds the
+	// finalizer 3s to 4s past the delete.
 	t.Run("passes a delete whose cleanup outlasts T_settle", func(t *testing.T) {
 		toy := loadTarget(t, binary)
-		toy.Launch.Args = append(toy.Launch.Args, "--cleanup-delay=7s")
+		toy.Timeouts = target.Timeouts{Settle: 2 * time.Second, Stable: time.Second, Delete: 6 * time.Second}
+		toy.Launch.Args = append(toy.Launch.Args, "--cleanup-delay=4s")
 
 		result, err := run.Run(ctx, toy, readSequence(t, createThenDelete), run.Options{
 			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
@@ -301,6 +303,7 @@ func TestRunner(t *testing.T) {
 
 	t.Run("fails G3, not G4, on a finalizer that never clears", func(t *testing.T) {
 		toy := loadTarget(t, binary)
+		toy.Timeouts = target.Timeouts{Settle: 2 * time.Second, Stable: time.Second, Delete: 4 * time.Second}
 		toy.Launch.Args = append(toy.Launch.Args, "--bug=12")
 
 		result, err := run.Run(ctx, toy, readSequence(t, createThenDelete), run.Options{
@@ -313,7 +316,7 @@ func TestRunner(t *testing.T) {
 		if result.Violation == nil || result.Violation.ID != "G3" {
 			t.Fatalf("The run reported %v, want G3.", result.Violation)
 		}
-		if want := "the CR widget still carried the finalizers [widget.botbox/cleanup] 10s after its deletion"; result.Violation.Statement != want {
+		if want := "the CR widget still carried the finalizers [widget.botbox/cleanup] 4s after its deletion"; result.Violation.Statement != want {
 			t.Errorf("G3 says %q, want %q.", result.Violation.Statement, want)
 		}
 		if want := "toy.botbox/v1/Widget widget"; result.Violation.VersionsOf != want || len(result.Violation.Versions) == 0 {

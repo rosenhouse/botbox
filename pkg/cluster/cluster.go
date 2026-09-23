@@ -49,6 +49,9 @@ func Start(opts Options) (*Cluster, error) {
 	// cluster KUBECONFIG names.
 	existing := false
 	env := &envtest.Environment{CRDDirectoryPaths: opts.CRDPaths, UseExistingCluster: &existing}
+	// Only kube-controller-manager removes the finalizer this plugin adds to
+	// a claim. Append keeps envtest's own entry, which disables ServiceAccount.
+	env.ControlPlane.GetAPIServer().Configure().Append("disable-admission-plugins", "StorageObjectInUseProtection")
 	config, err := env.Start()
 	if err != nil {
 		return nil, fmt.Errorf("starting the envtest control plane: %w", err)

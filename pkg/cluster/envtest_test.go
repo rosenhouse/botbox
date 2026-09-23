@@ -7,8 +7,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
@@ -87,6 +92,61 @@ func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
 
 	// A mapper built after Start knows the kinds the CRDs installed.
 	requireThingServed(t, c.Config())
+}
+
+// Nothing on envtest would remove a finalizer or create a ServiceAccount.
+func TestStartAdmitsWhatOnlyAControllerManagerWouldFinish(t *testing.T) {
+	c, err := cluster.Start(cluster.Options{})
+	if err != nil {
+		t.Fatalf("Start returned an error: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := c.Stop(); err != nil {
+			t.Errorf("Stop returned an error: %v", err)
+		}
+	})
+	client, err := kubernetes.NewForConfig(c.Config())
+	if err != nil {
+		t.Fatalf("Building a client failed: %v", err)
+	}
+	namespace := newNamespace(t, client)
+	ctx := t.Context()
+
+	t.Run("a claim carries no finalizer and deletes at once", func(t *testing.T) {
+		claim := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "data"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+				},
+			},
+		}
+		claims := client.CoreV1().PersistentVolumeClaims(namespace)
+		created, err := claims.Create(ctx, claim, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("Creating the claim failed: %v", err)
+		}
+		if len(created.Finalizers) > 0 {
+			t.Errorf("The claim carries the finalizers %v, which nothing on envtest removes.", created.Finalizers)
+		}
+		if err := claims.Delete(ctx, created.Name, metav1.DeleteOptions{}); err != nil {
+			t.Fatalf("Deleting the claim failed: %v", err)
+		}
+		if _, err := claims.Get(ctx, created.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Errorf("Reading the deleted claim returned %v, want NotFound.", err)
+		}
+	})
+
+	t.Run("a pod needs no ServiceAccount", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "workload"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "main", Image: "example.invalid/main"}}},
+		}
+		if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+			t.Errorf("Creating a pod in a namespace with no ServiceAccount failed: %v", err)
+		}
+	})
 }
 
 func TestConnectInstallsCRDsAndLeavesThem(t *testing.T) {

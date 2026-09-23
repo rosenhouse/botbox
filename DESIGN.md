@@ -842,7 +842,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   milestone and the invariant/property IDs it touches, and carries a "Design change"
   section whenever it edits this document.
 - **No flaky-test retries in CI.** A flaky harness test is a P0 bug in the harness.
-- **Seeds are always printed.** Every failure is reproducible from seed + sequence.
+- **Seeds are always printed.** Every failure is reproducible from its sequence, and from
+  its seed with the same botbox build and target declaration (§5.4).
 
 ## 12. How agents work in this repo
 
@@ -1211,11 +1212,12 @@ built from source and run as a black-box binary.
   once its window is closed, so a request faulted just before a removal stays in it.
 - **D@55 A golden test pins what fixed seeds draw.** Draws come from rapid's
   `Example(seed)`, which rapid documents as fit only for examples and which promises nothing
-  across versions. A draw also depends on the CRD schema, the sample and `generate`. The
-  Makefile, the README and the envtest tier rely on what particular seeds draw, and nothing
-  checked it. `pkg/generate` now records the draws of those seeds for the toy, cert-manager
-  and external-secrets. A change to generation or to rapid that moves a draw fails until the
-  test is rerun with `-update`.
+  across versions. A draw also depends on the CRD schema, the sample, `generate` and
+  `manages`. The Makefile, the README and the envtest tier rely on what particular seeds
+  draw. `pkg/generate` records the draws of those seeds for the toy, cert-manager and
+  external-secrets. A change to generation or to rapid that moves a draw fails until the
+  test is rerun with `-update`. The README tells CI to pin botbox to a commit and to replay
+  a failing `sequence.json` against the base branch.
 - **D@48 Generation keeps the CRD's own rules, judged by the API server's code.** The
   generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
   rule `self.maxUnavailable <= self.count`, 15 of 100 drawn sequences broke it, and the

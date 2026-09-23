@@ -270,7 +270,7 @@ the count beside it. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-r
 - uses: actions/setup-go@v5
   with:
     go-version-file: go.mod
-- run: go install github.com/rosenhouse/botbox/cmd/botbox@latest
+- run: go install github.com/rosenhouse/botbox/cmd/botbox@<commit>   # a commit of main
 - run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
 - run: |
     index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
@@ -282,9 +282,14 @@ the count beside it. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-r
 `$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not. Give
 `--deadline` room for your controller, because a run that overruns it, or an invocation it stops
 before the last run, exits 2 rather than reporting a find. Cache the control plane and the target as
-[.github/workflows/ci.yml](.github/workflows/ci.yml) does. Fix the seed on pull requests, so that
-a failure is the change under review and not a new draw, and draw fresh seeds on a schedule, as
-[nightly.yml](.github/workflows/nightly.yml) does. The job needs no cluster and no registry.
+[.github/workflows/ci.yml](.github/workflows/ci.yml) does. The job needs no cluster and no registry.
+
+Pin botbox to a commit, because `@latest` tracks main. Fix the seed on pull requests, and draw
+fresh seeds on a schedule, as [nightly.yml](.github/workflows/nightly.yml) does. A seed names a
+sequence for one build of botbox and one target declaration: its CRD schema, `sample`,
+`generate` and `manages`. A botbox upgrade, or a pull request that edits any of those, draws
+different sequences under the same seed. To tell whether a failure comes from the change under
+review, replay its `sequence.json` against the base branch's controller.
 
 ## Invariants
 

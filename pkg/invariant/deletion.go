@@ -13,11 +13,11 @@ func (in Input) WaitOwed(t time.Time) time.Time {
 func (in Input) deletionOwed(t time.Time) time.Time {
 	var owed time.Time
 	for _, deleted := range in.crDeletionsBy(t) {
-		deadline := deleted.at.Add(in.timeouts().Delete)
-		if gone, found := in.goneBy(deleted, t); found && !gone.After(deadline) {
-			deadline = gone.Add(in.timeouts().Settle)
+		until := deleted.deadline
+		if gone, found := in.goneBy(deleted, t); found && !gone.After(until) {
+			until = gone.Add(in.timeouts().Settle)
 		}
-		owed = later(owed, deadline)
+		owed = later(owed, until)
 	}
 	return owed
 }
@@ -29,15 +29,14 @@ func (in Input) Excused(checkpoint Checkpoint) bool {
 }
 
 // DeletionOverdue reports whether a settle wait saw a CR outlive a deletion
-// deadline G3 judges: the CR was still there at the deadline, or where the
-// wait began if that was later.
+// deadline G3 judges: its finalizers still held it at the deadline, or where
+// the wait began if that was later.
 func (in Input) DeletionOverdue(checkpoint Checkpoint) bool {
 	for _, deleted := range in.crDeletionsBy(checkpoint.Time) {
-		deadline := deleted.at.Add(in.timeouts().Delete)
-		if deadline.After(checkpoint.Time) || in.faulted(deleted.at, deadline) {
+		if deleted.deadline.After(checkpoint.Time) || in.faulted(deleted.at, deleted.deadline) {
 			continue
 		}
-		if cr, found := in.stateAt(later(deadline, checkpoint.Began)).version(deleted.key); found && cr.UID == deleted.uid {
+		if _, held := in.stateAt(later(deleted.deadline, checkpoint.Began)).held(deleted); held {
 			return true
 		}
 	}

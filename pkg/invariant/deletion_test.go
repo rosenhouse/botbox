@@ -53,6 +53,24 @@ func TestG4JudgesAWaitG3DoesNot(t *testing.T) {
 			want: "no CR was left to be ready, but the namespace never held still",
 		},
 		{
+			name: "the CR went in time, and a child kept changing past its deadline",
+			in: beingDeleted().
+				remove(17*time.Second, deletedWidget("16")).
+				record(20500*time.Millisecond, child("w-2", "17")).
+				record(21500*time.Millisecond, child("w-2", "18")).
+				checkpoint(22*time.Second, invariant.Expired).
+				through(24 * time.Second),
+			want: "no CR was left to be ready, but the namespace never held still",
+		},
+		{
+			name: "no finalizer held the CR at its deadline",
+			in: beingDeleted().
+				record(12*time.Second, deletedWidget("16")).
+				checkpoint(20150*time.Millisecond, invariant.Expired).
+				through(25 * time.Second),
+			want: "the CR w was still being deleted",
+		},
+		{
 			name: "the CR went late, but before the wait began",
 			in: beingDeleted().
 				checkpoint(20150*time.Millisecond, invariant.Expired).

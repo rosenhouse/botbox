@@ -168,6 +168,11 @@ the status writes that change nothing, which G2 counts. A write that changes som
 fails G2 whatever `quiet` is. Keep `quiet` as low as your timer allows, since G1 lets a
 slow loop of that many requests through.
 
+G6 fails a controller that repeats one failing request more than `errloop` times within
+`settle`. controller-runtime's default backoff repeats one 13 times in 30s, so G6 sees
+such a loop in a controller built on it only with `errloop: 12` or less. A 5s `settle`
+holds 10 of them, so it needs 9 or less.
+
 envtest runs no garbage collector, so botbox runs its own over the kinds your target
 declares. It deletes an object once every owner the object names is gone. It finds an owner
 by group, kind and name, at any version the API server serves, and then compares the UID.

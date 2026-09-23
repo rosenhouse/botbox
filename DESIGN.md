@@ -392,6 +392,14 @@ looping and G6 counts it; so is a 409 on any other verb. G6 also counts a failin
 which G1 excludes: G1 ignores a watch because a watch that hangs is the target waiting,
 while a watch that fails returns at once and repeating it is a loop.
 
+**Backoff.** controller-runtime's default rate limiter doubles a failing request's delay
+from 5 ms. A loop on one object therefore repeats 10 times in its first 5 s and 13 times
+in its densest 30 s, however long it runs. The default `N_errloop` misses it, and a
+readiness verdict or G1 names the loop instead (§5.7). A target built on
+controller-runtime or on client-go's workqueue declares an `errloop` of 12 or less, and
+one with a `T_settle` of 5 s an `errloop` of 9 or less, as the toy does (§9). A loop on a
+fixed interval longer than `T_settle / N_errloop` escapes G6.
+
 **Notes.** A check that could not judge something records a note naming it: G3 for a
 deletion whose deadline the run did not reach, that a fault reached into, or that botbox
 took an object inside, G5 for a `Restart` missing a snapshot or with a change of botbox's
@@ -671,6 +679,8 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   present. In CEL, `!has(status.ready) || status.ready <= managed.filter(o, o.kind ==
   "ConfigMap").size()`.
 - `timeouts: {settle: 5s, stable: 2s, delete: 10s}`. The toy converges in milliseconds.
+- `thresholds: {errloop: 5}`. B5's backoff repeats its failing request 10 times in the
+  toy's 5 s `T_settle` (§6, backoff).
 - `--resync=<duration>` requeues every Widget on that interval and writes its status each
   time, changed or not. The envtest tier runs it at 900 ms, which fails G1 under the
   default `N_quiet` and passes under `quiet: 3` (§6, periodic work).
@@ -1288,3 +1298,16 @@ built from source and run as a black-box binary.
   still churn (§14 question 1). An `N_quiet` above zero lets a slow loop through G1, so
   G6 has to catch a loop that fails (D@46). The toy's `--resync` runs under envtest with
   `quiet: 3` and with the default.
+- **D@46 `N_errloop` stays 20, and a controller-runtime target declares 12 or less.**
+  controller-runtime's default backoff puts 13 identical failures in the densest 30 s, so
+  G6 misses such a loop at 20, and G4 or G1 reports it instead. A default of 10 would
+  see it, provided correct targets stay well under 10. A scratch build that kept passing
+  runs measured the worst count of one failing request within 30 s. Over 21 drawn seeds
+  of cert-manager and 25 of external-secrets, plus their pinned sequences and controls,
+  it was 2 for cert-manager and 16 for external-secrets. Each of external-secrets' 16 was
+  an event create refused with 403 in an earlier run's namespace. The runs of one
+  invocation share a control plane, the teardown leaves the SecretStore fixture in a
+  namespace envtest never finishes deleting, and each later run's controller reconciles
+  every one of them. The count grows with the run's place in the invocation. Within its
+  own namespace, external-secrets' worst was 3. The default stays 20 while that leak
+  stands. G6's statement names `thresholds.errloop`, so a finding says what to change.

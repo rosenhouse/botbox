@@ -257,11 +257,12 @@ Every violation says how many entries it chose each excerpt from, because a repo
 counted only what it was handed would claim every bounded excerpt was whole. It also says
 the instant it judged, which aligns the two tables, and whose history a one-object
 timeline is. A readiness verdict also quotes the `ready` expression, the error evaluating
-it, and the CR's status there. A status holds whatever its controller wrote, so the report
-bounds it: twenty conditions as a table, 200 bytes of each field, and 1000 bytes of the
-rest as JSON. A readiness verdict and a G1 name the failing request the target repeated
-most in their window, with its count, because an error loop that backs off can stay under
-`N_errloop` and surface only as G4 or G1 (D@49).
+it, and the name and status of the CR it read. A status holds whatever its controller
+wrote, so the report bounds it: twenty conditions as a table, 200 bytes of each field, and
+1000 bytes of the rest as JSON. Each code block's fence is longer than any run of
+backticks inside it. A readiness verdict and a G1 name the failing request the target
+repeated most in their window, with its count, because an error loop that backs off can
+stay under `N_errloop` and surface only as G4 or G1 (D@49).
 
 A report is a snapshot taken where the check failed, and the recordings beside it are
 finalized when the run ends. A request still open at the snapshot, which a watch usually

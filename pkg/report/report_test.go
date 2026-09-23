@@ -655,6 +655,7 @@ func deploymentBacked() report.Report {
 	failure.Check.ID = "G4"
 	failure.Ready = &invariant.Readiness{
 		Expr:  `status.conditions.exists(c, c.type == "Ready" && c.status == "True")`,
+		CR:    "widget",
 		Error: `evaluating ready "…": no such key: conditions`,
 		Status: map[string]any{
 			"observedGeneration": int64(1),
@@ -676,25 +677,26 @@ func TestReportQuotesTheReadyPredicate(t *testing.T) {
 
 	body := section(md, "Ready predicate")
 	for _, want := range []string{
-		"```\n" + failure.Ready.Expr + "\n```",
+		"The verdict evaluated the target's `ready` on the CR `widget`:\n\n```\n" + failure.Ready.Expr + "\n```",
 		"Evaluating it on the CR at the verdict failed:\n\n```\n" + failure.Ready.Error + "\n```",
 		"The CR's conditions at the verdict:\n\n| type | status | reason | message | observedGeneration |",
 		"| Ready | False | Pending | 0/10 replicas available | 1 |",
 		"The rest of its status:\n\n```json\n" + `{"observedGeneration":1,"phase":"<Pending> & waiting","replicas":0}` + "\n```",
+		"`objects.jsonl` holds every version of the CR whole.",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("The Ready predicate section does not quote %q:\n%s", want, body)
 		}
 	}
 	var ready struct {
-		Expr, Error string
-		Conditions  []map[string]string
-		Status      string
+		Expr, CR, Error string
+		Conditions      []map[string]string
+		Status          string
 	}
 	if err := json.Unmarshal([]byte(field(t, encoded, "ready")), &ready); err != nil {
 		t.Fatalf("report.json's ready does not parse: %v", err)
 	}
-	if ready.Expr != failure.Ready.Expr || ready.Error != failure.Ready.Error ||
+	if ready.Expr != failure.Ready.Expr || ready.CR != "widget" || ready.Error != failure.Ready.Error ||
 		len(ready.Conditions) != 1 || ready.Conditions[0]["message"] != "0/10 replicas available" ||
 		ready.Status != `{"observedGeneration":1,"phase":"<Pending> & waiting","replicas":0}` {
 		t.Errorf("report.json quotes the ready predicate as %+v.", ready)
@@ -737,6 +739,7 @@ func TestReportBoundsTheCRsStatus(t *testing.T) {
 		conditions = append(conditions, map[string]any{"type": fmt.Sprintf("C%d", i), "status": "False"})
 	}
 	conditions[0].(map[string]any)["message"] = "one | two\nthree " + strings.Repeat("x", 1000)
+	conditions[1].(map[string]any)["message"] = strings.Repeat("y", 200)
 	// The key's odd length puts the cut inside a character.
 	failure.Ready.Status = map[string]any{"conditions": conditions, "logs": strings.Repeat("é", 2000)}
 
@@ -752,16 +755,47 @@ func TestReportBoundsTheCRsStatus(t *testing.T) {
 	if !strings.Contains(body, `| one \| two three xxx`) {
 		t.Errorf("The report does not keep a message's bar and newline out of the table:\n%s", body)
 	}
-	if strings.Contains(body, strings.Repeat("x", 300)) || strings.Contains(encoded, strings.Repeat("x", 300)) {
+	if strings.Contains(body, strings.Repeat("x", 185)) || strings.Contains(encoded, strings.Repeat("x", 185)) {
 		t.Errorf("The report quotes a condition's message whole.")
+	}
+	if !strings.Contains(body, strings.Repeat("x", 184)+"… |") {
+		t.Errorf("The report does not mark where it cut a message:\n%s", body)
+	}
+	if !strings.Contains(body, "| "+strings.Repeat("y", 200)+" |") {
+		t.Errorf("The report cut a message that fits:\n%s", body)
+	}
+	if strings.Contains(body, "<nil>") || strings.Contains(encoded, "<nil>") {
+		t.Errorf("The report quotes a missing reason or message as <nil>:\n%s", body)
 	}
 	if strings.Contains(body, strings.Repeat("é", 600)) || strings.Contains(encoded, strings.Repeat("é", 600)) {
 		t.Errorf("The report quotes the rest of the status whole.")
 	}
-	if !strings.Contains(body, "The rest of its status, cut to 1000 of 4011 bytes:") {
+	if !strings.Contains(body, "The rest of its status, cut to 999 of 4011 bytes:") {
 		t.Errorf("The report does not say it cut the status:\n%s", body)
 	}
 	if !utf8.ValidString(md) || !utf8.ValidString(encoded) {
 		t.Errorf("The report cut a character in two.")
+	}
+}
+
+// A controller can write a fence into its status, and the report's own fences
+// must outlast it.
+func TestReportFencesTheReadyPredicateAroundTheFencesItQuotes(t *testing.T) {
+	failure := deploymentBacked()
+	failure.Ready.Expr = "status.note == \"```\""
+	failure.Ready.Error = "no such key: ````"
+	failure.Ready.Status = map[string]any{"note": "```"}
+
+	md, _ := write(t, failure)
+
+	body := section(md, "Ready predicate")
+	for _, want := range []string{
+		"````\n" + failure.Ready.Expr + "\n````",
+		"`````\n" + failure.Ready.Error + "\n`````",
+		"````json\n{\"note\":\"```\"}\n````",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("The Ready predicate section does not fence %q:\n%s", want, body)
+		}
 	}
 }

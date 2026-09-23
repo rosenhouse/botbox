@@ -22,6 +22,7 @@ const (
 // ready is the Ready predicate as both files quote it.
 type ready struct {
 	Expr            string      `json:"expr,omitempty"`
+	CR              string      `json:"cr,omitempty"`
 	Error           string      `json:"error,omitempty"`
 	Conditions      []condition `json:"conditions,omitempty"`
 	ConditionsTotal int         `json:"conditionsTotal,omitempty"`
@@ -43,7 +44,7 @@ func quoteReady(r *invariant.Readiness) *ready {
 	if r == nil {
 		return nil
 	}
-	quoted := &ready{Expr: r.Expr, Error: r.Error}
+	quoted := &ready{Expr: r.Expr, CR: r.CR, Error: r.Error}
 	rest := maps.Clone(r.Status)
 	if listed, isList := rest["conditions"].([]any); isList {
 		delete(rest, "conditions")
@@ -92,9 +93,9 @@ func cut(s string, n int) string {
 
 func (r *ready) markdown(md *strings.Builder) {
 	md.WriteString("\n## Ready predicate\n\n")
-	fmt.Fprintf(md, "The target's `ready` is:\n\n```\n%s\n```\n", r.Expr)
+	fmt.Fprintf(md, "The verdict evaluated the target's `ready` on the CR `%s`:\n\n%s\n", r.CR, fenced("", r.Expr))
 	if r.Error != "" {
-		fmt.Fprintf(md, "\nEvaluating it on the CR at the verdict failed:\n\n```\n%s\n```\n", r.Error)
+		fmt.Fprintf(md, "\nEvaluating it on the CR at the verdict failed:\n\n%s\n", fenced("", r.Error))
 	}
 	if r.ConditionsTotal > len(r.Conditions) {
 		fmt.Fprintf(md, "\nThe CR carried %d conditions at the verdict; the report quotes the first %d.\n\n", r.ConditionsTotal, len(r.Conditions))
@@ -114,11 +115,20 @@ func (r *ready) markdown(md *strings.Builder) {
 			status = "The rest of its status"
 		}
 		if r.StatusBytes > len(r.Status) {
-			status += fmt.Sprintf(", cut to %d of %d bytes", maxStatus, r.StatusBytes)
+			status += fmt.Sprintf(", cut to %d of %d bytes", len(strings.TrimSuffix(r.Status, "…")), r.StatusBytes)
 		}
-		fmt.Fprintf(md, "\n%s:\n\n```json\n%s\n```\n", status, r.Status)
+		fmt.Fprintf(md, "\n%s:\n\n%s\n", status, fenced("json", r.Status))
 	}
 	md.WriteString("\n`objects.jsonl` holds every version of the CR whole.\n")
+}
+
+// fenced is s in a code fence longer than any run of backticks in it.
+func fenced(info, s string) string {
+	fence := "```"
+	for strings.Contains(s, fence) {
+		fence += "`"
+	}
+	return fence + info + "\n" + s + "\n" + fence
 }
 
 // cell keeps a table row on one line.

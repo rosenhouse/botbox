@@ -470,22 +470,39 @@ func TestNotifyDoesNotBlockWhenASweepIsPending(t *testing.T) {
 	}
 }
 
+// Each pair of neighbours in want ties on the sort keys before the one that
+// orders it, and the keys after would order it the other way. The sweep meets
+// them in reverse.
 func TestUnresolvedNamesEachDependentAndOwnerOnce(t *testing.T) {
 	c, _, _ := fakeCollector(t)
-	secret := secretOwner("tls")
+	deployment := metav1.OwnerReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "a", UID: "uid-a"}
+	secretX := configMapObject("x", "uid-secret-x", secretOwner("a"))
+	secretX.kind = secretKind
 	objects := []object{
-		configMapObject("second", "uid-second", secret),
-		configMapObject("first", "uid-first", secret),
+		secretX,
+		configMapObject("y", "uid-y", secretOwner("c"), secretOwner("b"), secretOwner("a")),
+		configMapObject("x", "uid-x", deployment, secretOwner("b")),
 	}
 
 	c.sweep(context.Background(), objects)
 	c.sweep(context.Background(), objects)
 
-	owned := func(dependent string) Unresolved {
-		return Unresolved{DependentKind: configMapKind, DependentName: dependent, OwnerKind: secretKind, OwnerName: secret.Name}
+	owned := func(dependent schema.GroupVersionKind, name string, owner metav1.OwnerReference) Unresolved {
+		return Unresolved{
+			DependentKind: dependent, DependentName: name,
+			OwnerKind: schema.FromAPIVersionAndKind(owner.APIVersion, owner.Kind), OwnerName: owner.Name,
+		}
 	}
-	if got, want := c.Unresolved(), []Unresolved{owned("first"), owned("second")}; !slices.Equal(got, want) {
-		t.Errorf("Unresolved returned %+v, want %+v.", got, want)
+	want := []Unresolved{
+		owned(configMapKind, "x", secretOwner("b")),
+		owned(configMapKind, "x", deployment),
+		owned(configMapKind, "y", secretOwner("a")),
+		owned(configMapKind, "y", secretOwner("b")),
+		owned(configMapKind, "y", secretOwner("c")),
+		owned(secretKind, "x", secretOwner("a")),
+	}
+	if got := c.Unresolved(); !slices.Equal(got, want) {
+		t.Errorf("Unresolved returned\n\t%+v\nwant\n\t%+v", got, want)
 	}
 }
 

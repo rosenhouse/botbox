@@ -39,10 +39,11 @@ type schema struct {
 	MaxItems         *int64   `json:"maxItems"`
 	// ListType is x-kubernetes-list-type: a set holds no duplicate item, and a
 	// map holds no duplicate key.
-	ListType   string             `json:"x-kubernetes-list-type"`
-	Items      *schema            `json:"items"`
-	Properties map[string]*schema `json:"properties"`
-	Required   []string           `json:"required"`
+	ListType    string             `json:"x-kubernetes-list-type"`
+	IntOrString bool               `json:"x-kubernetes-int-or-string"`
+	Items       *schema            `json:"items"`
+	Properties  map[string]*schema `json:"properties"`
+	Required    []string           `json:"required"`
 }
 
 // field is one path the generator may change, and the values it may take.

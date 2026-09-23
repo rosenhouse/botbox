@@ -2,6 +2,7 @@ package generate
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -123,7 +124,7 @@ func TestOptionalPropertiesTheSchemaSaysTooLittleAboutStayOut(t *testing.T) {
 func TestSchemasThatSayTooLittleAreConfigurationErrors(t *testing.T) {
 	for _, testCase := range []struct{ declared, reports string }{
 		{`{"type":"string","format":"date-time"}`, "format"},
-		{`{"x-kubernetes-int-or-string":true}`, "does not say what values"},
+		{`{"x-kubernetes-int-or-string":true}`, "x-kubernetes-int-or-string"},
 		{`{"type":"object","x-kubernetes-preserve-unknown-fields":true}`, "no property"},
 		{`{"type":"array"}`, "what the array holds"},
 		{`{"type":"integer","minimum":5,"maximum":3}`, "no integer"},
@@ -141,6 +142,57 @@ func TestSchemasThatSayTooLittleAreConfigurationErrors(t *testing.T) {
 			if !strings.Contains(err.Error(), testCase.reports) {
 				t.Errorf("valuesOf reported %q, which does not mention %q.", err, testCase.reports)
 			}
+		})
+	}
+}
+
+func TestAnIntOrStringNamesTheOverlayThatSaysWhichItIs(t *testing.T) {
+	for _, declared := range []string{
+		`{"x-kubernetes-int-or-string":true}`,
+		// A word is rarely what an int-or-string's string form means.
+		`{"x-kubernetes-int-or-string":true,"type":"string"}`,
+	} {
+		t.Run(declared, func(t *testing.T) {
+			_, err := valuesOf(parseSchema(t, declared))
+			if err == nil {
+				t.Fatal("valuesOf guessed which form an int-or-string takes.")
+			}
+			for _, want := range []string{"x-kubernetes-int-or-string", "generate.overlay", "type: integer", "type: string", "pattern", "enum"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("valuesOf reported %q, which does not mention %q.", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAnIntOrStringFollowsItsOverlay(t *testing.T) {
+	percent := regexp.MustCompile(`^[1-9]0%$`)
+	for _, testCase := range []struct {
+		overlay map[string]any
+		allowed func(any) bool
+	}{
+		{map[string]any{"type": "integer", "minimum": 1, "maximum": 3}, func(value any) bool {
+			whole, isInteger := value.(int64)
+			return isInteger && whole >= 1 && whole <= 3
+		}},
+		{map[string]any{"type": "string", "pattern": percent.String()}, func(value any) bool {
+			text, isString := value.(string)
+			return isString && percent.MatchString(text)
+		}},
+	} {
+		t.Run(testCase.overlay["type"].(string), func(t *testing.T) {
+			loaded := loadTarget(t, rulesTarget)
+			loaded.Generate.Mutate = []string{"spec.surge"}
+			loaded.Generate.Overlay = map[string]map[string]any{"spec.surge": testCase.overlay}
+			g := newGenerator(t, loaded, Options{})
+			rapid.Check(t, func(rt *rapid.T) {
+				for _, surge := range generatedAt(g.sequence(rt), loaded.Sample, "spec", "surge") {
+					if !testCase.allowed(surge) {
+						rt.Fatalf("spec.surge is %#v, which the overlay %v does not allow.", surge, testCase.overlay)
+					}
+				}
+			})
 		})
 	}
 }

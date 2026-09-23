@@ -12,6 +12,7 @@ import (
 const (
 	toyTarget         = "../../targets/toy-widget/target.yaml"
 	certManagerTarget = "../../examples/cert-manager/target.yaml"
+	rulesTarget       = "testdata/rules/target.yaml"
 )
 
 func loadTarget(t *testing.T, path string) *target.Target {

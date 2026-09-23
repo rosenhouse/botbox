@@ -198,8 +198,9 @@ An invariant ignores any window the proxy applied a fault in, so what a fault te
 the controller behaves once the fault stops. A controller backs off while its requests fail,
 so once the faults stop botbox gives it as long as they lasted, plus `settle`, to converge.
 That includes a fault still active when the sequence ends, like the one above: botbox clears
-it and waits for the controller before it tears the run down. A fault that matches no request
-changes nothing and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
+it and waits for the controller before it tears the run down. A request gets the first fault
+that matches it, in op order, and each fault runs out on its own `until`. A fault that matches
+no request changes nothing and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
 
 Field values come from the CRD's own schema: its numeric ranges, enums, patterns and list
 lengths. A schema that says only `type: string` yields a random word, so the schema is not a

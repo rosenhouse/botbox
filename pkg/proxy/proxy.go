@@ -34,9 +34,10 @@ type Proxy struct {
 	seed     int64
 	inFlight sync.WaitGroup
 
-	mu     sync.Mutex
-	log    []Request
-	faults []*activeFault
+	mu        sync.Mutex
+	log       []Request
+	faults    []*activeFault
+	nextFault FaultID
 }
 
 // Start listens on 127.0.0.1 over plain HTTP and forwards to the server cfg

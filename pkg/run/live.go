@@ -71,9 +71,13 @@ func (l *liveRun) sleep(ctx context.Context, d time.Duration) error { return sle
 
 func (l *liveRun) restart(ctx context.Context) error { return l.h.Launcher.Restart(ctx) }
 
-func (l *liveRun) setFaults(specs []proxy.FaultSpec) { l.h.Proxy.SetFaults(specs) }
+func (l *liveRun) addFault(spec proxy.FaultSpec) proxy.FaultID { return l.h.Proxy.AddFault(spec) }
 
-func (l *liveRun) faultWindows() []proxy.FaultWindow { return l.h.Proxy.Windows() }
+func (l *liveRun) removeFault(id proxy.FaultID) { l.h.Proxy.RemoveFault(id) }
+
+func (l *liveRun) clearFaults() { l.h.Proxy.ClearFaults() }
+
+func (l *liveRun) faultWindow(id proxy.FaultID) proxy.FaultWindow { return l.h.Proxy.Window(id) }
 
 // createCR creates the op's object as the primary CR and tells the Observer
 // botbox created it, so that it never counts as managed (DESIGN.md §6).

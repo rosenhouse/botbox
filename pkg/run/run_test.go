@@ -3,6 +3,7 @@ package run
 import (
 	"errors"
 	"maps"
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +15,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/rosenhouse/botbox/pkg/observe"
+	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
@@ -143,6 +145,37 @@ func TestNewLiveRunResolvesThroughTheHarnessMapper(t *testing.T) {
 	}
 	if !maps.Equal(live.resources, want) {
 		t.Errorf("The Runner resolved %v, want %v.", live.resources, want)
+	}
+}
+
+// The Runner names each fault on the run's proxy by the ID the proxy gave it.
+func TestTheLiveRunDrivesTheProxysFaults(t *testing.T) {
+	p, err := proxy.Start(unreachable(), proxy.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { p.Stop() })
+	live := &liveRun{h: &Harness{Proxy: p}}
+	spec := proxy.FaultSpec{Action: proxy.Error{Code: http.StatusInternalServerError}}
+	get := func() int {
+		resp, err := http.Get(p.URL() + "/api/v1/namespaces/ns1/configmaps")
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	removed, kept := live.addFault(spec), live.addFault(spec)
+
+	live.removeFault(removed)
+	get()
+
+	if window := live.faultWindow(kept); window.First.IsZero() {
+		t.Error("The fault kept never applied, so the request met the one removed.")
+	}
+	live.clearFaults()
+	if status := get(); status == http.StatusInternalServerError {
+		t.Error("A request after clearFaults was faulted.")
 	}
 }
 

@@ -60,7 +60,9 @@ func faultedProxy(t *testing.T, seed int64, specs ...proxy.FaultSpec) *proxy.Pro
 			t.Errorf("Stop returned an error: %v", err)
 		}
 	})
-	p.SetFaults(specs)
+	for _, spec := range specs {
+		p.AddFault(spec)
+	}
 	return p
 }
 
@@ -211,6 +213,30 @@ func TestFractionFaultsAShareOfMatchingRequestsPerSeed(t *testing.T) {
 	}
 }
 
+func TestEachFaultDrawsItsOwnFraction(t *testing.T) {
+	half := func(resource string) proxy.FaultSpec {
+		return proxy.FaultSpec{
+			Match:  proxy.RequestMatcher{Resource: resource, Fraction: 0.5},
+			Action: proxy.Error{Code: http.StatusInternalServerError},
+		}
+	}
+	p := faultedProxy(t, 1, half("configmaps"), half("secrets"))
+
+	const n = 20
+	for i := range n {
+		do(t, p, "GET", fmt.Sprintf("/api/v1/namespaces/ns1/configmaps/cm%d", i), nil)
+		do(t, p, "GET", fmt.Sprintf("/api/v1/namespaces/ns1/secrets/s%d", i), nil)
+	}
+
+	faulted := map[string][]bool{}
+	for _, r := range p.Log() {
+		faulted[r.Resource] = append(faulted[r.Resource], r.Fault != "")
+	}
+	if slices.Equal(faulted["configmaps"], faulted["secrets"]) {
+		t.Errorf("Both faults faulted the requests %v, want each to draw its own.", faulted["configmaps"])
+	}
+}
+
 func TestUntilCountEndsTheFault(t *testing.T) {
 	p := faultedProxy(t, 0, proxy.FaultSpec{
 		Match:  proxy.RequestMatcher{Resource: "configmaps"},
@@ -263,6 +289,18 @@ func TestClearFaultsRestoresTheUpstream(t *testing.T) {
 	}
 }
 
+func TestRemoveFaultRestoresTheUpstream(t *testing.T) {
+	p := faultedProxy(t, 0)
+	id := p.AddFault(proxy.FaultSpec{Action: proxy.Error{Code: http.StatusInternalServerError}})
+
+	p.RemoveFault(id)
+	resp := do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil)
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("A request after RemoveFault got %d, want 200.", resp.StatusCode)
+	}
+}
+
 func TestTheFirstMatchingFaultWins(t *testing.T) {
 	p := faultedProxy(t, 0,
 		proxy.FaultSpec{Match: proxy.RequestMatcher{Verb: "create"}, Action: proxy.Error{Code: http.StatusConflict}},
@@ -287,44 +325,68 @@ func TestUpgradeRequestsAreNeverFaulted(t *testing.T) {
 	}
 }
 
-// The Runner reads Windows to bound a fault's excuse: it runs from the first
+// The Runner reads Window to bound a fault's excuse: it runs from the first
 // request the proxy faulted to the one that spent the trigger (§5.2, §6).
-func TestWindowsNameWhatTheProxyDidWithEachFault(t *testing.T) {
-	p := faultedProxy(t, 0,
-		proxy.FaultSpec{
-			Match:  proxy.RequestMatcher{Resource: "configmaps"},
-			Action: proxy.Error{Code: http.StatusInternalServerError},
-			Until:  proxy.Trigger{Count: 1},
-		},
-		proxy.FaultSpec{
-			Match:  proxy.RequestMatcher{Resource: "secrets"},
-			Action: proxy.Error{Code: http.StatusInternalServerError},
-			Until:  proxy.Trigger{For: 50 * time.Millisecond},
-		},
-		proxy.FaultSpec{
-			Match:  proxy.RequestMatcher{Resource: "widgets"},
-			Action: proxy.Error{Code: http.StatusInternalServerError},
-		},
-	)
+func TestWindowNamesWhatTheProxyDidWithEachFault(t *testing.T) {
+	p := faultedProxy(t, 0)
+	counted := p.AddFault(proxy.FaultSpec{
+		Match:  proxy.RequestMatcher{Resource: "configmaps"},
+		Action: proxy.Error{Code: http.StatusInternalServerError},
+		Until:  proxy.Trigger{Count: 1},
+	})
+	timed := p.AddFault(proxy.FaultSpec{
+		Match:  proxy.RequestMatcher{Resource: "secrets"},
+		Action: proxy.Error{Code: http.StatusInternalServerError},
+		Until:  proxy.Trigger{For: 50 * time.Millisecond},
+	})
+	endless := p.AddFault(proxy.FaultSpec{
+		Match:  proxy.RequestMatcher{Resource: "widgets"},
+		Action: proxy.Error{Code: http.StatusInternalServerError},
+	})
 
-	if windows := p.Windows(); len(windows) != 3 || !windows[0].First.IsZero() {
-		t.Fatalf("Windows says %v before any request, and no fault has been applied yet.", windows)
+	if window := p.Window(counted); !window.First.IsZero() {
+		t.Fatalf("Window says %v before any request, and no fault has been applied yet.", window)
 	}
 	spent := time.Now()
 	do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil)
 	time.Sleep(60 * time.Millisecond)
 
-	windows := p.Windows()
-	if windows[0].First.Before(spent) || windows[0].Retired.Before(spent) {
-		t.Errorf("The count-of-1 fault ran %+v, want it applied and spent on the request after %v.", windows[0], spent)
+	if window := p.Window(counted); window.First.Before(spent) || window.Retired.Before(spent) {
+		t.Errorf("The count-of-1 fault ran %+v, want it applied and spent on the request after %v.", window, spent)
 	}
-	if !windows[1].First.IsZero() {
-		t.Errorf("The fault matching secrets was applied at %v, and the request was for configmaps.", windows[1].First)
+	window := p.Window(timed)
+	if !window.First.IsZero() {
+		t.Errorf("The fault matching secrets was applied at %v, and the request was for configmaps.", window.First)
 	}
-	if windows[1].Retired.IsZero() || windows[1].Retired.After(time.Now()) {
-		t.Errorf("The 50ms fault retired at %v, want the moment its window closed.", windows[1].Retired)
+	if window.Retired.IsZero() || window.Retired.After(time.Now()) {
+		t.Errorf("The 50ms fault retired at %v, want the moment its window closed.", window.Retired)
 	}
-	if !windows[2].First.IsZero() || !windows[2].Retired.IsZero() {
-		t.Errorf("The fault with no trigger ran %+v, and no request matched it.", windows[2])
+	if window := p.Window(endless); !window.First.IsZero() || !window.Retired.IsZero() {
+		t.Errorf("The fault with no trigger ran %+v, and no request matched it.", window)
+	}
+}
+
+// Two fault ops can inject equal specs. Removing the one that ran out leaves
+// the other applying, with its own window.
+func TestRemovingAFaultLeavesAnEqualOneApplying(t *testing.T) {
+	spec := proxy.FaultSpec{
+		Match:  proxy.RequestMatcher{Resource: "configmaps"},
+		Action: proxy.Error{Code: http.StatusInternalServerError},
+		Until:  proxy.Trigger{Count: 3},
+	}
+	p := faultedProxy(t, 0)
+	spent, applying := p.AddFault(spec), p.AddFault(spec)
+	for range 4 {
+		do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil)
+	}
+	own := p.Window(applying)
+
+	p.RemoveFault(spent)
+
+	if got := p.Window(applying); got != own || !got.Retired.IsZero() {
+		t.Errorf("The remaining fault ran %+v, want its own window %+v, still open.", got, own)
+	}
+	if resp := do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil); resp.StatusCode != http.StatusInternalServerError {
+		t.Errorf("A request after the removal got %d, want the remaining fault's 500.", resp.StatusCode)
 	}
 }

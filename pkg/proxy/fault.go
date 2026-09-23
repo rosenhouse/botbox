@@ -77,37 +77,45 @@ func (a Delay) String() string { return fmt.Sprintf("delay(%s)", a.For) }
 func (Drop) String() string    { return "drop" }
 
 // Trigger ends a fault after a count of applications or a duration from the
-// SetFaults call. The zero Trigger never ends, which is how the Runner drives
+// AddFault call. The zero Trigger never ends, which is how the Runner drives
 // the op-index trigger of DESIGN.md §5.2.
 type Trigger struct {
 	Count int
 	For   time.Duration
 }
 
-// SetFaults replaces the active faults. A spec the proxy already holds keeps
-// what it has done so far, so that adding or dropping one fault does not
-// restart another's trigger. The first spec that matches a request wins.
-func (p *Proxy) SetFaults(specs []FaultSpec) {
+// FaultID names a fault the proxy holds. Two faults can have equal specs.
+type FaultID int
+
+// AddFault has the proxy apply the fault after those it already holds. The
+// first fault that matches a request wins.
+func (p *Proxy) AddFault(spec FaultSpec) FaultID {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	held := slices.Clone(p.faults)
-	faults := make([]*activeFault, len(specs))
-	for i, spec := range specs {
-		if j := slices.IndexFunc(held, func(f *activeFault) bool { return f != nil && f.spec == spec }); j >= 0 {
-			faults[i], held[j] = held[j], nil
-			continue
-		}
-		faults[i] = &activeFault{
-			spec:   spec,
-			since:  time.Now(),
-			random: rand.New(rand.NewPCG(uint64(p.seed), uint64(i))),
-		}
-	}
-	p.faults = faults
+	id := p.nextFault
+	p.nextFault++
+	p.faults = append(p.faults, &activeFault{
+		id:     id,
+		spec:   spec,
+		since:  time.Now(),
+		random: rand.New(rand.NewPCG(uint64(p.seed), uint64(id))),
+	})
+	return id
 }
 
-// ClearFaults removes every active fault.
-func (p *Proxy) ClearFaults() { p.SetFaults(nil) }
+// RemoveFault stops the proxy applying the fault.
+func (p *Proxy) RemoveFault(id FaultID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.faults = slices.DeleteFunc(p.faults, func(f *activeFault) bool { return f.id == id })
+}
+
+// ClearFaults removes every fault.
+func (p *Proxy) ClearFaults() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.faults = nil
+}
 
 // FaultWindow is what the proxy has done with one fault (DESIGN.md §5.2).
 type FaultWindow struct {
@@ -119,22 +127,24 @@ type FaultWindow struct {
 	Retired time.Time
 }
 
-// Windows reports what the proxy has done with each fault of the last
-// SetFaults call, in that order. The Runner reads them into the run's timeline:
-// a fault excuses the target over the window the proxy applied it in, and a
-// fault it never applied excuses nothing (DESIGN.md §6).
-func (p *Proxy) Windows() []FaultWindow {
+// Window reports what the proxy has done with a fault it holds. The Runner
+// reads it into the run's timeline: a fault excuses the target over the window
+// the proxy applied it in, and a fault it never applied excuses nothing
+// (DESIGN.md §6).
+func (p *Proxy) Window(id FaultID) FaultWindow {
 	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	windows := make([]FaultWindow, len(p.faults))
-	for i, fault := range p.faults {
-		windows[i] = FaultWindow{First: fault.first, Retired: fault.retiredBy(now)}
+	for _, fault := range p.faults {
+		if fault.id == id {
+			return FaultWindow{First: fault.first, Retired: fault.retiredBy(now)}
+		}
 	}
-	return windows
+	return FaultWindow{}
 }
 
 type activeFault struct {
+	id      FaultID
 	spec    FaultSpec
 	since   time.Time
 	random  *rand.Rand

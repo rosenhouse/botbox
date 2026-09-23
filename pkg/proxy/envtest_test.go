@@ -143,10 +143,10 @@ func TestProxyInFrontOfTheAPIServer(t *testing.T) {
 
 	t.Run("injects an error the target decodes", func(t *testing.T) {
 		mark := len(p.Log())
-		p.SetFaults([]proxy.FaultSpec{{
+		p.AddFault(proxy.FaultSpec{
 			Match:  proxy.RequestMatcher{Verb: "create", Resource: "configmaps"},
 			Action: proxy.Error{Code: 500},
-		}})
+		})
 		defer p.ClearFaults()
 
 		_, err := configMaps.Create(ctx, configMap("faulted"), metav1.CreateOptions{})
@@ -181,10 +181,10 @@ func TestProxyInFrontOfTheAPIServer(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		p.SetFaults([]proxy.FaultSpec{{
+		p.AddFault(proxy.FaultSpec{
 			Match:  proxy.RequestMatcher{Verb: "create"},
 			Action: proxy.Error{Code: 500},
-		}})
+		})
 		defer p.ClearFaults()
 
 		_, err = protobuf.CoreV1().ConfigMaps(namespace).Create(ctx, configMap("protobuf"), metav1.CreateOptions{})
@@ -200,10 +200,10 @@ func TestProxyInFrontOfTheAPIServer(t *testing.T) {
 
 	t.Run("delays a matched request", func(t *testing.T) {
 		const delay = 500 * time.Millisecond
-		p.SetFaults([]proxy.FaultSpec{{
+		p.AddFault(proxy.FaultSpec{
 			Match:  proxy.RequestMatcher{Verb: "get", Resource: "configmaps", Name: "recorded"},
 			Action: proxy.Delay{For: delay},
-		}})
+		})
 		defer p.ClearFaults()
 
 		start := time.Now()
@@ -216,7 +216,7 @@ func TestProxyInFrontOfTheAPIServer(t *testing.T) {
 	})
 
 	t.Run("serves normally once the faults are cleared", func(t *testing.T) {
-		p.SetFaults([]proxy.FaultSpec{{Action: proxy.Error{Code: 500}}})
+		p.AddFault(proxy.FaultSpec{Action: proxy.Error{Code: 500}})
 		p.ClearFaults()
 		mark := len(p.Log())
 

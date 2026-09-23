@@ -430,6 +430,9 @@ Details the example does not show:
   `settle` op after a `restart`, and one before it unless the op before it settles.
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
+- Each `fault` op adds a fault of its own, even where its spec equals another's. A request
+  gets the first fault that matches it, in op order, and each fault runs out on its own
+  `until`.
 - `update` applies `patch` as a JSON merge patch (RFC 7386).
 - `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
@@ -1181,3 +1184,9 @@ built from source and run as a black-box binary.
   resolve it either. G5 has no mapper, so it ignores the version. Each unresolved reference
   is a run note that names the object it keeps, because G3 reports that object and the
   report is what a reader acts on.
+- **D@40 The proxy holds each fault op's fault by identity.** The Runner handed the proxy
+  the specs it still held, and the proxy carried a fault over by an equal spec. With two
+  equal specs, dropping the one that ran out kept its spent entry and discarded the other.
+  The proxy stopped applying the second fault, its window was lost, and the toy with no
+  bug failed G4 after three settles. The proxy now gives each fault an ID, and the Runner
+  removes a fault and reads its window by that ID.

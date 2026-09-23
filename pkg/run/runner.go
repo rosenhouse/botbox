@@ -249,10 +249,12 @@ type harness interface {
 	settle(ctx context.Context, owed func() time.Time) (bool, error)
 	sleep(ctx context.Context, d time.Duration) error
 	restart(ctx context.Context) error
-	setFaults(specs []proxy.FaultSpec)
-	// faultWindows is what the proxy has done with each spec setFaults was
-	// last given, in that order.
-	faultWindows() []proxy.FaultWindow
+	// addFault has the proxy apply the fault after those it holds.
+	addFault(spec proxy.FaultSpec) proxy.FaultID
+	removeFault(id proxy.FaultID)
+	clearFaults()
+	// faultWindow is what the proxy has done with a fault it holds.
+	faultWindow(id proxy.FaultID) proxy.FaultWindow
 	createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error)
 	patchCR(ctx context.Context, name string, patch map[string]any) error
 	deleteCR(ctx context.Context, name string) error
@@ -302,11 +304,9 @@ type runner struct {
 	faults []activeFault
 }
 
-// activeFault is a fault op's spec while the proxy holds it. The Runner's
-// faults are exactly the specs it last gave the proxy, in that order, so that
-// the proxy's windows line up with them.
+// activeFault is a fault op's fault while the proxy applies it.
 type activeFault struct {
-	spec proxy.FaultSpec
+	id proxy.FaultID
 	// until is the op index the fault ends at, or nil if only the proxy's own
 	// trigger ends it (DESIGN.md §5.2).
 	until *int
@@ -628,11 +628,10 @@ func (r *runner) violate(violation Violation) {
 func (r *runner) inject(op Op) {
 	r.timeline.Faults = append(r.timeline.Faults, Window{})
 	r.faults = append(r.faults, activeFault{
-		spec:   op.Fault.spec(),
+		id:     r.h.addFault(op.Fault.spec()),
 		until:  op.Fault.Until.Op,
 		window: len(r.timeline.Faults) - 1,
 	})
-	r.setFaults()
 }
 
 // expireFaults drops the faults whose until trigger names this op or an
@@ -645,15 +644,12 @@ func (r *runner) expireFaults(op int) {
 		case fault.retired: // The proxy is done with it, and its window is closed.
 		case fault.until != nil && *fault.until <= op:
 			r.timeline.Faults[fault.window].End = r.now()
+			r.h.removeFault(fault.id)
 		default:
 			kept = append(kept, fault)
 		}
 	}
-	if len(kept) == len(r.faults) {
-		return
-	}
 	r.faults = kept
-	r.setFaults()
 }
 
 // readFaultWindows writes what the proxy has done with each fault into the
@@ -662,24 +658,16 @@ func (r *runner) expireFaults(op int) {
 // leaves its window unopened, because the run then ran as if the fault op
 // were not there.
 func (r *runner) readFaultWindows() {
-	windows := r.h.faultWindows()
-	for i := range min(len(r.faults), len(windows)) {
-		fault, window := &r.faults[i], &r.timeline.Faults[r.faults[i].window]
-		if !windows[i].First.IsZero() {
-			fault.applied, window.Start = true, windows[i].First
+	for i := range r.faults {
+		fault := &r.faults[i]
+		proxied, window := r.h.faultWindow(fault.id), &r.timeline.Faults[fault.window]
+		if !proxied.First.IsZero() {
+			fault.applied, window.Start = true, proxied.First
 		}
-		if !windows[i].Retired.IsZero() {
-			fault.retired, window.End = true, windows[i].Retired
+		if !proxied.Retired.IsZero() {
+			fault.retired, window.End = true, proxied.Retired
 		}
 	}
-}
-
-func (r *runner) setFaults() {
-	specs := make([]proxy.FaultSpec, len(r.faults))
-	for i, fault := range r.faults {
-		specs[i] = fault.spec
-	}
-	r.h.setFaults(specs)
 }
 
 // clearFaults takes every fault off the proxy and closes its window, which the
@@ -692,7 +680,7 @@ func (r *runner) clearFaults() {
 		}
 	}
 	r.faults = nil
-	r.h.setFaults(nil)
+	r.h.clearFaults()
 }
 
 // awaitRecovery waits for a target still owed time to recover from the faults.

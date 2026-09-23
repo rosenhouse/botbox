@@ -324,8 +324,8 @@ func (o options) replayCommand(sequence string) string {
 
 var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_./:@%+,-][A-Za-z0-9_./=:@%+,-]*$`)
 
-// shellQuote leaves a word sh and zsh read literally as it is, and
-// single-quotes any other.
+// shellQuote single-quotes a word unless shellSafe shows that sh and zsh read
+// it literally.
 func shellQuote(word string) string {
 	if shellSafe.MatchString(word) {
 		return word

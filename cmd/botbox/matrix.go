@@ -92,7 +92,7 @@ func (c *cli) exerciseBug(ctx context.Context, s session, t *target.Target, row 
 	if err != nil {
 		return fmt.Errorf("%s: %w", row.file, err)
 	}
-	var notes []string
+	notes := slices.Clone(result.Notes)
 	for _, check := range results {
 		if len(check.Violations) > 0 {
 			row.fired = append(row.fired, check.ID)

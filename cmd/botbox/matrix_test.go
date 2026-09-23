@@ -154,6 +154,24 @@ func TestMatrixMarksACheckThatLeftSomethingUnjudged(t *testing.T) {
 	}
 }
 
+// A run note says why a row reads as it does, such as why G3 fired.
+func TestMatrixPrintsTheRunsNotes(t *testing.T) {
+	control := recorded(t, true)
+	note := "botbox's garbage collector never deletes v1/ConfigMap widget-0, because it does not watch v1/Secret, the kind of its owner tls"
+	control.Notes = []string{note}
+	session := &fakeSession{results: []run.Result{control, recorded(t, false)}}
+
+	code, stdout, stderr := invoke(t, session, "matrix",
+		"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", matrixFile(t))
+
+	if code != exitOK {
+		t.Fatalf("botbox matrix exited %d: %s", code, stderr)
+	}
+	if want := "B0: b0.json fired nothing\n  " + note + "\n"; !strings.Contains(stdout, want) {
+		t.Errorf("botbox matrix printed %q, want %q.", stdout, want)
+	}
+}
+
 func TestMatrixListsTheBugsInCatalogOrder(t *testing.T) {
 	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, false)}}
 	out := matrixFile(t)

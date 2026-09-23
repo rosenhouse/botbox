@@ -108,7 +108,7 @@ func (l *liveRun) patchCR(ctx context.Context, name string, patch map[string]any
 		if err != nil {
 			return err
 		}
-		patched := &unstructured.Unstructured{Object: mergePatch(current.Object, patch)}
+		patched := &unstructured.Unstructured{Object: MergePatch(current.Object, patch)}
 		_, err = l.crs().Update(ctx, patched, metav1.UpdateOptions{})
 		return err
 	})

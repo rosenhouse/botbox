@@ -35,6 +35,7 @@ var targets = []struct {
 	{certManagerTarget,
 		[]string{"spec.dnsNames", "spec.duration", "spec.privateKey.algorithm", "spec.privateKey.rotationPolicy"},
 		[]string{"v1/Secret", "cert-manager.io/v1/CertificateRequest"}},
+	{externalSecretsTarget, []string{"spec.refreshInterval", "spec.target.name"}, []string{"v1/Secret"}},
 }
 
 func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
@@ -61,6 +62,96 @@ func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// The gadget's CRD states rules its schema cannot. The test reads them here,
+// apart from the API server's code that generation runs.
+func gadgetRuleBroken(cr, old map[string]any) string {
+	spec, _ := cr["spec"].(map[string]any)
+	value := func(name string, absent int64) int64 {
+		if set, isInteger := spec[name].(int64); isInteger {
+			return set
+		}
+		return absent
+	}
+	_, left := spec["left"]
+	_, right := spec["right"]
+	switch count := value("count", 0); {
+	case value("maxUnavailable", 0) > count:
+		return "maxUnavailable exceeds count"
+	case count < value("minCount", 1):
+		return "count is below minCount's default"
+	case left == right:
+		return "left and right are both set or both unset"
+	}
+	if previous, _ := old["spec"].(map[string]any); old != nil && previous["mode"] != spec["mode"] {
+		return "mode changed"
+	}
+	return ""
+}
+
+func TestGeneratedGadgetsKeepTheirCRDsRules(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	g := newGenerator(t, loaded, Options{})
+	crd := crdSchemaOf(t, rulesTarget)
+	var changed, updated int
+	rapid.Check(t, func(rt *rapid.T) {
+		var current map[string]any
+		for _, op := range g.sequence(rt).Ops {
+			var next, old map[string]any
+			switch op.Type {
+			case run.OpCreate, run.OpRecreate:
+				next = op.Obj.DeepCopy().Object
+				if !equalJSON(next, loaded.Sample.Object) {
+					changed++
+				}
+			case run.OpUpdate:
+				next, old = merge(current, op.Patch), current
+				updated++
+			case run.OpDelete:
+				current = nil
+				continue
+			default:
+				continue
+			}
+			if err := validate(crd, next, ""); err != nil {
+				rt.Fatalf("Op %d (%s) left the gadget outside its schema: %v.", op.Index, op.Type, err)
+			}
+			if broken := gadgetRuleBroken(next, old); broken != "" {
+				rt.Fatalf("Op %d (%s) left a gadget whose %s: %v.", op.Index, op.Type, broken, next["spec"])
+			}
+			current = next
+		}
+	})
+	if changed == 0 || updated == 0 {
+		t.Errorf("%d creates changed the sample and %d updates were drawn; a generator that changes nothing keeps every rule.",
+			changed, updated)
+	}
+}
+
+func TestARefusedUpdateIsDrawnAgain(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	loaded.Generate.Mutate = []string{"spec.left", "spec.maxUnavailable"}
+	// Every maxUnavailable exceeds the sample's count, so the CRD refuses it.
+	loaded.Generate.Overlay = map[string]map[string]any{"spec.maxUnavailable": {"minimum": 4}}
+	g := newGenerator(t, loaded, Options{})
+	updates := 0
+	for seed := int64(1); seed <= 200; seed++ {
+		sequence, err := g.Draw(seed)
+		if err != nil {
+			t.Fatalf("Draw(%d) failed: %v.", seed, err)
+		}
+		for _, op := range sequence.Ops {
+			if op.Type == run.OpUpdate {
+				updates++
+			}
+		}
+	}
+	// A left that changes passes a quarter of the draws. Drawn again, most
+	// update ops find one.
+	if updates < 50 {
+		t.Errorf("200 seeds drew %d updates; a refused update is not drawn again.", updates)
 	}
 }
 

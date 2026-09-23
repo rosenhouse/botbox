@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"pgregory.net/rapid"
 
 	"github.com/rosenhouse/botbox/pkg/run"
@@ -31,6 +32,7 @@ type Options struct {
 // draw does no I/O.
 type Generator struct {
 	target    *target.Target
+	rules     *crdRules
 	fields    []field
 	leftAlone []string
 	managed   []string
@@ -41,15 +43,36 @@ type Generator struct {
 // New reads the target's primary CRD and the constraints on generating from
 // it. Every error it returns is a configuration error (DESIGN.md §11).
 func New(t *target.Target, opts Options) (*Generator, error) {
-	primary, err := primarySchema(t)
+	g, err := build(t, opts)
 	if err != nil {
 		return nil, fmt.Errorf("generating for the target %s: %w", t.Name, err)
+	}
+	return g, nil
+}
+
+func build(t *target.Target, opts Options) (*Generator, error) {
+	crd, err := openAPISchema(t)
+	if err != nil {
+		return nil, err
+	}
+	// The API server judges the CRD as declared, so the rules are read before
+	// the overlay changes it.
+	rules, err := newCRDRules(crd)
+	if err != nil {
+		return nil, err
+	}
+	if err := rules.refusal(t.Sample.Object, nil); err != nil {
+		return nil, fmt.Errorf("the CRD refuses the sample: %w", err)
+	}
+	primary, err := overlaid(crd, t.Generate.Overlay)
+	if err != nil {
+		return nil, err
 	}
 	fields, leftAlone, err := mutableFields(t, primary)
 	if err != nil {
-		return nil, fmt.Errorf("generating for the target %s: %w", t.Name, err)
+		return nil, err
 	}
-	g := &Generator{target: t, fields: fields, leftAlone: leftAlone, maxOps: opts.MaxOps}
+	g := &Generator{target: t, rules: rules, fields: fields, leftAlone: leftAlone, maxOps: opts.MaxOps}
 	if g.maxOps < 1 {
 		g.maxOps = defaultMaxOps
 	}
@@ -74,7 +97,7 @@ func (g *Generator) LeftAlone() []string { return g.leftAlone }
 func (g *Generator) sequence(t *rapid.T) run.Sequence {
 	create := run.Op{Index: 0, Type: run.OpCreate, Obj: g.cr(t), NoSettle: rapid.Bool().Draw(t, "noSettle")}
 	ops := []run.Op{create}
-	at := state{crExists: true, settled: create.Settles()}
+	at := state{cr: create.Obj.Object, settled: create.Settles()}
 	for range rapid.IntRange(0, g.maxOps-1).Draw(t, "ops") {
 		ops = append(ops, g.op(t, len(ops), &at))
 	}
@@ -128,7 +151,8 @@ func (g *Generator) Draw(seed int64) (sequence run.Sequence, err error) {
 	return sequence, nil
 }
 
-// cr is the target's sample with a subset of the mutable fields changed.
+// cr is the target's sample with a subset of the mutable fields changed. A
+// change its CRD refuses is undone, and the next is judged without it.
 func (g *Generator) cr(t *rapid.T) *unstructured.Unstructured {
 	cr := g.target.Sample.DeepCopy()
 	for _, mutable := range g.fields {
@@ -136,15 +160,37 @@ func (g *Generator) cr(t *rapid.T) *unstructured.Unstructured {
 			continue
 		}
 		value, present := mutable.draw(t)
+		changed := cr.DeepCopy()
 		if !present {
-			unstructured.RemoveNestedField(cr.Object, mutable.path...)
-			continue
-		}
-		if err := unstructured.SetNestedField(cr.Object, value, mutable.path...); err != nil {
+			unstructured.RemoveNestedField(changed.Object, mutable.path...)
+		} else if err := unstructured.SetNestedField(changed.Object, value, mutable.path...); err != nil {
 			t.Fatalf("The sample does not take a %s: %v.", mutable.dotted, err)
+		}
+		if g.rules.refusal(changed.Object, nil) == nil {
+			cr = changed
 		}
 	}
 	return cr
+}
+
+// updateDraws bounds how often an update is drawn again where the CRD refuses
+// it.
+const updateDraws = 8
+
+// patch is a merge patch that changes one field of the CR, or nil if the CRD
+// refused every one drawn.
+func (g *Generator) patch(t *rapid.T, cr map[string]any) map[string]any {
+	for range updateDraws {
+		mutable := rapid.SampledFrom(g.fields).Draw(t, "field")
+		value, _ := mutable.draw(t)
+		// A merge patch removes the field where the draw left it absent
+		// (RFC 7386).
+		patch := nest(mutable.path, value)
+		if g.rules.refusal(run.MergePatch(runtime.DeepCopyJSON(cr), patch), cr) == nil {
+			return patch
+		}
+	}
+	return nil
 }
 
 // draw is one value for the field, or its removal where the schema allows the
@@ -159,7 +205,8 @@ func (f field) draw(t *rapid.T) (any, bool) {
 // state is what the sequence so far leaves the run in, which says what op may
 // come next.
 type state struct {
-	crExists bool
+	// cr is the primary CR as botbox last wrote it, or nil once deleted.
+	cr map[string]any
 	// settled says the Runner has waited for the target's reaction since the
 	// last change, so the objects the target manages are there to be deleted.
 	settled bool
@@ -170,11 +217,9 @@ func (g *Generator) op(t *rapid.T, index int, at *state) run.Op {
 	op := run.Op{Index: index, Type: rapid.SampledFrom(g.legal(at)).Draw(t, "op")}
 	switch op.Type {
 	case run.OpUpdate:
-		mutable := rapid.SampledFrom(g.fields).Draw(t, "field")
-		value, _ := mutable.draw(t)
-		// A merge patch removes the field where the draw left it absent
-		// (RFC 7386).
-		op.Patch = nest(mutable.path, value)
+		if op.Patch = g.patch(t, at.cr); op.Patch == nil {
+			op.Type = run.OpSettle
+		}
 	case run.OpRecreate:
 		op.Obj = g.cr(t)
 	case run.OpDeleteManaged:
@@ -195,14 +240,14 @@ func (g *Generator) op(t *rapid.T, index int, at *state) run.Op {
 // prefers the simplest.
 func (g *Generator) legal(at *state) []run.OpType {
 	legal := []run.OpType{run.OpSettle, run.OpRestart}
-	if at.crExists && len(g.fields) > 0 {
+	if at.cr != nil && len(g.fields) > 0 {
 		legal = append(legal, run.OpUpdate)
 	}
-	if at.crExists && at.settled && len(g.managed) > 0 {
+	if at.cr != nil && at.settled && len(g.managed) > 0 {
 		legal = append(legal, run.OpDeleteManaged)
 	}
 	legal = append(legal, run.OpRecreate)
-	if at.crExists {
+	if at.cr != nil {
 		legal = append(legal, run.OpDelete)
 	}
 	return legal
@@ -211,9 +256,11 @@ func (g *Generator) legal(at *state) []run.OpType {
 func (at *state) advance(op run.Op) {
 	switch op.Type {
 	case run.OpDelete:
-		at.crExists = false
+		at.cr = nil
 	case run.OpRecreate:
-		at.crExists = true
+		at.cr = op.Obj.Object
+	case run.OpUpdate:
+		at.cr = run.MergePatch(runtime.DeepCopyJSON(at.cr), op.Patch)
 	}
 	// The only op that changes the managed objects without waiting for the
 	// target's reaction is a CR op that skips its settle.

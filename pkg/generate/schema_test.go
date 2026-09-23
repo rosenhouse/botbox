@@ -204,7 +204,8 @@ func TestWithoutMutateEverySpecPathTheSchemaDescribesMoves(t *testing.T) {
 	for _, field := range fields {
 		paths = append(paths, field.dotted)
 	}
-	want := []string{"spec.config", "spec.count", "spec.left", "spec.maxUnavailable", "spec.minCount", "spec.mode", "spec.right"}
+	want := []string{"spec.config", "spec.count", "spec.left", "spec.maxUnavailable", "spec.minCount", "spec.mode",
+		"spec.right", "spec.tags"}
 	if !slices.Equal(paths, want) {
 		t.Errorf("The generator mutates %v, want %v.", paths, want)
 	}

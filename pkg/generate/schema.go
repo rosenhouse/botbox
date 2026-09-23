@@ -80,8 +80,14 @@ func primarySchema(t *target.Target) (*schema, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, dotted := range slices.Sorted(maps.Keys(t.Generate.Overlay)) {
-		overlay := t.Generate.Overlay[dotted]
+	return overlaid(root, t.Generate.Overlay)
+}
+
+// overlaid merges each overlay into the raw schema, in place, and reads the
+// result.
+func overlaid(root map[string]any, overlays map[string]map[string]any) (*schema, error) {
+	for _, dotted := range slices.Sorted(maps.Keys(overlays)) {
+		overlay := overlays[dotted]
 		if unread := unreadKeywords(overlay, ""); len(unread) > 0 {
 			return nil, fmt.Errorf("generate.overlay %s: botbox does not read %s; it reads %s",
 				dotted, strings.Join(unread, ", "), strings.Join(keywords, ", "))

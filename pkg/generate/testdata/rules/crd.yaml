@@ -29,7 +29,7 @@ spec:
               type: object
               required: [count, mode]
               x-kubernetes-validations:
-                - rule: self.maxUnavailable <= self.count
+                - rule: '!has(self.maxUnavailable) || self.maxUnavailable <= self.count'
                   message: maxUnavailable must not exceed count
                 - rule: self.count >= self.minCount
                   message: count must reach minCount
@@ -61,6 +61,13 @@ spec:
                 right:
                   type: string
                   maxLength: 8
+                tags:
+                  type: array
+                  x-kubernetes-list-type: set
+                  maxItems: 3
+                  items:
+                    type: string
+                    maxLength: 8
                 config:
                   type: object
                   maxProperties: 3

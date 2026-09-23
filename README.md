@@ -147,6 +147,7 @@ launch:
   binary: bin/cert-manager-controller       # relative to the working directory, not to this file
   args:
     - --kubeconfig=$KUBECONFIG                # replaced with a kubeconfig for the proxy
+    - --leader-elect=false                    # restart kills it before it releases its lease
     - --enable-certificate-owner-ref=true
 timeouts:                                     # optional; 30s, 10s and 60s by default
   settle: 30s                                 # the whole budget for one spec change
@@ -173,9 +174,11 @@ every kind.
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the
 controller's back. G7 then requires your controller to recreate an object of that kind and
-name before the run settles. If your controller leaves a kind deleted by design, or recreates
-it under a new name, list the kind under `notRecreated`. cert-manager lists CertificateRequest,
-because a Ready Certificate does not replace a deleted request.
+name before the run settles. Where your `ready` still holds without the object, the run settles
+once nothing has changed for `stable`, so your controller has `stable` to recreate it, however
+wide `settle` is. If your controller leaves a kind deleted by design, or recreates it under a
+new name, list the kind under `notRecreated`. cert-manager lists CertificateRequest, because a
+Ready Certificate does not replace a deleted request.
 
 A sequence you write yourself can also carry a `fault`, which makes the proxy refuse, delay or
 drop the requests it matches. This is `targets/toy-widget/sequences/fault.json`:
@@ -239,7 +242,9 @@ a failure, and `make test-example` runs every pinned sequence so none can rot.
 
 In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
 before it settles. G5 compares the states the controller settled in on either side, and leaves a
-note instead of a verdict when another op changed something in between.
+note instead of a verdict when another op changed something in between. G7 likewise notes a
+`deleteManaged` that follows a `restart` before your controller has requested a resource other
+than its lease, since botbox cannot otherwise tell that it is back.
 
 ## Reading a report
 

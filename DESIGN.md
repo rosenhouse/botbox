@@ -108,9 +108,11 @@ Implementations:
   binary. botbox writes a kubeconfig whose server is the proxy URL, exports it as
   `KUBECONFIG`, and substitutes `$KUBECONFIG` in `launch.args`. The target's stdout and
   stderr go to `target.log` in the run directory. `Restart` sends SIGKILL, waits for the
-  process to be reaped, then execs again, so fixed ports and lock files are released.
-  botbox does not probe the target for health; the settle wait after the first op absorbs
-  startup.
+  process to be reaped, then execs again, so fixed ports and lock files are released. A
+  killed process never releases a leader-election lease, so a target runs with leader
+  election off. botbox does not probe the target for health. The settle wait after the
+  first op absorbs startup, but one after a `Restart` can converge before the target is
+  back, which G7 allows for (§6).
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
 - `Image` — run a container image against a kind cluster, with the proxy in-cluster or
   reached by port-forward. Phase 2 (§10, M8).
@@ -389,13 +391,15 @@ while a watch that fails returns at once and repeating it is a loop.
 **Notes.** A check that could not judge something records a note naming it: G3 for a
 deletion whose deadline the run did not reach, that a fault reached into, or that botbox
 took an object inside, G5 for a `Restart` missing a snapshot or with a change of botbox's
-or a fault between its snapshots, G7 for a `DeleteManaged` that followed such a change
-before the run converged or whose wait a fault reached into. The Runner carries the last
-checkpoint's notes out and `botbox` prints them at the end of the run, because a check
-that was skipped otherwise reads like one that passed. G5 also notes an `equalIgnore` path it could not follow
-(§8.1), since it then compares a field the target meant it to skip. The Runner also notes
-each ownerReference the collector could not resolve (§5.8), since the object that carries
-it stays, and G3 would report it without saying why.
+or a fault between its snapshots, and G7 for an object a `DeleteManaged` deleted that did
+not come back, where the op followed such a change before the run converged or followed a
+`Restart` the target had not yet answered, or where a fault reached into its wait. The
+Runner carries the last checkpoint's notes out and `botbox` prints them at the end of the
+run, because a check that was skipped otherwise reads like one that passed. G5 also notes
+an `equalIgnore` path it could not follow (§8.1), since it then compares a field the
+target meant it to skip. The Runner also notes each ownerReference the collector could
+not resolve (§5.8), since the object that carries it stays, and G3 would report it
+without saying why.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2, G5 and G7 need none of their own, but they
@@ -428,12 +432,18 @@ equal. An item that `[*]` names stays even when left empty, so the items still c
 **G7 evaluation.** G7 is evaluated once per `DeleteManaged` op that deleted something,
 where the settle wait after it ends, which is always before the teardown boundary. Its
 window is that wait: up to `T_settle`, closing once `Ready` holds with `T_stable` of quiet
-behind it (§5.5). An object of the deleted one's kind and name satisfies it, whatever its
-UID and content, since a recreated object carries a new UID. G7 does not judge an op where
-no primary CR is live, or where the CR is being deleted, when the wait ends: nothing asks
-for the object back. It notes an op where botbox changed the CR or a managed object after
-the last settle wait that converged, since the target may then have meant to delete the
-object itself, and one whose wait a fault's window reaches into.
+behind it (§5.5). Where `Ready` holds without the object, the target therefore has
+`T_stable` to recreate it. An object of the deleted one's kind and name satisfies G7,
+whatever its UID and content, since a recreated object carries a new UID. Where none
+exists, G7 does not judge an op where no primary CR is live, or where the CR is being
+deleted, when the wait ends: nothing asks for the object back. It notes an op where botbox
+changed the CR or a managed object after the last settle wait that converged, since the
+target may then have meant to delete the object itself, and one whose wait a fault's
+window reaches into. It also notes an op that follows a `Restart` where the target
+requested nothing between the two but its lease and paths that name no resource. botbox
+has no other sign that the target is back (§5.1), and a process starting up or waiting to
+lead requests only those. A violation quotes the object's history and the managed objects
+where the wait ended, which show an object recreated under a new name.
 
 ## 7. Sequence format
 
@@ -461,7 +471,9 @@ Details the example does not show:
   (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
 - G5 judges a `restart` only between two converged settle waits with no CR op, no
   `deleteManaged` that deleted something and no fault's window between them (§6). Put a
-  `settle` op after a `restart`, and one before it unless the op before it settles.
+  `settle` op after a `restart`, and one before it unless the op before it settles. G7
+  judges a `deleteManaged` after a `restart` only once the target has requested a
+  resource other than its lease, which a `settle` op between them gives it time to do.
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
 - Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
@@ -552,9 +564,9 @@ equality predicate as `equal: go:<name>` (§8.4). A hook takes no `equalIgnore`,
 nothing would read it.
 
 `notRecreated` lists managed kinds the target leaves deleted by design, or recreates under
-a new name, which G7 does not require back (§6). Each must appear in `manages`. cert-manager lists CertificateRequest:
-a request records one issuance, and a Ready Certificate whose request is deleted issues no
-new one.
+a new name, which G7 does not require back (§6). Each must appear in `manages`.
+cert-manager lists CertificateRequest: a request records one issuance, and a Ready
+Certificate whose request is deleted issues no new one.
 
 `equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
 holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
@@ -1301,4 +1313,12 @@ built from source and run as a black-box binary.
   neither lists Secret. G7 notes an op that follows a change of botbox's before the run
   converged, because the target may have meant to delete that object itself, as the toy
   does on a scale-down. It notes one whose wait a fault reached into, as every check
-  ignores a fault's window, and it does not judge an op while no CR is live.
+  ignores a fault's window, and it does not judge an op while no CR is live. An object that
+  is back satisfies G7 before any of these, whatever the fault or the change did. A
+  `Restart` gives botbox no sign that the target is back, so a settle wait after one could
+  converge while the target was still starting, or waiting out the lease its killed
+  predecessor held. G7 then failed the correct toy behind a wrapper that delayed each
+  restart by 3 s. G7 judges an op after a `Restart` only where the target requested a
+  resource other than a lease between the two. A request anywhere in the op's wait was
+  rejected as the bar, because a target first heard from late in the wait has had no time
+  to act.

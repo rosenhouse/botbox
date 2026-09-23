@@ -11,8 +11,9 @@ import (
 	"testing"
 )
 
-// A controller that crashes on a spec value is a finding. botbox restarts it,
-// it never converges, and the report quotes why it stopped.
+// A controller that crashes on a spec value is a finding, even where it wrote
+// its converged state first. botbox restarts it, it never converges, and the
+// report quotes why it stopped.
 func TestACrashLoopIsAFindingWithAReport(t *testing.T) {
 	targetFile, err := filepath.Abs(toyTargetYAML)
 	if err != nil {
@@ -38,7 +39,7 @@ func TestACrashLoopIsAFindingWithAReport(t *testing.T) {
 		t.Fatalf("botbox exited %d, want %d.\nstdout:\n%s\nstderr:\n%s", code, exitViolation, &stdout, &stderr)
 	}
 	const exited = `the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero`
-	for _, want := range []string{"G4 the settle wait after op 1 (update) expired", exited} {
+	for _, want := range []string{"G4 the settle wait after op ", exited} {
 		if !strings.Contains(stdout.String(), want) {
 			t.Errorf("botbox printed\n%s\nwhich does not say %q.", &stdout, want)
 		}

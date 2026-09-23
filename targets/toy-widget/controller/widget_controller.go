@@ -66,11 +66,16 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Bug != B8 {
 		builder = builder.Owns(&corev1.ConfigMap{}) // B8 (§9.1): without this watch, a deleted child goes unnoticed.
 	}
-	if r.Bug == B12 {
-		recoverPanic := false // B12 (§9.1): a panic ends the process.
-		builder = builder.WithOptions(controller.Options{RecoverPanic: &recoverPanic})
+	return builder.WithOptions(r.controllerOptions()).Complete(r)
+}
+
+// controllerOptions let a panic end B12's process.
+func (r *Reconciler) controllerOptions() controller.Options {
+	if r.Bug != B12 {
+		return controller.Options{}
 	}
-	return builder.Complete(r)
+	recoverPanic := false
+	return controller.Options{RecoverPanic: &recoverPanic}
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -81,11 +86,6 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if !widget.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.cleanUp(ctx, widget)
-	}
-
-	if r.Bug == B12 {
-		// B12 (§9.1): a count of 0 divides by zero.
-		log.FromContext(ctx).Info("reconciling", "percentReady", 100*widget.Status.Ready/widget.Spec.Count)
 	}
 
 	// Patches throughout, so a cached Widget that predates the last write cannot conflict.
@@ -118,10 +118,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if r.Bug == B10 && !r.createdChildFor(widget) {
 		return ctrl.Result{}, nil // B10 (§9.1): the status follows a flag a restart lost.
 	}
-	if !changed {
-		return ctrl.Result{}, nil
+	if changed {
+		if err := r.patchStatus(ctx, widget, status); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
-	return ctrl.Result{}, r.patchStatus(ctx, widget, status)
+	if r.Bug == B12 {
+		// B12: a count of 0 divides by zero.
+		log.FromContext(ctx).Info("reconciled", "percentReady", 100*status.Ready/widget.Spec.Count)
+	}
+	return ctrl.Result{}, nil
 }
 
 // claimChildrenEarly reports the children ready and holds that state, so that a

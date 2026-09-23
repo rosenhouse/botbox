@@ -287,8 +287,8 @@ The first settle wait expired. What follows `expired with no fault active` says 
   status field rewritten on every reconcile, such as a timestamp, does this.
 - `ready held until …` means `ready` held and then stopped holding.
 
-After a `delete`, `the CR … was still being deleted, held by the finalizers …` means your
-controller did not remove its finalizer within `settle`.
+After a `delete`, `the CR … was still being deleted, held by the finalizers …` means
+nothing removed those finalizers within `settle`.
 
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
 `settle`. Where your controller repeated a failing request, the line names it and its

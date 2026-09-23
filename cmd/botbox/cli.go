@@ -362,6 +362,7 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 		VersionsOf:    violation.VersionsOf,
 		Managed:       violation.Managed,
 		ManagedTotal:  violation.ManagedTotal,
+		Ready:         violation.Ready,
 	})
 }
 

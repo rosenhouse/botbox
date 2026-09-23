@@ -9,10 +9,12 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/report"
@@ -321,12 +323,12 @@ func TestReportQuotesTheVersionTimelineWithoutTheObjects(t *testing.T) {
 func TestReportOmitsTheSectionsWithNothingToSay(t *testing.T) {
 	md, encoded := write(t, failingRun())
 
-	for _, absent := range []string{"## Requests", "## Object versions", "## Managed objects at the verdict", "## Notes"} {
+	for _, absent := range []string{"## Requests", "## Object versions", "## Managed objects at the verdict", "## Notes", "## Ready predicate"} {
 		if strings.Contains(md, absent) {
 			t.Errorf("The report holds an empty %q section:\n%s", absent, md)
 		}
 	}
-	for _, absent := range []string{"requests", "versions", "managed", "managedTotal", "notes"} {
+	for _, absent := range []string{"requests", "versions", "managed", "managedTotal", "notes", "ready"} {
 		if strings.Contains(encoded, `"`+absent+`"`) {
 			t.Errorf("report.json holds an empty %q:\n%s", absent, encoded)
 		}
@@ -643,5 +645,94 @@ func TestReportSaysWhatTheChecksOwnBoundLeftOut(t *testing.T) {
 		if total := field(t, encoded, excerpt.key+"Total"); total != fmt.Sprint(excerpt.chose) {
 			t.Errorf("report.json says %s of %s, want the %d the check chose from.", total, excerpt.key, excerpt.chose)
 		}
+	}
+}
+
+// deploymentBacked is a readiness verdict on a CR that waits on a Deployment
+// envtest never runs.
+func deploymentBacked() report.Report {
+	failure := failingRun()
+	failure.Check.ID = "G4"
+	failure.Ready = &invariant.Readiness{
+		Expr:  `status.conditions.exists(c, c.type == "Ready" && c.status == "True")`,
+		Error: `evaluating ready "…": no such key: conditions`,
+		Status: map[string]any{
+			"observedGeneration": int64(1),
+			"replicas":           int64(0),
+			"conditions": []any{map[string]any{
+				"type": "Ready", "status": "False", "reason": "Pending",
+				"message": "0/10 replicas available", "observedGeneration": int64(1),
+			}},
+		},
+	}
+	return failure
+}
+
+func TestReportQuotesTheReadyPredicate(t *testing.T) {
+	failure := deploymentBacked()
+
+	md, encoded := write(t, failure)
+
+	body := section(md, "Ready predicate")
+	for _, want := range []string{
+		"```\n" + failure.Ready.Expr + "\n```",
+		"```\n" + failure.Ready.Error + "\n```",
+		"| type | status | reason | message | observedGeneration |",
+		"| Ready | False | Pending | 0/10 replicas available | 1 |",
+		"```json\n" + `{"observedGeneration":1,"replicas":0}` + "\n```",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("The Ready predicate section does not quote %q:\n%s", want, body)
+		}
+	}
+	var ready struct {
+		Expr, Error string
+		Conditions  []map[string]string
+		Status      string
+	}
+	if err := json.Unmarshal([]byte(field(t, encoded, "ready")), &ready); err != nil {
+		t.Fatalf("report.json's ready does not parse: %v", err)
+	}
+	if ready.Expr != failure.Ready.Expr || ready.Error != failure.Ready.Error ||
+		len(ready.Conditions) != 1 || ready.Conditions[0]["message"] != "0/10 replicas available" ||
+		ready.Status != `{"observedGeneration":1,"replicas":0}` {
+		t.Errorf("report.json quotes the ready predicate as %+v.", ready)
+	}
+}
+
+// A status carries whatever its controller put there, so the report quotes a
+// bounded part of it and objects.jsonl keeps the rest.
+func TestReportBoundsTheCRsStatus(t *testing.T) {
+	failure := deploymentBacked()
+	var conditions []any
+	for i := range 25 {
+		conditions = append(conditions, map[string]any{"type": fmt.Sprintf("C%d", i), "status": "False"})
+	}
+	conditions[0].(map[string]any)["message"] = "one | two\nthree " + strings.Repeat("x", 1000)
+	failure.Ready.Status = map[string]any{"conditions": conditions, "log": strings.Repeat("é", 2000)}
+
+	md, encoded := write(t, failure)
+
+	body := section(md, "Ready predicate")
+	if want := "The CR carried 25 conditions at the verdict; the report quotes the first 20."; !strings.Contains(body, want) {
+		t.Errorf("The report does not say %q:\n%s", want, body)
+	}
+	if rows := strings.Count(body, "| False |"); rows != 20 {
+		t.Errorf("The report quotes %d conditions, want 20.", rows)
+	}
+	if !strings.Contains(body, `| one \| two three xxx`) {
+		t.Errorf("The report does not keep a message's bar and newline out of the table:\n%s", body)
+	}
+	if strings.Contains(body, strings.Repeat("x", 300)) || strings.Contains(encoded, strings.Repeat("x", 300)) {
+		t.Errorf("The report quotes a condition's message whole.")
+	}
+	if strings.Contains(body, strings.Repeat("é", 600)) || strings.Contains(encoded, strings.Repeat("é", 600)) {
+		t.Errorf("The report quotes the rest of the status whole.")
+	}
+	if !strings.Contains(body, "The rest of its status, cut to 1000 of 4010 bytes:") {
+		t.Errorf("The report does not say it cut the status:\n%s", body)
+	}
+	if !utf8.ValidString(md) || !utf8.ValidString(encoded) {
+		t.Errorf("The report cut a character in two.")
 	}
 }

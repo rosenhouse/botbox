@@ -39,6 +39,10 @@ func TestOwedIsAsLongAfterTheFaultsAsTheyLastedAndTSettleMore(t *testing.T) {
 			run: newRun().op(invariant.OpCreate, 0).fault(time.Second, 8*time.Second).
 				checkpoint(6*time.Second, invariant.Converged),
 			at: 10 * time.Second, want: 15 * time.Second},
+		{name: "a convergence at the instant asked about",
+			run: newRun().op(invariant.OpCreate, 0).fault(time.Second, 4*time.Second).
+				checkpoint(6*time.Second, invariant.Converged),
+			at: 6 * time.Second},
 		{name: "a convergence after the instant asked about",
 			run: newRun().op(invariant.OpCreate, 0).fault(time.Second, 4*time.Second).
 				checkpoint(6*time.Second, invariant.Converged),

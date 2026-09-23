@@ -78,7 +78,7 @@ func TestNewDrawsAFieldAHundredTimesToFindAValueTheCRDAccepts(t *testing.T) {
 		{0, 100, false},
 	} {
 		draws := 0
-		err := g.rules.acceptsADraw(loaded.Sample, countsOf(testCase.count, &draws)[0])
+		err := g.rules.acceptsADraw(loaded.Sample, countField(testCase.count, &draws))
 		if (err == nil) != testCase.accepted || draws != testCase.draws {
 			t.Errorf("With every count %d, New drew %d times and returned %v, want %d draws and accepted=%t.",
 				testCase.count, draws, err, testCase.draws, testCase.accepted)
@@ -88,14 +88,7 @@ func TestNewDrawsAFieldAHundredTimesToFindAValueTheCRDAccepts(t *testing.T) {
 
 func TestATransitionRuleSeesTheOldObjectsDefaults(t *testing.T) {
 	loaded := loadTarget(t, rulesTarget)
-	crd, err := openAPISchema(loaded)
-	if err != nil {
-		t.Fatalf("openAPISchema failed: %v.", err)
-	}
-	rules, err := newCRDRules(crd)
-	if err != nil {
-		t.Fatalf("newCRDRules failed: %v.", err)
-	}
+	rules := newGenerator(t, loaded, Options{}).rules
 	for _, testCase := range []struct {
 		field   string
 		value   int64
@@ -120,7 +113,7 @@ func TestATransitionRuleSeesTheOldObjectsDefaults(t *testing.T) {
 func TestAFieldTheSampleCannotHoldIsRefused(t *testing.T) {
 	g := newGenerator(t, loadTarget(t, rulesTarget), Options{})
 	draws := 0
-	inside := countsOf(5, &draws)[0]
+	inside := countField(5, &draws)
 	inside.path = []string{"spec", "count", "inside"}
 	if err := g.rules.acceptsADraw(g.target.Sample, inside); err == nil {
 		t.Error("New drew a value inside the sample's spec.count, which holds an integer.")

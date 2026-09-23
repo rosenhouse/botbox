@@ -141,13 +141,14 @@ func TestGeneratedGadgetsKeepTheirCRDsRules(t *testing.T) {
 	}
 }
 
-// countsOf draws the count given, and counts the draws.
-func countsOf(count int64, draws *int) []field {
+// countField is spec.count, drawn always as the count given. It counts its
+// draws.
+func countField(count int64, draws *int) field {
 	values := rapid.Custom(func(t *rapid.T) any {
 		*draws++
 		return rapid.Just(count).Draw(t, "count")
 	})
-	return []field{{path: []string{"spec", "count"}, dotted: "spec.count", values: values}}
+	return field{path: []string{"spec", "count"}, dotted: "spec.count", values: values}
 }
 
 func TestARefusedUpdateIsDrawnEightTimes(t *testing.T) {
@@ -163,7 +164,7 @@ func TestARefusedUpdateIsDrawnEightTimes(t *testing.T) {
 		{0, 8, false},
 	} {
 		draws := 0
-		g.fields = countsOf(testCase.count, &draws)
+		g.fields = []field{countField(testCase.count, &draws)}
 		patch := rapid.Custom(func(t *rapid.T) map[string]any { return g.patch(t, loaded.Sample.Object) }).Example(0)
 		if (patch != nil) != testCase.accepted || draws != testCase.draws {
 			t.Errorf("With every count %d, an update drew %d times and patched %v, want %d draws and accepted=%t.",
@@ -176,7 +177,7 @@ func TestAnUpdateTheCRDAlwaysRefusesBecomesASettle(t *testing.T) {
 	loaded := loadTarget(t, rulesTarget)
 	g := newGenerator(t, loaded, Options{})
 	draws := 0
-	g.fields = countsOf(0, &draws)
+	g.fields = []field{countField(0, &draws)}
 	rapid.Check(t, func(rt *rapid.T) {
 		sequence := g.sequence(rt)
 		if err := sequence.Validate(); err != nil {

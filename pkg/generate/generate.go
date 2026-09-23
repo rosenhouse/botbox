@@ -92,9 +92,9 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 	return g, nil
 }
 
-// drawable keeps the fields the CRD accepts a drawn value of in the sample.
-// generate.mutate names each field it keeps, so a field the CRD refuses there
-// is a configuration error.
+// drawable keeps the fields the CRD accepts a drawn value of in the sample. A
+// refused field that generate.mutate names is a configuration error, and any
+// other is left alone.
 func drawable(t *target.Target, rules *crdRules, fields []field, leftAlone []string) ([]field, []string, error) {
 	var kept []field
 	for _, mutable := range fields {

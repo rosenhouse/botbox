@@ -135,7 +135,7 @@ Responsibilities:
 type FaultSpec struct {
     Match  RequestMatcher // verb, resource, name pattern, fraction
     Action FaultAction    // Error{code}, Delay{d}, Drop{}, DropWatchEvents{kinds}
-    Until  Trigger        // op index, duration, or count of matched requests
+    Until  Trigger        // op index, duration, or count of requests it applied to
 }
 ```
 
@@ -430,6 +430,9 @@ Details the example does not show:
   `settle` op after a `restart`, and one before it unless the op before it settles.
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
+- Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
+  tries faults in op order, the first that applies to a request wins, and each runs out on
+  its own `until`.
 - `update` applies `patch` as a JSON merge patch (RFC 7386).
 - `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
@@ -1181,3 +1184,7 @@ built from source and run as a black-box binary.
   resolve it either. G5 has no mapper, so it ignores the version. Each unresolved reference
   is a run note that names the object it keeps, because G3 reports that object and the
   report is what a reader acts on.
+- **D@40 The proxy holds each fault op's fault by identity.** The proxy matched a held
+  fault by its spec, so a spent fault displaced an equal one, and the toy with no bug failed
+  G4. Each fault has an ID, and a removed fault keeps its window. The Runner drops a fault
+  once its window is closed, so a request faulted just before a removal stays in it.

@@ -30,22 +30,27 @@ type fakeHarness struct {
 
 	converged bool
 	clean     bool
-	// specs are the faults the harness was last given, as the proxy holds
-	// them, so that its windows line up with the Runner's own bookkeeping.
-	specs []proxy.FaultSpec
+	// added counts the faults the proxy was given, which is the ID of the
+	// next, and removed is when the Runner took each off.
+	added   int
+	removed map[proxy.FaultID]time.Time
 	// faulting makes the harness answer as a proxy that applies every fault
-	// the moment it is given it, and retires none. faultingInWait has it
+	// the moment it is given it, and that only a removal retires. It ignores
+	// that the first fault to match a request wins. faultingInWait has it
 	// first apply them once a wait begins, as the target's requests do.
-	faulting       bool
-	faultingInWait bool
-	applied        map[proxy.FaultSpec]time.Time
+	// faultingAsRemoved has it apply a fault just as it is removed, as a
+	// request that raced the removal would.
+	faulting          bool
+	faultingInWait    bool
+	faultingAsRemoved bool
+	applied           map[proxy.FaultID]time.Time
 	// store is the version history the checks and the report read.
 	store *observe.Store
 	// logged are the requests the harness answers with before the run's own,
 	// so that a test can drive the log past what a violation quotes.
 	logged []proxy.Request
-	// applying is what the harness says the proxy did with each fault it was
-	// given, in that order. Its zero value is a fault that matched nothing.
+	// applying is what the harness says the proxy did with each fault, by
+	// ID. Its zero value is a fault that matched nothing.
 	applying []proxy.FaultWindow
 
 	managed map[schema.GroupVersionKind][]string
@@ -85,7 +90,8 @@ func newFakeHarness() *fakeHarness {
 		store:     observe.NewStore(observe.Options{Namespace: fakeNamespace, Manages: []schema.GroupVersionKind{configMapKind}}),
 		managed:   map[schema.GroupVersionKind][]string{configMapKind: {"widget-0", "widget-1"}},
 		fail:      map[string]error{},
-		applied:   map[proxy.FaultSpec]time.Time{},
+		applied:   map[proxy.FaultID]time.Time{},
+		removed:   map[proxy.FaultID]time.Time{},
 	}
 }
 
@@ -129,35 +135,63 @@ func (f *fakeHarness) sleep(_ context.Context, d time.Duration) error {
 
 func (f *fakeHarness) restart(context.Context) error { return f.record("restart") }
 
-func (f *fakeHarness) setFaults(specs []proxy.FaultSpec) {
-	f.specs = specs
+func (f *fakeHarness) addFault(proxy.FaultSpec) proxy.FaultID {
+	id := proxy.FaultID(f.added)
+	f.added++
 	if f.faulting {
 		f.apply()
 	}
-	_ = f.record(fmt.Sprintf("setFaults %d", len(specs)))
+	_ = f.record(fmt.Sprintf("addFault %d", id))
+	return id
+}
+
+func (f *fakeHarness) removeFault(id proxy.FaultID) {
+	f.remove(id)
+	_ = f.record(fmt.Sprintf("removeFault %d", id))
+}
+
+func (f *fakeHarness) clearFaults() {
+	for id := range proxy.FaultID(f.added) {
+		f.remove(id)
+	}
+	_ = f.record("clearFaults")
+}
+
+// remove retires the fault, as the proxy does, unless it is retired already.
+func (f *fakeHarness) remove(id proxy.FaultID) {
+	if !f.faultWindow(id).Retired.IsZero() {
+		return
+	}
+	if _, applied := f.applied[id]; f.faultingAsRemoved && !applied {
+		f.applied[id] = time.Now()
+	}
+	f.removed[id] = time.Now()
 }
 
 // apply has the proxy apply each fault it holds, from now if it has not yet.
 func (f *fakeHarness) apply() {
-	for _, spec := range f.specs {
-		if _, held := f.applied[spec]; !held {
-			f.applied[spec] = time.Now()
+	for id := range proxy.FaultID(f.added) {
+		_, removed := f.removed[id]
+		if _, applied := f.applied[id]; !applied && !removed {
+			f.applied[id] = time.Now()
 		}
 	}
 }
 
-// faultWindows answers as the proxy does, one window per spec it was last
-// given and in that order. A test either says what the proxy did with the
-// first of them, or has it apply every fault as it is given.
-func (f *fakeHarness) faultWindows() []proxy.FaultWindow {
-	windows := make([]proxy.FaultWindow, len(f.specs))
-	copy(windows, f.applying)
-	for i, spec := range f.specs {
-		if first, applied := f.applied[spec]; applied && windows[i].First.IsZero() {
-			windows[i].First = first
-		}
+// faultWindow answers as the proxy does. A test either says what the proxy
+// did with each fault, or has it apply every fault as it is given.
+func (f *fakeHarness) faultWindow(id proxy.FaultID) proxy.FaultWindow {
+	var window proxy.FaultWindow
+	if int(id) < len(f.applying) {
+		window = f.applying[id]
 	}
-	return windows
+	if first, applied := f.applied[id]; applied && window.First.IsZero() {
+		window.First = first
+	}
+	if removed, ok := f.removed[id]; ok && (window.Retired.IsZero() || removed.Before(window.Retired)) {
+		window.Retired = removed
+	}
+	return window
 }
 
 func (f *fakeHarness) createCR(_ context.Context, obj *unstructured.Unstructured) (string, error) {
@@ -247,13 +281,10 @@ func (f *fakeHarness) recordChild(name, resourceVersion string) {
 func (f *fakeHarness) opCalls() []string       { return f.calls[:f.teardownStart()] }
 func (f *fakeHarness) teardownCalls() []string { return f.calls[f.teardownStart():] }
 
-// teardownStart is where the teardown begins: it clears the faults, and
-// nothing sets them after it.
+// teardownStart is where the teardown begins: it clears the faults.
 func (f *fakeHarness) teardownStart() int {
-	for i := len(f.calls) - 1; i >= 0; i-- {
-		if f.calls[i] == "setFaults 0" {
-			return i
-		}
+	if i := slices.Index(f.calls, "clearFaults"); i >= 0 {
+		return i
 	}
 	return len(f.calls)
 }
@@ -599,6 +630,61 @@ func TestRunStopsExcusingTheTargetWhereTheProxyRetiredTheFault(t *testing.T) {
 	}
 }
 
+// Dropping a fault that ran out leaves the next fault its own window, as when
+// two fault ops inject equal specs.
+func TestRunKeepsTheWindowOfTheFaultAfterOneThatRanOut(t *testing.T) {
+	h := newFakeHarness()
+	h.converged = false
+	first, retired, second := time.Now().Add(-10*time.Second), time.Now().Add(-9*time.Second), time.Now().Add(-8*time.Second)
+	h.applying = []proxy.FaultWindow{{First: first}}
+	h.applyingInWait = []proxy.FaultWindow{{First: first, Retired: retired}, {First: second}}
+	fault := Fault{Match: Match{Verb: "create", Resource: "configmaps"}, Action: Action{Error: 500}, Until: Trigger{Count: 12}}
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &fault},
+		Op{Type: OpFault, Fault: &fault},
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpSettle},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if got, settled := result.Timeline.Faults[1], result.Timeline.Ops[3].Settled; !got.Start.Equal(second) || !got.End.After(settled.Window.End) {
+		t.Errorf("The second fault's window is %+v, want its own from %v, open past the last settle wait.", got, second)
+	}
+	if result.Violation == nil || !strings.Contains(result.Violation.Statement, "after the last fault stopped") {
+		t.Errorf("The run reported %v, want only the G4 of the wait after the last fault stopped.", result.Violation)
+	}
+}
+
+// A request can meet a fault just as the Runner takes it off, whether its op
+// trigger ran out or the teardown cleared it. The target then owes recovery.
+func TestRunKeepsARequestFaultedAsTheFaultWasRemoved(t *testing.T) {
+	h := newFakeHarness()
+	h.faultingAsRemoved = true
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}},
+		Op{Type: OpCreate, Obj: widget("widget")},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	for i, window := range result.Timeline.Faults {
+		if window.Start.IsZero() || window.End.Before(window.Start) {
+			t.Errorf("Fault %d ran %+v, want the request it faulted as it was removed.", i, window)
+		}
+	}
+	if result.Timeline.Recovery == nil {
+		t.Error("The teardown gave the target no recovery from the fault it cleared.")
+	}
+}
+
 // A fault that stopped as the wait ended leaves the target time it has not
 // had yet, so the Runner leaves the wait to the teardown's recovery.
 func TestRunExcusesAWaitThatEndedWhileTheTargetWasOwedRecovery(t *testing.T) {
@@ -710,8 +796,8 @@ func TestRunRecordsG4OnceTheFaultHasExpired(t *testing.T) {
 	if result.Violation == nil || result.Violation.ID != "G4" {
 		t.Errorf("The run reported %+v, want a G4 violation: the fault ended at op 1.", result.Violation)
 	}
-	if got := h.opCalls(); !slices.Contains(got, "setFaults 0") {
-		t.Errorf("The run did %v, want the expired fault cleared.", got)
+	if got := h.opCalls(); !slices.Contains(got, "removeFault 0") {
+		t.Errorf("The run did %v, want the expired fault removed.", got)
 	}
 }
 
@@ -756,7 +842,7 @@ func TestTheTeardownWaitsForTheTargetToRecoverFromAFaultItCleared(t *testing.T) 
 		t.Fatalf("The run failed: %v", err)
 	}
 	want := []string{
-		"setFaults 0",
+		"clearFaults",
 		"settle",
 		"sleep " + testTimeouts.Stable.String(),
 		"deleteCR widget",
@@ -810,7 +896,7 @@ func TestTheTeardownWaitsForNoRecoveryTheTargetIsNotOwed(t *testing.T) {
 }
 
 // A run that ended early is judged no further, so the teardown gives it no
-// time to recover.
+// time to recover. The recorded run still shows where the fault stopped.
 func TestTheTeardownWaitsForNoRecoveryAfterTheRunEnded(t *testing.T) {
 	for _, test := range []struct {
 		name  string
@@ -836,6 +922,9 @@ func TestTheTeardownWaitsForNoRecoveryAfterTheRunEnded(t *testing.T) {
 
 			if got := h.teardownCalls(); slices.Contains(got, "settle") || result.Timeline.Recovery != nil {
 				t.Errorf("The teardown did %v, want no wait: the run had ended.", got)
+			}
+			if fault := result.Timeline.Faults[0]; fault.End.IsZero() {
+				t.Errorf("The fault ran %+v, want its window closed where the teardown cleared it.", fault)
 			}
 		})
 	}
@@ -876,7 +965,7 @@ func TestTheRecoveryEndsWithTheCallersContext(t *testing.T) {
 	h := newFakeHarness()
 	h.faulting = true
 	ctx, cancel := context.WithCancel(t.Context())
-	h.cancel, h.cancelsAfter = cancel, "setFaults 0"
+	h.cancel, h.cancelsAfter = cancel, "clearFaults"
 	sequence := sequenceOf(
 		Op{Type: OpCreate, Obj: widget("widget")},
 		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}},
@@ -963,7 +1052,7 @@ func TestRunTearsDownInTheOrderTheDesignGives(t *testing.T) {
 		t.Fatalf("The run failed: %v", err)
 	}
 	want := []string{
-		"setFaults 0",
+		"clearFaults",
 		"sleep " + testTimeouts.Stable.String(),
 		"deleteCR widget",
 		"awaitClean " + (testTimeouts.Delete + deletionMargin).String(),
@@ -1159,14 +1248,15 @@ func checkpointsAt(timeline Timeline) []int {
 	return ops
 }
 
-// The Runner knows when each fault op injected its spec and when the fault was
-// cleared, which is the window the checks ignore what happened in.
+// The Runner knows when each fault op injected its fault and when the fault
+// was removed, which is the window the checks ignore what happened in.
 func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 	h := newFakeHarness()
 	h.faulting = true
 	sequence := sequenceOf(
-		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
-		Op{Type: OpFault, Fault: &Fault{Action: Action{Drop: true}}},
+		Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: "configmaps"}, Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
+		Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: "secrets"}, Action: Action{Drop: true}}},
+		Op{Type: OpSettle},
 		Op{Type: OpSettle},
 	)
 
@@ -1181,10 +1271,32 @@ func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 	}
 	ops := result.Timeline.Ops
 	if !between(faults[0].Start, ops[0].At, ops[1].At) || !between(faults[0].End, ops[1].At, ops[2].At) {
-		t.Errorf("The first fault was active %+v, want from op 0 until op 2 cleared it.", faults[0])
+		t.Errorf("The first fault was active %+v, want from op 0 until op 2 removed it.", faults[0])
 	}
-	if !between(faults[1].Start, ops[1].At, ops[2].At) || !faults[1].End.After(ops[2].At) {
+	if !between(faults[1].Start, ops[1].At, ops[2].At) || !faults[1].End.After(ops[3].At) {
 		t.Errorf("The second fault was active %+v, want from op 1 until the teardown cleared it.", faults[1])
+	}
+	want := []string{"addFault 0", "addFault 1", "removeFault 0", "settle", "settle"}
+	if got := h.opCalls(); !slices.Equal(got, want) {
+		t.Errorf("The run did %v, want %v.", got, want)
+	}
+}
+
+// A fault whose op trigger names its own op ends at the next one.
+func TestRunEndsAFaultWhoseOpTriggerNamesItsOwnOp(t *testing.T) {
+	h := newFakeHarness()
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(0)}}},
+		Op{Type: OpSettle},
+	)
+
+	_, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if got, want := h.opCalls(), []string{"addFault 0", "removeFault 0", "settle"}; !slices.Equal(got, want) {
+		t.Errorf("The run did %v, want %v.", got, want)
 	}
 }
 

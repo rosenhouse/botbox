@@ -282,9 +282,9 @@ A G5 report lists each field the restart changed, with its value before and afte
 botbox prints names the first. If your controller stamps one of those fields at startup, paste
 its path into `equalIgnore` as written. A Secret's values appear there as markers too.
 
-### When G4 fails on op 0
+### When a settle wait fails G4
 
-The first settle wait expired. What follows `expired with no fault active` says why:
+A settle wait expired. What follows `expired with no fault active` says why:
 
 - `ready never held: evaluating ready "…": no such key: …` means your `ready` reads a
   field the CR does not have. Check the spelling, and guard an optional field with `has()`.

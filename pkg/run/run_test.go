@@ -1,12 +1,16 @@
 package run
 
 import (
+	"context"
 	"errors"
 	"maps"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -14,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/rest"
 
+	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
@@ -228,5 +233,48 @@ func TestReady(t *testing.T) {
 				t.Errorf("ready reported %t, want %t.", got, test.want)
 			}
 		})
+	}
+}
+
+// Each exit of a supervised target is recorded with the line its own process
+// wrote as it stopped, though every process writes to one log.
+func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
+	dir := t.TempDir()
+	panicked := filepath.Join(dir, "panicked")
+	log, err := os.Create(filepath.Join(dir, targetLogFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { log.Close() })
+	binary := launch.NewBinary(launch.Options{
+		Path: "/bin/sh",
+		Args: []string{"-c", `if [ -e "$0" ]; then echo "E0923 lost the lease"; exit 1; fi
+			echo "panic: first"; echo "goroutine 1 [running]:"; : > "$0"; exit 2`, panicked},
+		Log:     log,
+		Backoff: launch.MaxBackoff,
+	})
+	t.Cleanup(func() { _ = binary.Stop(context.Background()) })
+	live := &liveRun{h: &Harness{dir: dir, Launcher: binary}}
+	if err := binary.Start(t.Context(), "kubeconfig"); err != nil {
+		t.Fatal(err)
+	}
+
+	live.supervise()
+
+	for deadline := time.Now().Add(10 * time.Second); len(live.exits()) < 2 && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+	}
+	exits := live.exits()
+	if len(exits) != 2 {
+		t.Fatalf("The harness recorded the exits %+v, want the first and the one after its restart.", exits)
+	}
+	for i, want := range []struct{ status, said string }{
+		{"exit status 2", "panic: first"},
+		{"exit status 1", "E0923 lost the lease"},
+	} {
+		exit := exits[i]
+		if exit.Said != want.said || exit.Err == nil || exit.Err.Error() != want.status || exit.At.IsZero() {
+			t.Errorf("Exit %d is %+v, want %s after the target wrote %q.", i+1, exit, want.status, want.said)
+		}
 	}
 }

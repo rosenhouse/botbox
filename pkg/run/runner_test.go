@@ -67,10 +67,22 @@ type fakeHarness struct {
 	deletedCRAt   time.Time
 
 	// targetGone makes the harness report a target that has stopped, and
-	// stopsAfter is the call it stops at.
-	targetGone bool
-	stopsAfter string
-	targetExit error
+	// stopsAfter is the call it exits at. exitsInWait is the settle wait it
+	// exits during, counting from 1. Once supervised, an exit is recorded
+	// with the next of says as its last words and the target runs on, unless
+	// restartFails.
+	targetGone   bool
+	stopsAfter   string
+	exitsInWait  int
+	targetExit   error
+	says         []string
+	supervised   bool
+	restartFails bool
+	exited       []Exit
+	// settles are the outcomes of the settle waits in turn. Later waits
+	// converge as converged says.
+	settles []bool
+	waits   int
 
 	// owed is what each settle wait was told the target owed, and
 	// applyingInWait replaces applying once a wait begins.
@@ -99,7 +111,7 @@ func newFakeHarness() *fakeHarness {
 func (f *fakeHarness) record(call string) error {
 	f.calls = append(f.calls, call)
 	if call == f.stopsAfter {
-		f.targetGone = true
+		f.exit()
 	}
 	if call == f.cancelsAfter {
 		f.cancel()
@@ -124,11 +136,37 @@ func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time) (bool, 
 	if f.faultingInWait {
 		f.apply()
 	}
+	if f.waits++; f.waits == f.exitsInWait {
+		f.exit()
+	}
 	if err := errors.Join(f.record("settle"), ctx.Err()); err != nil {
 		return false, err
 	}
+	if f.waits <= len(f.settles) {
+		return f.settles[f.waits-1], nil
+	}
 	return f.converged, nil
 }
+
+// exit stops the target as it would stop on its own.
+func (f *fakeHarness) exit() {
+	if f.supervised && !f.restartFails {
+		said := ""
+		if n := len(f.exited); n < len(f.says) {
+			said = f.says[n]
+		}
+		f.exited = append(f.exited, Exit{At: time.Now(), Err: f.targetExit, Said: said})
+		return
+	}
+	f.targetGone = true
+}
+
+func (f *fakeHarness) supervise() {
+	f.supervised = true
+	_ = f.record("supervise")
+}
+
+func (f *fakeHarness) exits() []Exit { return slices.Clone(f.exited) }
 
 func (f *fakeHarness) sleep(_ context.Context, d time.Duration) error {
 	return f.record("sleep " + d.String())
@@ -380,8 +418,10 @@ func TestRunAppliesTheOpsInOrder(t *testing.T) {
 	if result.Violation != nil {
 		t.Errorf("The run reported %v, want no violation.", result.Violation)
 	}
+	// The first wait that converged shows the target runs, so botbox
+	// supervises it from there on, once.
 	want := []string{
-		"createCR widget", "settle",
+		"createCR widget", "settle", "supervise",
 		"patchCR widget map[spec:map[count:5]]", "settle",
 		"settle",
 		"restart",
@@ -1388,7 +1428,7 @@ func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 	if !between(faults[1].Start, ops[1].At, ops[2].At) || !faults[1].End.After(ops[3].At) {
 		t.Errorf("The second fault was active %+v, want from op 1 until the teardown cleared it.", faults[1])
 	}
-	want := []string{"addFault 0", "addFault 1", "removeFault 0", "settle", "settle"}
+	want := []string{"addFault 0", "addFault 1", "removeFault 0", "settle", "supervise", "settle"}
 	if got := h.opCalls(); !slices.Equal(got, want) {
 		t.Errorf("The run did %v, want %v.", got, want)
 	}
@@ -1407,7 +1447,7 @@ func TestRunEndsAFaultWhoseOpTriggerNamesItsOwnOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("The run failed: %v", err)
 	}
-	if got, want := h.opCalls(), []string{"addFault 0", "removeFault 0", "settle"}; !slices.Equal(got, want) {
+	if got, want := h.opCalls(), []string{"addFault 0", "removeFault 0", "settle", "supervise"}; !slices.Equal(got, want) {
 		t.Errorf("The run did %v, want %v.", got, want)
 	}
 }
@@ -1645,10 +1685,10 @@ func TestTheRunnerAppliesNoOpToATargetThatStopped(t *testing.T) {
 	}
 }
 
-// The teardown judges the deletion it asked for. A target that stopped cleaned
-// nothing up, so the window is not its to answer for.
+// The teardown judges the deletion it asked for. A target that could not start
+// again cleaned nothing up, so the window is not its to answer for.
 func TestTheTeardownJudgesNoDeletionWithATargetThatStopped(t *testing.T) {
-	h := &fakeHarness{converged: true, stopsAfter: "deleteCR widget", targetExit: errors.New("exit status 1")}
+	h := &fakeHarness{converged: true, stopsAfter: "deleteCR widget", targetExit: errors.New("exit status 1"), restartFails: true}
 	g3 := Violation{ID: "G3", Statement: "the CR widget still carried its finalizers"}
 	check := &fakeChecker{violations: [][]Violation{nil, {g3}}}
 
@@ -1779,12 +1819,12 @@ func TestWhatTheTargetSaidOnTheWayOut(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if got := whyItStopped(path); got != log.want {
+			if got, _ := whyItStopped(path, 0); got != log.want {
 				t.Errorf("A log of %d bytes reads as %q, want %q.", len(log.wrote), got, log.want)
 			}
 		})
 	}
-	if got := whyItStopped(filepath.Join(t.TempDir(), "no-such-log")); got != "" {
+	if got, _ := whyItStopped(filepath.Join(t.TempDir(), "no-such-log"), 0); got != "" {
 		t.Errorf("A log botbox never wrote reads as %q.", got)
 	}
 }
@@ -1802,7 +1842,7 @@ func TestWhatTheTargetSaidAboveItsStackTrace(t *testing.T) {
 		{"zap-json.log", `{"level":"error","ts":"2026-09-23T16:04:03Z","logger":"setup","msg":"unable to create controller","controller":"Widget","error":"no matches for kind \"Widget\" in version \"toy.botbox/v1\"","stacktrace":"main.main\n\tgithub.com/rosenhouse/botbox/zzprobe/main.go:39\nruntime.main\n\truntime/proc.go:290"}`},
 	} {
 		t.Run(log.file, func(t *testing.T) {
-			if got := whyItStopped(filepath.Join("testdata", "stopped", log.file)); got != log.want {
+			if got, _ := whyItStopped(filepath.Join("testdata", "stopped", log.file), 0); got != log.want {
 				t.Errorf("%s reads as %q, want %q.", log.file, got, log.want)
 			}
 		})
@@ -1939,5 +1979,163 @@ func TestTheG4OfAnExpiredWaitQuotesTheManagedObjects(t *testing.T) {
 	}
 	if slices.ContainsFunc(versions, func(v observe.Version) bool { return v.GVK == configMapKind }) {
 		t.Errorf("The timeline holds %v, want the CR's history alone.", versions)
+	}
+}
+
+// Until a settle wait converges, botbox has not seen the target work, and an
+// exit reads like a bad flag or a taken port: a harness error.
+func TestAnExitBeforeAnyWaitConvergedEndsTheRun(t *testing.T) {
+	h := newFakeHarness()
+	h.converged, h.faulting = false, true
+	h.exitsInWait, h.targetExit = 2, errors.New("exit status 1")
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpSettle},
+	)
+
+	_, err := runFake(t, h, nil, sequence)
+
+	if err == nil || !strings.Contains(err.Error(), "op 2 (settle): the target is no longer running") {
+		t.Errorf("The run returned %v, want the harness error of the exit in op 2.", err)
+	}
+	if slices.Contains(h.calls, "supervise") {
+		t.Errorf("The run did %v, and no wait converged to show the target worked.", h.calls)
+	}
+}
+
+// crashLoop is a target that converges on op 0 and exits in the wait of the
+// op after.
+func crashLoop() *fakeHarness {
+	h := newFakeHarness()
+	h.exitsInWait, h.targetExit = 2, errors.New("exit status 2")
+	h.says = []string{"panic: runtime error: integer divide by zero"}
+	return h
+}
+
+const crashNote = `the target exited during op 1 (update) with exit status 2 after writing ` +
+	`"panic: runtime error: integer divide by zero"`
+
+// A target that exits once it has worked is restarted, as a kubelet would.
+// One that keeps exiting never converges, and G4 quotes the last exit since it
+// last converged.
+func TestACrashLoopIsAG4ThatQuotesTheLastExit(t *testing.T) {
+	h := crashLoop()
+	h.settles = []bool{true, false}
+	h.stopsAfter = "patchCR widget map[spec:map[count:0]]"
+	h.says = []string{"E0923 lost the lease", "panic: runtime error: integer divide by zero"}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(0)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || result.Violation.ID != "G4" || !strings.Contains(result.Violation.Statement, "op 1 (update)") {
+		t.Fatalf("The run reported %v, want the G4 of the wait after op 1.", result.Violation)
+	}
+	want := `the target exited 2 times since it last converged, last with exit status 2 after writing ` +
+		`"panic: runtime error: integer divide by zero"`
+	if !strings.Contains(result.Violation.Evidence, want) {
+		t.Errorf("The G4's evidence is %q, want it to say %q.", result.Violation.Evidence, want)
+	}
+	if !slices.Contains(result.Notes, crashNote) {
+		t.Errorf("The run noted %q, want %q.", result.Notes, crashNote)
+	}
+	if len(result.Timeline.Exits) != 2 {
+		t.Errorf("The run recorded the exits %+v, want the two in op 1.", result.Timeline.Exits)
+	}
+}
+
+// A target that converges after it exited passes, and the exit is noted.
+func TestATargetThatConvergesAfterItExitedPasses(t *testing.T) {
+	h := crashLoop()
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(0)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %v against a target that converged after it exited.", result.Violation)
+	}
+	if !slices.Contains(result.Notes, crashNote) {
+		t.Errorf("The run noted %q, want %q.", result.Notes, crashNote)
+	}
+}
+
+// A G4 quotes only the exits since the target last converged.
+func TestAnExitBeforeTheTargetLastConvergedIsNotEvidence(t *testing.T) {
+	h := crashLoop()
+	h.settles = []bool{true, true, false}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(0)}}},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(7)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || !strings.Contains(result.Violation.Statement, "op 2 (update)") {
+		t.Fatalf("The run reported %v, want the G4 of the wait after op 2.", result.Violation)
+	}
+	if strings.Contains(result.Violation.Evidence, "exited") {
+		t.Errorf("The G4's evidence is %q, and the target converged after it exited.", result.Violation.Evidence)
+	}
+	if !slices.Contains(result.Notes, crashNote) {
+		t.Errorf("The run noted %q, want %q.", result.Notes, crashNote)
+	}
+}
+
+// The wait for recovery from a fault is the teardown's too.
+func TestAnExitWhileTheTeardownAwaitsRecoveryIsTheTeardowns(t *testing.T) {
+	h := crashLoop()
+	h.faulting, h.exitsInWait, h.says = true, 3, nil
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 30}}},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Timeline.Recovery == nil {
+		t.Fatal("The teardown waited for no recovery.")
+	}
+	if want := "the target exited during the teardown with exit status 2"; !slices.Contains(result.Notes, want) {
+		t.Errorf("The run noted %q, want %q.", result.Notes, want)
+	}
+}
+
+// The teardown judges the deletion of a target that exited during it, and the
+// note says where the exit came.
+func TestAnExitDuringTheTeardownIsNotedAsSuch(t *testing.T) {
+	h := crashLoop()
+	h.exitsInWait, h.stopsAfter, h.says = 0, "deleteCR widget", nil
+	check := &fakeChecker{}
+
+	result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if want := "the target exited during the teardown with exit status 2"; !slices.Contains(result.Notes, want) {
+		t.Errorf("The run noted %q, want %q.", result.Notes, want)
+	}
+	if got := checkpointsAt(result.Timeline); !slices.Equal(got, []int{0, Teardown}) {
+		t.Errorf("The run checkpointed at %v, want the deletion judged too.", got)
 	}
 }

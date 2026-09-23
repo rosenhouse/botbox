@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -231,6 +232,25 @@ func (l *liveRun) requests() []proxy.Request { return l.h.Proxy.Log() }
 func (l *liveRun) objects() *observe.Store { return l.h.Observer.Store }
 
 func (l *liveRun) targetStatus() launch.Status { return l.h.Launcher.Status() }
+
+// supervise records why the target stopped before the launcher restarts it.
+// Each process writes to one log, so an exit is quoted from what the log
+// gained since the exit before it.
+func (l *liveRun) supervise() {
+	l.h.Launcher.Supervise(func(exit error) {
+		l.h.mu.Lock()
+		defer l.h.mu.Unlock()
+		said, end := whyItStopped(filepath.Join(l.h.dir, targetLogFile), l.h.logQuoted)
+		l.h.logQuoted = end
+		l.h.exited = append(l.h.exited, Exit{At: time.Now(), Err: exit, Said: said})
+	})
+}
+
+func (l *liveRun) exits() []Exit {
+	l.h.mu.Lock()
+	defer l.h.mu.Unlock()
+	return slices.Clone(l.h.exited)
+}
 
 func (l *liveRun) stop(ctx context.Context) error { return l.h.Stop(ctx) }
 

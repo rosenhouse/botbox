@@ -167,6 +167,24 @@ type Timeline struct {
 	// The run notes each one: G3 judged the deletion window, which closed
 	// before any of this (DESIGN.md §5.5, D37).
 	Forced []string
+	// Exits are the times the target stopped on its own after the first
+	// settle wait converged.
+	Exits []Exit
+}
+
+// Exit is one time the target stopped on its own.
+type Exit struct {
+	At  time.Time
+	Err error
+	// Said is what the target wrote as it stopped, or empty.
+	Said string
+}
+
+func (e Exit) String() string {
+	if e.Said == "" {
+		return e.Err.Error()
+	}
+	return fmt.Sprintf("%v after writing %q", e.Err, e.Said)
 }
 
 // AppliedOp is one op the Runner applied.
@@ -281,6 +299,10 @@ type harness interface {
 	// targetStatus reports whether the target is still running, and why it
 	// stopped if it is not.
 	targetStatus() launch.Status
+	// supervise restarts the target from now on whenever it exits, and
+	// records each exit in exits.
+	supervise()
+	exits() []Exit
 	stop(ctx context.Context) error
 	// unresolvedOwners names each owner the collector could not resolve. It
 	// is complete once stop has returned.
@@ -304,6 +326,11 @@ type runner struct {
 	// botbox did to the run namespace itself (DESIGN.md §6).
 	skipped []string
 	failed  bool
+	// converged is where the last settle wait that converged ended. The first
+	// shows the target works, so botbox supervises it from there on.
+	converged time.Time
+	// teardownStart is where the teardown began.
+	teardownStart time.Time
 	// cr is the primary CR the CR ops act on.
 	cr     string
 	faults []heldFault
@@ -338,8 +365,9 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 	failure := r.applyOps(ctx)
 	r.failed = failure != nil
 	teardown := r.teardown(ctx)
+	r.timeline.Exits = h.exits()
 	// The run's own notes come before the last checkpoint's.
-	notes := slices.Concat(r.skipped, r.notes)
+	notes := slices.Concat(r.exitNotes(), r.skipped, r.notes)
 	result := Result{Timeline: r.timeline, Violation: r.violation, Notes: notes, Recorded: r.input()}
 	return result, errors.Join(failure, teardown)
 }
@@ -482,6 +510,12 @@ func (r *runner) wait(ctx context.Context) (Wait, error) {
 	wait := Wait{Window: Window{Start: r.now()}}
 	converged, err := r.h.settle(ctx, r.owed)
 	wait.Window.End, wait.Converged = r.now(), converged
+	if converged {
+		if r.converged.IsZero() {
+			r.h.supervise()
+		}
+		r.converged = wait.Window.End
+	}
 	return wait, err
 }
 
@@ -521,13 +555,19 @@ func (r *runner) expired(after string, wait Wait) Violation {
 	// disagree with the state quoted beside it.
 	managed := r.h.objects().Managed()
 	cr := observe.Key{GVK: r.target.Primary, Namespace: r.timeline.Namespace, Name: r.cr}
+	evidence := fmt.Sprintf("in %v the target never held its Ready predicate with %v of quiet behind it; %s",
+		wait.Window.End.Sub(wait.Window.Start).Round(time.Millisecond), r.target.Timeouts.Stable,
+		managedClause(len(managed)))
+	exits := slices.DeleteFunc(r.h.exits(), func(exit Exit) bool { return exit.At.Before(r.converged) })
+	if len(exits) > 0 {
+		evidence += fmt.Sprintf("; the target exited %s since it last converged, last with %v",
+			count(len(exits), "time"), exits[len(exits)-1])
+	}
 	return Violation{
 		ID:        "G4",
 		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active", after),
 		At:        wait.Window.End,
-		Evidence: fmt.Sprintf("in %v the target never held its Ready predicate with %v of quiet behind it; %s",
-			wait.Window.End.Sub(wait.Window.Start).Round(time.Millisecond), r.target.Timeouts.Stable,
-			managedClause(len(managed))),
+		Evidence:  evidence,
 	}.quotingRequests(invariant.Recent(r.h.requests())).
 		quotingVersions(invariant.RecentHistory(cr, r.h.objects().History(cr))).
 		quotingManaged(invariant.Sample(managed))
@@ -543,7 +583,7 @@ func (r *runner) targetStopped(status launch.Status) error {
 	if status.Exit != nil {
 		stopped += ": " + status.Exit.Error()
 	}
-	said := whyItStopped(log)
+	said, _ := whyItStopped(log, 0)
 	if said == "" {
 		return fmt.Errorf("%s; its output is in %s", stopped, log)
 	}
@@ -563,54 +603,53 @@ var (
 	goroutineHeader = regexp.MustCompile(`^goroutine \d+ .*:$`)
 )
 
-// whyItStopped is what the target said as it stopped: the line the last panic
-// opens with, or else the last whole line above any stack trace. It is empty
-// where the log holds neither, which leaves the reader the file itself.
-func whyItStopped(path string) string {
-	said := tailLines(path)
+// whyItStopped is what the target said as it stopped, in the log past from:
+// the line the last panic opens with, or else the last whole line above any
+// stack trace. It is empty where the log holds neither, which leaves the
+// reader the file itself. It also returns where the log ends.
+func whyItStopped(path string, from int64) (string, int64) {
+	said, end := tailLines(path, from)
 	for _, line := range slices.Backward(said) {
 		if slices.ContainsFunc(panicked, func(opener string) bool { return strings.HasPrefix(line, opener) }) {
-			return line
+			return line, end
 		}
 	}
 	for i, line := range slices.Backward(said) {
 		inTrace := strings.TrimSpace(line) == "" || frameLocation.MatchString(line) || goroutineHeader.MatchString(line) ||
 			(i+1 < len(said) && frameLocation.MatchString(said[i+1]))
 		if !inTrace {
-			return strings.TrimSpace(line)
+			return strings.TrimSpace(line), end
 		}
 	}
-	return ""
+	return "", end
 }
 
-// tailLines are the whole lines at the end of the file, innermost last. A
-// line longer than maxTail has no whole form to quote, and a file botbox
-// cannot read has nothing.
-func tailLines(path string) []string {
+// tailLines are the whole lines of the file past from, at most maxTail bytes
+// of them, innermost last, and where the file ends. A line longer than
+// maxTail has no whole form to quote, and a file botbox cannot read has
+// nothing.
+func tailLines(path string, from int64) ([]string, int64) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, from
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
-		return nil
+		return nil, from
 	}
-	tail := make([]byte, min(info.Size(), maxTail))
-	if _, err := file.ReadAt(tail, info.Size()-int64(len(tail))); err != nil {
-		return nil
+	start := max(from, info.Size()-maxTail)
+	tail := make([]byte, info.Size()-start)
+	if _, err := file.ReadAt(tail, start); err != nil {
+		return nil, from
 	}
-	body := strings.TrimRight(string(tail), "\n")
-	// A tail shorter than the file begins mid-line, so its first line is a
-	// fragment: klog puts the level and the message at the front.
-	if int64(len(tail)) < info.Size() {
-		cut := strings.IndexByte(body, '\n')
-		if cut < 0 {
-			return nil
-		}
-		body = body[cut+1:]
+	lines := strings.Split(strings.TrimRight(string(tail), "\n"), "\n")
+	// A tail cut short begins mid-line, so its first line is a fragment: klog
+	// puts the level and the message at the front.
+	if start > from {
+		lines = lines[1:]
 	}
-	return strings.Split(body, "\n")
+	return lines, info.Size()
 }
 
 // checkpoint evaluates the checks and keeps the first violation.
@@ -735,6 +774,7 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 // The caller's deadline can end the recovery, which is judged as an op's wait
 // is, but no step after it.
 func (r *runner) teardown(ctx context.Context) error {
+	r.teardownStart = r.now()
 	r.clearFaults()
 	for i, window := range r.timeline.Faults {
 		if window.Start.IsZero() {
@@ -781,6 +821,29 @@ func (r *runner) teardown(ctx context.Context) error {
 		r.skipped = append(r.skipped, unresolvedNote(owner))
 	}
 	return errors.Join(failures...)
+}
+
+func (r *runner) exitNotes() []string {
+	notes := make([]string, len(r.timeline.Exits))
+	for i, exit := range r.timeline.Exits {
+		notes[i] = fmt.Sprintf("the target exited during %s with %v", r.during(exit.At), exit)
+	}
+	return notes
+}
+
+// during names what the run was doing at t: the op it had applied last, or the
+// teardown.
+func (r *runner) during(t time.Time) string {
+	if !t.Before(r.teardownStart) {
+		return "the teardown"
+	}
+	var last AppliedOp
+	for _, applied := range r.timeline.Ops {
+		if !applied.At.After(t) {
+			last = applied
+		}
+	}
+	return fmt.Sprintf("op %d (%s)", last.Op.Index, last.Op.Type)
 }
 
 // unresolvedNote says why the collector kept an object: it counts an owner it

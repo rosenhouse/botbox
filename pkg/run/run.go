@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -92,6 +93,12 @@ type Harness struct {
 	down   teardown
 	// unresolved is what the collector could not resolve, once it stops.
 	unresolved []cluster.Unresolved
+
+	mu sync.Mutex
+	// exited records each exit of a supervised target, and logQuoted is where
+	// target.log ended at the last of them.
+	exited    []Exit
+	logQuoted int64
 }
 
 // Start brings the run up in the order DESIGN.md §5.5 requires and leaves the

@@ -187,6 +187,11 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 			want: `"Create"`,
 		},
 		{
+			name: "a fault on a subresource",
+			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"resource": "widgets/status"}, "action": {"drop": true}}}`,
+			want: `match.resource "widgets/status" names a subresource; a fault on widgets matches its subresources' requests too`,
+		},
+		{
 			name: "a restart that skips its settle",
 			ops:  `{"i": 0, "t": "restart", "noSettle": true}`,
 			want: "noSettle",

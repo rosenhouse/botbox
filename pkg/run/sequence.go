@@ -279,6 +279,10 @@ func (f *Fault) validate() error {
 		return fmt.Errorf("match.verb %q is not one of %s and %s",
 			verb, strings.Join(proxy.Verbs[:last], ", "), proxy.Verbs[last])
 	}
+	if resource, _, found := strings.Cut(f.Match.Resource, "/"); found {
+		return fmt.Errorf("match.resource %q names a subresource; a fault on %s matches its subresources' requests too",
+			f.Match.Resource, resource)
+	}
 	return nil
 }
 

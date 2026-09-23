@@ -83,6 +83,9 @@ func load(path string) (*Target, error) {
 	}
 	var declared declaration
 	if err := yaml.UnmarshalStrict(data, &declared); err != nil {
+		if located := unknownKey(data); located != nil {
+			return nil, located
+		}
 		return nil, err
 	}
 	dir := filepath.Dir(path)

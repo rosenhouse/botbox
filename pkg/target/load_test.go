@@ -238,6 +238,7 @@ func TestLoadRejects(t *testing.T) {
 	}{
 		{"unknown field", minimalTarget + "reday: 'true'\n", "", []string{"reday"}},
 		{"unknown nested field", minimalTarget + "timeouts:\n  settel: 5s\n", "", []string{"settel"}},
+		{"a list where a string goes", minimalTarget + "version: [v1]\n", "", []string{"version", "array"}},
 		{"primary without a version", "name: min\nprimary: Widget\nsample: widget.yaml\nlaunch: {binary: bin/min}\n", "", []string{"primary", "Widget"}},
 		{"primary group read as a version", "name: min\nprimary: apps/Deployment\nsample: widget.yaml\nlaunch: {binary: bin/min}\n", "", []string{"primary", "apps"}},
 		{"managed kind with too many slashes", minimalTarget + "manages:\n  - a/b/c/d\n", "", []string{"manages", "a/b/c/d"}},
@@ -389,6 +390,49 @@ launch:
 	}
 	if loaded.Launch.Binary != "bin/min" {
 		t.Errorf("Load resolved launch.binary to %q; it is relative to the working directory.", loaded.Launch.Binary)
+	}
+}
+
+func TestLoadPointsAtAMisspelledKey(t *testing.T) {
+	for _, test := range []struct {
+		name, yaml string
+		want       []string
+	}{
+		{"at the top", minimalTarget + "reday: 'true'\n",
+			[]string{"line 5: reday is not a key; did you mean ready?"}},
+		{"in a block", minimalTarget + "timeouts:\n  setle: 5s\n",
+			[]string{"line 6: timeouts.setle is not a key; did you mean settle?"}},
+		{"in a list item", minimalTarget + "properties:\n  - id: P1\n    cell: 'true'\n",
+			[]string{"line 7: properties[0].cell is not a key; did you mean cel?"}},
+		{"with no key near it", minimalTarget + "timeouts:\n  zzz: 5s\n",
+			[]string{"line 6: timeouts.zzz is not a key; timeouts takes settle, stable and delete"}},
+		{"with no key near it at the top", minimalTarget + "zzz: 1\n",
+			[]string{"line 5: zzz is not a key; target.yaml takes name, version, crds,", "timeouts and thresholds"}},
+		{"after keys any map takes", minimalTarget + "generate:\n  overlay:\n    spec.count: {maximum: 3}\n" +
+			"thresholds:\n  errlop: 5\n",
+			[]string{"line 9: thresholds.errlop is not a key; did you mean errloop?"}},
+		{"after a merge", minimalTarget + "timeouts:\n  <<: {settle: 5s}\n  stabel: 2s\n",
+			[]string{"line 7: timeouts.stabel is not a key; did you mean stable?"}},
+		{"too short to be near", minimalTarget + "properties:\n  - xy: P1\n",
+			[]string{"line 6: properties[0].xy is not a key; properties[0] takes id, description, cel and when"}},
+		// The decoder matches a key whatever its case.
+		{"below a capital", minimalTarget + "Timeouts:\n  setle: 5s\n",
+			[]string{"line 6: Timeouts.setle is not a key; did you mean settle?"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := writeTarget(t, test.yaml, map[string]string{"widget.yaml": sampleWidget})
+
+			_, err := target.Load(path)
+
+			if err == nil {
+				t.Fatal("Load accepted a key target.yaml does not take.")
+			}
+			for _, want := range test.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("Load returned %q, want %q.", err, want)
+				}
+			}
+		})
 	}
 }
 

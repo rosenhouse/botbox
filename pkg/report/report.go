@@ -148,7 +148,7 @@ func (r Report) document() document {
 }
 
 // timeline quotes when each version appeared and what it carried, and drops
-// the object bodies that objects.jsonl holds in full.
+// the object bodies that objects.jsonl holds.
 func timeline(versions []observe.Version) []observe.Version { return quoting(recent(versions)) }
 
 // state quotes what the target managed at the violation. The check ordered it

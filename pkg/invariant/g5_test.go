@@ -129,6 +129,15 @@ func TestG5ComparesALiveOwnerReferenceThatNamesAnotherVersion(t *testing.T) {
 	fired(t, invariant.RestartStable, in)
 }
 
+// botbox cannot tell that an owner of a kind the target does not declare is
+// gone.
+func TestG5ComparesAnOwnerReferenceOfAnUndeclaredKind(t *testing.T) {
+	absent := metav1.OwnerReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "absent", UID: "uid-absent"}
+	in := restarted(child("w-0", "11", ownedBy(absent)), child("w-0", "21", orphaned))
+
+	fired(t, invariant.RestartStable, in)
+}
+
 func ownedBy(refs ...metav1.OwnerReference) option {
 	return func(u *unstructured.Unstructured) { u.SetOwnerReferences(refs) }
 }

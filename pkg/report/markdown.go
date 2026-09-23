@@ -33,6 +33,9 @@ func (d document) markdown() []byte {
 		}
 	}
 	fmt.Fprintf(&md, "\n## Sequence\n\n```json\n%s\n```\n", strings.TrimRight(string(d.Sequence), "\n"))
+	if d.Ready != nil {
+		d.Ready.markdown(&md)
+	}
 	if len(d.Requests) > 0 {
 		md.WriteString("\n## Requests\n\n")
 		md.WriteString(quotedLine(d.RequestsTotal, len(d.Requests), "request", "", "requests.jsonl", "every request the run made"))

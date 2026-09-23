@@ -2,11 +2,13 @@ package run
 
 import (
 	"errors"
+	"fmt"
 	"maps"
 	"net/http"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -204,28 +206,61 @@ func TestApplyFixturesResolvesThroughTheHarnessMapper(t *testing.T) {
 	}
 }
 
+// A settle wait ends at the first reading of a ready that yields no bool,
+// rather than waiting out settle on it.
+func TestTheHarnessReadsAReadyThatYieldsNoBoolAsAnError(t *testing.T) {
+	store := observe.NewStore(observe.Options{Namespace: "botbox-run-x"})
+	store.Record(widgetKind, widget("widget"), time.Now())
+	yieldsAnInt := &target.Target{Primary: widgetKind, Ready: func(*unstructured.Unstructured) (bool, error) {
+		return false, &target.EvalError{Predicate: "ready", Expr: "status.ready", Err: fmt.Errorf("%w: it yielded int64", target.ErrNotBool)}
+	}}
+	h := &Harness{target: yieldsAnInt, Observer: &observe.Observer{Store: store}}
+
+	_, _, err := h.state(time.Now())
+
+	if !errors.Is(err, target.ErrNotBool) {
+		t.Errorf("Reading the run returned the error %v, want the ready that yields no bool.", err)
+	}
+}
+
 func TestReady(t *testing.T) {
 	holds := func(*unstructured.Unstructured) (bool, error) { return true, nil }
 	fails := func(*unstructured.Unstructured) (bool, error) { return false, nil }
 	errs := func(*unstructured.Unstructured) (bool, error) {
 		return false, errors.New("no such field: status.ready")
 	}
+	yieldsAnInt := func(*unstructured.Unstructured) (bool, error) {
+		return false, &target.EvalError{Predicate: "ready", Expr: "status.ready", Err: fmt.Errorf("%w: it yielded int64", target.ErrNotBool)}
+	}
 	widget := observe.Version{Object: &unstructured.Unstructured{}}
+	named := func(name string) observe.Version {
+		cr := &unstructured.Unstructured{}
+		cr.SetName(name)
+		return observe.Version{Object: cr}
+	}
+	holdsOnReady := func(cr *unstructured.Unstructured) (bool, error) { return cr.GetName() == "ready", nil }
 
 	for _, test := range []struct {
 		name      string
 		predicate target.ReadyFunc
 		observed  []observe.Version
 		want      bool
+		wantErr   bool
 	}{
 		{name: "it holds on the one CR", predicate: holds, observed: []observe.Version{widget}, want: true},
 		{name: "it fails on one of two CRs", predicate: fails, observed: []observe.Version{widget, widget}},
+		{name: "it fails on the second of two CRs", predicate: holdsOnReady, observed: []observe.Version{named("ready"), named("unready")}},
 		{name: "it cannot be evaluated", predicate: errs, observed: []observe.Version{widget}},
 		{name: "no CR is left to be ready", predicate: fails, want: true},
+		{name: "it yields no bool", predicate: yieldsAnInt, observed: []observe.Version{widget}, wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			if got := ready(test.predicate, test.observed); got != test.want {
+			got, err := ready(test.predicate, test.observed)
+			if got != test.want {
 				t.Errorf("ready reported %t, want %t.", got, test.want)
+			}
+			if (err != nil) != test.wantErr {
+				t.Errorf("ready returned the error %v, want one: %t.", err, test.wantErr)
 			}
 		})
 	}

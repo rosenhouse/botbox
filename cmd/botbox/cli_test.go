@@ -17,6 +17,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/report"
@@ -1103,6 +1104,26 @@ func TestTheReportQuotesTheStateAtTheVerdict(t *testing.T) {
 				t.Errorf("report.json is\n%s\nwant the count of the objects the target managed.", encoded)
 			}
 		})
+	}
+}
+
+func TestTheReportQuotesTheReadyPredicate(t *testing.T) {
+	violation := run.Violation{ID: "G4", Statement: "the target converges",
+		Ready: &invariant.Readiness{Expr: "has(status.ready)", Error: "no such key: ready"}}
+	session := &fakeSession{results: []run.Result{{Violation: &violation}}}
+
+	code, _, stderr := invokeWith(t, session, countingGenerator(nil, run.OpSettle),
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d, want %d: %s", code, exitViolation, stderr)
+	}
+	md, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(md), "## Ready predicate") || !strings.Contains(string(md), "no such key: ready") {
+		t.Errorf("report.md is\n%s\nwant the ready predicate and its error.", md)
 	}
 }
 

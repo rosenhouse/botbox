@@ -2,6 +2,7 @@ package invariant_test
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -106,8 +107,13 @@ func (r *run) fixture(obj *unstructured.Unstructured) *run {
 	return r
 }
 
+// op is an op of the type given, which writes the CR w if it is a CR op.
 func (r *run) op(opType invariant.OpType, when time.Duration) *run {
-	r.in.Ops = append(r.in.Ops, invariant.Op{Index: len(r.in.Ops), Type: opType, Time: at(when)})
+	op := invariant.Op{Index: len(r.in.Ops), Type: opType, Time: at(when)}
+	if slices.Contains([]invariant.OpType{invariant.OpCreate, invariant.OpUpdate, invariant.OpDelete, invariant.OpRecreate}, opType) {
+		op.CR = observe.Key{GVK: widgetGVK, Namespace: namespace, Name: widgetName}
+	}
+	r.in.Ops = append(r.in.Ops, op)
 	return r
 }
 
@@ -123,10 +129,23 @@ func (r *run) deletedManaged(when time.Duration, name string) *run {
 	return r
 }
 
+// checkpoint ends the settle wait of the last op, which began where the op
+// was applied.
 func (r *run) checkpoint(when time.Duration, result invariant.SettleResult) *run {
+	var began time.Time
+	if n := len(r.in.Ops); n > 0 {
+		began = r.in.Ops[n-1].Time
+	}
 	r.in.Checkpoints = append(r.in.Checkpoints, invariant.Checkpoint{
-		Op: len(r.in.Ops) - 1, Time: at(when), Settle: result,
+		Op: len(r.in.Ops) - 1, Began: began, Time: at(when), Settle: result,
 	})
+	return r
+}
+
+// waitBegan moves where the last settle wait began, which the Runner stamps
+// once the op has returned.
+func (r *run) waitBegan(when time.Duration) *run {
+	r.in.Checkpoints[len(r.in.Checkpoints)-1].Began = at(when)
 	return r
 }
 

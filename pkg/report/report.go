@@ -65,6 +65,8 @@ type Report struct {
 	// (DESIGN.md §5.7, D39).
 	Managed      []observe.Version
 	ManagedTotal *int
+	// Ready is what a readiness verdict read, which the report bounds.
+	Ready *invariant.Readiness
 }
 
 // Check is the invariant or property the run broke (DESIGN.md §6).
@@ -115,6 +117,7 @@ type document struct {
 	Notes         []string          `json:"notes,omitempty"`
 	Replay        string            `json:"replay"`
 	Sequence      json.RawMessage   `json:"sequence"`
+	Ready         *ready            `json:"ready,omitempty"`
 	Applied       int               `json:"applied,omitempty"`
 	Ops           int               `json:"ops,omitempty"`
 	Requests      []proxy.Request   `json:"requests,omitempty"`
@@ -135,6 +138,7 @@ func (r Report) document() document {
 		Notes:         r.Notes,
 		Replay:        r.Replay,
 		Sequence:      r.Sequence,
+		Ready:         quoteReady(r.Ready),
 		Applied:       r.Applied,
 		Ops:           r.Ops,
 		Requests:      recent(r.Requests),

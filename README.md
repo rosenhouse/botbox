@@ -266,6 +266,36 @@ property also quotes the state of the objects your controller managed where it f
 over the kinds your target declares: a second table with its own bound of twenty and
 the count beside it. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-report)).
 
+A G4 also quotes your `ready`, the error evaluating it, and your CR's status where it
+failed. The status holds whatever your controller wrote, so the report cuts it: twenty
+conditions, 200 bytes of each field and 1000 bytes of the rest. `objects.jsonl` holds it
+whole.
+
+### When G4 fails on op 0
+
+The first settle wait expired. What follows `expired with no fault active` says why:
+
+- `ready never held: evaluating ready "…": no such key: …` means your `ready` reads a
+  field the CR does not have. Check the spelling, and guard an optional field with `has()`.
+- `ready never held: it evaluated to false` means your controller never reached the state
+  your `ready` describes. The report's Ready predicate section shows the CR's conditions
+  and status, which is where a reason such as `0/10 replicas available` appears. Compare
+  that status with your `ready`: a misspelled field under `has()` also evaluates to false.
+  envtest runs only the API server and etcd: no Deployment, ReplicaSet or Pod controller
+  runs, so a CR that waits on a Deployment's replicas never becomes ready there.
+- `ready held from … on, but the namespace never held still for stable (2s)` means your
+  controller converged and kept writing. The Object versions table lists the writes. A
+  status field rewritten on every reconcile, such as a timestamp, does this.
+- `ready held until …` means `ready` held and then stopped holding.
+
+After a `delete`, `the CR … was still being deleted, held by the finalizers …` means
+nothing removed those finalizers within `settle`.
+
+A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
+`settle`. Where your controller repeated a failing request, the line names it and its
+count: an error loop that backs off can fail too rarely for G6 to count. A `ready` that yields
+something other than a bool is a configuration error, and botbox exits 2 naming it.
+
 ## Running in CI
 
 ```yaml

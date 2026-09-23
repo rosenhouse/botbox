@@ -85,6 +85,9 @@ type Target struct {
 	Manages       []schema.GroupVersionKind
 	Selector      labels.Selector
 	Ready         ReadyFunc
+	// ReadyExpr is the text Ready came from: the declared CEL, the default, or
+	// go:<name>.
+	ReadyExpr string
 	// Equal is nil unless the target names a hook. The invariant engine then
 	// applies the §6 default equality together with EqualIgnore.
 	Equal       EqualFunc

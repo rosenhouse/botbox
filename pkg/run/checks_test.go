@@ -140,6 +140,18 @@ func TestTheChecksReadTheRecoveryCheckpointAsASettleWait(t *testing.T) {
 	}
 }
 
+func TestTheChecksMeasureAnExpiredWaitFromWhereItBegan(t *testing.T) {
+	in := convergedRun()
+	in.Timeline.Ops = append(in.Timeline.Ops, appliedOp(1, OpSettle, at(3)))
+	in.Timeline.Checkpoints = append(in.Timeline.Checkpoints, Checkpoint{At: at(9), Began: at(4), Op: 1, Converged: false})
+
+	violations := checked(t, in)
+
+	if len(violations) != 1 || !strings.Contains(violations[0].Statement, "expired with no fault active: in 5s, ready held from 0s on") {
+		t.Errorf("The checks reported %v, want the G4 of a wait that ran 5s on a ready CR.", violations)
+	}
+}
+
 // A namespace that came clean settles G3 where the teardown stopped watching,
 // which is before T_delete is up whenever the target cleans up promptly
 // (DESIGN.md §6). The timeline carries that instant, not a teardown
@@ -244,6 +256,25 @@ func TestTheChecksCarryNoObjectForAnOpThatResolvedToNothing(t *testing.T) {
 
 	if got := ops[0].Deleted; got != (observe.Key{}) {
 		t.Errorf("The op names the object %+v, and its index resolved to nothing.", got)
+	}
+}
+
+func TestTheChecksNameTheCRAnOpWrote(t *testing.T) {
+	timeline := Timeline{
+		Namespace: fakeNamespace,
+		Ops: []AppliedOp{
+			{Op: Op{Index: 0, Type: OpUpdate}, At: at(1), CR: "widget"},
+			{Op: Op{Index: 1, Type: OpSettle}, At: at(2)},
+		},
+	}
+
+	ops := engineOps(checkTarget(), timeline)
+
+	if want := (observe.Key{GVK: widgetKind, Namespace: fakeNamespace, Name: "widget"}); ops[0].CR != want {
+		t.Errorf("The update names the CR %+v, want %+v.", ops[0].CR, want)
+	}
+	if got := ops[1].CR; got != (observe.Key{}) {
+		t.Errorf("The settle names the CR %+v, and it wrote none.", got)
 	}
 }
 

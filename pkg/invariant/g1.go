@@ -20,8 +20,8 @@ func BoundedReconciliation(in Input) (Result, error) {
 			continue
 		}
 		out.violate(Violation{
-			Statement: fmt.Sprintf("the target made %d API requests in %s, which §6 requires to be quiet",
-				len(noisy), window),
+			Statement: fmt.Sprintf("the target made %d API requests in %s, which §6 requires to be quiet%s",
+				len(noisy), window, in.repeated(window.start, window.end)),
 			At: noisy[0].Start,
 		}.quotingRequests(Recent(noisy)))
 	}

@@ -91,26 +91,8 @@ type Violation struct {
 	// leaves the total nil (DESIGN.md §5.7, D39).
 	Managed      []observe.Version
 	ManagedTotal *int
-}
-
-// quotingRequests carries an excerpt of the request log into the violation
-// with the number it was chosen from, so that the two cannot disagree.
-func (v Violation) quotingRequests(e invariant.Excerpt[proxy.Request]) Violation {
-	v.Requests, v.RequestsTotal = e.Quoted, e.Total
-	return v
-}
-
-// quotingVersions does the same for a timeline of object versions.
-func (v Violation) quotingVersions(e invariant.Excerpt[observe.Version]) Violation {
-	v.Versions, v.VersionsTotal, v.VersionsOf = e.Quoted, e.Total, e.Of
-	return v
-}
-
-// quotingManaged does the same for the state at the verdict, whose total the
-// check always knows: it asked.
-func (v Violation) quotingManaged(e invariant.Excerpt[observe.Version]) Violation {
-	v.Managed, v.ManagedTotal = e.Quoted, &e.Total
-	return v
+	// Ready is what a readiness verdict read of the predicate and the CR.
+	Ready *invariant.Readiness
 }
 
 // String is the violation in one line. A message that prints one wants the
@@ -171,6 +153,8 @@ type Timeline struct {
 type AppliedOp struct {
 	Op Op
 	At time.Time
+	// CR is the primary CR a CR op wrote.
+	CR string
 	// Resolved is the object a deleteManaged op chose (DESIGN.md §7).
 	Resolved string
 	// Settled is the settle wait that followed the op, or nil if none did.
@@ -185,7 +169,11 @@ type Wait struct {
 
 // Checkpoint is where the checks ran (DESIGN.md §4).
 type Checkpoint struct {
+	// At is where the settle wait ended, or where the teardown's deletion
+	// window closed.
 	At time.Time
+	// Began is where that settle wait began. The teardown's is zero.
+	Began time.Time
 	// Op is the op whose settle wait ended here, Recovery, or Teardown.
 	Op int
 	// Converged is whether that wait converged. At the teardown's checkpoint
@@ -360,6 +348,9 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 	}
 	r.expireFaults(op.Index)
 	applied, err := r.apply(ctx, op)
+	if op.Type.OnCR() {
+		applied.CR = r.cr
+	}
 	r.timeline.Ops = append(r.timeline.Ops, applied)
 	if err != nil {
 		return err
@@ -463,7 +454,7 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 	}
 	r.timeline.Ops[len(r.timeline.Ops)-1].Settled = &wait
 	excused := r.faultsAndWaits().Recovering(wait.Window.End)
-	return r.judge(op.Index, fmt.Sprintf("op %d (%s)", op.Index, op.Type), wait, excused)
+	return r.judge(op.Index, wait, excused)
 }
 
 // wait waits up to T_settle for the target to converge, or longer while it is
@@ -491,36 +482,16 @@ func (r *runner) faultsAndWaits() invariant.Input {
 
 // judge checkpoints where a settle wait ended. A wait that expired where the
 // faults did not excuse it is a G4 violation, which ends the run.
-func (r *runner) judge(op int, after string, wait Wait, excused bool) error {
+func (r *runner) judge(op int, wait Wait, excused bool) error {
 	if !wait.Converged {
 		// A target that is gone cannot converge, so that is the harness's
 		// failure to report, not the target's to answer for.
 		if status := r.h.targetStatus(); !status.Running {
 			return r.targetStopped(status)
 		}
-		if !excused {
-			r.violate(r.expired(after, wait))
-		}
 	}
-	return r.checkpoint(op, wait.Converged)
-}
-
-// expired is the G4 of a settle wait that ran out with no fault to excuse it.
-func (r *runner) expired(after string, wait Wait) Violation {
-	// One read of the managed objects answers both, so that the count cannot
-	// disagree with the state quoted beside it.
-	managed := r.h.objects().Managed()
-	cr := observe.Key{GVK: r.target.Primary, Namespace: r.timeline.Namespace, Name: r.cr}
-	return Violation{
-		ID:        "G4",
-		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active", after),
-		At:        wait.Window.End,
-		Evidence: fmt.Sprintf("in %v the target never held its Ready predicate with %v of quiet behind it; %s",
-			wait.Window.End.Sub(wait.Window.Start).Round(time.Millisecond), r.target.Timeouts.Stable,
-			managedClause(len(managed))),
-	}.quotingRequests(invariant.Recent(r.h.requests())).
-		quotingVersions(invariant.RecentHistory(cr, r.h.objects().History(cr))).
-		quotingManaged(invariant.Sample(managed))
+	return r.checkpoint(Checkpoint{At: wait.Window.End, Began: wait.Window.Start, Op: op, Converged: wait.Converged},
+		!wait.Converged && !excused)
 }
 
 // targetStopped is the harness error for a target that is no longer running.
@@ -595,12 +566,20 @@ func tailLines(path string) []string {
 	return lines
 }
 
-// checkpoint evaluates the checks and keeps the first violation.
-func (r *runner) checkpoint(op int, converged bool) error {
+// checkpoint evaluates the checks and keeps the first violation. The G4 of a
+// wait that expired unexcused comes first.
+func (r *runner) checkpoint(checkpoint Checkpoint, expired bool) error {
 	if count := r.h.managedCount(); count > r.limit {
 		return fmt.Errorf("the run namespace holds %d managed objects, over the harness limit of %d", count, r.limit)
 	}
-	r.timeline.Checkpoints = append(r.timeline.Checkpoints, Checkpoint{At: r.now(), Op: op, Converged: converged})
+	r.timeline.Checkpoints = append(r.timeline.Checkpoints, checkpoint)
+	if expired {
+		violation, err := engineInput(r.input()).ExpiredWait(engineCheckpoint(checkpoint))
+		if err != nil {
+			return err
+		}
+		r.violate(fromEngine(violation))
+	}
 	found, err := r.check.Check(r.input())
 	if err != nil {
 		return fmt.Errorf("evaluating the checks: %w", err)
@@ -678,7 +657,7 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 		r.timeline.Recovery = &wait
 		// The faults are cleared, and the wait ran until the time they left
 		// the target was up, so nothing excuses it.
-		err = r.judge(Recovery, "the last fault stopped", wait, false)
+		err = r.judge(Recovery, wait, false)
 	}
 	if err != nil {
 		r.failed = true
@@ -751,7 +730,7 @@ func (r *runner) teardownCheckpoint(clean bool) error {
 	if status := r.h.targetStatus(); !status.Running {
 		return fmt.Errorf("the teardown: %w", r.targetStopped(status))
 	}
-	return r.checkpoint(Teardown, clean)
+	return r.checkpoint(Checkpoint{At: r.now(), Op: Teardown, Converged: clean}, false)
 }
 
 func (r *runner) teardownBudget() time.Duration {

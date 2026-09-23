@@ -144,6 +144,10 @@ func load(path string) (*Target, error) {
 		}
 	}
 
+	if declared.Ready == "" {
+		declared.Ready = DefaultReady
+	}
+	loaded.ReadyExpr = declared.Ready
 	if loaded.Ready, err = readyPredicate(declared.Ready); err != nil {
 		return nil, fmt.Errorf("ready: %w", err)
 	}
@@ -194,9 +198,6 @@ func load(path string) (*Target, error) {
 func readyPredicate(declared string) (ReadyFunc, error) {
 	if name, isHook := hookName(declared); isHook {
 		return readyHook(name)
-	}
-	if declared == "" {
-		declared = DefaultReady
 	}
 	return compileReady(declared)
 }

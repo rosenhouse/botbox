@@ -39,10 +39,10 @@ func (d document) markdown() []byte {
 		md.WriteString(differencesLine(d.Differences, d.DifferencesTotal, d.Compared))
 		table(&md, []string{"object", "resourceVersion", "path", "before", "after"}, differenceRows(d.Differences))
 	}
-	fmt.Fprintf(&md, "\n## Sequence\n\n```json\n%s\n```\n", strings.TrimRight(string(d.Sequence), "\n"))
 	if d.Ready != nil {
 		d.Ready.markdown(&md)
 	}
+	fmt.Fprintf(&md, "\n## Sequence\n\n```json\n%s\n```\n", strings.TrimRight(string(d.Sequence), "\n"))
 	if len(d.Requests) > 0 {
 		md.WriteString("\n## Requests\n\n")
 		md.WriteString(quotedLine(d.RequestsTotal, len(d.Requests), "request", "", "requests.jsonl", "every request the run made"))

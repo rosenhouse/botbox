@@ -17,11 +17,12 @@ export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 ### Against kind
 
 botbox starts its own API server by default. That server runs no controller manager and no
-kubelet. botbox emulates the garbage collector, but no Pod runs, and the status of a
-Deployment, a Job or a PersistentVolumeClaim never changes. A `ready` that waits on that
-status never holds, and a controller that requeues while it waits can hide a missed watch.
-botbox warns when your target manages such a kind. To test such a controller, or against a
-real garbage collector, point botbox at a throwaway cluster:
+kubelet. botbox emulates the garbage collector, but no Pod runs, a Pod bound to a node never
+finishes deleting, and the status of a Deployment, a Job or a PersistentVolumeClaim never
+changes. A `ready` that waits on that status never holds, and a controller that requeues
+while it waits can hide a missed watch. botbox warns when your target manages such a kind.
+To test such a controller, or against a real garbage collector, point botbox at a throwaway
+cluster:
 
 ```sh
 kind create cluster --kubeconfig kind.kubeconfig

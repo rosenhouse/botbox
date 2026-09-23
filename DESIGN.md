@@ -322,18 +322,19 @@ Consequences:
   were created with: Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob,
   ReplicationController, Pod and PersistentVolumeClaim. No ReplicaSet or Pod appears for
   them. A `ready` that waits on that status never holds, and a target that requeues while
-  it waits can hide a missed watch. When `manages` names one of these kinds, an envtest
-  invocation says so once, before the control plane starts, and names `--kubeconfig` and
-  kind. A G4 report repeats it among its notes. botbox does not emulate these controllers
-  (D@35).
+  it waits can hide a missed watch. A Pod bound to a node never finishes deleting, since
+  only its kubelet confirms the delete, so G3 fails on one the target manages. When
+  `manages` names one of these kinds, an envtest invocation says so once, before the
+  control plane starts, and names `--kubeconfig` and kind. A G4 report repeats it among
+  its notes. botbox does not emulate these controllers (D@35).
 - **No finalizers that only `kube-controller-manager` removes.** botbox starts the API
   server with its garbage collector off, and with the `StorageObjectInUseProtection`
-  admission plugin disabled beside envtest's own `ServiceAccount`. A delete therefore adds
-  no `orphan` or `foregroundDeletion` finalizer, whatever its propagation policy. No
-  PersistentVolumeClaim carries `kubernetes.io/pvc-protection`, and no PersistentVolume
-  carries `kubernetes.io/pv-protection`. On a kubeconfig cluster a Job or
-  ReplicationController deleted without a policy orphans its Pods, and a claim keeps its
-  finalizer until no Pod uses it.
+  admission plugin disabled beside envtest's own `ServiceAccount`. A delete of anything
+  but a Namespace therefore adds no `orphan` or `foregroundDeletion` finalizer, whatever
+  its propagation policy. No PersistentVolumeClaim carries `kubernetes.io/pvc-protection`,
+  and no PersistentVolume carries `kubernetes.io/pv-protection`. On a kubeconfig cluster a
+  Job or ReplicationController deleted without a policy orphans its Pods, and a claim
+  keeps its finalizer until no Pod uses it.
 - **No admission webhooks.** See §8.3.
 
 ## 6. Generic invariants

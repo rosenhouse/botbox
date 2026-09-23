@@ -19,6 +19,37 @@ func TestTheCRDJudgesWhatTheOverlayLoosens(t *testing.T) {
 	})
 }
 
+func TestATransitionRuleSeesTheOldObjectsDefaults(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	crd, err := openAPISchema(loaded)
+	if err != nil {
+		t.Fatalf("openAPISchema failed: %v.", err)
+	}
+	rules, err := newCRDRules(crd)
+	if err != nil {
+		t.Fatalf("newCRDRules failed: %v.", err)
+	}
+	for _, testCase := range []struct {
+		field   string
+		value   int64
+		refused bool
+	}{
+		{"count", 5, false},
+		{"minCount", 2, true},
+	} {
+		t.Run(testCase.field, func(t *testing.T) {
+			updated := loaded.Sample.DeepCopy()
+			if err := unstructured.SetNestedField(updated.Object, testCase.value, "spec", testCase.field); err != nil {
+				t.Fatalf("Setting spec.%s failed: %v.", testCase.field, err)
+			}
+			if err := rules.refusal(updated.Object, loaded.Sample.Object); (err != nil) != testCase.refused {
+				t.Errorf("Setting spec.%s to %d on a gadget without minCount returned %v, want refused=%t.",
+					testCase.field, testCase.value, err, testCase.refused)
+			}
+		})
+	}
+}
+
 func TestASampleItsCRDRefusesIsAConfigurationError(t *testing.T) {
 	for _, testCase := range []struct {
 		field    string

@@ -18,6 +18,9 @@ spec:
         openAPIV3Schema:
           type: object
           required: [spec]
+          x-kubernetes-validations:
+            - rule: self.metadata.name.size() <= 20
+              message: the name must fit in 20 characters
           properties:
             apiVersion:
               type: string
@@ -35,6 +38,8 @@ spec:
                   message: count must reach minCount
                 - rule: '[has(self.left), has(self.right)].exists_one(x, x)'
                   message: exactly one of left and right must be set
+                - rule: self.minCount <= oldSelf.minCount
+                  message: minCount may not rise
               properties:
                 count:
                   type: integer

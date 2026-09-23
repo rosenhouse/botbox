@@ -69,7 +69,7 @@ func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
 // apart from the API server's code that generation runs.
 func gadgetRuleBroken(cr, old map[string]any) string {
 	spec, _ := cr["spec"].(map[string]any)
-	value := func(name string, absent int64) int64 {
+	value := func(spec map[string]any, name string, absent int64) int64 {
 		if set, isInteger := spec[name].(int64); isInteger {
 			return set
 		}
@@ -77,16 +77,21 @@ func gadgetRuleBroken(cr, old map[string]any) string {
 	}
 	_, left := spec["left"]
 	_, right := spec["right"]
-	switch count := value("count", 0); {
-	case value("maxUnavailable", 0) > count:
+	switch count := value(spec, "count", 0); {
+	case value(spec, "maxUnavailable", 0) > count:
 		return "maxUnavailable exceeds count"
-	case count < value("minCount", 1):
+	case count < value(spec, "minCount", 1):
 		return "count is below minCount's default"
 	case left == right:
 		return "left and right are both set or both unset"
 	}
-	if previous, _ := old["spec"].(map[string]any); old != nil && previous["mode"] != spec["mode"] {
+	previous, _ := old["spec"].(map[string]any)
+	switch {
+	case old == nil:
+	case previous["mode"] != spec["mode"]:
 		return "mode changed"
+	case value(spec, "minCount", 1) > value(previous, "minCount", 1):
+		return "minCount rose"
 	}
 	return ""
 }
@@ -95,7 +100,7 @@ func TestGeneratedGadgetsKeepTheirCRDsRules(t *testing.T) {
 	loaded := loadTarget(t, rulesTarget)
 	g := newGenerator(t, loaded, Options{})
 	crd := crdSchemaOf(t, rulesTarget)
-	var changed, updated int
+	var changed, switchedMode, updated int
 	rapid.Check(t, func(rt *rapid.T) {
 		var current map[string]any
 		for _, op := range g.sequence(rt).Ops {
@@ -105,6 +110,9 @@ func TestGeneratedGadgetsKeepTheirCRDsRules(t *testing.T) {
 				next = op.Obj.DeepCopy().Object
 				if !equalJSON(next, loaded.Sample.Object) {
 					changed++
+				}
+				if mode, _, _ := unstructured.NestedString(next, "spec", "mode"); mode != "fast" {
+					switchedMode++
 				}
 			case run.OpUpdate:
 				next, old = merge(current, op.Patch), current
@@ -127,6 +135,9 @@ func TestGeneratedGadgetsKeepTheirCRDsRules(t *testing.T) {
 	if changed == 0 || updated == 0 {
 		t.Errorf("%d creates changed the sample and %d updates were drawn; a generator that changes nothing keeps every rule.",
 			changed, updated)
+	}
+	if switchedMode == 0 {
+		t.Error("No create switched the sample's mode, which only an update may not change.")
 	}
 }
 

@@ -98,8 +98,8 @@ func TestAnExpiredWaitSaysWhatKeptTheNamespaceFromHoldingStill(t *testing.T) {
 		op(invariant.OpCreate, 0).
 		record(500*time.Millisecond, widget("10", spec(1), status(1, 1))).
 		record(time.Second, child("w-0", "11")).
-		record(3500*time.Millisecond, child("w-0", "12")).
-		record(4*time.Second, widget("13", spec(1), status(1, 1))).
+		record(3500*time.Millisecond, widget("12", spec(1), status(1, 1))).
+		record(4*time.Second, child("w-0", "13")).
 		record(4500*time.Millisecond, child("w-0", "14")).
 		checkpoint(5*time.Second, invariant.Expired).
 		through(8 * time.Second)
@@ -108,7 +108,7 @@ func TestAnExpiredWaitSaysWhatKeptTheNamespaceFromHoldingStill(t *testing.T) {
 
 	requireStatement(t, violation, "in 5s, ready held from 500ms on, but the namespace never held still for stable (2s): "+
 		"3 changes in the last 2s, the last to v1/ConfigMap w-0")
-	if got := quoted(violation); strings.Join(got, ",") != "w-0@12,w@13,w-0@14" {
+	if got := quoted(violation); strings.Join(got, ",") != "w@12,w-0@13,w-0@14" {
 		t.Errorf("The timeline holds %v, want the 3 changes that broke the quiet.", got)
 	}
 	if violation.VersionsOf != "" {
@@ -254,18 +254,22 @@ func TestAnExpiredWaitSaysNoCRWasLeft(t *testing.T) {
 	violation := fired(t, invariant.Convergence, in)
 
 	requireStatement(t, violation, "in 5s, no CR was left to be ready, but the namespace never held still for stable (2s): 1 change")
+	if got := quoted(violation); strings.Join(got, ",") != "w-1@13" {
+		t.Errorf("The timeline holds %v, want the change that broke the quiet.", got)
+	}
 }
 
 func TestAnExpiredWaitQuotesNoRequestMadeAfterIt(t *testing.T) {
 	in := expiredSettle().
 		request(3*time.Second, get("w-0")).
-		request(7*time.Second, get("w-1")).
+		request(6*time.Second, get("w-1")).
+		request(7*time.Second, get("w-2")).
 		through(8 * time.Second)
 
 	violation := fired(t, invariant.Convergence, in)
 
-	if len(violation.Requests) != 1 || violation.Requests[0].Name != "w-0" || violation.RequestsTotal != 1 {
-		t.Errorf("The violation quotes %v of %d requests, want the one made before it.", violation.Requests, violation.RequestsTotal)
+	if len(violation.Requests) != 2 || violation.Requests[1].Name != "w-1" || violation.RequestsTotal != 2 {
+		t.Errorf("The violation quotes %v of %d requests, want the two made by its end.", violation.Requests, violation.RequestsTotal)
 	}
 }
 
@@ -336,15 +340,27 @@ func TestAVerdictNamesAFailingRequestTheTargetRepeated(t *testing.T) {
 			in := c.run.
 				request(1100*time.Millisecond, failedGet("w-0", http.StatusInternalServerError)).
 				request(1200*time.Millisecond, failedGet("w-1", http.StatusNotFound)).
-				request(1300*time.Millisecond, failedGet("w-0", http.StatusNotFound)).
-				request(1500*time.Millisecond, failedGet("w-0", http.StatusNotFound)).
+				request(1300*time.Millisecond, failedGet("w-0", http.StatusBadRequest)).
 				through(8 * time.Second)
 
 			violation := fired(t, c.check, in)
 
-			requireStatement(t, violation, "; the target repeated the failing request get configmaps/w-0 3 times, the last answered 404")
+			requireStatement(t, violation, "; the target repeated the failing request get configmaps/w-0 2 times, the last answered 400")
 		})
 	}
+}
+
+func TestAVerdictNamesTheRequestThatFirstFailedMostOften(t *testing.T) {
+	in := unreadyCreate(0, 1).
+		request(1100*time.Millisecond, failedGet("w-0", http.StatusNotFound)).
+		request(1200*time.Millisecond, failedGet("w-1", http.StatusNotFound)).
+		request(1300*time.Millisecond, failedGet("w-0", http.StatusNotFound)).
+		request(1400*time.Millisecond, failedGet("w-1", http.StatusNotFound)).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	requireStatement(t, violation, "; the target repeated the failing request get configmaps/w-0 2 times")
 }
 
 func TestAVerdictNamesNoRequestTheTargetDidNotRepeat(t *testing.T) {

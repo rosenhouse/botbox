@@ -289,6 +289,24 @@ func TestAnExpiredWaitQuotesTheCRReadyFailedOn(t *testing.T) {
 	}
 }
 
+func TestAnExpiredWaitQuotesTheFirstCRWhereReadyHeld(t *testing.T) {
+	in := newRun().
+		record(500*time.Millisecond, object(widgetGVK, "v", "9", generation(1), spec(3), status(3, 1))).
+		op(invariant.OpCreate, time.Second).
+		record(1100*time.Millisecond, widget("10", spec(3), status(3, 1))).
+		record(5*time.Second, child("w-0", "11")).
+		checkpoint(6*time.Second, invariant.Expired).
+		waitBegan(1200 * time.Millisecond).
+		through(9 * time.Second)
+
+	violation := expiredWait(t, in)
+
+	requireStatement(t, violation, "in 4.8s, ready held from 0s on, but the namespace never held still")
+	if ready := violation.Ready; ready == nil || ready.CR != "v" {
+		t.Errorf("The violation quotes the ready of %+v, want v's, the first CR.", ready)
+	}
+}
+
 func TestAnExpiredWaitSaysWhereNothingChanged(t *testing.T) {
 	in := unreadyCreate(3, 1).checkpoint(5*time.Second, invariant.Expired).through(8 * time.Second)
 

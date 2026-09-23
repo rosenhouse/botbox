@@ -49,7 +49,8 @@ func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 type readyWalk struct {
 	// crs is how many primary CRs were live at the end.
 	crs int
-	// cr is the CR Ready last failed on, or the first where it held.
+	// cr is the CR the last evaluation failed on, or the first CR if Ready
+	// held.
 	cr   observe.Version
 	held bool
 	// ever is whether Ready held after the op's write.

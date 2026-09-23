@@ -10,23 +10,17 @@ import (
 
 // Under --resync the toy writes its unchanged status on every tick. Ticks
 // 900ms apart put at most three in the toy's 2s quiet window, so a quiet of 3
-// admits them and the default of 0 does not. The sequence keeps the Widget, so
-// the ticks go on into the windows the run judges.
+// admits them and the default of 0 does not.
 func TestAQuietThresholdAdmitsATimer(t *testing.T) {
 	ctx := t.Context()
 	binary := buildToy(t)
 	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
-	b0, err := run.ReadSequence(repoRoot + "/targets/toy-widget/sequences/b0.json")
-	if err != nil {
-		t.Fatalf("Reading the sequence failed: %v", err)
-	}
-	sequence := without(b0, run.OpDelete)
 	runAllowing := func(t *testing.T, quiet int) run.Result {
 		t.Helper()
 		toy := loadTarget(t, binary)
 		toy.Launch.Args = append(toy.Launch.Args, "--resync=900ms")
 		toy.Thresholds.Quiet = quiet
-		result, err := run.Run(ctx, toy, sequence, run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+		result, err := run.Run(ctx, toy, readSequence(t, oneCreate), run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
 		if err != nil {
 			t.Fatalf("The run failed: %v", err)
 		}

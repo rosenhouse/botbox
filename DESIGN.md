@@ -298,9 +298,10 @@ botbox owns the API server a run executes against.
   every namespace acts in another invocation's run namespace too, and each invocation
   would count that work as its own target's.
 
-envtest runs only the API server and etcd. There is no `kube-controller-manager`, so
-nothing garbage-collects owned objects, namespaces never finish terminating, no default
-service accounts appear, and no pods run. Consequences:
+envtest runs only the API server and etcd. There is no `kube-controller-manager` and no
+kubelet, so nothing garbage-collects owned objects, namespaces never finish terminating, no
+default service accounts appear, no pods run, and no workload's status changes.
+Consequences:
 
 - **Garbage-collector emulation.** In envtest mode botbox runs a minimal collector over
   the run namespace: it deletes a managed object that has at least one ownerReference
@@ -317,6 +318,20 @@ service accounts appear, and no pods run. Consequences:
   not modelled. Its writes bypass the proxy and never count as target traffic. On a
   kubeconfig cluster it is off.
 - **Self-cleanup.** The Runner empties the run namespace itself (§5.5, step 4).
+- **No workloads.** A kind that runs Pods, and a claim Pods mount, keep the status they
+  were created with: Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob,
+  ReplicationController, Pod and PersistentVolumeClaim. No ReplicaSet or Pod appears for
+  them. A `ready` that waits on that status never holds, and a target that requeues while
+  it waits can hide a missed watch. When `manages` names one of these kinds, an envtest
+  invocation says so once, before the control plane starts, and names `--kubeconfig` and
+  kind. A G4 report repeats it among its notes. botbox does not emulate these controllers
+  (D@35).
+- **No storage protection.** botbox starts the API server with the
+  `StorageObjectInUseProtection` admission plugin disabled, beside envtest's own
+  `ServiceAccount`. That plugin puts `kubernetes.io/pvc-protection` on every
+  PersistentVolumeClaim and `kubernetes.io/pv-protection` on every PersistentVolume, and
+  only `kube-controller-manager` removes them. On a kubeconfig cluster a claim keeps its
+  finalizer until no Pod uses it.
 - **No admission webhooks.** See §8.3.
 
 ## 6. Generic invariants
@@ -1283,3 +1298,18 @@ built from source and run as a black-box binary.
   envtest also read `USE_EXISTING_CLUSTER`, which pointed botbox's default mode, collector
   emulation and all, at whatever `KUBECONFIG` named. `cluster.Start` now turns that off.
   `make test-kind` runs on kind v0.33.0 and its default node image, Kubernetes 1.37.0.
+- **D@35 botbox names the kinds envtest never moves, and envtest admits a claim
+  unprotected.** An operator whose `ready` waited on its Deployment's `availableReplicas`
+  failed G4 on every envtest run, and botbox said nothing about why. envtest runs no
+  `kube-controller-manager` and no kubelet, so the Deployment's status stayed empty and no
+  ReplicaSet or Pod appeared. Under the default `observedGeneration` predicate the same
+  operator passed, but it requeued every 5 s while it waited, and so recreated a child it
+  never watched. A seeded missed-watch bug passed. botbox therefore names these kinds and
+  points to kind, rather than suggest a weaker `ready`. The list is explicit and short: the
+  kinds that run Pods, and PersistentVolumeClaim. It matches by group and kind, at any
+  version. Running `kube-controller-manager` beside envtest was rejected: setup-envtest
+  ships no such binary, and no Pod would run without a kubelet anyway. A claim also
+  carried `kubernetes.io/pvc-protection`, which nothing on envtest removes, so a correctly
+  owned claim failed G3. Removing that finalizer in the collector was rejected, because it
+  adds code and timing, and on envtest no Pod ever uses a claim. botbox disables the
+  admission plugin instead.

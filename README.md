@@ -272,6 +272,10 @@ property also quotes the state of the objects your controller managed where it f
 over the kinds your target declares: a second table with its own bound of twenty and
 the count beside it. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-report)).
 
+A G5 report lists each field the restart changed, with its value before and after, and the line
+botbox prints names the first. If your controller stamps one of those fields at startup, paste
+its path into `equalIgnore` as written. A Secret's values appear there as markers too.
+
 ## Running in CI
 
 ```yaml

@@ -249,14 +249,19 @@ re-examined without re-running. A readiness verdict and a
 property violation also quote the state of the objects the target managed where it failed,
 in a table of its own, bounded on its own, and say how many there were: a child the
 target never created has no version to quote, and the count is what a report about a
-missing one turns on (D39).
+missing one turns on (D39). A G5 violation names the two states it compared and quotes, in
+a table of its own, each field that differs between them: the object, the resourceVersions
+compared, the path in the form `equalIgnore` takes, and the value on each side, cut to 80
+runes. An object only one state holds is one row. The table is bounded as a timeline is, and
+takes the rows of each object in turn (D@52).
 Every violation says how many entries it chose each excerpt from, because a report that
 counted only what it was handed would claim every bounded excerpt was whole. It also says
 the instant it judged, which aligns the two tables, and whose history a one-object
 timeline is.
 
-A report's version rows carry no object body, so they quote no Secret value (§11). Its
-sequence and replay command hold the sample and the command line as given.
+A report's version rows carry no object body. G5's table quotes a Secret's values as the
+markers `objects.jsonl` writes (§11). A report's sequence and replay command hold the sample
+and the command line as given.
 
 A report is a snapshot taken where the check failed, and the recordings beside it are
 finalized when the run ends. A request still open at the snapshot, which a watch usually
@@ -383,7 +388,8 @@ the settle wait, which the predicate ends. The default is
 `has(status.observedGeneration) && status.observedGeneration == metadata.generation`, and
 a target whose primary CR lacks that field must declare `ready` (§8.4).
 
-**G5 evaluation.** G5 is evaluated once per `Restart`. The Runner snapshots whenever a
+**G5 evaluation.** G5 is evaluated once per `Restart`, and one violation names every object
+that differs across it, judged at the snapshot after it. The Runner snapshots whenever a
 settle wait converges, implicit or explicit. A `Restart` is compared against the last
 converged snapshot before it and the first converged snapshot after it. If either is
 missing, G5 is not evaluated for that `Restart` and the report says so. The same holds
@@ -798,10 +804,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   annotations as a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The
   HMAC key is drawn per invocation and never written, so equal values share a marker
   within one invocation and a marker reveals only the value's length. The Observer's
-  history keeps the values, so G5 compares them exactly. Nothing else is redacted: a
-  Secret's labels, every other object, `target.log`, `sequence.json`, and a report's
-  sequence and replay command hold what the target, the sample and the command line gave
-  them (D@64).
+  history keeps the values, so G5 compares them exactly, and its report quotes the
+  markers. Nothing else is redacted: a Secret's labels, every other object, `target.log`,
+  `sequence.json`, and a report's sequence and replay command hold what the target, the
+  sample and the command line gave them (D@64).
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -1090,9 +1096,10 @@ built from source and run as a black-box binary.
   timeline's last entries, and the report says so rather than calling them the nearest: a
   violation is stamped where its evidence opens as often as where it closes. A state is
   bounded and counted on its own (D39). Quoted versions leave their object bodies to
-  `objects.jsonl`. The report also carries what no check could judge, for D31's reason: a
-  report that omits "G3 could not be judged" reads like one where G3 passed, and it is the
-  artefact a human actually reads.
+  `objects.jsonl`, but G5 quotes the value of each field it found changed, bounded and
+  counted in the same way (D@52). The report also carries what no check could judge, for
+  D31's reason: a report that omits "G3 could not be judged" reads like one where G3
+  passed, and it is the artefact a human actually reads.
 - **D38 G3 credits no cleanup botbox performed.** A `DeleteManaged` op deletes a managed
   object behind the target's back (§5.4). Inside a CR deletion's window that deletes the
   evidence: G3 asked whether the object was gone by the deadline and never asked who
@@ -1200,3 +1207,14 @@ built from source and run as a black-box binary.
   against them. Only core Secrets are redacted, because botbox cannot tell a credential
   anywhere else from other data. No flag writes the raw values. Each example tier fails if
   its control's evidence holds its Secret's value.
+- **D@52 A G5 violation names each field that differs.** A G5 report named the object and
+  the restart, so an adopter diffed two versions in `objects.jsonl` by hand to learn what
+  changed and whether it belonged in `equalIgnore`. G5 now diffs the forms it compared,
+  after the default and `equalIgnore` reductions, so nothing it ignores appears. A path
+  writes a list item as `[*]` and ends at a label or an annotation, so every path pastes
+  into `equalIgnore`; a list whose length changed is one row. One violation covers
+  every object a restart changed, because a run keeps its first violation and one per object
+  hid the rest. The bound takes each object's rows in turn, so one noisy object does not
+  crowd out the others. G5 is stamped at the state after the restart, where it judged. A
+  target with its own equality hook gets one row per object, because G5 cannot see what the
+  hook compared.

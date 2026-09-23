@@ -462,7 +462,7 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		return err
 	}
 	r.timeline.Ops[len(r.timeline.Ops)-1].Settled = &wait
-	excused := r.runSoFar().Recovering(wait.Window.End)
+	excused := r.faultsAndWaits().Recovering(wait.Window.End)
 	return r.judge(op.Index, fmt.Sprintf("op %d (%s)", op.Index, op.Type), wait, excused)
 }
 
@@ -477,10 +477,10 @@ func (r *runner) wait(ctx context.Context) (Wait, error) {
 
 // owed is when the target must have recovered from the faults by, as the
 // checks judge it.
-func (r *runner) owed() time.Time { return r.runSoFar().Owed(r.now()) }
+func (r *runner) owed() time.Time { return r.faultsAndWaits().Owed(r.now()) }
 
-// runSoFar is the run's faults and settle waits, as the checks read them.
-func (r *runner) runSoFar() invariant.Input {
+// faultsAndWaits is what the checks read of the run's faults and settle waits.
+func (r *runner) faultsAndWaits() invariant.Input {
 	r.readFaultWindows()
 	return invariant.Input{
 		Target:      r.target,
@@ -685,7 +685,7 @@ func (r *runner) clearFaults() {
 
 // awaitRecovery waits for a target still owed time to recover from the faults.
 func (r *runner) awaitRecovery(ctx context.Context) error {
-	if r.violation != nil || r.failed || !r.runSoFar().Recovering(r.now()) {
+	if r.violation != nil || r.failed || !r.faultsAndWaits().Recovering(r.now()) {
 		return nil
 	}
 	wait, err := r.wait(ctx)

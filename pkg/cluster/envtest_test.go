@@ -9,6 +9,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 )
@@ -50,13 +53,17 @@ func TestStartIgnoresUseExistingCluster(t *testing.T) {
 	}
 }
 
-func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
+func thingCRDDir(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "thing.yaml"), []byte(thingCRD), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	return dir
+}
 
-	c, err := cluster.Start(cluster.Options{CRDPaths: []string{dir}})
+func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
+	c, err := cluster.Start(cluster.Options{CRDPaths: []string{thingCRDDir(t)}})
 	if err != nil {
 		t.Fatalf("Start returned an error: %v", err)
 	}
@@ -79,7 +86,39 @@ func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
 	}
 
 	// A mapper built after Start knows the kinds the CRDs installed.
-	mapper, err := cluster.NewRESTMapper(c.Config())
+	requireThingServed(t, c.Config())
+}
+
+func TestConnectInstallsCRDsAndLeavesThem(t *testing.T) {
+	bare, err := cluster.Start(cluster.Options{})
+	if err != nil {
+		t.Fatalf("Start returned an error: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := bare.Stop(); err != nil {
+			t.Errorf("Stop returned an error: %v", err)
+		}
+	})
+	kubeconfig := writeKubeconfig(t, bare.Config())
+	crds := cluster.Options{CRDPaths: []string{thingCRDDir(t)}}
+
+	// The second Connect finds the CRD installed and replaces it.
+	for range 2 {
+		c, err := cluster.Connect(kubeconfig, crds)
+		if err != nil {
+			t.Fatalf("Connect returned an error: %v", err)
+		}
+		if err := c.Stop(); err != nil {
+			t.Fatalf("Stop returned an error: %v", err)
+		}
+	}
+
+	requireThingServed(t, bare.Config())
+}
+
+func requireThingServed(t *testing.T, config *rest.Config) {
+	t.Helper()
+	mapper, err := cluster.NewRESTMapper(config)
 	if err != nil {
 		t.Fatalf("Building the RESTMapper failed: %v", err)
 	}
@@ -90,4 +129,25 @@ func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
 	if mapping.Resource != thingResource {
 		t.Errorf("The mapper resolves %s to %v, want %v.", thingKind.Kind, mapping.Resource, thingResource)
 	}
+}
+
+func writeKubeconfig(t *testing.T, config *rest.Config) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	kubeconfig := clientcmdapi.Config{
+		Clusters: map[string]*clientcmdapi.Cluster{"envtest": {
+			Server:                   config.Host,
+			CertificateAuthorityData: config.CAData,
+		}},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{"admin": {
+			ClientCertificateData: config.CertData,
+			ClientKeyData:         config.KeyData,
+		}},
+		Contexts:       map[string]*clientcmdapi.Context{"envtest": {Cluster: "envtest", AuthInfo: "admin"}},
+		CurrentContext: "envtest",
+	}
+	if err := clientcmd.WriteToFile(kubeconfig, path); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

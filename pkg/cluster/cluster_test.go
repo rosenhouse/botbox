@@ -52,8 +52,8 @@ func TestConnectNamesAKubeconfigItCannotRead(t *testing.T) {
 	kubeconfig := filepath.Join(t.TempDir(), "no-such-kubeconfig")
 
 	_, err := cluster.Connect(kubeconfig, cluster.Options{})
-	if err == nil || !strings.Contains(err.Error(), kubeconfig) {
-		t.Errorf("Connect returned %v, want an error naming %s.", err, kubeconfig)
+	if want := "reading the kubeconfig " + kubeconfig; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("Connect returned %v, want an error saying %q.", err, want)
 	}
 }
 

@@ -48,6 +48,9 @@ func run(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	if *resync < 0 {
+		return fmt.Errorf("--resync=%v: want 0 or more", *resync)
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 

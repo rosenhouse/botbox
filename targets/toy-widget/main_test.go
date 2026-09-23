@@ -93,6 +93,16 @@ func TestRunRejectsABugOutsideTheCatalog(t *testing.T) {
 	}
 }
 
+func TestRunRejectsANegativeResync(t *testing.T) {
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "no-such-kubeconfig"))
+
+	err := run([]string{"--resync=-1s"}, io.Discard)
+
+	if err == nil || !strings.Contains(err.Error(), "--resync=-1s") {
+		t.Errorf("run returned %v, want it to reject --resync=-1s.", err)
+	}
+}
+
 func TestRunPrintsTheUsageForHelp(t *testing.T) {
 	printed := &strings.Builder{}
 

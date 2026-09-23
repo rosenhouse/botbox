@@ -29,9 +29,7 @@ func TestValidateAcceptsExistingCRDPath(t *testing.T) {
 	}
 }
 
-// installControlPlane points envtest at a directory holding executables of
-// these names, and at nothing else.
-func installControlPlane(t *testing.T, names ...string) string {
+func executables(t *testing.T, names ...string) string {
 	t.Helper()
 	dir := t.TempDir()
 	for _, name := range names {
@@ -39,6 +37,14 @@ func installControlPlane(t *testing.T, names ...string) string {
 			t.Fatal(err)
 		}
 	}
+	return dir
+}
+
+// installControlPlane points envtest at a directory holding executables of
+// these names, and at nothing else.
+func installControlPlane(t *testing.T, names ...string) string {
+	t.Helper()
+	dir := executables(t, names...)
 	unsetenv(t, "TEST_ASSET_ETCD")
 	unsetenv(t, "TEST_ASSET_KUBE_APISERVER")
 	t.Setenv("KUBEBUILDER_ASSETS", dir)
@@ -72,12 +78,23 @@ func TestValidateNamesTheControlPlaneBinaryItCannotRun(t *testing.T) {
 			}
 			return []string{"KUBEBUILDER_ASSETS is not set", "/usr/local/kubebuilder/bin/etcd", "setup-envtest"}
 		}},
-		// envtest then looks in the working directory.
-		{"KUBEBUILDER_ASSETS is empty", func(t *testing.T) []string {
+		{"KUBEBUILDER_ASSETS is empty, and only the working directory holds the control plane", func(t *testing.T) []string {
 			installControlPlane(t)
 			t.Setenv("KUBEBUILDER_ASSETS", "")
-			t.Chdir(t.TempDir())
-			return []string{"KUBEBUILDER_ASSETS is empty; install", "setup-envtest"}
+			t.Setenv("PATH", t.TempDir())
+			t.Chdir(executables(t, "etcd", "kube-apiserver"))
+			return []string{"KUBEBUILDER_ASSETS is empty, and envtest found no etcd on PATH; install", "setup-envtest"}
+		}},
+		{"TEST_ASSET_ETCD is empty", func(t *testing.T) []string {
+			installControlPlane(t, "etcd", "kube-apiserver")
+			t.Setenv("TEST_ASSET_ETCD", "")
+			return []string{"TEST_ASSET_ETCD is empty; fix or unset TEST_ASSET_ETCD"}
+		}},
+		{"TEST_ASSET_ETCD names a program PATH does not hold", func(t *testing.T) []string {
+			installControlPlane(t, "kube-apiserver")
+			t.Setenv("TEST_ASSET_ETCD", "my-etcd")
+			t.Setenv("PATH", t.TempDir())
+			return []string{"TEST_ASSET_ETCD is my-etcd, and envtest found no my-etcd on PATH"}
 		}},
 		{"the directory holds etcd alone", func(t *testing.T) []string {
 			dir := installControlPlane(t, "etcd")
@@ -122,6 +139,24 @@ func TestValidateNamesTheControlPlaneBinaryItCannotRun(t *testing.T) {
 				if !strings.Contains(err.Error(), said) {
 					t.Errorf("Validate returned %q, which does not say %q.", err, said)
 				}
+			}
+		})
+	}
+}
+
+// envtest, like os/exec, looks a path with no slash up on PATH.
+func TestValidateLooksABareNameUpOnPATH(t *testing.T) {
+	for name, set := range map[string][2]string{
+		"KUBEBUILDER_ASSETS is empty": {"KUBEBUILDER_ASSETS", ""},
+		"TEST_ASSET_ETCD is a name":   {"TEST_ASSET_ETCD", "my-etcd"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			installControlPlane(t, "kube-apiserver")
+			t.Setenv("PATH", executables(t, "my-etcd", "etcd", "kube-apiserver"))
+			t.Setenv(set[0], set[1])
+
+			if err := (cluster.Options{}).Validate(); err != nil {
+				t.Errorf("Validate refused a control plane on PATH: %v", err)
 			}
 		})
 	}

@@ -9,6 +9,7 @@ package cluster
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -52,23 +53,37 @@ func findBinary(name string) error {
 			path = filepath.Join("/usr/local/kubebuilder/bin", name)
 		}
 	}
-	info, err := os.Stat(path)
-	var problem string
+	problem := cannotRun(name, path)
 	switch {
-	case err != nil:
-		problem = fmt.Sprintf("envtest found no %s at %s", name, path)
-	case info.IsDir() || info.Mode().Perm()&0o111 == 0:
-		problem = path + " is not executable"
-	default:
+	case problem == "":
 		return nil
-	}
-	switch {
 	case !set:
 		return fmt.Errorf("%s is not set, and %s; %s", variable, problem, fix)
-	case value == "":
+	case path == "":
 		return fmt.Errorf("%s is empty; %s", variable, fix)
+	case value == "":
+		return fmt.Errorf("%s is empty, and %s; %s", variable, problem, fix)
 	}
 	return fmt.Errorf("%s is %s, and %s; %s", variable, value, problem, fix)
+}
+
+// cannotRun says why envtest cannot run path, or is empty if it can. Like
+// os/exec, it looks a name with no slash up on PATH.
+func cannotRun(name, path string) string {
+	if filepath.Base(path) == path {
+		if _, err := exec.LookPath(path); err != nil {
+			return fmt.Sprintf("envtest found no %s on PATH", path)
+		}
+		return ""
+	}
+	info, err := os.Stat(path)
+	switch {
+	case err != nil:
+		return fmt.Sprintf("envtest found no %s at %s", name, path)
+	case info.IsDir() || info.Mode().Perm()&0o111 == 0:
+		return path + " is not executable"
+	}
+	return ""
 }
 
 // Cluster is a running test cluster.

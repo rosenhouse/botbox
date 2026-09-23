@@ -307,6 +307,8 @@ type runner struct {
 	// cr is the primary CR the CR ops act on.
 	cr     string
 	faults []heldFault
+	// faultOps is the op index of each of Timeline.Faults.
+	faultOps []int
 }
 
 // heldFault is a fault op's fault. The Runner holds it to read its window from
@@ -669,6 +671,7 @@ func (r *runner) checkResource(resource string) error {
 // where the proxy first applies it, which may be never (D36).
 func (r *runner) inject(op Op) {
 	r.timeline.Faults = append(r.timeline.Faults, Window{})
+	r.faultOps = append(r.faultOps, op.Index)
 	r.faults = append(r.faults, heldFault{
 		id:     r.h.addFault(op.Fault.spec()),
 		until:  op.Fault.Until.Op,
@@ -734,6 +737,11 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 // is, but no step after it.
 func (r *runner) teardown(ctx context.Context) error {
 	r.clearFaults()
+	for i, window := range r.timeline.Faults {
+		if window.Start.IsZero() {
+			r.skipped = append(r.skipped, fmt.Sprintf("the fault of op %d matched no request", r.faultOps[i]))
+		}
+	}
 	failures := []error{r.awaitRecovery(ctx)}
 
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.teardownBudget())

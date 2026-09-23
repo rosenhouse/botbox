@@ -382,7 +382,8 @@ or a fault between its snapshots. The Runner carries the last checkpoint's notes
 reads like one that passed. G5 also notes an `equalIgnore` path it could not follow
 (§8.1), since it then compares a field the target meant it to skip. The Runner also notes
 each ownerReference the collector could not resolve (§5.8), since the object that carries
-it stays, and G3 would report it without saying why.
+it stays, and G3 would report it without saying why. It notes each fault op whose fault
+matched no request, since that fault tested nothing (D36).
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read

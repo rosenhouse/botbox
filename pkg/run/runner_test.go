@@ -790,6 +790,35 @@ func TestRunJudgesARunWhoseFaultMatchedNothing(t *testing.T) {
 	if got := result.Timeline.Faults; len(got) != 1 || !got[0].Start.IsZero() {
 		t.Errorf("The fault's window is %+v, want no window: the proxy applied nothing.", got)
 	}
+	if !slices.Contains(result.Notes, "the fault of op 0 matched no request") {
+		t.Errorf("The run noted %q, want it to say the fault matched nothing.", result.Notes)
+	}
+}
+
+func TestOnlyAFaultThatMatchedNothingLeavesANote(t *testing.T) {
+	h := newFakeHarness()
+	h.applying = []proxy.FaultWindow{{First: time.Now()}, {}}
+	fault := &Fault{Match: Match{Resource: "configmaps"}, Action: Action{Error: 500}, Until: Trigger{Count: 1}}
+
+	result, err := runFake(t, h, nil, sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpFault, Fault: fault},
+		Op{Type: OpFault, Fault: fault},
+		Op{Type: OpSettle},
+	))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	var noted []string
+	for _, note := range result.Notes {
+		if strings.Contains(note, "matched no request") {
+			noted = append(noted, note)
+		}
+	}
+	if want := []string{"the fault of op 2 matched no request"}; !slices.Equal(noted, want) {
+		t.Errorf("The run noted %q, want %q: the proxy applied the fault of op 1.", noted, want)
+	}
 }
 
 // The proxy records a request's resource as the plural the API server serves,

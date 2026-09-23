@@ -219,7 +219,7 @@ order, the first that applies to a request wins, and each runs out on its own `u
 that matches no request changes nothing and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
 `match.verb` is a Kubernetes verb such as `create` or `list`, and `match.resource` is the
 plural the API server serves, such as `configmaps`. botbox refuses any other value, because
-the fault would match nothing.
+the fault would match nothing. A run notes each fault that matched no request.
 
 Field values come from the CRD's own schema: its numeric ranges, enums, patterns and list
 lengths. A schema that says only `type: string` yields a random word, so the schema is not a

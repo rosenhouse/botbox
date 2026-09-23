@@ -1255,3 +1255,19 @@ built from source and run as a black-box binary.
   script that reads `${KUBECONFIG}`. The loader refuses a `launch.env` name or value that
   YAML 1.1 decoding would change, such as `0022` or `ON`, and accepts one that decodes to
   its own text, such as `8080`.
+- **D@54 A configuration mistake fails before a control plane starts, where it can, and
+  names the setting to change.** A new user's first mistakes surfaced late or with no hint.
+  envtest reported `fork/exec /usr/local/kubebuilder/bin/etcd` and named neither
+  `KUBEBUILDER_ASSETS` nor setup-envtest. A misspelled key gave `json: unknown field` with
+  no line. A missing `launch.binary` and a cluster-scoped kind failed only once the control
+  plane was up, and the cluster-scoped kinds one at a time. A stopped target's quote was the
+  last frame of its stack trace. A fault on `configmap` matched nothing and said nothing.
+  botbox now looks for the control plane where envtest does, checks `launch.binary` first,
+  names a bad key's line and nearest key, and quotes the line above a stack trace. It
+  refuses every cluster-scoped primary, managed kind and fixture in one error: from the
+  CRD files at load time, and through discovery before the first run for built-in kinds,
+  which no file describes. D13 stands, and now covers managed kinds and fixtures. A fixture
+  that sets a namespace is refused rather than moved. `launch.binary` keeps the working
+  directory as its base, because `launch.args` and the target's own relative paths resolve
+  from there. The Runner checks a fault's resource when it applies the fault op, not when
+  the run starts, because a target may install its CRDs itself.

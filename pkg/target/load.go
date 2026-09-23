@@ -257,7 +257,7 @@ func checkEnv(data []byte, env map[string]string) error {
 		}
 	}
 	if len(env) != len(written.Launch.Env) {
-		return errors.New("botbox checks names and values only under the lower-case keys launch and env")
+		return errors.New("write launch and env in lower case")
 	}
 	return nil
 }

@@ -289,7 +289,8 @@ func TestLoadRejects(t *testing.T) {
 		{"an octal launch env value merged in", minimalTargetWithEnv + "    <<: {UMASK: 0022}\n", "", []string{"launch.env", "UMASK: 0022 as 18;"}},
 		// Decoding matches keys regardless of case, but the check reads the
 		// text under launch and env alone.
-		{"a launch env in capitals", strings.Replace(minimalTargetWithEnv, "  env:", "  Env:", 1) + "    UMASK: 0022\n", "", []string{"launch.env", "lower-case keys"}},
+		{"a launch env in capitals", strings.Replace(minimalTargetWithEnv, "  env:", "  Env:", 1) + "    UMASK: 0022\n", "", []string{"launch.env", "write launch and env in lower case"}},
+		{"a launch in capitals", strings.Replace(minimalTargetWithEnv, "launch:", "Launch:", 1) + "    UMASK: 0022\n", "", []string{"launch.env", "write launch and env in lower case"}},
 		// A settle wait carves T_stable of quiet out of T_settle, so these
 		// leave the target no time to react and every op expires. The wants
 		// carry the durations: the temp directory's path holds the case name,

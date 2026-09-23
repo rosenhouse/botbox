@@ -342,9 +342,10 @@ while a watch that fails returns at once and repeating it is a loop.
 
 **Notes.** A check that could not judge something records a note naming it: G3 for a
 deletion whose deadline the run did not reach, that a fault reached into, or that botbox
-took an object inside, G5 for a `Restart` missing a snapshot. The Runner carries the last
-checkpoint's notes out and `botbox` prints them at the end of the run, because a check
-that was skipped otherwise reads like one that passed.
+took an object inside, G5 for a `Restart` missing a snapshot or with a change of botbox's
+between its snapshots. The Runner carries the last checkpoint's notes out and `botbox`
+prints them at the end of the run, because a check that was skipped otherwise reads like
+one that passed.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
@@ -355,7 +356,11 @@ a target whose primary CR lacks that field must declare `ready` (§8.4).
 **G5 evaluation.** G5 is evaluated once per `Restart`. The Runner snapshots whenever a
 settle wait converges, implicit or explicit. A `Restart` is compared against the last
 converged snapshot before it and the first converged snapshot after it. If either is
-missing, G5 is not evaluated for that `Restart` and the report says so. Snapshots are
+missing, G5 is not evaluated for that `Restart` and the report says so. The same holds
+where botbox applied an op between the two snapshots that changed the CR or a managed
+object: a `create`, `update`, `delete`, `recreate`, or a `DeleteManaged` that deleted
+something. A difference could then be that op's. A `settle`, a `fault`, another `Restart`
+or a `DeleteManaged` that deleted nothing leaves the comparison standing. Snapshots are
 keyed by kind and name.
 
 **G5 equality.** The default ignores exactly `metadata.resourceVersion`, `metadata.uid`,
@@ -387,6 +392,9 @@ Details the example does not show:
 - Any CR op may carry `"noSettle": true`, which skips the Runner's implicit settle wait.
 - A sequence ends with an op that settles, or nothing judges the state it leaves behind
   (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
+- G5 judges a `restart` only between two converged settle waits with no CR op and no
+  `deleteManaged` between them (§6). A `settle` op on each side of a `restart` gives it
+  those.
 - `update` applies `patch` as a JSON merge patch (RFC 7386).
 - `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
@@ -968,11 +976,11 @@ built from source and run as a black-box binary.
   sequence stands: skipping that wait is what it is for.
 
   Generation also wraps every drawn `restart` in settle waits, because G5 compares the
-  converged state either side of one: a change before it leaves G5 nothing to compare,
-  and a change after it is blamed on the restart. That is a rule for generation, not for
-  the format, because a hand-written sequence may mean to restart and change the spec at
-  once — `b0.json` and `b10.json` both do. `Options.MaxOps` therefore bounds the ops a
-  draw makes, not the sequence's length: at most two settles join each drawn op.
+  converged state either side of one, and a change on either side leaves G5 nothing to
+  judge (D@41). That is a rule for generation, not for the format, because a hand-written
+  sequence may mean to restart and change the spec at once, as `b10.json` does.
+  `Options.MaxOps` therefore bounds the ops a draw makes, not the sequence's length: at
+  most two settles join each drawn op.
 - **D34 G3 reads the teardown's own observation, not a checkpoint.** The Runner records a
   teardown checkpoint only for a run that found no violation, and `cleaned` derived G3's
   "the namespace emptied" from that checkpoint, so exactly the runs where a bug fired lost
@@ -1060,3 +1068,14 @@ built from source and run as a black-box binary.
   nothing to resolve, and G3 names the Secret. `deletionPolicy` is not a second control:
   its default `Retain` leaves a Secret that still carries an ownerReference, which the
   collector removes.
+- **D@41 G5 judges a restart only where botbox changed nothing between its snapshots.**
+  `b10.json` failed G5 against the toy with no bug. A `restart` does not settle, so the
+  first converged state after it followed the update, and the update to `count` 1 was
+  the whole difference. G5 now notes such a restart. Making `restart` settle was
+  rejected: it would reverse D33, which lets a hand-written sequence restart and change
+  the spec at once, and it would change what replaying an existing sequence does. The
+  cost is every restart botbox confounds itself, even with an update that changes
+  nothing, and G5 cannot judge those soundly. The shrink pass matches a candidate on the
+  check alone, so it could drop the settle after a restart and keep a G5 the next op
+  caused; that candidate now gives a note and no G5. `b0.json` moves its settle to after
+  its restart, so the control row still judges G5.

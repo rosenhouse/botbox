@@ -1320,9 +1320,10 @@ built from source and run as a black-box binary.
   so a settle wait after one could converge while the target was still starting, or
   waiting out the lease its killed predecessor held. G7 then failed the correct toy behind
   a wrapper that delayed each restart by 3 s. G7 judges an op after a `Restart` only where
-  the target requested a resource outside leader election between the two. A request
-  anywhere in the op's wait was rejected as the bar, because a target first heard from
-  late in the wait has had no time to act.
+  the target requested a resource outside leader election between the two, whatever the
+  API server answered, since only a running target asks. A request anywhere in the op's
+  wait was rejected as the bar, because a target first heard from late in the wait has had
+  no time to act.
 - **D@44 G1 and G7 treat every `coordination.k8s.io` request as leader election.** The
   group holds only leases and lease candidates. A candidate under coordinated leader
   election creates and renews its LeaseCandidate whether or not it leads. G1 ignores those

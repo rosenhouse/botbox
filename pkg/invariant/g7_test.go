@@ -1,6 +1,7 @@
 package invariant_test
 
 import (
+	"net/http"
 	"slices"
 	"strings"
 	"testing"
@@ -207,6 +208,7 @@ func TestG7JudgesAnObjectDeletedOnceARestartedTargetWasBack(t *testing.T) {
 		request proxy.Request
 	}{
 		{"with a watch", watch()},
+		{"with a get the API server refused", failedGet("w-0", http.StatusNotFound)},
 		{"with a resource named leases in another group", leasesElsewhere()},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -267,18 +269,37 @@ func TestG7NotesAnObjectAFaultMayHaveKeptAway(t *testing.T) {
 }
 
 // The update scales the toy down to one child before it settles, so the
-// target meant to delete w-1 itself.
+// target meant to delete w-1 itself. Whether the target wanted w-1 back comes
+// before whether it could recreate it.
 func TestG7NotesAnObjectDeletedBeforeTheRunConverged(t *testing.T) {
-	in := converged().
-		op(invariant.OpUpdate, 10*time.Second).
-		record(10050*time.Millisecond, widget("20", spec(1), generation(2), status(2, 1), finalizers(cleanup))).
-		deletedManaged(10100*time.Millisecond, "w-1").
-		remove(10150*time.Millisecond, child("w-1", "21")).
-		record(10200*time.Millisecond, widget("22", spec(1), generation(2), status(1, 2), finalizers(cleanup))).
-		checkpoint(12200*time.Millisecond, invariant.Converged).
-		through(12200 * time.Millisecond)
-
-	noted(t, invariant.SelfHealing, in, "G7 is not evaluated for op 2 (deleteManaged): the run had not converged since op 1 (update)")
+	updated := func() *run {
+		return converged().
+			op(invariant.OpUpdate, 10*time.Second).
+			record(10050*time.Millisecond, widget("20", spec(1), generation(2), status(2, 1), finalizers(cleanup)))
+	}
+	deletedAfter := func(r *run) invariant.Input {
+		return r.
+			deletedManaged(10100*time.Millisecond, "w-1").
+			remove(10150*time.Millisecond, child("w-1", "21")).
+			record(10200*time.Millisecond, widget("22", spec(1), generation(2), status(1, 2), finalizers(cleanup))).
+			checkpoint(12200*time.Millisecond, invariant.Converged).
+			through(12200 * time.Millisecond)
+	}
+	const wantNote = "G7 is not evaluated for op 2 (deleteManaged): the run had not converged since op 1 (update)"
+	for _, c := range []struct {
+		name string
+		in   invariant.Input
+		want string
+	}{
+		{"alone", deletedAfter(updated()), wantNote},
+		{"with a fault in the wait", deletedAfter(updated().fault(10150*time.Millisecond, 11*time.Second)), wantNote},
+		{"with a restart before the op", deletedAfter(updated().op(invariant.OpRestart, 10060*time.Millisecond)),
+			"G7 is not evaluated for op 3 (deleteManaged): the run had not converged since op 1 (update)"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			noted(t, invariant.SelfHealing, c.in, c.want)
+		})
+	}
 }
 
 // botbox deleted the CR without waiting, and the Observer saw it go only after

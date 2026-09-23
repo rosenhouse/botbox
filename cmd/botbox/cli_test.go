@@ -35,6 +35,8 @@ type fakeSession struct {
 	// pass is given its verdicts. It reads the directory too, because that is
 	// what tells a replay of the pass from the run of the minimized sequence.
 	fails func(sequence run.Sequence, dir string) *run.Violation
+	// notes are what a run fails answers for notes.
+	notes []string
 	// after runs once a sequence has executed, which is where a test expires
 	// the deadline.
 	after     func()
@@ -69,7 +71,7 @@ func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.
 		return s.results[n], failure
 	}
 	if s.fails != nil {
-		return run.Result{Violation: s.fails(sequence, dir)}, failure
+		return run.Result{Violation: s.fails(sequence, dir), Notes: s.notes}, failure
 	}
 	return run.Result{}, failure
 }
@@ -532,6 +534,34 @@ func TestTheReportCarriesTheMinimizedSequence(t *testing.T) {
 	}
 }
 
+// The notes printed above a violation are of the run it came from, which is
+// the minimized sequence's once that reproduced.
+func TestTheNotesPrintedAreOfTheRunReported(t *testing.T) {
+	violation := run.Violation{ID: "G4", Statement: "the settle wait after op 0 (restart) expired"}
+	drawn, minimized := "the target exited during op 1 (restart)", "the target exited during op 0 (restart)"
+	session := &fakeSession{
+		results: []run.Result{{Violation: &violation, Notes: []string{drawn}}},
+		fails: func(candidate run.Sequence, _ string) *run.Violation {
+			if slices.ContainsFunc(candidate.Ops, func(op run.Op) bool { return op.Type == run.OpRestart }) {
+				return &violation
+			}
+			return nil
+		},
+		notes: []string{minimized},
+	}
+	generate := countingGenerator(nil, run.OpSettle, run.OpRestart, run.OpSettle)
+
+	code, stdout, stderr := invokeWith(t, session, generate,
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	if strings.Contains(stdout, drawn) || !strings.Contains(stdout, "run 1: "+minimized+"\nrun 1: G4") {
+		t.Errorf("botbox run printed\n%s\nwant the minimized run's note above its violation, and not the drawn run's.", stdout)
+	}
+}
+
 // reportedSequence is the sequence report.json embedded.
 func reportedSequence(t *testing.T, dir string) run.Sequence {
 	t.Helper()
@@ -754,15 +784,31 @@ func TestReplayExecutesTheNamedSequenceAndPrintsItsSeed(t *testing.T) {
 // it could not judge (DESIGN.md §6).
 func TestARunPrintsWhatTheChecksCouldNotJudge(t *testing.T) {
 	note := "G3 is not evaluated for the deletion of widget: the run ended before its 10s deadline"
-	session := &fakeSession{results: []run.Result{{Notes: []string{note}}}}
+	for _, ending := range []struct {
+		name      string
+		violation *run.Violation
+		failure   error
+		code      int
+	}{
+		{"a pass", nil, nil, exitOK},
+		{"a violation", &run.Violation{ID: "G4"}, nil, exitViolation},
+		{"a harness error", nil, errors.New("the target is no longer running"), exitError},
+	} {
+		t.Run(ending.name, func(t *testing.T) {
+			session := &fakeSession{
+				results:  []run.Result{{Notes: []string{note}, Violation: ending.violation}},
+				failures: []error{ending.failure},
+			}
 
-	code, stdout, stderr := invoke(t, session, "replay", "--target", toyTargetYAML, "--out", t.TempDir(), writeSequence(t, 1))
+			code, stdout, stderr := invoke(t, session, "replay", "--target", toyTargetYAML, "--out", t.TempDir(), writeSequence(t, 1))
 
-	if code != exitOK {
-		t.Fatalf("botbox replay exited %d: %s", code, stderr)
-	}
-	if !strings.Contains(stdout, note) {
-		t.Errorf("botbox replay printed %q, want the note %q.", stdout, note)
+			if code != ending.code {
+				t.Fatalf("botbox replay exited %d, want %d: %s", code, ending.code, stderr)
+			}
+			if !strings.Contains(stdout, note) {
+				t.Errorf("botbox replay printed %q, want the note %q.", stdout, note)
+			}
+		})
 	}
 }
 

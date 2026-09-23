@@ -1041,7 +1041,7 @@ built from source and run as a black-box binary.
 
   Generation also wraps every drawn `restart` in settle waits, because G5 compares the
   converged state either side of one, and a change on either side leaves G5 nothing to
-  judge (D@41). That is a rule for generation, not for the format, because a hand-written
+  judge (D42). That is a rule for generation, not for the format, because a hand-written
   sequence may mean to restart and change the spec at once, as `b10.json` does.
   `Options.MaxOps` therefore bounds the ops a draw makes, not the sequence's length: at
   most two settles join each drawn op.
@@ -1132,7 +1132,7 @@ built from source and run as a black-box binary.
   nothing to resolve, and G3 names the Secret. `deletionPolicy` is not a second control:
   its default `Retain` leaves a Secret that still carries an ownerReference, which the
   collector removes.
-- **D@41 G5 judges a restart only where botbox changed nothing between its snapshots.**
+- **D42 G5 judges a restart only where botbox changed nothing between its snapshots.**
   A `restart` does not settle, so in `b10.json` the first converged state after the
   restart follows the update to `count` 1. G5 blamed the restart for that update and
   failed the toy with no bug. G5 notes such a restart instead. A `restart` that settles
@@ -1144,13 +1144,13 @@ built from source and run as a black-box binary.
   check ignores a fault's window. The shrink pass matches a candidate on the check alone,
   so a candidate without the settle after a restart no longer keeps a G5 the next op
   caused. `b0.json` settles after its restart, so the control row judges G5.
-- **D@66 The matrix runs every sequence against the toy with no bug too.** Only `b0.json`
+- **D43 The matrix runs every sequence against the toy with no bug too.** Only `b0.json`
   ran against the correct toy, so a sequence that fails a correct controller showed up
   nowhere. Each sequence now runs a second time without its bug, and a check that fires
   there fails the matrix. B0's one run is both. A `?` there does not fail it, because the
   check found nothing: G5 leaves the restart of `b10.json` unjudged. The cost is a second
   run per sequence.
-- **D@40 After faults stop, a target has as long as they lasted plus `T_settle` to
+- **D44 After faults stop, a target has as long as they lasted plus `T_settle` to
   recover, and the teardown waits for it.** The README's fault example failed the toy with
   no bug: its fault outlived the sequence, the teardown cleared it and opened the quiet
   window at once, and the toy's next create landed there as G1. B11 never recovers and
@@ -1163,7 +1163,7 @@ built from source and run as a black-box binary.
   earlier than its last convergence. The Runner's waits and the engine share the rule, and
   the teardown's recovery wait is judged as an op's wait is. This is the teardown that
   settles first that D32 deferred, for faults only.
-- **D@42 `equalIgnore` paths have a grammar that the loader checks.** A dotted path
+- **D45 `equalIgnore` paths have a grammar that the loader checks.** A dotted path
   cannot name an annotation key, which holds dots, and the loader accepted a path that
   named nothing. `["key"]` quotes a key as a CEL map index does, and `[*]` follows §6 and
   kubectl's JSONPath. A child created after the operator started carries no annotation
@@ -1171,7 +1171,7 @@ built from source and run as a black-box binary.
   absent. `generate` keeps dotted schema property names, which the schema already checks.
   A key that meets a list is a note and not a configuration error, because `equalIgnore`
   applies to every managed kind, and one kind's list can be another kind's map.
-- **D@43 An owner resolves through any served version, and an unresolved one is a run
+- **D46 An owner resolves through any served version, and an unresolved one is a run
   note.** An operator that migrates between API versions can name its owner at `v1alpha1`
   while the target declares `v1`. The collector keyed an owner by its apiVersion, so it
   kept that child, G3 fired on a correct controller, and only a warning on stderr said why.

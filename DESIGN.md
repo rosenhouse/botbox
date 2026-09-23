@@ -862,8 +862,8 @@ the proxy; the `Image` launcher. Separate design addendum.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
   (five lines); install; quickstart against cert-manager, then what the second example
-  adds; writing `target.yaml` for your own controller; reading a report; a CI recipe for
-  adopters; a one-line-per-invariant table linking to §6; a closing "Design and
+  adds; writing `target.yaml` for your own controller; reading a report; what to change
+  when botbox exits 2; a CI recipe for adopters; a one-line-per-invariant table linking to §6; a closing "Design and
   internals" link to this document and to
   `docs/bug-matrix.md`. A fenced block preceded by `<!-- embed: <path> -->` has content,
   excluding the two fence lines, byte-identical to that file including its trailing

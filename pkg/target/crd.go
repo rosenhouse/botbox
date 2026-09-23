@@ -16,7 +16,7 @@ import (
 )
 
 // ReadCRDs reads every document of the CRD manifests the paths name. A path is
-// a file or a directory of them, as the cluster reads them (DESIGN.md §8.1).
+// a file or a directory of them, as the cluster reads them.
 func ReadCRDs(paths []string) ([]map[string]any, error) {
 	var documents []map[string]any
 	for _, path := range paths {

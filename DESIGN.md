@@ -1260,4 +1260,5 @@ built from source and run as a black-box binary.
   crowd out the others. G5 is stamped at the state after the restart, where it judged. A
   target with its own equality hook gets one row per object, because G5 cannot see what the
   hook compared. A row of a whole object names no path, because `equalIgnore` cannot ignore
-  an object, and the line botbox prints leaves it to the statement.
+  an object. The line botbox prints quotes the first row with a path, since that is what an
+  adopter pastes, and names its object where the statement names another.

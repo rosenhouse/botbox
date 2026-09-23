@@ -989,7 +989,7 @@ func TestTheReplayCommandQuotesAWordZshWouldExpand(t *testing.T) {
 	}
 }
 
-// literalBytes are the bytes a shell reads as themselves.
+// literalBytes are the bytes sh and zsh read as themselves, but for a leading =.
 const literalBytes = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./=:@%+,-"
 
 func TestTheReplayCommandQuotesEveryByteAShellInterprets(t *testing.T) {

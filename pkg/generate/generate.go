@@ -55,8 +55,8 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 	if err != nil {
 		return nil, err
 	}
-	// The API server judges the CRD as declared, so the rules are read before
-	// the overlay changes it.
+	// The API server judges a CR against the CRD as declared, so the rules are
+	// read before the overlay changes it.
 	rules, err := newCRDRules(crd)
 	if err != nil {
 		return nil, err

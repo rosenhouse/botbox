@@ -109,12 +109,14 @@ func (r *ready) markdown(md *strings.Builder) {
 		table(md, []string{"type", "status", "reason", "message", "observedGeneration"}, rows)
 	}
 	if r.Status != "" {
-		if r.StatusBytes > len(r.Status) {
-			fmt.Fprintf(md, "\nThe rest of its status, cut to %d of %d bytes:\n", maxStatus, r.StatusBytes)
-		} else {
-			md.WriteString("\nThe rest of its status:\n")
+		status := "The CR's status at the verdict"
+		if r.ConditionsTotal > 0 {
+			status = "The rest of its status"
 		}
-		fmt.Fprintf(md, "\n```json\n%s\n```\n", r.Status)
+		if r.StatusBytes > len(r.Status) {
+			status += fmt.Sprintf(", cut to %d of %d bytes", maxStatus, r.StatusBytes)
+		}
+		fmt.Fprintf(md, "\n%s:\n\n```json\n%s\n```\n", status, r.Status)
 	}
 	md.WriteString("\n`objects.jsonl` holds every version of the CR whole.\n")
 }

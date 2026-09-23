@@ -700,6 +700,17 @@ func TestReportQuotesTheReadyPredicate(t *testing.T) {
 	}
 }
 
+func TestReportQuotesAStatusWithoutConditionsWhole(t *testing.T) {
+	failure := deploymentBacked()
+	failure.Ready.Status = map[string]any{"ready": int64(1)}
+
+	md, _ := write(t, failure)
+
+	if want := "The CR's status at the verdict:\n\n```json\n{\"ready\":1}\n```"; !strings.Contains(section(md, "Ready predicate"), want) {
+		t.Errorf("The report does not say %q:\n%s", want, md)
+	}
+}
+
 // A status carries whatever its controller put there, so the report quotes a
 // bounded part of it and objects.jsonl keeps the rest.
 func TestReportBoundsTheCRsStatus(t *testing.T) {

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -166,6 +167,23 @@ func TestApplyFixturesResolvesThroughTheHarnessMapper(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "resolving the fixture") {
 		t.Errorf("applyFixtures returned %q, which does not say it could not resolve the fixture.", err)
+	}
+}
+
+// A settle wait ends at the first reading of a ready that yields no bool,
+// rather than waiting out T_settle on it.
+func TestTheHarnessReadsAReadyThatYieldsNoBoolAsAnError(t *testing.T) {
+	store := observe.NewStore(observe.Options{Namespace: "botbox-run-x"})
+	store.Record(widgetKind, widget("widget"), time.Now())
+	yieldsAnInt := &target.Target{Primary: widgetKind, Ready: func(*unstructured.Unstructured) (bool, error) {
+		return false, &target.EvalError{Predicate: "ready", Expr: "status.ready", Err: fmt.Errorf("%w: it yielded int64", target.ErrNotBool)}
+	}}
+	h := &Harness{target: yieldsAnInt, Observer: &observe.Observer{Store: store}}
+
+	_, _, err := h.state(time.Now())
+
+	if !errors.Is(err, target.ErrNotBool) {
+		t.Errorf("Reading the run returned the error %v, want the ready that yields no bool.", err)
 	}
 }
 

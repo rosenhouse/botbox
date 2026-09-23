@@ -153,6 +153,19 @@ func TestAnExpiredWaitSaysNoCRWasLeft(t *testing.T) {
 	requireStatement(t, violation, "in 5s, no CR was left to be ready, but the namespace never held still for stable (2s): 1 change")
 }
 
+func TestAnExpiredWaitQuotesNoRequestMadeAfterIt(t *testing.T) {
+	in := expiredSettle().
+		request(3*time.Second, get("w-0")).
+		request(7*time.Second, get("w-1")).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if len(violation.Requests) != 1 || violation.Requests[0].Name != "w-0" || violation.RequestsTotal != 1 {
+		t.Errorf("The violation quotes %v of %d requests, want the one made before it.", violation.Requests, violation.RequestsTotal)
+	}
+}
+
 // DESIGN.md §8.4 makes a ready that yields a non-bool a configuration error,
 // wherever it is first evaluated.
 func TestAReadyThatYieldsNoBoolIsAConfigurationError(t *testing.T) {
@@ -243,6 +256,7 @@ func TestAVerdictNamesNoRequestTheTargetDidNotRepeat(t *testing.T) {
 			requests(0, 100*time.Millisecond, 3, failedGet("w-0", http.StatusNotFound)).
 			op(invariant.OpCreate, time.Second).
 			record(1100*time.Millisecond, widget("10", spec(3), status(0, 1)))},
+		{"failures after the window", unreadyCreate(0, 1).requests(5100*time.Millisecond, 100*time.Millisecond, 3, failedGet("w-0", http.StatusNotFound))},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			violation := fired(t, invariant.Convergence, c.run.through(9*time.Second))

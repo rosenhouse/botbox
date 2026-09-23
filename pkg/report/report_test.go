@@ -659,6 +659,7 @@ func deploymentBacked() report.Report {
 		Status: map[string]any{
 			"observedGeneration": int64(1),
 			"replicas":           int64(0),
+			"phase":              "<Pending> & waiting",
 			"conditions": []any{map[string]any{
 				"type": "Ready", "status": "False", "reason": "Pending",
 				"message": "0/10 replicas available", "observedGeneration": int64(1),
@@ -676,10 +677,10 @@ func TestReportQuotesTheReadyPredicate(t *testing.T) {
 	body := section(md, "Ready predicate")
 	for _, want := range []string{
 		"```\n" + failure.Ready.Expr + "\n```",
-		"```\n" + failure.Ready.Error + "\n```",
-		"| type | status | reason | message | observedGeneration |",
+		"Evaluating it on the CR at the verdict failed:\n\n```\n" + failure.Ready.Error + "\n```",
+		"The CR's conditions at the verdict:\n\n| type | status | reason | message | observedGeneration |",
 		"| Ready | False | Pending | 0/10 replicas available | 1 |",
-		"```json\n" + `{"observedGeneration":1,"replicas":0}` + "\n```",
+		"The rest of its status:\n\n```json\n" + `{"observedGeneration":1,"phase":"<Pending> & waiting","replicas":0}` + "\n```",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("The Ready predicate section does not quote %q:\n%s", want, body)
@@ -695,7 +696,7 @@ func TestReportQuotesTheReadyPredicate(t *testing.T) {
 	}
 	if ready.Expr != failure.Ready.Expr || ready.Error != failure.Ready.Error ||
 		len(ready.Conditions) != 1 || ready.Conditions[0]["message"] != "0/10 replicas available" ||
-		ready.Status != `{"observedGeneration":1,"replicas":0}` {
+		ready.Status != `{"observedGeneration":1,"phase":"<Pending> & waiting","replicas":0}` {
 		t.Errorf("report.json quotes the ready predicate as %+v.", ready)
 	}
 }
@@ -711,6 +712,22 @@ func TestReportQuotesAStatusWithoutConditionsWhole(t *testing.T) {
 	}
 }
 
+// A ready that evaluated on a CR with no status leaves nothing to quote but
+// the expression.
+func TestReportQuotesNoStatusOrErrorItWasNotGiven(t *testing.T) {
+	failure := deploymentBacked()
+	failure.Ready.Error, failure.Ready.Status = "", nil
+
+	md, _ := write(t, failure)
+
+	body := section(md, "Ready predicate")
+	for _, absent := range []string{"failed:", "status at the verdict", "rest of its status", "conditions at the verdict", "```json"} {
+		if strings.Contains(body, absent) {
+			t.Errorf("The Ready predicate section says %q:\n%s", absent, body)
+		}
+	}
+}
+
 // A status carries whatever its controller put there, so the report quotes a
 // bounded part of it and objects.jsonl keeps the rest.
 func TestReportBoundsTheCRsStatus(t *testing.T) {
@@ -720,7 +737,8 @@ func TestReportBoundsTheCRsStatus(t *testing.T) {
 		conditions = append(conditions, map[string]any{"type": fmt.Sprintf("C%d", i), "status": "False"})
 	}
 	conditions[0].(map[string]any)["message"] = "one | two\nthree " + strings.Repeat("x", 1000)
-	failure.Ready.Status = map[string]any{"conditions": conditions, "log": strings.Repeat("é", 2000)}
+	// The key's odd length puts the cut inside a character.
+	failure.Ready.Status = map[string]any{"conditions": conditions, "logs": strings.Repeat("é", 2000)}
 
 	md, encoded := write(t, failure)
 
@@ -740,7 +758,7 @@ func TestReportBoundsTheCRsStatus(t *testing.T) {
 	if strings.Contains(body, strings.Repeat("é", 600)) || strings.Contains(encoded, strings.Repeat("é", 600)) {
 		t.Errorf("The report quotes the rest of the status whole.")
 	}
-	if !strings.Contains(body, "The rest of its status, cut to 1000 of 4010 bytes:") {
+	if !strings.Contains(body, "The rest of its status, cut to 1000 of 4011 bytes:") {
 		t.Errorf("The report does not say it cut the status:\n%s", body)
 	}
 	if !utf8.ValidString(md) || !utf8.ValidString(encoded) {

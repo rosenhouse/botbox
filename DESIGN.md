@@ -422,7 +422,9 @@ or a fault between its snapshots. The Runner carries the last checkpoint's notes
 reads like one that passed. G5 also notes an `equalIgnore` path it could not follow
 (§8.1), since it then compares a field the target meant it to skip. The Runner also notes
 each ownerReference the collector could not resolve (§5.8), since the object that carries
-it stays, and G3 would report it without saying why.
+it stays, and G3 would report it without saying why. A G4 report on envtest also notes the
+managed kinds whose status envtest never changes (§5.8), since G4 may fail for that alone.
+botbox prints that note once, when the invocation starts, rather than with a run's notes.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read

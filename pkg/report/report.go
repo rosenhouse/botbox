@@ -38,9 +38,8 @@ type Report struct {
 	// Seed is the sequence's seed, which the run is reproducible from
 	// (DESIGN.md §11).
 	Seed int64
-	// Notes name what a check could not judge, and anything else a reader
-	// must weigh beside the verdict. A report that left them out would read
-	// as though those checks passed (DESIGN.md §6).
+	// Notes name what a check could not judge, and what the test cluster
+	// cannot run. Without them a report claims more than its run showed.
 	Notes []string
 	// Replay is the one-line command that re-executes the sequence.
 	Replay string

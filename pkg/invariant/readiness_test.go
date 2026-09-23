@@ -131,6 +131,35 @@ func TestAnExpiredWaitReadsTheCRAsTheWaitFoundIt(t *testing.T) {
 	requireStatement(t, violation, "in 5s, ready held from 0s on, but the namespace never held still for stable (2s): 1 change")
 }
 
+// An update's wait can begin before the Observer sees the update, and the CR
+// it found then is the one the update replaced.
+func TestAnExpiredWaitJudgesTheCRFromTheWriteOn(t *testing.T) {
+	in := newRun().
+		record(time.Second, widget("10", spec(3), status(3, 1))).
+		op(invariant.OpUpdate, 2*time.Second).
+		record(2001*time.Millisecond, widget("11", spec(4), generation(2), status(3, 1))).
+		checkpoint(7*time.Second, invariant.Expired).
+		through(9 * time.Second)
+
+	violation := expiredWait(t, in)
+
+	requireStatement(t, violation, "in 5s, ready never held: it evaluated to false")
+}
+
+// A restart writes no CR, so the CR the wait found is the target's.
+func TestAnExpiredWaitSaysReadyStoppedHoldingAfterARestart(t *testing.T) {
+	in := newRun().
+		record(time.Second, widget("10", spec(3), status(3, 1))).
+		op(invariant.OpRestart, 2*time.Second).
+		record(3*time.Second, widget("11", spec(3), status(0, 1))).
+		checkpoint(7*time.Second, invariant.Expired).
+		through(9 * time.Second)
+
+	violation := expiredWait(t, in)
+
+	requireStatement(t, violation, "in 5s, ready held until 1s: it evaluated to false")
+}
+
 // The wait holds Ready only where it holds on every CR, as the wait reads it.
 func TestAnExpiredWaitHoldsReadyOnlyOnEveryCR(t *testing.T) {
 	in := newRun().

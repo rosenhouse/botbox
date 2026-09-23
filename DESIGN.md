@@ -1199,10 +1199,11 @@ built from source and run as a black-box binary.
   `ready` that yields an int read as "not ready". The expired wait now walks `Ready` over
   the CR's versions in the wait and names the cause. The Runner calls the engine's
   function for it, so the two agree, and a checkpoint sits where its wait ended, where the
-  engine stamps the verdict. The walk counts a missing CR as not holding, because a
-  create's wait can begin before the Observer sees the CR. The report quotes the CR's
-  status, which D35 left to `objects.jsonl`, because a reason such as "0/10 replicas
-  available" lives there. A controller can copy anything into its status, so the quote is
-  bounded. A non-bool ends the run at its first evaluation. The same verdicts name a
-  failing request the target repeated, which #46 found behind G4 and G1 under
-  controller-runtime's default backoff.
+  engine stamps the verdict. A wait can begin before the Observer sees the op's write, so
+  the walk counts a missing CR as not holding, and after an op that wrote the CR it does
+  not count the CR the wait found as having held. B4 otherwise read "held until 0s". The
+  report quotes the CR's status, which D35 left to `objects.jsonl`, because a reason such
+  as "0/10 replicas available" lives there. A controller can copy anything into its
+  status, so the quote is bounded. A non-bool ends the run at its first evaluation. The
+  same verdicts name a failing request the target repeated, which #46 found behind G4 and
+  G1 under controller-runtime's default backoff.

@@ -16,7 +16,8 @@ import (
 // after, so the two cannot disagree. Its error is a configuration error.
 func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 	began, at := checkpoint.Began, checkpoint.Time
-	walk, err := in.walkReady(began, at)
+	op, found := in.op(checkpoint.Op)
+	walk, err := in.walkReady(began, at, found && op.Type.touchesCR())
 	if err != nil {
 		return Violation{}, err
 	}
@@ -58,8 +59,10 @@ type readyWalk struct {
 }
 
 // walkReady evaluates Ready on the CR as the wait found it and on every
-// version the Observer recorded after, up to the end.
-func (in Input) walkReady(began, end time.Time) (readyWalk, error) {
+// version the Observer recorded after, up to the end. A wait after an op that
+// wrote the CR can begin before the Observer sees the write, so the CR it
+// found then does not count as having held.
+func (in Input) walkReady(began, end time.Time, written bool) (readyWalk, error) {
 	var walk readyWalk
 	versions := slices.DeleteFunc(in.versionsIn(time.Time{}, end), func(v observe.Version) bool {
 		return v.GVK != in.Target.Primary
@@ -72,6 +75,7 @@ func (in Input) walkReady(began, end time.Time) (readyWalk, error) {
 	if err := walk.step(in, began, live(latest)); err != nil {
 		return walk, err
 	}
+	walk.ever = walk.ever && !written
 	for _, v := range versions[next:] {
 		latest[v.Key] = v
 		if err := walk.step(in, v.Time, live(latest)); err != nil {

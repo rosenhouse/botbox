@@ -192,6 +192,16 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 			want: `match.resource "widgets/status" names a subresource; a fault on widgets matches its subresources' requests too`,
 		},
 		{
+			name: "a fault on a resource with a leading slash",
+			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"resource": "/configmaps"}, "action": {"drop": true}}}`,
+			want: `match.resource "/configmaps" is not a plural such as configmaps`,
+		},
+		{
+			name: "a fault on a resource with a trailing slash",
+			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"resource": "configmaps/"}, "action": {"drop": true}}}`,
+			want: `match.resource "configmaps/" is not a plural such as configmaps`,
+		},
+		{
 			name: "a restart that skips its settle",
 			ops:  `{"i": 0, "t": "restart", "noSettle": true}`,
 			want: "noSettle",

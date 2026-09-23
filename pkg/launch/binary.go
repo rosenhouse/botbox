@@ -188,20 +188,16 @@ func (b *Binary) Status() Status {
 	case b.failed != nil:
 		return Status{Exit: b.failed}
 	}
-	exited := closed(b.running.done)
-	if exited && b.onExit == nil {
-		return Status{Exit: b.running.exit}
-	}
-	return Status{Running: true, Restarting: exited, Started: b.running.started}
-}
-
-func closed(c <-chan struct{}) bool {
+	running := Status{Running: true, Started: b.running.started}
 	select {
-	case <-c:
-		return true
+	case <-b.running.done:
+		if b.onExit == nil {
+			return Status{Exit: b.running.exit}
+		}
+		running.Restarting = true
 	default:
-		return false
 	}
+	return running
 }
 
 // noTarget is the Exited of a launcher with nothing left to wait for.

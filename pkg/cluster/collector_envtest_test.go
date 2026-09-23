@@ -4,6 +4,7 @@ package cluster_test
 
 import (
 	"context"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -12,22 +13,28 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 )
 
-var configMapKind = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
+var (
+	configMapKind  = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
+	gadgetKind     = schema.GroupVersionKind{Group: "test.botbox", Version: "v1", Kind: "Gadget"}
+	gadgetResource = schema.GroupVersionResource{Group: "test.botbox", Version: "v1", Resource: "gadgets"}
+)
 
 // collectionBudget is the bound DESIGN.md §5.8 puts on the collector: it
 // deletes within a second of the owner's deletion event.
 const collectionBudget = time.Second
 
 func TestCollector(t *testing.T) {
-	c, err := cluster.Start(cluster.Options{})
+	c, err := cluster.Start(cluster.Options{CRDPaths: []string{"testdata"}})
 	if err != nil {
 		t.Fatalf("Start returned an error: %v", err)
 	}
@@ -39,6 +46,13 @@ func TestCollector(t *testing.T) {
 	client, err := kubernetes.NewForConfig(c.Config())
 	if err != nil {
 		t.Fatalf("Building a client failed: %v", err)
+	}
+	dynamicClient, err := dynamic.NewForConfig(c.Config())
+	if err != nil {
+		t.Fatalf("Building a dynamic client failed: %v", err)
+	}
+	gadgets := func(namespace string) dynamic.ResourceInterface {
+		return dynamicClient.Resource(gadgetResource).Namespace(namespace)
 	}
 
 	t.Run("collects a child once its owner is gone", func(t *testing.T) {
@@ -54,17 +68,44 @@ func TestCollector(t *testing.T) {
 
 	t.Run("keeps what it must not collect", func(t *testing.T) {
 		namespace := newNamespace(t, client)
+		gadget := createGadget(t, gadgets(namespace), "gadget")
 		parent := createConfigMap(t, client, namespace, "parent")
 		canary := createConfigMap(t, client, namespace, "canary", ownerOf(parent))
 		ownerless := createConfigMap(t, client, namespace, "ownerless")
 		unwatchedOwner := createConfigMap(t, client, namespace, "unwatched-owner", secretOwner("absent"))
-		startCollector(t, c.Config(), namespace, configMapKind)
+		unservedVersion := createConfigMap(t, client, namespace, "unserved-version", gadgetOwner(gadget, "v1beta9"))
+		collector := startCollector(t, c.Config(), namespace, configMapKind, gadgetKind)
 
+		// The canary goes in a sweep that follows both deletions.
+		deleteGadget(t, gadgets(namespace), gadget.GetName())
 		deleteConfigMap(t, client, namespace, parent.Name)
 
 		waitGone(t, client, namespace, canary.Name)
 		requirePresent(t, client, namespace, ownerless.Name)
 		requirePresent(t, client, namespace, unwatchedOwner.Name)
+		requirePresent(t, client, namespace, unservedVersion.Name)
+		collector.Stop()
+		want := []cluster.Unresolved{
+			{DependentKind: configMapKind, DependentName: unservedVersion.Name,
+				OwnerKind: schema.GroupVersionKind{Group: gadgetKind.Group, Version: "v1beta9", Kind: gadgetKind.Kind}, OwnerName: gadget.GetName()},
+			{DependentKind: configMapKind, DependentName: unwatchedOwner.Name,
+				OwnerKind: schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, OwnerName: "absent", Served: true},
+		}
+		if got := collector.Unresolved(); !slices.Equal(got, want) {
+			t.Errorf("Unresolved returned %+v, want %+v.", got, want)
+		}
+	})
+
+	// An ownerReference may name any version the API server serves.
+	t.Run("collects a child whose owner reference names another served version", func(t *testing.T) {
+		namespace := newNamespace(t, client)
+		gadget := createGadget(t, gadgets(namespace), "gadget")
+		child := createConfigMap(t, client, namespace, "child", gadgetOwner(gadget, "v1alpha1"))
+		startCollector(t, c.Config(), namespace, configMapKind, gadgetKind)
+
+		deleteGadget(t, gadgets(namespace), gadget.GetName())
+
+		waitGone(t, client, namespace, child.Name)
 	})
 
 	t.Run("collects a child once its last owner is gone", func(t *testing.T) {
@@ -142,17 +183,18 @@ func newNamespace(t *testing.T, client kubernetes.Interface) string {
 	return created.Name
 }
 
-func startCollector(t *testing.T, config *rest.Config, namespace string, kind schema.GroupVersionKind) {
+func startCollector(t *testing.T, config *rest.Config, namespace string, kinds ...schema.GroupVersionKind) *cluster.Collector {
 	t.Helper()
 	collector, err := cluster.StartCollector(config, cluster.CollectorOptions{
 		Namespace: namespace,
-		Kinds:     []schema.GroupVersionKind{kind},
+		Kinds:     kinds,
 		Mapper:    restMapper(t, config),
 	})
 	if err != nil {
 		t.Fatalf("StartCollector returned an error: %v", err)
 	}
 	t.Cleanup(collector.Stop)
+	return collector
 }
 
 func restMapper(t *testing.T, config *rest.Config) meta.RESTMapper {
@@ -183,6 +225,35 @@ func deleteConfigMap(t *testing.T, client kubernetes.Interface, namespace, name 
 
 func ownerOf(configMap *corev1.ConfigMap) metav1.OwnerReference {
 	return metav1.OwnerReference{APIVersion: "v1", Kind: "ConfigMap", Name: configMap.Name, UID: configMap.UID}
+}
+
+func createGadget(t *testing.T, gadgets dynamic.ResourceInterface, name string) *unstructured.Unstructured {
+	t.Helper()
+	gadget := &unstructured.Unstructured{}
+	gadget.SetGroupVersionKind(gadgetKind)
+	gadget.SetName(name)
+	created, err := gadgets.Create(context.Background(), gadget, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Creating the Gadget %s failed: %v", name, err)
+	}
+	return created
+}
+
+func deleteGadget(t *testing.T, gadgets dynamic.ResourceInterface, name string) {
+	t.Helper()
+	if err := gadgets.Delete(context.Background(), name, metav1.DeleteOptions{}); err != nil {
+		t.Fatalf("Deleting the Gadget %s failed: %v", name, err)
+	}
+}
+
+// gadgetOwner names the Gadget at the version given.
+func gadgetOwner(gadget *unstructured.Unstructured, version string) metav1.OwnerReference {
+	return metav1.OwnerReference{
+		APIVersion: gadgetKind.Group + "/" + version,
+		Kind:       gadgetKind.Kind,
+		Name:       gadget.GetName(),
+		UID:        gadget.GetUID(),
+	}
 }
 
 // secretOwner names an owner of a kind the collector does not watch.

@@ -267,11 +267,14 @@ service accounts appear, and no pods run. Consequences:
 
 - **Garbage-collector emulation.** In envtest mode botbox runs a minimal collector over
   the run namespace: it deletes a managed object that has at least one ownerReference
-  once every owner in its `ownerReferences` is gone; an object with none is never touched. An owner is resolved by (apiVersion, kind, name) in the run
-  namespace and then by UID; a name match with a different UID counts as gone. An owner of
-  a kind botbox does not watch is treated as live, so the emulator never deletes an object
-  whose owners it cannot resolve; it logs each unresolved reference once per run. The
-  emulator is watch-driven and deletes within 1 s of the owner's deletion event. It does
+  once every owner in its `ownerReferences` is gone; an object with none is never touched.
+  An owner is resolved as kube's garbage collector resolves it: the reference's apiVersion
+  and kind map through the API server's discovery, so any version the API server serves
+  will do, and the owner is then found by (group, kind, name) in the run namespace and by
+  UID. A name match with a different UID counts as gone. An owner of a kind botbox does not
+  watch, or named at a version the API server does not serve, is treated as live, so the
+  emulator never deletes an object whose owners it cannot resolve. It records each
+  unresolved reference once per object that carries it. The emulator is watch-driven and deletes within 1 s of the owner's deletion event. It does
   not patch dangling ownerReferences off a dependent that still has a live owner.
   `blockOwnerDeletion`, foreground and orphan policies are not modelled. Its writes bypass
   the proxy and never count as target traffic. On a kubeconfig cluster it is off.

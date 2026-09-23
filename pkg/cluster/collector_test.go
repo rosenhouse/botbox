@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"maps"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -26,12 +27,35 @@ import (
 var (
 	configMapKind     = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
 	configMapResource = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
+	secretKind        = schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
+	widgetKind        = schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
+	widgetResource    = schema.GroupVersionResource{Group: "toy.botbox", Version: "v1", Resource: "widgets"}
+	// widgetV1alpha1 is another version the API server serves Widgets at.
+	widgetV1alpha1 = schema.GroupVersionKind{Group: "toy.botbox", Version: "v1alpha1", Kind: "Widget"}
 )
 
 const runNamespace = "run-1"
 
 // knowsNothing resolves no kind at all.
 func knowsNothing() apimeta.RESTMapper { return apimeta.NewDefaultRESTMapper(nil) }
+
+// serves resolves ConfigMaps, Secrets, and Widgets at v1 and v1alpha1.
+func serves() apimeta.RESTMapper {
+	mapper := apimeta.NewDefaultRESTMapper(nil)
+	for _, kind := range []schema.GroupVersionKind{configMapKind, secretKind, widgetKind, widgetV1alpha1} {
+		mapper.Add(kind, apimeta.RESTScopeNamespace)
+	}
+	return mapper
+}
+
+// watchesConfigMapsAndWidgets are the kinds the collector watches in these
+// tests.
+func watchesConfigMapsAndWidgets() map[schema.GroupKind]watchedKind {
+	return map[schema.GroupKind]watchedKind{
+		configMapKind.GroupKind(): {kind: configMapKind, resource: configMapResource},
+		widgetKind.GroupKind():    {kind: widgetKind, resource: widgetResource},
+	}
+}
 
 func configMapOwner(name string, uid types.UID) metav1.OwnerReference {
 	return metav1.OwnerReference{APIVersion: "v1", Kind: "ConfigMap", Name: name, UID: uid}
@@ -41,11 +65,17 @@ func secretOwner(name string) metav1.OwnerReference {
 	return metav1.OwnerReference{APIVersion: "v1", Kind: "Secret", Name: name, UID: "uid-secret"}
 }
 
-// watchingConfigMaps views a namespace where the collector watches ConfigMaps
-// and no other kind.
-func watchingConfigMaps(resolved ...map[ownerKey]owner) owners {
+func widgetOwner(version schema.GroupVersionKind, name string, uid types.UID) metav1.OwnerReference {
+	apiVersion, kind := version.ToAPIVersionAndKind()
+	return metav1.OwnerReference{APIVersion: apiVersion, Kind: kind, Name: name, UID: uid}
+}
+
+// watching views a namespace where the collector watches ConfigMaps and
+// Widgets, and no other kind.
+func watching(resolved ...map[ownerKey]owner) owners {
 	view := owners{
-		watched:  map[schema.GroupVersionKind]watchedKind{configMapKind: {resource: configMapResource}},
+		mapper:   serves(),
+		watched:  watchesConfigMapsAndWidgets(),
 		resolved: map[ownerKey]owner{},
 	}
 	for _, owners := range resolved {
@@ -86,18 +116,18 @@ func TestCollectible(t *testing.T) {
 		live owners
 		want bool
 	}{
-		{"no ownerReferences", nil, watchingConfigMaps(living(parent)), false},
-		{"the only owner lives", []metav1.OwnerReference{parent}, watchingConfigMaps(living(parent, other)), false},
-		{"the only owner is gone", []metav1.OwnerReference{parent}, watchingConfigMaps(gone(parent)), true},
-		{"one of two owners lives", []metav1.OwnerReference{parent, other}, watchingConfigMaps(gone(parent), living(other)), false},
-		{"both owners are gone", []metav1.OwnerReference{parent, other}, watchingConfigMaps(gone(parent, other)), true},
-		{"the owner's name is reused by a new UID", []metav1.OwnerReference{parent}, watchingConfigMaps(living(reusedName)), true},
-		{"the owner's kind is not watched", []metav1.OwnerReference{secretOwner("tls")}, watchingConfigMaps(), false},
-		{"the owner could not be read", []metav1.OwnerReference{parent}, watchingConfigMaps(unreadable(parent)), false},
-		{"the owner was not read at all", []metav1.OwnerReference{parent}, watchingConfigMaps(), false},
+		{"no ownerReferences", nil, watching(living(parent)), false},
+		{"the only owner lives", []metav1.OwnerReference{parent}, watching(living(parent, other)), false},
+		{"the only owner is gone", []metav1.OwnerReference{parent}, watching(gone(parent)), true},
+		{"one of two owners lives", []metav1.OwnerReference{parent, other}, watching(gone(parent), living(other)), false},
+		{"both owners are gone", []metav1.OwnerReference{parent, other}, watching(gone(parent, other)), true},
+		{"the owner's name is reused by a new UID", []metav1.OwnerReference{parent}, watching(living(reusedName)), true},
+		{"the owner's kind is not watched", []metav1.OwnerReference{secretOwner("tls")}, watching(), false},
+		{"the owner could not be read", []metav1.OwnerReference{parent}, watching(unreadable(parent)), false},
+		{"the owner was not read at all", []metav1.OwnerReference{parent}, watching(), false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got, _ := tc.live.collectible(tc.refs); got != tc.want {
+			if got, _ := tc.live.collectible(configMapObject("child", "uid-child", tc.refs...)); got != tc.want {
 				t.Errorf("collectible returned %t, want %t.", got, tc.want)
 			}
 		})
@@ -108,13 +138,54 @@ func TestCollectibleReportsOwnersOfUnwatchedKinds(t *testing.T) {
 	parent := configMapOwner("parent", "uid-parent")
 	secret := secretOwner("tls")
 
-	collect, unresolved := watchingConfigMaps(gone(parent)).collectible([]metav1.OwnerReference{parent, secret})
+	collect, unresolved := watching(gone(parent)).collectible(configMapObject("child", "uid-child", parent, secret))
 
 	if collect {
 		t.Error("collectible chose to delete an object although one of its owners is of an unwatched kind.")
 	}
-	if len(unresolved) != 1 || unresolved[0].Name != secret.Name {
-		t.Errorf("collectible reported %v as unresolved, want the Secret owner alone.", unresolved)
+	want := []Unresolved{{DependentKind: configMapKind, DependentName: "child", OwnerKind: secretKind, OwnerName: secret.Name, Served: true}}
+	if !slices.Equal(unresolved, want) {
+		t.Errorf("collectible reported %+v as unresolved, want %+v.", unresolved, want)
+	}
+}
+
+// The garbage collector resolves an owner through whichever version the
+// reference names, so long as the API server serves it.
+func TestCollectibleResolvesAnOwnerAtAnotherServedVersion(t *testing.T) {
+	parent := widgetOwner(widgetV1alpha1, "parent", "uid-parent")
+	for _, tc := range []struct {
+		name string
+		live owners
+		want bool
+	}{
+		{"the owner is gone", watching(gone(parent)), true},
+		{"the owner lives", watching(living(parent)), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			collect, unresolved := tc.live.collectible(configMapObject("child", "uid-child", parent))
+
+			if collect != tc.want {
+				t.Errorf("collectible returned %t, want %t.", collect, tc.want)
+			}
+			if len(unresolved) > 0 {
+				t.Errorf("collectible reported %+v as unresolved, want none.", unresolved)
+			}
+		})
+	}
+}
+
+func TestCollectibleKeepsAnObjectWhoseOwnerNamesAVersionNotServed(t *testing.T) {
+	unserved := schema.GroupVersionKind{Group: widgetKind.Group, Version: "v1beta9", Kind: widgetKind.Kind}
+	parent := widgetOwner(unserved, "parent", "uid-parent")
+
+	collect, unresolved := watching(gone(parent)).collectible(configMapObject("child", "uid-child", parent))
+
+	if collect {
+		t.Error("collectible chose to delete an object whose owner names a version the API server does not serve.")
+	}
+	want := []Unresolved{{DependentKind: configMapKind, DependentName: "child", OwnerKind: unserved, OwnerName: parent.Name}}
+	if !slices.Equal(unresolved, want) {
+		t.Errorf("collectible reported %+v as unresolved, want %+v.", unresolved, want)
 	}
 }
 
@@ -131,9 +202,10 @@ func fakeCollector(t *testing.T) (*Collector, *fake.FakeMetadataClient, *bytes.B
 	c := &Collector{
 		client:     client,
 		namespace:  runNamespace,
-		watched:    map[schema.GroupVersionKind]watchedKind{configMapKind: {resource: configMapResource}},
+		mapper:     serves(),
+		watched:    watchesConfigMapsAndWidgets(),
 		log:        slog.New(slog.NewTextHandler(&logged, nil)),
-		unresolved: map[ownerKey]bool{},
+		unresolved: map[Unresolved]bool{},
 		events:     make(chan struct{}, 1),
 		stopped:    make(chan struct{}),
 	}
@@ -142,6 +214,7 @@ func fakeCollector(t *testing.T) (*Collector, *fake.FakeMetadataClient, *bytes.B
 
 func configMapObject(name string, uid types.UID, owners ...metav1.OwnerReference) object {
 	return object{
+		kind:     configMapKind,
 		resource: configMapResource,
 		meta: &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{
 			Namespace:       runNamespace,
@@ -181,17 +254,27 @@ func TestSweepDeletesOnlyTheObjectItRead(t *testing.T) {
 	}
 }
 
-func TestSweepLogsAnOwnerOfAnUnwatchedKind(t *testing.T) {
+func TestSweepKeepsAChildOfAnOwnerItCannotResolve(t *testing.T) {
 	c, client, logged := fakeCollector(t)
-	secret := secretOwner("tls")
 
-	c.sweep(context.Background(), []object{configMapObject("child", "uid-child", secret)})
+	c.sweep(context.Background(), []object{configMapObject("child", "uid-child", secretOwner("tls"))})
 
 	if deleted := deletions(t, client); len(deleted) != 0 {
 		t.Errorf("The collector deleted %v although it cannot resolve the owner.", deleted)
 	}
-	if !strings.Contains(logged.String(), secret.Name) {
-		t.Errorf("The collector logged %q, which does not name the unresolved owner.", logged.String())
+	if logged.Len() != 0 {
+		t.Errorf("The collector logged %q; the run notes an unresolved owner instead.", logged.String())
+	}
+}
+
+func TestSweepCollectsAChildWhoseOwnerIsGoneAtAnotherServedVersion(t *testing.T) {
+	c, client, _ := fakeCollector(t)
+	child := configMapObject("child", "uid-child", widgetOwner(widgetV1alpha1, "gone", "uid-gone"))
+
+	c.sweep(context.Background(), []object{child})
+
+	if deleted := deletions(t, client); len(deleted) != 1 {
+		t.Errorf("The collector made these deletions: %v, want the child of the Widget that is gone.", deleted)
 	}
 }
 
@@ -278,15 +361,19 @@ func TestObjectsSkipWhatTheCollectorMustNotDelete(t *testing.T) {
 	terminating.DeletionTimestamp = &metav1.Time{Time: time.Now()}
 	elsewhere := configMapObject("elsewhere", "uid-elsewhere").meta
 	elsewhere.Namespace = "another-run"
-	c.watched[configMapKind] = watchedKind{
+	c.watched = map[schema.GroupKind]watchedKind{configMapKind.GroupKind(): {
+		kind:     configMapKind,
 		resource: configMapResource,
 		store:    seededStore(t, configMapObject("live", "uid-live").meta, terminating, elsewhere),
-	}
+	}}
 
 	found := c.objects()
 
 	if len(found) != 1 || found[0].meta.Name != "live" {
-		t.Errorf("objects returned %v, want the live ConfigMap alone.", found)
+		t.Fatalf("objects returned %v, want the live ConfigMap alone.", found)
+	}
+	if found[0].kind != configMapKind {
+		t.Errorf("objects gave the ConfigMap the kind %v, want %v.", found[0].kind, configMapKind)
 	}
 }
 
@@ -312,7 +399,9 @@ func TestASweepIsRetriedAfterAFailedCall(t *testing.T) {
 		return true, nil, apierrors.NewInternalError(errors.New("the API server is unwell"))
 	})
 	child := configMapObject("child", "uid-child", configMapOwner("parent", "uid-parent"))
-	c.watched[configMapKind] = watchedKind{resource: configMapResource, store: seededStore(t, child.meta)}
+	c.watched = map[schema.GroupKind]watchedKind{
+		configMapKind.GroupKind(): {kind: configMapKind, resource: configMapResource, store: seededStore(t, child.meta)},
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer func() {
 		cancel()
@@ -349,18 +438,22 @@ func TestNotifyDoesNotBlockWhenASweepIsPending(t *testing.T) {
 	}
 }
 
-func TestUnresolvedOwnersAreLoggedOncePerRun(t *testing.T) {
-	c, _, logged := fakeCollector(t)
+func TestUnresolvedNamesEachDependentAndOwnerOnce(t *testing.T) {
+	c, _, _ := fakeCollector(t)
 	secret := secretOwner("tls")
-
-	c.logUnresolved([]metav1.OwnerReference{secret})
-	c.logUnresolved([]metav1.OwnerReference{secret})
-
-	if lines := strings.Count(logged.String(), "\n"); lines != 1 {
-		t.Errorf("The collector logged %d lines, want 1: %s", lines, logged.String())
+	objects := []object{
+		configMapObject("second", "uid-second", secret),
+		configMapObject("first", "uid-first", secret),
 	}
-	if !strings.Contains(logged.String(), secret.Name) {
-		t.Errorf("The log line does not name the owner: %s", logged.String())
+
+	c.sweep(context.Background(), objects)
+	c.sweep(context.Background(), objects)
+
+	owned := func(dependent string) Unresolved {
+		return Unresolved{DependentKind: configMapKind, DependentName: dependent, OwnerKind: secretKind, OwnerName: secret.Name, Served: true}
+	}
+	if got, want := c.Unresolved(), []Unresolved{owned("first"), owned("second")}; !slices.Equal(got, want) {
+		t.Errorf("Unresolved returned %+v, want %+v.", got, want)
 	}
 }
 

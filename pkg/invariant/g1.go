@@ -11,17 +11,19 @@ import (
 const leaseGroup, leaseResource = "coordination.k8s.io", "leases"
 
 // BoundedReconciliation is G1: once the settle wait has ended, the target
-// makes no further API request for T_stable (DESIGN.md §6).
+// makes no more API requests in T_stable than thresholds.quiet allows
+// (DESIGN.md §6).
 func BoundedReconciliation(in Input) (Result, error) {
 	out := Result{ID: "G1"}
+	allowed := in.Target.Thresholds.Quiet
 	for _, window := range in.quietWindows() {
 		noisy := in.requestsIn(window, reconciles)
-		if len(noisy) == 0 {
+		if len(noisy) <= allowed {
 			continue
 		}
 		out.violate(Violation{
-			Statement: fmt.Sprintf("the target made %d API requests in %s, which §6 requires to be quiet%s",
-				len(noisy), window, in.repeated(window.start, window.end)),
+			Statement: fmt.Sprintf("the target made %d API requests in %s, where thresholds.quiet allows %d%s",
+				len(noisy), window, allowed, in.repeated(window.start, window.end)),
 			At: noisy[0].Start,
 		}.quotingRequests(Recent(noisy)))
 	}

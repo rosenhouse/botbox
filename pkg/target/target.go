@@ -62,8 +62,9 @@ type LaunchSpec struct {
 // Timeouts are the run's waits (DESIGN.md §6).
 type Timeouts struct{ Settle, Stable, Delete time.Duration }
 
-// Thresholds hold N_errloop for G6 (DESIGN.md §6).
-type Thresholds struct{ ErrLoop int }
+// Thresholds hold N_errloop for G6, and the requests G1 and the status writes
+// G2 allow in one quiet window (DESIGN.md §6).
+type Thresholds struct{ ErrLoop, Quiet int }
 
 // Defaults for a target that declares neither block (DESIGN.md §6).
 var (

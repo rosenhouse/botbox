@@ -10,9 +10,11 @@ import (
 // NoChurn is G2: once converged under a stable spec, the primary CR, the set
 // of managed objects and their resourceVersions do not change for T_stable
 // (DESIGN.md §6). A status write whose content is unchanged moves no
-// resourceVersion, so the proxy log supplies that half.
+// resourceVersion, so the proxy log supplies that half, which
+// thresholds.quiet bounds.
 func NoChurn(in Input) (Result, error) {
 	out := Result{ID: "G2"}
+	allowed := in.Target.Thresholds.Quiet
 	for _, window := range in.quietWindows() {
 		if moved := in.changesIn(window); len(moved) > 0 {
 			out.violate(Violation{
@@ -21,10 +23,10 @@ func NoChurn(in Input) (Result, error) {
 				At: moved[0].Time,
 			}.quotingVersions(Recent(moved)))
 		}
-		if written := in.requestsIn(window, writesStatus); len(written) > 0 {
+		if written := in.requestsIn(window, writesStatus); len(written) > allowed {
 			out.violate(Violation{
-				Statement: fmt.Sprintf("the target made %d status writes in %s, which §6 counts as churn",
-					len(written), window),
+				Statement: fmt.Sprintf("the target made %d status writes in %s, where thresholds.quiet allows %d",
+					len(written), window, allowed),
 				At: written[0].Start,
 			}.quotingRequests(Recent(written)))
 		}

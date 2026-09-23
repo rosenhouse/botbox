@@ -48,6 +48,9 @@ type Reconciler struct {
 	// B1Hold is how long B1 holds its premature status; zero behaves as
 	// defaultB1Hold (DESIGN.md §9.1).
 	B1Hold time.Duration
+	// Resync requeues every Widget this often and writes its status each
+	// time, changed or not. Zero turns the timer off.
+	Resync time.Duration
 
 	// createdFor holds the Widgets this process created a child for. Only B10
 	// reads it, and a restart loses it. Reconciles run on one worker (the
@@ -106,6 +109,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 	if r.Bug == B10 && !r.createdChildFor(widget) {
 		return ctrl.Result{}, nil // B10 (§9.1): the status follows a flag a restart lost.
+	}
+	if r.Resync > 0 {
+		return ctrl.Result{RequeueAfter: r.Resync}, r.patchStatus(ctx, widget, status)
 	}
 	if !changed {
 		return ctrl.Result{}, nil

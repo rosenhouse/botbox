@@ -263,6 +263,7 @@ func TestLoadRejects(t *testing.T) {
 		{"timeout of zero", minimalTarget + "timeouts:\n  stable: 0s\n", "", []string{"stable", "positive"}},
 		{"negative timeout", minimalTarget + "timeouts:\n  delete: -1s\n", "", []string{"delete", "positive"}},
 		{"errloop of zero", minimalTarget + "thresholds:\n  errloop: 0\n", "", []string{"errloop", "positive"}},
+		{"negative quiet", minimalTarget + "thresholds:\n  quiet: -1\n", "", []string{"quiet -1", "negative"}},
 		// A settle wait carves T_stable of quiet out of T_settle, so these
 		// leave the target no time to react and every op expires. The wants
 		// carry the durations: the temp directory's path holds the case name,
@@ -439,6 +440,29 @@ func TestLoadDefaultsEachTimeoutSeparately(t *testing.T) {
 	}
 	if loaded.Thresholds.ErrLoop != 20 {
 		t.Errorf("Load read errloop %d, want the default 20.", loaded.Thresholds.ErrLoop)
+	}
+}
+
+func TestLoadThresholds(t *testing.T) {
+	for _, tc := range []struct {
+		declared string
+		want     target.Thresholds
+	}{
+		{"thresholds:\n  quiet: 3\n", target.Thresholds{ErrLoop: 20, Quiet: 3}},
+		{"thresholds:\n  quiet: 0\n  errloop: 7\n", target.Thresholds{ErrLoop: 7, Quiet: 0}},
+	} {
+		t.Run(tc.declared, func(t *testing.T) {
+			path := writeTarget(t, minimalTarget+tc.declared, map[string]string{"widget.yaml": sampleWidget})
+
+			loaded, err := target.Load(path)
+
+			if err != nil {
+				t.Fatalf("Load rejected the thresholds: %v", err)
+			}
+			if loaded.Thresholds != tc.want {
+				t.Errorf("Load read thresholds %+v, want %+v.", loaded.Thresholds, tc.want)
+			}
+		})
 	}
 }
 

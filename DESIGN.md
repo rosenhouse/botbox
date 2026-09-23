@@ -277,8 +277,8 @@ botbox owns the API server a run executes against.
   harness package allowed to import controller-runtime (§11). Before it starts them,
   botbox looks for both binaries where envtest does: `TEST_ASSET_ETCD` and
   `TEST_ASSET_KUBE_APISERVER`, then `KUBEBUILDER_ASSETS`, then `/usr/local/kubebuilder/bin`.
-  Like envtest, it looks a path with no slash up on `PATH`, as an empty `KUBEBUILDER_ASSETS`
-  gives. It names the variable and the path when one is missing.
+  botbox looks up a bare name on `PATH`, as envtest does. An empty `KUBEBUILDER_ASSETS`
+  leaves one. botbox names the variable and the path when a binary is missing.
 - **kubeconfig**. An existing cluster, normally kind. Used by the nightly tier and, in
   phase 2, by `Image` targets.
 

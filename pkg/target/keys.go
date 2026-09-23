@@ -91,8 +91,8 @@ func nearest(key string, names []string) string {
 	return best
 }
 
-// editDistance counts the insertions, deletions, substitutions and swaps of
-// adjacent letters that turn a into b.
+// editDistance counts the fewest insertions, deletions, substitutions and
+// swaps of adjacent letters that turn a into b.
 func editDistance(a, b string) int {
 	d := make([][]int, len(a)+1)
 	for i := range d {

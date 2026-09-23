@@ -156,6 +156,20 @@ func TestG4StopsGivingTheTargetTimeOnceItConverged(t *testing.T) {
 	silent(t, invariant.Convergence, in)
 }
 
+// A settle wait that expired shows no recovery, so it leaves the target the
+// time the fault left it.
+func TestG4GivesTheTargetItsTimePastAnExpiredWait(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		fault(time.Second, 4*time.Second).
+		record(time.Second, widget("10", spec(3), status(0, 1))).
+		checkpoint(4500*time.Millisecond, invariant.Expired).
+		record(11*time.Second, widget("11", spec(3), status(3, 1))).
+		through(13 * time.Second)
+
+	silent(t, invariant.Convergence, in)
+}
+
 // A target that converged only after the time the fault left it is late.
 func TestG4GivesNoMoreTimeForAConvergenceThatCameLate(t *testing.T) {
 	in := newRun().

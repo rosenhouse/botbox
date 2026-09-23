@@ -503,7 +503,7 @@ func (r *runner) judge(checkpoint int, after string, wait Wait, excused bool) er
 	return r.checkpoint(checkpoint, wait.Converged)
 }
 
-// expired is the G4 of a settle wait that ran out with no fault active.
+// expired is the G4 of a settle wait that ran out with no fault to excuse it.
 func (r *runner) expired(after string, wait Wait) Violation {
 	// One read of the managed objects answers both, so that the count cannot
 	// disagree with the state quoted beside it.
@@ -693,9 +693,9 @@ func (r *runner) clearFaults() {
 	r.h.setFaults(nil)
 }
 
-// recover gives a target the faults still excuse a settle wait of its own,
-// since no op's wait gave it time to recover from them.
-func (r *runner) recover(ctx context.Context) error {
+// awaitRecovery gives a target the faults still excuse a settle wait of its
+// own, since no op's wait gave it time to recover from them.
+func (r *runner) awaitRecovery(ctx context.Context) error {
 	if r.violation != nil || r.failed || !r.faultsSoFar().Recovering(r.now()) {
 		return nil
 	}
@@ -718,7 +718,7 @@ func (r *runner) recover(ctx context.Context) error {
 // is, but no step after it.
 func (r *runner) teardown(ctx context.Context) error {
 	r.clearFaults()
-	failures := []error{r.recover(ctx)}
+	failures := []error{r.awaitRecovery(ctx)}
 
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.teardownBudget())
 	defer cancel()

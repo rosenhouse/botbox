@@ -326,12 +326,14 @@ Consequences:
   invocation says so once, before the control plane starts, and names `--kubeconfig` and
   kind. A G4 report repeats it among its notes. botbox does not emulate these controllers
   (D@35).
-- **No storage protection.** botbox starts the API server with the
-  `StorageObjectInUseProtection` admission plugin disabled, beside envtest's own
-  `ServiceAccount`. That plugin puts `kubernetes.io/pvc-protection` on every
-  PersistentVolumeClaim and `kubernetes.io/pv-protection` on every PersistentVolume, and
-  only `kube-controller-manager` removes them. On a kubeconfig cluster a claim keeps its
-  finalizer until no Pod uses it.
+- **No finalizers that only `kube-controller-manager` removes.** botbox starts the API
+  server with its garbage collector off, and with the `StorageObjectInUseProtection`
+  admission plugin disabled beside envtest's own `ServiceAccount`. A delete therefore adds
+  no `orphan` or `foregroundDeletion` finalizer, whatever its propagation policy, and the
+  object goes at once. No PersistentVolumeClaim carries `kubernetes.io/pvc-protection`,
+  and no PersistentVolume carries `kubernetes.io/pv-protection`. On a kubeconfig cluster a
+  Job or ReplicationController deleted without a policy orphans its Pods, and a claim keeps
+  its finalizer until no Pod uses it.
 - **No admission webhooks.** See §8.3.
 
 ## 6. Generic invariants
@@ -1298,8 +1300,8 @@ built from source and run as a black-box binary.
   envtest also read `USE_EXISTING_CLUSTER`, which pointed botbox's default mode, collector
   emulation and all, at whatever `KUBECONFIG` named. `cluster.Start` now turns that off.
   `make test-kind` runs on kind v0.33.0 and its default node image, Kubernetes 1.37.0.
-- **D@35 botbox names the kinds envtest never moves, and envtest admits a claim
-  unprotected.** An operator whose `ready` waited on its Deployment's `availableReplicas`
+- **D@35 botbox names the kinds envtest never moves, and envtest adds no finalizer that
+  only the controller manager removes.** An operator whose `ready` waited on its Deployment's `availableReplicas`
   failed G4 on every envtest run, and botbox said nothing about why. envtest runs no
   `kube-controller-manager` and no kubelet, so the Deployment's status stayed empty and no
   ReplicaSet or Pod appeared. Under the default `observedGeneration` predicate the same
@@ -1312,4 +1314,7 @@ built from source and run as a black-box binary.
   carried `kubernetes.io/pvc-protection`, which nothing on envtest removes, so a correctly
   owned claim failed G3. Removing that finalizer in the collector was rejected, because it
   adds code and timing, and on envtest no Pod ever uses a claim. botbox disables the
-  admission plugin instead.
+  admission plugin instead. A Job or a ReplicationController, which a delete orphans by
+  default, and any foreground delete likewise carried a finalizer that only the garbage
+  collector removes, so a correctly owned Job failed G3 too. botbox therefore also turns
+  off the API server's garbage collector, which adds those finalizers.

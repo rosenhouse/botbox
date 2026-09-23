@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -135,6 +136,42 @@ func TestStartAdmitsWhatOnlyAControllerManagerWouldFinish(t *testing.T) {
 		}
 		if _, err := claims.Get(ctx, created.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
 			t.Errorf("Reading the deleted claim returned %v, want NotFound.", err)
+		}
+	})
+
+	t.Run("a Job, whose default is to orphan, deletes at once", func(t *testing.T) {
+		job := &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{Name: "init"},
+			Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+				RestartPolicy: corev1.RestartPolicyNever,
+				Containers:    []corev1.Container{{Name: "main", Image: "example.invalid/main"}},
+			}}},
+		}
+		jobs := client.BatchV1().Jobs(namespace)
+		created, err := jobs.Create(ctx, job, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("Creating the Job failed: %v", err)
+		}
+		if err := jobs.Delete(ctx, created.Name, metav1.DeleteOptions{}); err != nil {
+			t.Fatalf("Deleting the Job failed: %v", err)
+		}
+		if _, err := jobs.Get(ctx, created.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Errorf("Reading the deleted Job returned %v, want NotFound.", err)
+		}
+	})
+
+	t.Run("a foreground delete removes the object at once", func(t *testing.T) {
+		configMaps := client.CoreV1().ConfigMaps(namespace)
+		created, err := configMaps.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "config"}}, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("Creating the ConfigMap failed: %v", err)
+		}
+		foreground := metav1.DeletePropagationForeground
+		if err := configMaps.Delete(ctx, created.Name, metav1.DeleteOptions{PropagationPolicy: &foreground}); err != nil {
+			t.Fatalf("Deleting the ConfigMap failed: %v", err)
+		}
+		if _, err := configMaps.Get(ctx, created.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Errorf("Reading the deleted ConfigMap returned %v, want NotFound.", err)
 		}
 	})
 

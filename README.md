@@ -191,8 +191,9 @@ writing. A `stable` at least as wide as `settle` leaves it none, so botbox refus
 that target rather than reporting G4 against your controller.
 
 envtest runs no garbage collector, so botbox runs its own over the kinds your target
-declares. It deletes an object once every owner the object names is gone. It finds an owner
-by group, kind and name, at any version the API server serves, and then compares the UID.
+declares. It deletes an object once every owner the object names is gone. It treats a
+foreground or orphan delete as a background one. It finds an owner by group, kind and name,
+at any version the API server serves, and then compares the UID.
 It counts as live an owner of a kind your target does not declare, or one named at a version
 the API server does not serve, so it never deletes an object that names one. The run prints
 a note for each such object and owner, and the report carries it. A real garbage collector

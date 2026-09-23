@@ -380,10 +380,11 @@ remaining ownerReferences. A target excludes further paths with `equalIgnore` (Â
     {"i": 0, "t": "create", "obj": {"apiVersion": "...", "kind": "Widget", "spec": {"count": 3}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps", "fraction": 0.5}, "action": {"error": 500}, "until": {"op": 3}}},
     {"i": 2, "t": "update", "patch": {"spec": {"count": 5}}, "noSettle": true},
-    {"i": 3, "t": "restart"},
-    {"i": 4, "t": "settle"},
-    {"i": 5, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
-    {"i": 6, "t": "delete"}
+    {"i": 3, "t": "settle"},
+    {"i": 4, "t": "restart"},
+    {"i": 5, "t": "settle"},
+    {"i": 6, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 7, "t": "delete"}
   ]
 }
 ```

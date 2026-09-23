@@ -22,10 +22,11 @@ const designExample = `{
     {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "spec": {"count": 3}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps", "fraction": 0.5}, "action": {"error": 500}, "until": {"op": 3}}},
     {"i": 2, "t": "update", "patch": {"spec": {"count": 5}}, "noSettle": true},
-    {"i": 3, "t": "restart"},
-    {"i": 4, "t": "settle"},
-    {"i": 5, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
-    {"i": 6, "t": "delete"}
+    {"i": 3, "t": "settle"},
+    {"i": 4, "t": "restart"},
+    {"i": 5, "t": "settle"},
+    {"i": 6, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 7, "t": "delete"}
   ]
 }`
 
@@ -85,11 +86,11 @@ func TestSequenceReadsTheDesignExample(t *testing.T) {
 	if !update.NoSettle || update.Patch == nil {
 		t.Errorf("The update op decoded to %+v, want a patch it does not settle after.", update)
 	}
-	deleteManaged := decoded.Ops[5]
+	deleteManaged := decoded.Ops[6]
 	if deleteManaged.Kind != "v1/ConfigMap" || deleteManaged.Nth == nil || *deleteManaged.Nth != 0 {
 		t.Errorf("The deleteManaged op decoded to %+v.", deleteManaged)
 	}
-	if types := opTypesOf(decoded); strings.Join(types, ",") != "create,fault,update,restart,settle,deleteManaged,delete" {
+	if types := opTypesOf(decoded); strings.Join(types, ",") != "create,fault,update,settle,restart,settle,deleteManaged,delete" {
 		t.Errorf("The example decoded to the ops %v.", types)
 	}
 }

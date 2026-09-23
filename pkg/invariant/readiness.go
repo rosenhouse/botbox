@@ -64,8 +64,8 @@ type readyWalk struct {
 
 // walkReady evaluates Ready on the CRs as the wait found them and on every
 // version the Observer recorded after, up to the end. The wait can begin
-// before the Observer sees the write of an op applied at wrote, so Ready
-// holding on a CR recorded by then does not count as having held.
+// before the Observer sees the write of an op applied at wrote, so a CR
+// recorded by then cannot show that Ready held after the write.
 func (in Input) walkReady(began, end, wrote time.Time) (readyWalk, error) {
 	var walk readyWalk
 	versions := slices.DeleteFunc(in.versionsIn(time.Time{}, end), func(v observe.Version) bool {

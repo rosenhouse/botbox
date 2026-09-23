@@ -112,6 +112,9 @@ func listValues(s *schema) (*rapid.Generator[any], error) {
 func key(item any) string { return fmt.Sprint(item) }
 
 func objectValues(s *schema) (*rapid.Generator[any], error) {
+	if s.AdditionalProperties.schema != nil {
+		return mapValuesOf(s)
+	}
 	type property struct {
 		name     string
 		values   *rapid.Generator[any]
@@ -142,6 +145,20 @@ func objectValues(s *schema) (*rapid.Generator[any], error) {
 		}
 		return object
 	}), nil
+}
+
+// mapValuesOf draws a map keyed by words.
+func mapValuesOf(s *schema) (*rapid.Generator[any], error) {
+	values, err := valuesOf(s.AdditionalProperties.schema)
+	if err != nil {
+		return nil, err
+	}
+	lo, hi := propertyRange(s)
+	if lo > hi {
+		return nil, errors.New("no map lies between the schema's minProperties and maxProperties")
+	}
+	keys := rapid.StringOfN(wordRunes, defaultMinLength, defaultMaxLength, -1)
+	return rapid.MapOfN(keys, values, lo, hi).AsAny(), nil
 }
 
 // integerRange is the range the schema allows, inside the integers JSON
@@ -210,6 +227,10 @@ func lengthRange(s *schema) (int, int) {
 
 func itemRange(s *schema) (int, int) {
 	return span(s.MinItems, s.MaxItems, 0, defaultMaxItems)
+}
+
+func propertyRange(s *schema) (int, int) {
+	return span(s.MinProperties, s.MaxProperties, 0, defaultMaxItems)
 }
 
 // span reads a length range, widening the default where the schema's own bound

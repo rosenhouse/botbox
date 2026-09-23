@@ -176,6 +176,8 @@ func TestAnOverlayKeywordBotboxDoesNotReadIsAConfigurationError(t *testing.T) {
 		{certManagerTarget, "spec.privateKey",
 			map[string]any{"properties": map[string]any{"algorithm": map[string]any{"enumm": []any{"RSA"}}}},
 			"properties.algorithm.enumm"},
+		{rulesTarget, "spec.config", map[string]any{"additionalProperties": map[string]any{"maxLenght": 3}},
+			"additionalProperties.maxLenght"},
 	} {
 		t.Run(testCase.unread, func(t *testing.T) {
 			loaded := loadTarget(t, testCase.path)
@@ -190,6 +192,21 @@ func TestAnOverlayKeywordBotboxDoesNotReadIsAConfigurationError(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWithoutMutateEverySpecPathTheSchemaDescribesMoves(t *testing.T) {
+	fields, err := mutableFields(loadTarget(t, rulesTarget), primarySchemaOf(t, rulesTarget))
+	if err != nil {
+		t.Fatalf("mutableFields failed: %v.", err)
+	}
+	var paths []string
+	for _, field := range fields {
+		paths = append(paths, field.dotted)
+	}
+	want := []string{"spec.config", "spec.count", "spec.left", "spec.maxUnavailable", "spec.minCount", "spec.mode", "spec.right"}
+	if !slices.Equal(paths, want) {
+		t.Errorf("The generator mutates %v, want %v.", paths, want)
 	}
 }
 

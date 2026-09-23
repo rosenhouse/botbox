@@ -108,6 +108,9 @@ func validateObject(s *schema, value any, path string) error {
 			return fmt.Errorf("%s carries no %s, which the schema requires", path, name)
 		}
 	}
+	if values := s.AdditionalProperties.schema; values != nil {
+		return validateMap(s, values, object, path)
+	}
 	if len(s.Properties) == 0 {
 		return nil
 	}
@@ -117,6 +120,20 @@ func validateObject(s *schema, value any, path string) error {
 			return fmt.Errorf("%s carries %s, which the schema does not describe", path, name)
 		}
 		if err := validate(property, object[name], join(path, name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateMap(s, values *schema, object map[string]any, path string) error {
+	if count := int64(len(object)); (s.MinProperties != nil && count < *s.MinProperties) ||
+		(s.MaxProperties != nil && count > *s.MaxProperties) {
+		return fmt.Errorf("%s holds %d keys, outside minProperties %v and maxProperties %v",
+			path, count, s.MinProperties, s.MaxProperties)
+	}
+	for _, name := range slices.Sorted(maps.Keys(object)) {
+		if err := validate(values, object[name], join(path, name)); err != nil {
 			return err
 		}
 	}

@@ -44,6 +44,23 @@ type schema struct {
 	Items       *schema            `json:"items"`
 	Properties  map[string]*schema `json:"properties"`
 	Required    []string           `json:"required"`
+	// AdditionalProperties is a map's values.
+	AdditionalProperties mapValues `json:"additionalProperties"`
+	MinProperties        *int64    `json:"minProperties"`
+	MaxProperties        *int64    `json:"maxProperties"`
+}
+
+// mapValues is additionalProperties, a schema or a boolean. A boolean says
+// nothing about the values.
+type mapValues struct{ schema *schema }
+
+func (m *mapValues) UnmarshalJSON(data []byte) error {
+	var allowed bool
+	if json.Unmarshal(data, &allowed) == nil {
+		return nil
+	}
+	m.schema = &schema{}
+	return json.Unmarshal(data, m.schema)
 }
 
 // field is one path the generator may change, and the values it may take.
@@ -201,7 +218,7 @@ func unreadKeywords(overlay map[string]any, prefix string) []string {
 		switch {
 		case !slices.Contains(keywords, key):
 			unread = append(unread, prefix+key)
-		case key == "items":
+		case key == "items" || key == "additionalProperties":
 			unread = append(unread, unreadKeywords(nested, prefix+key+".")...)
 		case key == "properties":
 			for _, name := range slices.Sorted(maps.Keys(nested)) {

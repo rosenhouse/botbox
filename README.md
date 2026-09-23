@@ -1,20 +1,11 @@
 # botbox
 
-A black-box property-based and fault-injection harness for Kubernetes controllers.
+Botbox is a tool to find bugs in your Kubernetes controller.
 
-botbox exercises an unmodified controller and judges it only through the Kubernetes API. It draws
-sequences of operations on one custom resource from that resource's own CRD schema, applies them,
-restarts the controller where a sequence says to, and records every request the controller makes.
-It then checks six generic invariants that need no per-controller configuration, plus properties a
-target declares. If your controller talks to an API server, botbox can test it.
-
-**Status:** M0–M7 are merged. `botbox run` draws sequences, runs them, and minimizes the first
-failure; `botbox replay` re-executes one. A failing run writes a report naming what broke and
-how to see it again ([DESIGN.md §5.7](DESIGN.md#57-report)).
+It fakes the API server, injecting various events (changes to resources, faults, restarts).  It then
+checks if certain expectations hold, including custom properties you can specify.
 
 ## Install
-
-An invocation starts an envtest control plane, so botbox needs `kube-apiserver` and `etcd` too. `setup-envtest` fetches them, and the pinned `--index` decides which build ([DESIGN.md §15, D18](DESIGN.md#15-decision-log)).
 
 ```sh
 go install github.com/rosenhouse/botbox/cmd/botbox@latest
@@ -22,8 +13,6 @@ go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
 index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
 export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 ```
-
-`botbox run --kubeconfig` uses an existing cluster instead ([DESIGN.md §5.8](DESIGN.md#58-test-cluster)).
 
 ## Quickstart: cert-manager
 

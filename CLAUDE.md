@@ -1,4 +1,7 @@
-# Botbox
+## Scope
+
+Do not file issues or PRs against any other repos.
+
 
 ## Attribution of GitHub posts
 

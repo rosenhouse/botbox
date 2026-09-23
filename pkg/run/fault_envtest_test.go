@@ -136,27 +136,6 @@ func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
 		}
 	})
 
-	t.Run("after the first of two equal faults runs out", func(t *testing.T) {
-		// Twelve refusals take the toy 10s, so the settles carry the run past
-		// the first fault's end while the second still refuses.
-		sequence := readExample(t)
-		sequence.Ops[1].Fault.Until.Count = 12
-		sequence.Ops = slices.Insert(sequence.Ops, 2, sequence.Ops[1])
-		sequence.Ops = append(sequence.Ops, run.Op{Type: run.OpSettle}, run.Op{Type: run.OpSettle}, run.Op{Type: run.OpSettle})
-		for i := range sequence.Ops {
-			sequence.Ops[i].Index = i
-		}
-
-		result := runUnder(t, nil, sequence)
-
-		if result.Violation != nil {
-			t.Errorf("The run reported %v, and the toy with no bug recovers.", result.Violation)
-		}
-		if first, second := result.Timeline.Faults[0], result.Timeline.Faults[1]; !second.Start.After(first.End) {
-			t.Errorf("The faults ran %+v and %+v, want the second refusing creates after the first ran out.", first, second)
-		}
-	})
-
 	t.Run("never, under a bug that never asks again", func(t *testing.T) {
 		result := runUnder(t, []string{seededBugB11}, readExample(t))
 

@@ -377,8 +377,9 @@ converged, often a write that changes nothing. `N_quiet` is how many of those on
 window may hold, per target (§8.1). A tick every `interval` puts at most
 `floor(T_stable / interval) + 1` ticks in one window, so `N_quiet` is that times the
 requests one tick makes. A write that changes something still moves a resourceVersion,
-which G2 reports whatever `N_quiet` is. Any `N_quiet` above zero also hides a slow loop
-of that many requests per window from G1, and G6 is then what catches a loop that fails.
+which G2 reports whatever `N_quiet` is. Any `N_quiet` above zero also lets a slow loop
+of that many requests per window through G1. G6 counts a loop only while it fails more
+than `N_errloop` times within `T_settle`, so a slow failing loop can pass both.
 
 **What the proxy cannot see.** G1 and G6 observe only requests that leave the target
 process. Reads served from a client-side cache are invisible, so a reconcile loop that
@@ -1295,17 +1296,16 @@ built from source and run as a black-box binary.
   tick's burst, and an opt-out would drop G1 and G2 whole. One number covers both checks,
   because a tick that rewrites an unchanged status is both a request and a status write.
   It never excuses a resourceVersion that moves, so a heartbeat that changes a field is
-  still churn (§14 question 1). An `N_quiet` above zero lets a slow loop through G1, so
-  G6 has to catch a loop that fails (D@46). The toy's `--resync` runs under envtest with
-  `quiet: 3` and with the default.
+  still churn (§14 question 1). An `N_quiet` above zero lets a slow loop through G1, and
+  G6 catches only a loop that fails often enough (D@46). The toy's `--resync` runs under
+  envtest with `quiet: 3` and with the default.
 - **D@46 `N_errloop` stays 20, and G6 sees controller-runtime's default backoff only at
-  12 or less.** That backoff puts 13 identical failures in the densest 30 s, so at 20 a
-  loop surfaces as G4 or G1 instead. A default of 10 needed correct targets to stay well
-  under 10. Recordings kept by a scratch build put the worst count of one failing request
-  within 30 s at 2 over 24 runs of cert-manager and 26 over 35 of external-secrets:
-  drawn seeds, pinned sequences and controls. external-secrets' counts above 3 were all
-  event creates refused with 403 in earlier runs' namespaces. The runs of one invocation
-  share a control plane, the teardown leaves the SecretStore fixture in a namespace
-  envtest never deletes, and each later run's controller reconciles every one. The count
-  grows with each run, and the seventh run of one invocation failed G6 at 20. The default
-  stays 20 while that leak stands. G6's statement names `thresholds.errloop`.
+  12 or less.** That backoff puts 13 identical failures in the densest 30 s, so at 20 such
+  a loop surfaces as G4 or G1. A default of 10 waits on a harness leak. A scratch build
+  kept the recordings of passing runs. The worst count of one failing request within
+  30 s was 2 over 24 cert-manager runs and 26 over 35 external-secrets runs: drawn seeds,
+  pinned sequences and controls. Every external-secrets count above 3 was event creates
+  refused with 403 in earlier runs' namespaces. The teardown leaves the SecretStore
+  fixture in a namespace envtest never deletes, and each later run of the invocation
+  reconciles all of them. The count grows with each run, and the seventh run of one
+  invocation failed G6 at 20.

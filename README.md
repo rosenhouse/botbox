@@ -164,10 +164,11 @@ A controller that resyncs on a timer makes requests after it has converged, and 
 it by default. `quiet` is how many requests one `stable` window may hold. A window holds
 at most one tick more than `stable` divided by the interval, rounded down. Multiply those
 ticks by the requests one tick makes. A 15s resync that makes one request needs `quiet: 1`
-under the default `stable`. `quiet` also bounds
-the status writes that change nothing, which G2 counts. A write that changes something
-fails G2 whatever `quiet` is. Keep `quiet` as low as your timer allows, since G1 lets a
-slow loop of that many requests through.
+under the default `stable`. `quiet` also bounds the status writes that change nothing,
+which G2 counts. A write that changes something fails G2 whatever `quiet` is, or G4 if
+the timer is faster than `stable`, because the settle wait then never sees `stable` of
+quiet. Keep `quiet` as low as your timer allows, since G1 lets a slow loop of that many
+requests through.
 
 G6 fails a controller that repeats one failing request more than `errloop` times within
 `settle`. controller-runtime's default backoff repeats one 13 times in 30s, so G6 sees

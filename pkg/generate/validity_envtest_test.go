@@ -32,6 +32,14 @@ func TestTheAPIServerAcceptsEveryGeneratedCROp(t *testing.T) {
 		loaded = append(loaded, declared)
 		crds = append(crds, declared.CRDs...)
 	}
+	// Without generate, the generator walks every spec path the schema says
+	// enough about.
+	for _, path := range []string{certManagerTarget, externalSecretsTarget} {
+		unconstrained := loadTarget(t, path)
+		unconstrained.Name += "-unconstrained"
+		unconstrained.Generate = target.GenerateSpec{}
+		loaded = append(loaded, unconstrained)
+	}
 	testCluster, err := cluster.Start(cluster.Options{CRDPaths: crds})
 	if err != nil {
 		t.Fatalf("Starting the test cluster failed: %v", err)

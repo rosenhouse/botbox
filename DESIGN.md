@@ -342,10 +342,10 @@ while a watch that fails returns at once and repeating it is a loop.
 
 **Notes.** A check that could not judge something records a note naming it: G3 for a
 deletion whose deadline the run did not reach, that a fault reached into, or that botbox
-took an object inside, G5 for a `Restart` missing a snapshot and for an `equalIgnore` key
-that meets a list (§8.1). The Runner carries the last checkpoint's notes out and `botbox`
-prints them at the end of the run, because a check that was skipped otherwise reads like
-one that passed.
+took an object inside, G5 for a `Restart` missing a snapshot. The Runner carries the last
+checkpoint's notes out and `botbox` prints them at the end of the run, because a check
+that was skipped otherwise reads like one that passed. G5 also notes an `equalIgnore` path
+it could not follow (§8.1), since it then compares a field the target meant it to skip.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read

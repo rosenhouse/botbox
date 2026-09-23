@@ -85,11 +85,10 @@ func load(path string) (*Target, error) {
 	dir := filepath.Dir(path)
 
 	loaded := &Target{
-		Name:        declared.Name,
-		Version:     declared.Version,
-		EqualIgnore: declared.EqualIgnore,
-		Generate:    GenerateSpec(declared.Generate),
-		Launch:      declared.Launch,
+		Name:     declared.Name,
+		Version:  declared.Version,
+		Generate: GenerateSpec(declared.Generate),
+		Launch:   declared.Launch,
 	}
 	if loaded.Name == "" {
 		return nil, errors.New("name is required")
@@ -154,6 +153,13 @@ func load(path string) (*Target, error) {
 		}
 	} else if declared.Equal != "" {
 		return nil, fmt.Errorf("equal %q: equality is not CEL; it takes a go:<name> hook", declared.Equal)
+	}
+	for _, text := range declared.EqualIgnore {
+		path, err := ParsePath(text)
+		if err != nil {
+			return nil, fmt.Errorf("equalIgnore %q: %w", text, err)
+		}
+		loaded.EqualIgnore = append(loaded.EqualIgnore, path)
 	}
 
 	seen := map[string]bool{}

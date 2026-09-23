@@ -256,6 +256,10 @@ func TestLoadRejects(t *testing.T) {
 		{"duplicate property id", minimalTarget + "properties:\n  - id: P1\n    cel: 'true'\n  - id: P1\n    cel: 'false'\n", "", []string{"P1", "twice"}},
 		{"property without cel", minimalTarget + "properties:\n  - id: P1\n", "", []string{"P1", "cel"}},
 		{"equal written as CEL", minimalTarget + "equal: 'a == b'\n", "", []string{"equal", "go:"}},
+		{"an ignored list index", minimalTarget + "equalIgnore:\n  - status.conditions[0].message\n", "",
+			[]string{"equalIgnore", "status.conditions[0].message", "offset 17", "[*]"}},
+		{"an ignored annotation whose key the dots split", minimalTarget + "equalIgnore:\n  - metadata.annotations.probe.example.com/started-at\n", "",
+			[]string{"equalIgnore", `metadata.annotations["probe.example.com/started-at"]`}},
 		{"timeout of zero", minimalTarget + "timeouts:\n  stable: 0s\n", "", []string{"stable", "positive"}},
 		{"negative timeout", minimalTarget + "timeouts:\n  delete: -1s\n", "", []string{"delete", "positive"}},
 		{"errloop of zero", minimalTarget + "thresholds:\n  errloop: 0\n", "", []string{"errloop", "positive"}},
@@ -415,8 +419,18 @@ func TestLoadDefaultsEachTimeoutSeparately(t *testing.T) {
 }
 
 func TestLoadGenerateAndSelector(t *testing.T) {
+	ignored := []string{
+		"status.lastSyncTime",
+		`metadata.annotations["probe.example.com/started-at"]`,
+		"status.conditions[*].lastHeartbeatTime",
+		`["top.level"].x`,
+	}
 	path := writeTarget(t, minimalTarget+`selector: app=widget,tier in (a,b)
-equalIgnore: [status.lastSyncTime]
+equalIgnore:
+  - `+ignored[0]+`
+  - `+ignored[1]+`
+  - `+ignored[2]+`
+  - '`+ignored[3]+`'
 generate:
   mutate: [spec.count]
   overlay:
@@ -430,8 +444,12 @@ generate:
 	if loaded.Selector == nil || !loaded.Selector.Matches(labels.Set{"app": "widget", "tier": "a"}) {
 		t.Errorf("Load read selector %v, which does not match app=widget,tier=a.", loaded.Selector)
 	}
-	if want := []string{"status.lastSyncTime"}; !reflect.DeepEqual(loaded.EqualIgnore, want) {
-		t.Errorf("Load read equalIgnore %v, want %v.", loaded.EqualIgnore, want)
+	var read []string
+	for _, path := range loaded.EqualIgnore {
+		read = append(read, path.String())
+	}
+	if !reflect.DeepEqual(read, ignored) {
+		t.Errorf("Load read equalIgnore %q, want %q.", read, ignored)
 	}
 	if want := []string{"spec.count"}; !reflect.DeepEqual(loaded.Generate.Mutate, want) {
 		t.Errorf("Load read generate.mutate %v, want %v.", loaded.Generate.Mutate, want)

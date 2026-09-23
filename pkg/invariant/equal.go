@@ -3,19 +3,26 @@ package invariant
 import (
 	"reflect"
 	"slices"
-	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/rosenhouse/botbox/pkg/observe"
+	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// ignoredMetadata are the metadata fields the §6 default equality ignores.
-// It compares everything else, labels, annotations, ownerReferences and
-// finalizers among them.
-var ignoredMetadata = []string{"resourceVersion", "uid", "creationTimestamp", "generation", "managedFields"}
+// ignoredByDefault are the paths the default equality ignores. It compares
+// everything else, labels, annotations, ownerReferences and finalizers among
+// them.
+var ignoredByDefault = []target.Path{
+	target.MustParsePath("metadata.resourceVersion"),
+	target.MustParsePath("metadata.uid"),
+	target.MustParsePath("metadata.creationTimestamp"),
+	target.MustParsePath("metadata.generation"),
+	target.MustParsePath("metadata.managedFields"),
+	target.MustParsePath("status.conditions[*].lastTransitionTime"),
+}
 
 // equality compares the snapshots around one Restart. A target that declares
 // a hook replaces the whole predicate (DESIGN.md §8.4); otherwise this is the
@@ -43,38 +50,15 @@ func snapshot(v observe.Version) observe.Snapshot {
 // comparable reduces an object to what §6 compares.
 func (in Input) comparable(obj *unstructured.Unstructured, live ownerSet) map[string]any {
 	content := obj.DeepCopy().Object
-	metadata, _, _ := unstructured.NestedMap(content, "metadata")
-	for _, field := range ignoredMetadata {
-		delete(metadata, field)
+	for _, path := range ignoredByDefault {
+		path.Remove(content)
 	}
+	metadata, _ := content["metadata"].(map[string]any)
 	live.pruneDangling(metadata)
-	delete(content, "metadata")
-	if len(metadata) > 0 {
-		content["metadata"] = metadata
-	}
-	dropTransitionTimes(content)
 	for _, path := range in.Target.EqualIgnore {
-		unstructured.RemoveNestedField(content, strings.Split(path, ".")...)
+		path.Remove(content)
 	}
 	return content
-}
-
-// dropTransitionTimes removes status.conditions[*].lastTransitionTime, which
-// moves whenever a controller re-decides the same condition.
-func dropTransitionTimes(content map[string]any) {
-	conditions, found, err := unstructured.NestedFieldNoCopy(content, "status", "conditions")
-	if !found || err != nil {
-		return
-	}
-	entries, ok := conditions.([]any)
-	if !ok {
-		return
-	}
-	for _, entry := range entries {
-		if condition, ok := entry.(map[string]any); ok {
-			delete(condition, "lastTransitionTime")
-		}
-	}
 }
 
 // ownerSet holds the owners a snapshot can resolve, the way the collector

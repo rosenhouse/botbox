@@ -9,6 +9,7 @@ import (
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
+	"github.com/rosenhouse/botbox/pkg/target"
 )
 
 // restartRun converges at 5s, restarts the target at 10s and converges again
@@ -88,6 +89,13 @@ func TestG5IgnoresThePathsSection6Names(t *testing.T) {
 	}
 }
 
+func TestG5CountsAnEmptyConditionListAsNone(t *testing.T) {
+	noConditions := func(u *unstructured.Unstructured) { u.Object["status"] = map[string]any{"conditions": []any{}} }
+	in := restarted(child("w-0", "11", noConditions), child("w-0", "21"))
+
+	silent(t, invariant.RestartStable, in)
+}
+
 func TestG5IgnoresAnOwnerReferenceWhoseOwnerIsGone(t *testing.T) {
 	in := restarted(child("w-0", "11", ownedByGhost), child("w-0", "21", orphaned))
 
@@ -119,9 +127,69 @@ func TestG5ComparesEverythingElse(t *testing.T) {
 
 func TestG5IgnoresThePathsTheTargetExcludes(t *testing.T) {
 	in := restarted(child("w-0", "11", data("0")), child("w-0", "21", data("1")))
-	in.Target.EqualIgnore = []string{"data.index"}
+	in.Target.EqualIgnore = []target.Path{target.MustParsePath("data.index")}
 
 	silent(t, invariant.RestartStable, in)
+}
+
+const startedAt = "probe.example.com/started-at"
+
+func annotations(values map[string]string) option {
+	return func(u *unstructured.Unstructured) { u.SetAnnotations(values) }
+}
+
+func TestG5IgnoresAnAnnotationWhoseKeyHoldsADot(t *testing.T) {
+	for _, stamped := range []struct {
+		name          string
+		before, after option
+	}{
+		{"again", annotations(map[string]string{startedAt: "1", "note": "a"}), annotations(map[string]string{startedAt: "2", "note": "a"})},
+		{"only by the restart", nothing, annotations(map[string]string{startedAt: "2"})},
+	} {
+		t.Run(stamped.name, func(t *testing.T) {
+			in := restarted(child("w-0", "11", stamped.before), child("w-0", "21", stamped.after))
+			in.Target.EqualIgnore = []target.Path{target.MustParsePath(`metadata.annotations["` + startedAt + `"]`)}
+
+			silent(t, invariant.RestartStable, in)
+		})
+	}
+}
+
+func TestG5ComparesTheAnnotationsTheTargetDoesNotIgnore(t *testing.T) {
+	in := restarted(
+		child("w-0", "11", annotations(map[string]string{startedAt: "1", "note": "a"})),
+		child("w-0", "21", annotations(map[string]string{startedAt: "2", "note": "b"})))
+	in.Target.EqualIgnore = []target.Path{target.MustParsePath(`metadata.annotations["` + startedAt + `"]`)}
+
+	fired(t, invariant.RestartStable, in)
+}
+
+// conditions sets two conditions, each with the heartbeat and the message.
+func conditions(heartbeat time.Duration, message string) option {
+	return func(u *unstructured.Unstructured) {
+		stamp := at(heartbeat).Format(time.RFC3339)
+		u.Object["status"] = map[string]any{"conditions": []any{
+			map[string]any{"type": "Ready", "status": "True", "lastHeartbeatTime": stamp, "message": message},
+			map[string]any{"type": "Synced", "status": "True", "lastHeartbeatTime": stamp, "message": message},
+		}}
+	}
+}
+
+func TestG5IgnoresAFieldOfEveryCondition(t *testing.T) {
+	heartbeats := []target.Path{target.MustParsePath("status.conditions[*].lastHeartbeatTime")}
+
+	t.Run("the ignored field", func(t *testing.T) {
+		in := restarted(child("w-0", "11", conditions(0, "ok")), child("w-0", "21", conditions(12*time.Second, "ok")))
+		in.Target.EqualIgnore = heartbeats
+
+		silent(t, invariant.RestartStable, in)
+	})
+	t.Run("another field", func(t *testing.T) {
+		in := restarted(child("w-0", "11", conditions(0, "ok")), child("w-0", "21", conditions(12*time.Second, "retrying")))
+		in.Target.EqualIgnore = heartbeats
+
+		fired(t, invariant.RestartStable, in)
+	})
 }
 
 func TestG5UsesTheTargetsOwnEquality(t *testing.T) {

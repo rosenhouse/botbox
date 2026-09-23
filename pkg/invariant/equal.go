@@ -2,7 +2,6 @@ package invariant
 
 import (
 	"fmt"
-	"reflect"
 	"slices"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -25,22 +24,29 @@ var ignoredByDefault = []target.Path{
 	target.MustParsePath("status.conditions[*].lastTransitionTime"),
 }
 
-// equality compares the snapshots around one Restart. A target that declares
-// a hook replaces the whole predicate (DESIGN.md §8.4); otherwise this is the
-// §6 default, which needs both snapshots to tell a live owner from a dangling
-// reference.
-func (in Input) equality(before, after state, out *Result) func(a, b observe.Version) bool {
+// differ lists what differs between the versions of one object around a
+// Restart. A target's own equality hook replaces the whole predicate, so G5 can
+// name no field. Otherwise this is the default, which needs both snapshots to
+// tell a live owner from a dangling reference. A Secret's values are quoted as
+// objects.jsonl writes them.
+func (in Input) differ(before, after state, out *Result) func(object Difference, a, b observe.Version) []Difference {
 	if in.Target.Equal != nil {
-		return func(a, b observe.Version) bool {
-			return in.Target.Equal(snapshot(a), snapshot(b))
+		return func(object Difference, a, b observe.Version) []Difference {
+			if in.Target.Equal(snapshot(a), snapshot(b)) {
+				return nil
+			}
+			return []Difference{whole(object, "(present)", "(changed)")}
 		}
 	}
 	liveBefore, liveAfter := in.owners(before), in.owners(after)
-	return func(a, b observe.Version) bool {
-		return reflect.DeepEqual(
-			in.comparable(a.Object, liveBefore, out),
-			in.comparable(b.Object, liveAfter, out),
-		)
+	return func(object Difference, a, b observe.Version) []Difference {
+		was, is := in.comparable(a.Object, liveBefore, out), in.comparable(b.Object, liveAfter, out)
+		changes := diff(nil, was, is, observe.Redacted(a.GVK, was), observe.Redacted(b.GVK, is), nil)
+		differences := make([]Difference, len(changes))
+		for i, c := range changes {
+			differences[i] = c.difference(object)
+		}
+		return differences
 	}
 }
 

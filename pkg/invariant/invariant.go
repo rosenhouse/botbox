@@ -140,6 +140,22 @@ type Violation struct {
 	// (DESIGN.md §5.7, D39).
 	Managed      []observe.Version `json:"managed,omitempty"`
 	ManagedTotal *int              `json:"managedTotal,omitempty"`
+	// Differences are what G5 found changed across a restart, and
+	// DifferencesTotal how many there were. Compared names the two states.
+	Differences      []Difference `json:"differences,omitempty"`
+	DifferencesTotal int          `json:"differencesTotal,omitempty"`
+	Compared         string       `json:"compared,omitempty"`
+}
+
+// Difference is one field that differs between two versions of an object,
+// with its value in each. Path is (object) where one version is absent or the
+// target's own equality compared the whole object.
+type Difference struct {
+	Object           string    `json:"object"`
+	ResourceVersions [2]string `json:"resourceVersions"`
+	Path             string    `json:"path"`
+	Before           string    `json:"before"`
+	After            string    `json:"after"`
 }
 
 // Result is what one check found.
@@ -188,6 +204,12 @@ func (v Violation) quotingRequests(e Excerpt[proxy.Request]) Violation {
 // quotingVersions does the same for a timeline of object versions.
 func (v Violation) quotingVersions(e Excerpt[observe.Version]) Violation {
 	v.Versions, v.VersionsTotal, v.VersionsOf = e.Quoted, e.Total, e.Of
+	return v
+}
+
+// quotingDifferences does the same for what changed across a restart.
+func (v Violation) quotingDifferences(e Excerpt[Difference]) Violation {
+	v.Differences, v.DifferencesTotal = e.Quoted, e.Total
 	return v
 }
 

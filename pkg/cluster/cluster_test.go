@@ -83,6 +83,13 @@ func TestValidateNamesTheControlPlaneBinaryItCannotRun(t *testing.T) {
 			}
 			return []string{filepath.Join(dir, "etcd"), "not executable"}
 		}},
+		{"etcd is a directory", func(t *testing.T) []string {
+			dir := installControlPlane(t, "kube-apiserver")
+			if err := os.Mkdir(filepath.Join(dir, "etcd"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			return []string{filepath.Join(dir, "etcd"), "not executable"}
+		}},
 		{"TEST_ASSET_ETCD names a missing file", func(t *testing.T) []string {
 			installControlPlane(t, "etcd", "kube-apiserver")
 			missing := filepath.Join(t.TempDir(), "etcd")

@@ -569,7 +569,6 @@ var (
 func whyItStopped(path string) string {
 	said := tailLines(path)
 	for _, line := range said {
-		line = strings.TrimSpace(line)
 		if slices.ContainsFunc(panicked, func(opener string) bool { return strings.HasPrefix(line, opener) }) {
 			return line
 		}
@@ -657,7 +656,7 @@ func (r *runner) checkResource(resource string) error {
 		if s.Name == resource {
 			return nil
 		}
-		if strings.EqualFold(s.Name, resource) || strings.EqualFold(s.SingularName, resource) || strings.EqualFold(s.Kind, resource) {
+		if strings.EqualFold(s.Name, resource) || strings.EqualFold(s.SingularName, resource) {
 			meant = s.Name
 		}
 	}

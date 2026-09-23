@@ -77,13 +77,16 @@ func TestLaunchCheckFindsTheBinaryWhereBotboxRuns(t *testing.T) {
 	for _, test := range []struct {
 		binary string
 		want   []string
+		// relative is whether the error names the working directory.
+		relative bool
 	}{
 		{binary: "./operator"},
 		{binary: filepath.Join(dir, "operator")},
 		{binary: "sh"},
-		{binary: "bin/operator", want: []string{"launch.binary", "bin/operator", "working directory " + dir, "target.yaml"}},
-		{binary: "./notes", want: []string{"launch.binary", "./notes", "permission denied"}},
+		{binary: "bin/operator", want: []string{"launch.binary", "bin/operator", "working directory " + dir, "target.yaml"}, relative: true},
+		{binary: "./notes", want: []string{"launch.binary", "./notes", "permission denied"}, relative: true},
 		{binary: "no-such-program-on-path", want: []string{"launch.binary", "no-such-program-on-path", "PATH"}},
+		{binary: filepath.Join(dir, "no-such-operator"), want: []string{"launch.binary", filepath.Join(dir, "no-such-operator")}},
 	} {
 		t.Run(test.binary, func(t *testing.T) {
 			err := target.LaunchSpec{Binary: test.binary}.Check()
@@ -101,6 +104,9 @@ func TestLaunchCheckFindsTheBinaryWhereBotboxRuns(t *testing.T) {
 				if !strings.Contains(err.Error(), said) {
 					t.Errorf("Check returned %q, which does not say %q.", err, said)
 				}
+			}
+			if named := strings.Contains(err.Error(), "working directory"); named != test.relative {
+				t.Errorf("Check returned %q; want it to name the working directory only for a relative path.", err)
 			}
 		})
 	}

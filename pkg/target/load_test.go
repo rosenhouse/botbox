@@ -413,6 +413,10 @@ func TestLoadPointsAtAMisspelledKey(t *testing.T) {
 			[]string{"line 9: thresholds.errlop is not a key; did you mean errloop?"}},
 		{"after a merge", minimalTarget + "timeouts:\n  <<: {settle: 5s}\n  stabel: 2s\n",
 			[]string{"line 7: timeouts.stabel is not a key; did you mean stable?"}},
+		{"three edits away", minimalTarget + "timeouts:\n  setxxx: 5s\n",
+			[]string{"line 6: timeouts.setxxx is not a key; timeouts takes settle, stable and delete"}},
+		{"as near to delete as to settle", minimalTarget + "timeouts:\n  detele: 5s\n",
+			[]string{"did you mean settle?"}},
 		{"too short to be near", minimalTarget + "properties:\n  - xy: P1\n",
 			[]string{"line 6: properties[0].xy is not a key; properties[0] takes id, description, cel and when"}},
 		// The decoder matches a key whatever its case.
@@ -437,8 +441,15 @@ func TestLoadPointsAtAMisspelledKey(t *testing.T) {
 }
 
 // clusterScopedCRDs define a cluster-scoped Widget and Gadget and a
-// namespaced Thing.
+// namespaced Thing. Another group's Thing is cluster-scoped.
 const clusterScopedCRDs = `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+spec:
+  group: elsewhere.botbox
+  names: {kind: Thing, plural: things}
+  scope: Cluster
+---
+apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 spec:
   group: toy.botbox
@@ -484,6 +495,19 @@ fixtures: [fixtures.yaml]
 		if strings.Contains(err.Error(), namespaced) {
 			t.Errorf("Load returned %q, which names the namespaced %s.", err, namespaced)
 		}
+	}
+}
+
+func TestLoadRejectsACRDFileThatIsNotYAML(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{
+		"widget.yaml":   sampleWidget,
+		"crds/bad.yaml": "spec: [unterminated\n",
+	})
+
+	_, err := target.Load(path)
+
+	if err == nil || !strings.Contains(err.Error(), "bad.yaml") {
+		t.Errorf("Load returned %v, want an error naming bad.yaml.", err)
 	}
 }
 

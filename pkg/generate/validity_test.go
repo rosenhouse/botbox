@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -51,6 +52,30 @@ func TestAMutatePathTheCRDRefusesInTheSampleIsAConfigurationError(t *testing.T) 
 				}
 			}
 		})
+	}
+}
+
+func TestNewReportsAFieldBotboxCannotDraw(t *testing.T) {
+	// No set of three items holds only a and b.
+	overlay := map[string]map[string]any{"spec.tags": {"minItems": 3, "items": map[string]any{"enum": []any{"a", "b"}}}}
+	loaded := loadTarget(t, rulesTarget)
+	loaded.Generate = target.GenerateSpec{Mutate: []string{"spec.tags"}, Overlay: overlay}
+	_, err := New(loaded, Options{})
+	if err == nil {
+		t.Fatal("New accepted generate.mutate spec.tags, which botbox cannot draw.")
+	}
+	for _, want := range []string{"generate.mutate spec.tags", "cannot draw"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("New reported %q, which does not mention %q.", err, want)
+		}
+	}
+
+	loaded.Generate.Mutate = nil
+	g := newGenerator(t, loaded, Options{})
+	if !slices.ContainsFunc(g.LeftAlone(), func(note string) bool {
+		return strings.Contains(note, "spec.tags") && strings.Contains(note, "cannot draw")
+	}) {
+		t.Errorf("New reports it leaves %q alone, want spec.tags among them.", g.LeftAlone())
 	}
 }
 

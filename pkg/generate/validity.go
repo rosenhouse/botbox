@@ -85,7 +85,12 @@ const fieldDraws = 100
 
 // acceptsADraw is nil once the CRD accepts the sample with a value drawn for
 // the field, and otherwise says why it refused them.
-func (c *crdRules) acceptsADraw(sample *unstructured.Unstructured, f field) error {
+func (c *crdRules) acceptsADraw(sample *unstructured.Unstructured, f field) (err error) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("botbox cannot draw a value its schema allows: %v", recovered)
+		}
+	}()
 	return rapid.Custom(func(t *rapid.T) error {
 		var refused error
 		for range fieldDraws {

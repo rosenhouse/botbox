@@ -12,7 +12,8 @@ import (
 const settlePoll = 50 * time.Millisecond
 
 // Settle waits for the target's reaction (DESIGN.md §5.5): the Ready predicate
-// holds and neither the CR nor a managed object has changed for T_stable. It
+// holds, and neither the CR nor a managed object has changed, nor the target
+// restarted, for T_stable. It
 // reports whether it converged within T_settle, or by what owed returns if
 // that is later: the target may still be recovering from a fault. A nil owed
 // owes nothing. A wait that expires while no fault excuses it is a G4
@@ -36,8 +37,8 @@ type settle struct {
 	poll     time.Duration
 	now      func() time.Time
 	sleep    func(context.Context, time.Duration) error
-	// state reports whether the target is ready, and when the run namespace
-	// last changed, which is never before since.
+	// state reports whether the target is ready, and when the run last
+	// changed, which is never before since.
 	state func(since time.Time) (ready bool, changed time.Time)
 	// stopped is closed once the target's process has stopped.
 	stopped <-chan struct{}
@@ -82,14 +83,20 @@ func closed(c <-chan struct{}) bool {
 	}
 }
 
-// state reads the Observer. Readiness is read first, so that a change arriving
-// during the read counts against stability rather than for it. The op that
-// opened the wait changed the CR, which is why stability runs from since.
+// state reads the launcher and the Observer. Readiness is read first, so that
+// a change arriving during the read counts against stability rather than for
+// it. The op that opened the wait changed the CR, which is why stability runs
+// from since. A target waiting to restart is down, and a restart counts as a
+// change.
 func (h *Harness) state(since time.Time) (bool, time.Time) {
-	ready := ready(h.target.Ready, h.Observer.Current(h.target.Primary))
+	target := h.Launcher.Status()
+	ready := !target.Restarting && ready(h.target.Ready, h.Observer.Current(h.target.Primary))
 	changed := since
 	if window := h.Observer.Window(since, time.Now()); len(window) > 0 {
 		changed = window[len(window)-1].Time
+	}
+	if target.Started.After(changed) {
+		changed = target.Started
 	}
 	return ready, changed
 }

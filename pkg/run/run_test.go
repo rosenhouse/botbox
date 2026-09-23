@@ -236,6 +236,55 @@ func TestReady(t *testing.T) {
 	}
 }
 
+// launcherReporting is a launcher that only reports status.
+type launcherReporting struct {
+	launch.Launcher
+	status launch.Status
+}
+
+func (l launcherReporting) Status() launch.Status { return l.status }
+
+// harnessOver reads a quiet, empty run namespace and the target as status says.
+func harnessOver(status launch.Status) *Harness {
+	return &Harness{
+		target:   &target.Target{Primary: widgetKind},
+		Observer: &observe.Observer{Store: observe.NewStore(observe.Options{Namespace: "botbox-run-1"})},
+		Launcher: launcherReporting{status: status},
+	}
+}
+
+// A target waiting out a restart backoff is down, whatever state it left.
+func TestATargetWaitingToRestartIsNotReady(t *testing.T) {
+	since := time.Now()
+	for _, test := range []struct {
+		name   string
+		status launch.Status
+		ready  bool
+	}{
+		{"running", launch.Status{Running: true, Started: since.Add(-time.Minute)}, true},
+		{"waiting to restart", launch.Status{Running: true, Restarting: true, Started: since.Add(-time.Minute)}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if ready, _ := harnessOver(test.status).state(since); ready != test.ready {
+				t.Errorf("A target %s reads as ready: %t, want %t.", test.name, ready, test.ready)
+			}
+		})
+	}
+}
+
+// A restarted target has to hold still for T_stable too, or a wait converges
+// before the new process has done anything.
+func TestARestartCountsAsAChange(t *testing.T) {
+	since := time.Now().Add(-time.Minute)
+	restarted := since.Add(time.Second)
+
+	_, changed := harnessOver(launch.Status{Running: true, Started: restarted}).state(since)
+
+	if !changed.Equal(restarted) {
+		t.Errorf("The run last changed at %v, want the restart at %v.", changed, restarted)
+	}
+}
+
 // Each exit of a supervised target is recorded with the line its own process
 // wrote as it stopped, though every process writes to one log.
 func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {

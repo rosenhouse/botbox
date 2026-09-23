@@ -123,9 +123,15 @@ func (r *run) deletedManaged(when time.Duration, name string) *run {
 	return r
 }
 
+// checkpoint ends the settle wait of the last op, which began where the op
+// was applied.
 func (r *run) checkpoint(when time.Duration, result invariant.SettleResult) *run {
+	var began time.Time
+	if n := len(r.in.Ops); n > 0 {
+		began = r.in.Ops[n-1].Time
+	}
 	r.in.Checkpoints = append(r.in.Checkpoints, invariant.Checkpoint{
-		Op: len(r.in.Ops) - 1, Time: at(when), Settle: result,
+		Op: len(r.in.Ops) - 1, Began: began, Time: at(when), Settle: result,
 	})
 	return r
 }

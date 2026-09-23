@@ -53,10 +53,10 @@ func (k requestKey) String() string {
 func (in Input) repeatedFailures() []failure {
 	grouped := map[time.Time]map[requestKey][]proxy.Request{}
 	for _, r := range in.Requests {
-		if r.Status < 400 || conflicted(r) || r.Fault != "" || in.faulted(r.Start, r.Start) {
+		if !failed(r) || in.faulted(r.Start, r.Start) {
 			continue
 		}
-		key := requestKey{verb: r.Verb, group: r.Group, resource: r.Resource, name: r.Name}
+		key := keyOf(r)
 		since := in.specSetAt(r.Start)
 		if grouped[since] == nil {
 			grouped[since] = map[requestKey][]proxy.Request{}
@@ -77,6 +77,16 @@ func (in Input) repeatedFailures() []failure {
 		)
 	})
 	return failures
+}
+
+func keyOf(r proxy.Request) requestKey {
+	return requestKey{verb: r.Verb, group: r.Group, resource: r.Resource, name: r.Name}
+}
+
+// failed reports whether the API server refused the target, rather than the
+// proxy refusing it or the target losing a race.
+func failed(r proxy.Request) bool {
+	return r.Status >= 400 && !conflicted(r) && r.Fault == ""
 }
 
 // conflicted reports whether the request lost an optimistic-concurrency race,

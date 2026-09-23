@@ -259,6 +259,29 @@ func TestG5NamesTheFirstOpThatKeptItFromJudgingARestart(t *testing.T) {
 	noted(t, invariant.RestartStable, in, "op 1 (update) ran")
 }
 
+func TestG5LeavesARestartUnjudgedWhereAFaultReachedBetweenTheStatesItCompares(t *testing.T) {
+	for _, fault := range []struct {
+		name     string
+		from, to time.Duration
+		judged   bool
+	}{
+		{"after the state before", 6 * time.Second, 7 * time.Second, false},
+		{"before the state after", 11 * time.Second, 12 * time.Second, false},
+		{"until the state before", 2 * time.Second, 5 * time.Second, true},
+		{"after the state after", 16 * time.Second, 18 * time.Second, true},
+	} {
+		t.Run(fault.name, func(t *testing.T) {
+			in := changedAround(func(r *run) *run { return r.fault(fault.from, fault.to) })
+
+			if fault.judged {
+				fired(t, invariant.RestartStable, in)
+				return
+			}
+			noted(t, invariant.RestartStable, in, "for op 0 (restart): a fault was active")
+		})
+	}
+}
+
 func TestG5ComparesTheMetadataSection6DoesNotIgnore(t *testing.T) {
 	in := restarted(child("w-0", "11", data("0")), child("w-0", "21", data("0"), deleting(12*time.Second)))
 

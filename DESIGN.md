@@ -196,7 +196,9 @@ The Runner executes one sequence:
    `Ready` predicate holds and neither the CR nor a managed object has changed for
    `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
    that expires while no fault is active records a G4 violation, where a fault counts as
-   active once the proxy has applied it and until the proxy stops (D36). A wait also ends
+   active once the proxy has applied it and until the proxy stops (D36). A fault that
+   stopped as the wait ended leaves the wait to the next one, or to the teardown's
+   recovery wait, because the target is still owed time. A wait also ends
    where the target's process exits, and the Runner checks the target is running before it
    applies each op. A target that stopped ends the run as a harness error naming the op it
    was at (§11), because the ops behind it would run against nothing.
@@ -316,12 +318,14 @@ recover from a fault (§5.5 step 4), so a sequence ends with an op that settles.
 
 **Recovery from faults.** A target backs off while its requests fail, and one that doubles
 its delay retries within as long as it has been failing. Once faults stop, G4 therefore
-owes the target as long as they lasted plus `T_settle`. The faults are those whose windows
-reach past the last settle wait that converged, since a target that converged had
-recovered, and they lasted from the first request the proxy faulted with any of them to
-the instant the last of them stopped. A settle wait does not give up before that time has
-passed, and one that expired is excused only while a fault is active or that time is still
-owed. A spec change made within that time is judged at the later of the two deadlines.
+gives the target as long as they lasted plus `T_settle`. The faults are those whose
+windows reach past the last settle wait that converged, because a target that converged
+had recovered. They lasted from the first request the proxy faulted with any of them, or
+from that convergence if it came later, to the instant the last of them stopped. A settle
+wait does not give up before that time has passed, and one that expired is excused only
+while a fault is active or that time is still owed. A spec change made within that time is
+judged at the later of the two deadlines. A settle wait that converged sooner ends that
+time early.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -1116,17 +1120,14 @@ built from source and run as a black-box binary.
   run per sequence.
 - **D@40 After faults stop, a target has as long as they lasted plus `T_settle` to
   recover, and the teardown waits for it.** The README's fault example failed the toy with
-  no bug. Its fault outlived the sequence, the teardown cleared it and opened its quiet
-  window at once, and the toy's next create landed there as G1. B11, which never
-  recovers, passed the same sequence, because nothing judged the time after the fault.
-  With the fault's count at 10 the correct toy failed G4 instead: its wait ended
-  `T_settle` after the update, 2.47 s after the fault stopped. §6 asked for `T_settle`
-  after faults stop, and the Runner and the engine each measured something else. The
-  teardown now waits for a target still owed that time, and every wait runs until it has
-  passed. `T_settle` alone is too short. controller-runtime doubles the toy's delay from
-  5 ms, so eleven refusals put its next create 5.12 s out, and after a fault that spanned
-  three expired waits that create came 5.4 s after the teardown cleared the fault. A
-  target that doubles its delay retries within as long as it has been failing, so G4 owes
-  it that span too, counted from the last wait that converged. The Runner and the engine
-  share the rule. The recovery wait is judged as an op's wait is, so the caller's deadline
-  ends it. This is the teardown that settles first that D32 deferred, for faults only.
+  no bug: its fault outlived the sequence, the teardown cleared it and opened the quiet
+  window at once, and the toy's next create landed there as G1. B11 never recovers and
+  passed it, because nothing judged the time after the fault. With the fault's count at
+  10, the correct toy failed G4 2.47 s after the fault stopped, because its wait ended
+  `T_settle` after the update. `T_settle` alone is too short: controller-runtime doubles
+  the toy's delay from 5 ms, and after a fault that spanned three expired waits its next
+  create came 5.4 s after the fault was cleared. A target that doubles its delay retries
+  within as long as it has been failing, so G4 gives it that span as well, starting no
+  earlier than its last convergence. The Runner's waits and the engine share the rule, and
+  the teardown's recovery wait is judged as an op's wait is. This is the teardown that
+  settles first that D32 deferred, for faults only.

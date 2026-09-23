@@ -13,11 +13,10 @@ const settlePoll = 50 * time.Millisecond
 
 // Settle waits for the target's reaction (DESIGN.md §5.5): the Ready predicate
 // holds, and neither the CR nor a managed object has changed, nor the target
-// restarted, for T_stable. It
-// reports whether it converged within T_settle, or by what owed returns if
-// that is later: the target may still be recovering from a fault. A nil owed
-// owes nothing. A wait that expires while no fault excuses it is a G4
-// violation, which the caller records.
+// restarted, for T_stable. It reports whether it converged within T_settle, or
+// by what owed returns if that is later: the target may still be recovering
+// from a fault. A nil owed owes nothing. A wait that expires while no fault
+// excuses it is a G4 violation, which the caller records.
 func (h *Harness) Settle(ctx context.Context, owed func() time.Time) (bool, error) {
 	return settle{
 		timeouts: h.target.Timeouts,

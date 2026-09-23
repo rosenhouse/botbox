@@ -165,13 +165,16 @@ func TestTheLiveRunDrivesTheProxysFaults(t *testing.T) {
 		resp.Body.Close()
 		return resp.StatusCode
 	}
-	removed, kept := live.addFault(spec), live.addFault(spec)
+	kept, removed := live.addFault(spec), live.addFault(spec)
 
 	live.removeFault(removed)
 	get()
 
-	if window := live.faultWindow(kept); window.First.IsZero() {
-		t.Error("The fault kept never applied, so the request met the one removed.")
+	if window := live.faultWindow(removed); window.Retired.IsZero() {
+		t.Error("The fault removed is still applying.")
+	}
+	if window := live.faultWindow(kept); window.First.IsZero() || !window.Retired.IsZero() {
+		t.Errorf("The fault kept ran %+v, want it applied and still applying.", window)
 	}
 	live.clearFaults()
 	if status := get(); status == http.StatusInternalServerError {

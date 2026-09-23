@@ -60,6 +60,9 @@ type Options struct {
 	// does and envtest does not. Its garbage collector replaces botbox's
 	// emulation, and botbox waits for what it adds to every namespace.
 	ControllerManager bool
+	// NamespaceDefaultsWithin bounds the wait for what the controller manager
+	// adds to the run namespace. Zero takes 30 s.
+	NamespaceDefaultsWithin time.Duration
 	// Check evaluates the invariants and properties at each checkpoint. Run
 	// requires it; Start does not use it.
 	Check Checker
@@ -74,6 +77,13 @@ func (o Options) maxManaged() int {
 		return o.MaxManaged
 	}
 	return defaultMaxManaged
+}
+
+func (o Options) namespaceDefaultsWithin() time.Duration {
+	if o.NamespaceDefaultsWithin > 0 {
+		return o.NamespaceDefaultsWithin
+	}
+	return defaultNamespaceDefaultsWithin
 }
 
 // Harness is one run's machinery.
@@ -175,7 +185,7 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 		return err
 	}
 	if opts.ControllerManager {
-		err := awaitNamespaceDefaults(ctx, h.Observer.Store, h.target.WatchedKinds(), namespaceDefaultsWithin, sleep)
+		err := awaitNamespaceDefaults(ctx, h.Observer.Store, h.target.WatchedKinds(), opts.namespaceDefaultsWithin(), sleep)
 		if err != nil {
 			return err
 		}
@@ -305,7 +315,7 @@ var namespaceDefaults = []struct {
 	{schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, "kube-root-ca.crt"},
 }
 
-const namespaceDefaultsWithin = 30 * time.Second
+const defaultNamespaceDefaultsWithin = 30 * time.Second
 
 // awaitNamespaceDefaults waits for the store to hold each namespace default
 // of a kind the run watches.

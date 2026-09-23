@@ -125,6 +125,27 @@ func TestHarness(t *testing.T) {
 		requireNoRunNamespaceLive(t, ctx, testCluster.Config())
 	})
 
+	// envtest runs no controller manager, so it never adds kube-root-ca.crt.
+	t.Run("ends when the controller manager adds nothing to the namespace", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		opts := run.Options{
+			Dir:                     t.TempDir(),
+			Config:                  testCluster.Config(),
+			ControllerManager:       true,
+			NamespaceDefaultsWithin: time.Second,
+		}
+
+		h, err := run.Start(ctx, toy, opts)
+
+		if h != nil {
+			_ = h.Stop(context.Background())
+		}
+		if err == nil || !strings.Contains(err.Error(), "v1/ConfigMap kube-root-ca.crt in the run namespace within 1s") {
+			t.Fatalf("Start returned %v, want an error naming the v1/ConfigMap kube-root-ca.crt it waited 1s for.", err)
+		}
+		requireNoRunNamespaceLive(t, ctx, testCluster.Config())
+	})
+
 	// A run given no cluster starts one and installs the target's CRDs in it.
 	// Everything the run then starts resolves those kinds, so nothing comes up
 	// unless the run built its mapper after the install.

@@ -51,7 +51,7 @@ type fakeHarness struct {
 	// so that a test can drive the log past what a violation quotes.
 	logged []proxy.Request
 	// applying is what the harness says the proxy did with each fault, by
-	// ID. Its zero value is a fault that matched nothing.
+	// ID. Its zero value is a fault the proxy applied to no request.
 	applying []proxy.FaultWindow
 
 	managed map[schema.GroupVersionKind][]string
@@ -983,7 +983,7 @@ func TestTheTeardownWaitsForNoRecoveryTheTargetIsNotOwed(t *testing.T) {
 		name     string
 		applying []proxy.FaultWindow
 	}{
-		{name: "a fault that matched nothing"},
+		{name: "a fault the proxy applied to no request"},
 		{name: "a fault the target converged after",
 			applying: []proxy.FaultWindow{{First: time.Now().Add(-3 * time.Second), Retired: time.Now().Add(-2 * time.Second)}}},
 	} {

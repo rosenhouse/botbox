@@ -1169,9 +1169,9 @@ built from source and run as a black-box binary.
   one fault op left G1 to G4 and G6 unjudged from then on, and a fault matching a resource
   the target never touches did the same. The proxy now reports what it did with each
   fault, and the window runs from the first request it faulted to the request or the
-  instant the trigger ran out. A fault that matched no request has no window: it changed
-  nothing, so it excuses nothing. This is the vacuity §9.1's control row exists to catch,
-  one layer up: a run that reports nothing because nothing was judged.
+  instant the trigger ran out. A fault the proxy applied to no request has no window: it
+  changed nothing, so it excuses nothing. This is the vacuity §9.1's control row exists to
+  catch, one layer up: a run that reports nothing because nothing was judged.
 - **D40 The external-secrets sample sets `refreshPolicy: OnChange`.** Under the CRD's
   `Periodic` the controller rewrites the ExternalSecret's status on every
   `refreshInterval`. Which check reports those writes depends on the interval. At `10s`,

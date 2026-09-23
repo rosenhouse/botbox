@@ -159,8 +159,8 @@ type Timeline struct {
 	// never did (DESIGN.md §6, D34).
 	Cleaned time.Time
 	// Faults are the windows the proxy applied each fault op's fault in, one
-	// per fault op. A window with no Start is a fault that matched no request,
-	// which changed nothing and excuses nothing (D36). A window with no End is
+	// per fault op. A window with no Start is a fault the proxy applied to no
+	// request, which changed nothing and excuses nothing (D36). A window with no End is
 	// a fault the proxy still applies.
 	Faults []Window
 	// Forced names every object the teardown force-removed a finalizer from.

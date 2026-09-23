@@ -106,8 +106,8 @@ func settleResult(checkpoint Checkpoint) invariant.SettleResult {
 }
 
 // engineFaults hands over the windows the proxy applied a fault in. A fault
-// that matched no request has no window: it changed nothing about the run, so
-// it excuses nothing (DESIGN.md §6, D36).
+// the proxy applied to no request has no window: it changed nothing about the
+// run, so it excuses nothing (DESIGN.md §6, D36).
 func engineFaults(windows []Window) []invariant.FaultWindow {
 	var faults []invariant.FaultWindow
 	for _, window := range windows {

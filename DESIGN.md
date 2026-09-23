@@ -392,9 +392,9 @@ Details the example does not show:
 - Any CR op may carry `"noSettle": true`, which skips the Runner's implicit settle wait.
 - A sequence ends with an op that settles, or nothing judges the state it leaves behind
   (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
-- G5 judges a `restart` only between two converged settle waits with no CR op and no
-  `deleteManaged` between them (§6). A `settle` op on each side of a `restart` gives it
-  those.
+- G5 judges a `restart` only between two converged settle waits with no CR op between
+  them and no `deleteManaged` that deleted something (§6). Put a `settle` op after a
+  `restart`, and one before it unless the op before it settles.
 - `update` applies `patch` as a JSON merge patch (RFC 7386).
 - `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
@@ -1069,13 +1069,12 @@ built from source and run as a black-box binary.
   its default `Retain` leaves a Secret that still carries an ownerReference, which the
   collector removes.
 - **D@41 G5 judges a restart only where botbox changed nothing between its snapshots.**
-  `b10.json` failed G5 against the toy with no bug. A `restart` does not settle, so the
-  first converged state after it followed the update, and the update to `count` 1 was
-  the whole difference. G5 now notes such a restart. Making `restart` settle was
-  rejected: it would reverse D33, which lets a hand-written sequence restart and change
-  the spec at once, and it would change what replaying an existing sequence does. The
-  cost is every restart botbox confounds itself, even with an update that changes
-  nothing, and G5 cannot judge those soundly. The shrink pass matches a candidate on the
-  check alone, so it could drop the settle after a restart and keep a G5 the next op
-  caused; that candidate now gives a note and no G5. `b0.json` moves its settle to after
-  its restart, so the control row still judges G5.
+  A `restart` does not settle, so in `b10.json` the first converged state after the
+  restart follows the update to `count` 1. G5 blamed the restart for that update and
+  failed the toy with no bug. G5 notes such a restart instead. A `restart` that settles
+  was rejected: it would reverse D33, which lets a hand-written sequence restart and
+  change the spec at once, and it would change what replaying a sequence does. G5 loses
+  every restart botbox confounds itself, even with an update that changes nothing, and it
+  cannot judge those soundly. The shrink pass matches a candidate on the check alone,
+  so a candidate without the settle after a restart no longer keeps a G5 the next op
+  caused. `b0.json` settles after its restart, so the control row judges G5.

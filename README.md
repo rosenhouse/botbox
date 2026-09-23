@@ -204,9 +204,9 @@ A sequence file runs as written and is never minimized. This is
 `botbox replay --target target.yaml sequence.json` re-executes one, which is how you re-examine
 a failure, and `make test-example` runs both pinned sequences so they cannot rot.
 
-In a sequence you write, put a `settle` op on each side of a `restart`. G5 compares the states
-the controller settled in on either side, and leaves a note instead of a verdict when another op
-changed something in between.
+In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
+before it settles. G5 compares the states the controller settled in on either side, and leaves a
+note instead of a verdict when another op changed something in between.
 
 ## Reading a report
 

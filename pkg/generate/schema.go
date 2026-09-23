@@ -73,16 +73,6 @@ type field struct {
 	optional bool
 }
 
-// primarySchema reads the schema of the target's primary CR from its CRDs,
-// with generate.overlay applied (DESIGN.md §8.3).
-func primarySchema(t *target.Target) (*schema, error) {
-	root, err := openAPISchema(t)
-	if err != nil {
-		return nil, err
-	}
-	return overlaid(root, t.Generate.Overlay)
-}
-
 // overlaid merges each overlay into the raw schema, in place, and reads the
 // result.
 func overlaid(root map[string]any, overlays map[string]map[string]any) (*schema, error) {
@@ -279,8 +269,8 @@ func asSchema(root map[string]any) (*schema, error) {
 
 // mutableFields are the paths the generator may change: the allowlist in
 // generate.mutate, or every path under spec where it is absent (DESIGN.md
-// §5.4).
-// Without the allowlist, it also says which spec paths it leaves alone and why.
+// §5.4). Without the allowlist, it also says which spec paths it leaves alone
+// and why.
 func mutableFields(t *target.Target, s *schema) ([]field, []string, error) {
 	if len(t.Generate.Mutate) == 0 {
 		fields, leftAlone := specFields(s, t.Sample.Object)

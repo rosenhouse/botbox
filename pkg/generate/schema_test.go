@@ -24,6 +24,15 @@ func loadTarget(t *testing.T, path string) *target.Target {
 	return loaded
 }
 
+// primarySchema reads the primary CR's schema with generate.overlay applied.
+func primarySchema(t *target.Target) (*schema, error) {
+	root, err := openAPISchema(t)
+	if err != nil {
+		return nil, err
+	}
+	return overlaid(root, t.Generate.Overlay)
+}
+
 func primarySchemaOf(t *testing.T, path string) *schema {
 	t.Helper()
 	read, err := primarySchema(loadTarget(t, path))

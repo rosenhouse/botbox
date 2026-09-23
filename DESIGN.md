@@ -252,12 +252,12 @@ target never created has no version to quote, and the count is what a report abo
 missing one turns on (D39). A G5 violation names the two states it compared and quotes, in
 a table of its own, each field that differs between them: the object, the resourceVersions
 compared, the path in the form `equalIgnore` takes, and the value on each side, cut to 80
-runes. An object only one state holds is one row, which names no path. The table is bounded
-as a timeline is, and takes the rows of each object in turn (D@52).
+runes. An object only one state holds is one row, which names no path. The table holds at
+most twenty rows, taken from each object in turn (D@52).
 Every violation says how many entries it chose each excerpt from, because a report that
 counted only what it was handed would claim every bounded excerpt was whole. It also says
-the instant it judged, which aligns the two tables, and whose history a one-object
-timeline is.
+the instant it judged, which aligns a timeline with the state at the verdict, and whose
+history a one-object timeline is.
 
 A report's version rows carry no object body. G5's table quotes a Secret's values as the
 markers `objects.jsonl` writes (§11). A report's sequence and replay command hold the sample

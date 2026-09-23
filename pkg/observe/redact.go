@@ -11,18 +11,16 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-const lastApplied = "kubectl.kubernetes.io/last-applied-configuration"
-
 var secretGVK = schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
 
 // markerKey is drawn once per process and never written, so a marker cannot
 // be looked up or brute-forced from what botbox writes.
 var markerKey = []byte(rand.Text())
 
-// Redacted returns a copy of a Secret whose data and stringData values and
-// last-applied-configuration are markers. Equal values share a marker within
-// one process. Any other kind is returned as it is, and content is never
-// modified.
+// Redacted returns a copy of a Secret whose data and annotation values are
+// markers, because a controller may annotate a Secret with a copy or a hash of
+// its data. Equal values share a marker within one process. Any other kind is
+// returned as it is, and content is never modified.
 func Redacted(gvk schema.GroupVersionKind, content map[string]any) map[string]any {
 	if gvk != secretGVK {
 		return content
@@ -30,17 +28,15 @@ func Redacted(gvk schema.GroupVersionKind, content map[string]any) map[string]an
 	redacted := runtime.DeepCopyJSON(content)
 	data, _ := redacted["data"].(map[string]any)
 	for key, value := range data {
-		decoded, _ := base64.StdEncoding.DecodeString(text(value))
+		encoded, _ := value.(string)
+		decoded, _ := base64.StdEncoding.DecodeString(encoded)
 		data[key] = marker(decoded)
-	}
-	stringData, _ := redacted["stringData"].(map[string]any)
-	for key, value := range stringData {
-		stringData[key] = marker([]byte(text(value)))
 	}
 	metadata, _ := redacted["metadata"].(map[string]any)
 	annotations, _ := metadata["annotations"].(map[string]any)
-	if value, found := annotations[lastApplied]; found {
-		annotations[lastApplied] = marker([]byte(text(value)))
+	for key, value := range annotations {
+		text, _ := value.(string)
+		annotations[key] = marker([]byte(text))
 	}
 	return redacted
 }
@@ -49,9 +45,4 @@ func marker(secret []byte) string {
 	mac := hmac.New(sha256.New, markerKey)
 	mac.Write(secret)
 	return fmt.Sprintf("[redacted %d bytes hmac-sha256:%x]", len(secret), mac.Sum(nil)[:8])
-}
-
-func text(value any) string {
-	s, _ := value.(string)
-	return s
 }

@@ -17,8 +17,6 @@ import (
 	"github.com/rosenhouse/botbox/pkg/observe"
 )
 
-const lastApplied = "kubectl.kubernetes.io/last-applied-configuration"
-
 var (
 	secretGVK = schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
 	marker    = regexp.MustCompile(`^\[redacted (\d+) bytes hmac-sha256:([0-9a-f]{16})\]$`)
@@ -72,31 +70,19 @@ func digest(t *testing.T, value any) string {
 }
 
 func TestAHistoryLineHidesASecretsValuesAndNamesItsKeys(t *testing.T) {
-	obj := secret("creds", "10", map[string]string{"token": "s3cr3t"})
-	obj.Object["stringData"] = map[string]any{"password": "hunter2"}
-	written := writtenObjects(t, obj)[0]
+	written := writtenObjects(t, secret("creds", "10", map[string]string{"token": "s3cr3t"}))[0]
 
-	for _, value := range []string{"s3cr3t", "czNjcjN0", "hunter2"} {
-		if strings.Contains(fmt.Sprint(written), value) {
-			t.Errorf("objects.jsonl holds the Secret's value %q: %v", value, written)
-		}
+	if strings.Contains(fmt.Sprint(written), "czNjcjN0") {
+		t.Errorf("objects.jsonl holds the Secret's value: %v", written)
 	}
-	if got := field(t, written, "data")["token"]; !marker.MatchString(fmt.Sprint(got)) {
-		t.Errorf("data.token is %v, want a marker.", got)
-	}
-	if got := field(t, written, "stringData")["password"]; !marker.MatchString(fmt.Sprint(got)) {
-		t.Errorf("stringData.password is %v, want a marker.", got)
-	}
+	digest(t, field(t, written, "data")["token"])
 }
 
 func TestAMarkerCountsTheBytesTheSecretHolds(t *testing.T) {
-	obj := secret("creds", "10", map[string]string{"token": "s3cr3t"})
-	obj.Object["stringData"] = map[string]any{"token": "s3cr3t"}
-	written := writtenObjects(t, obj)[0]
+	written := writtenObjects(t, secret("creds", "10", map[string]string{"token": "s3cr3t"}))[0]
 
-	encoded, plain := field(t, written, "data")["token"], field(t, written, "stringData")["token"]
-	if want := "[redacted 6 bytes hmac-sha256:" + digest(t, plain) + "]"; encoded != want || plain != want {
-		t.Errorf("data.token is %v and stringData.token %v, want both %s: the value, not its encoding.", encoded, plain, want)
+	if got := marker.FindStringSubmatch(fmt.Sprint(field(t, written, "data")["token"])); got == nil || got[1] != "6" {
+		t.Errorf("data.token is marked %v, want 6 bytes: the value, not its base64.", got)
 	}
 }
 
@@ -170,17 +156,18 @@ func TestPrintAMarker(t *testing.T) {
 	fmt.Println(field(t, observe.Redacted(secretGVK, secret("creds", "10", map[string]string{"token": "s3cr3t"}).Object), "data")["token"])
 }
 
-func TestAHistoryLineHidesTheLastAppliedConfiguration(t *testing.T) {
+// A controller may annotate a Secret with a copy or an unkeyed hash of its
+// data, as kubectl and external-secrets do.
+func TestAHistoryLineHidesASecretsAnnotations(t *testing.T) {
 	obj := secret("creds", "10", map[string]string{"token": "s3cr3t"})
 	obj.SetAnnotations(map[string]string{
-		lastApplied:         `{"apiVersion":"v1","kind":"Secret","data":{"token":"czNjcjN0"}}`,
-		"example.com/owner": "team-a",
+		"kubectl.kubernetes.io/last-applied-configuration": `{"apiVersion":"v1","kind":"Secret","data":{"token":"czNjcjN0"}}`,
+		"reconcile.external-secrets.io/data-hash":          "56e1b3f734a3d8e2c7932736ca6ff7fb9a9b5a14378c70c27c5e0adf",
 	})
 	annotations := field(t, writtenObjects(t, obj)[0], "metadata", "annotations")
 
-	digest(t, annotations[lastApplied])
-	if got := annotations["example.com/owner"]; got != "team-a" {
-		t.Errorf("The annotation example.com/owner is %v, want it as the Secret carries it.", got)
+	for key := range obj.GetAnnotations() {
+		digest(t, annotations[key])
 	}
 }
 

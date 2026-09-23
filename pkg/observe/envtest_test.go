@@ -186,42 +186,6 @@ func TestObserverRecordsTheRunNamespace(t *testing.T) {
 		}
 	})
 
-	t.Run("objects.jsonl names a Secret's keys and not its values", func(t *testing.T) {
-		secrets, err := observe.Start(c.Config(), observe.Options{
-			Namespace: ns,
-			Kinds:     []schema.GroupVersionKind{secretGVK},
-			Manages:   []schema.GroupVersionKind{secretGVK},
-			Mapper:    restMapper(t, c.Config()),
-		})
-		if err != nil {
-			t.Fatalf("Starting the observer failed: %v", err)
-		}
-		t.Cleanup(secrets.Stop)
-		if err := secrets.WaitForSync(ctx); err != nil {
-			t.Fatalf("The observer never synced: %v", err)
-		}
-		if _, err := client.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
-			ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: ns},
-			StringData: map[string]string{"token": "s3cr3t"},
-		}, metav1.CreateOptions{}); err != nil {
-			t.Fatalf("Creating the Secret failed: %v", err)
-		}
-		requireVersions(t, secrets, observe.Key{GVK: secretGVK, Namespace: ns, Name: "creds"}, 1)
-
-		var written strings.Builder
-		if err := secrets.WriteHistory(&written); err != nil {
-			t.Fatalf("WriteHistory returned an error: %v", err)
-		}
-		if !strings.Contains(written.String(), `"token":"[redacted 6 bytes`) {
-			t.Errorf("objects.jsonl does not mark the Secret's token: %s", written.String())
-		}
-		for _, value := range []string{"s3cr3t", "czNjcjN0"} {
-			if strings.Contains(written.String(), value) {
-				t.Errorf("objects.jsonl holds the Secret's value %q: %s", value, written.String())
-			}
-		}
-	})
-
 	t.Run("the deletion is the last version", func(t *testing.T) {
 		if err := client.CoreV1().ConfigMaps(ns).Delete(ctx, child.Name, metav1.DeleteOptions{}); err != nil {
 			t.Fatalf("Deleting the ConfigMap failed: %v", err)
@@ -242,4 +206,45 @@ func TestObserverRecordsTheRunNamespace(t *testing.T) {
 			t.Errorf("Managed returned %v after the only managed object was deleted.", got)
 		}
 	})
+}
+
+// The API server serves stringData as base64 data.
+func TestObjectsJSONLNamesASecretsKeysAndNotItsValues(t *testing.T) {
+	ctx := t.Context()
+	c, client := startCluster(t)
+	ns := createNamespace(t, ctx, client)
+
+	obs, err := observe.Start(c.Config(), observe.Options{
+		Namespace: ns,
+		Kinds:     []schema.GroupVersionKind{secretGVK},
+		Manages:   []schema.GroupVersionKind{secretGVK},
+		Mapper:    restMapper(t, c.Config()),
+	})
+	if err != nil {
+		t.Fatalf("Starting the observer failed: %v", err)
+	}
+	t.Cleanup(obs.Stop)
+	if err := obs.WaitForSync(ctx); err != nil {
+		t.Fatalf("The observer never synced: %v", err)
+	}
+	if _, err := client.CoreV1().Secrets(ns).Create(ctx, &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "creds", Namespace: ns},
+		StringData: map[string]string{"token": "s3cr3t"},
+	}, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Creating the Secret failed: %v", err)
+	}
+	requireVersions(t, obs, observe.Key{GVK: secretGVK, Namespace: ns, Name: "creds"}, 1)
+
+	var written strings.Builder
+	if err := obs.WriteHistory(&written); err != nil {
+		t.Fatalf("WriteHistory returned an error: %v", err)
+	}
+	if !strings.Contains(written.String(), `"token":"[redacted 6 bytes`) {
+		t.Errorf("objects.jsonl does not mark the Secret's token: %s", written.String())
+	}
+	for _, value := range []string{"s3cr3t", "czNjcjN0"} {
+		if strings.Contains(written.String(), value) {
+			t.Errorf("objects.jsonl holds the Secret's value %q: %s", value, written.String())
+		}
+	}
 }

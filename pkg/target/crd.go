@@ -78,9 +78,7 @@ func readDocuments(path string) ([]map[string]any, error) {
 		if err := yaml.Unmarshal(document, &decoded); err != nil {
 			return nil, fmt.Errorf("reading the CRDs in %s: %w", path, err)
 		}
-		if decoded != nil {
-			documents = append(documents, decoded)
-		}
+		documents = append(documents, decoded)
 	}
 }
 

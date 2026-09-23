@@ -400,6 +400,8 @@ func TestLoadPointsAtAMisspelledKey(t *testing.T) {
 	}{
 		{"at the top", minimalTarget + "reday: 'true'\n",
 			[]string{"line 5: reday is not a key; did you mean ready?"}},
+		{"in capitals", minimalTarget + "Reday: 'true'\n",
+			[]string{"line 5: Reday is not a key; did you mean ready?"}},
 		{"in a block", minimalTarget + "timeouts:\n  setle: 5s\n",
 			[]string{"line 6: timeouts.setle is not a key; did you mean settle?"}},
 		{"in a list item", minimalTarget + "properties:\n  - id: P1\n    cell: 'true'\n",
@@ -494,6 +496,22 @@ fixtures: [fixtures.yaml]
 	for _, namespaced := range []string{"Thing", "a-thing", "ConfigMap"} {
 		if strings.Contains(err.Error(), namespaced) {
 			t.Errorf("Load returned %q, which names the namespaced %s.", err, namespaced)
+		}
+	}
+}
+
+func TestLoadReadsEveryManifestExtensionOfACRDDirectory(t *testing.T) {
+	for _, file := range []string{"crds/widget.json", "crds/widget.yml"} {
+		path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{
+			"widget.yaml": sampleWidget,
+			file: `{"apiVersion": "apiextensions.k8s.io/v1", "kind": "CustomResourceDefinition",
+				"spec": {"group": "toy.botbox", "names": {"kind": "Widget", "plural": "widgets"}, "scope": "Cluster"}}`,
+		})
+
+		_, err := target.Load(path)
+
+		if err == nil || !strings.Contains(err.Error(), "primary toy.botbox/v1/Widget") {
+			t.Errorf("Load returned %v, want it to refuse the cluster-scoped Widget %s defines.", err, file)
 		}
 	}
 }

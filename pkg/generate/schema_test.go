@@ -214,9 +214,19 @@ func TestWithoutMutateEverySpecPathTheSchemaDescribesMoves(t *testing.T) {
 func TestNewReportsTheSpecPathsItLeavesAlone(t *testing.T) {
 	loaded := loadTarget(t, rulesTarget)
 	leftAlone := newGenerator(t, loaded, Options{}).LeftAlone()
-	if len(leftAlone) != 1 || !strings.Contains(leftAlone[0], "spec.surge") ||
-		!strings.Contains(leftAlone[0], "x-kubernetes-int-or-string") {
-		t.Errorf("New reports it leaves %q alone, want spec.surge and why.", leftAlone)
+	want := [][]string{
+		{"spec.right", "the CRD refuses every value botbox drew for it in the sample", "exactly one of left and right"},
+		{"spec.surge", "x-kubernetes-int-or-string"},
+	}
+	if len(leftAlone) != len(want) {
+		t.Fatalf("New reports it leaves %q alone, want spec.right and spec.surge.", leftAlone)
+	}
+	for i, says := range want {
+		for _, part := range says {
+			if !strings.Contains(leftAlone[i], part) {
+				t.Errorf("New reports %q, which does not say %q.", leftAlone[i], part)
+			}
+		}
 	}
 
 	loaded.Generate.Mutate = []string{"spec.count"}

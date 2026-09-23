@@ -6,17 +6,73 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"pgregory.net/rapid"
+
+	"github.com/rosenhouse/botbox/pkg/target"
 )
 
 func TestTheCRDJudgesWhatTheOverlayLoosens(t *testing.T) {
 	loaded := loadTarget(t, toyTarget)
-	loaded.Generate.Overlay = map[string]map[string]any{"spec.count": {"minimum": 11, "maximum": 20}}
+	loaded.Generate.Overlay = map[string]map[string]any{"spec.count": {"minimum": 5, "maximum": 20}}
 	g := newGenerator(t, loaded, Options{})
+	drawn := 0
 	rapid.Check(t, func(rt *rapid.T) {
-		if counts := generatedAt(g.sequence(rt), loaded.Sample, "spec", "count"); len(counts) > 0 {
-			rt.Fatalf("spec.count took %v, which the CRD's maximum of 10 refuses.", counts)
+		for _, count := range generatedAt(g.sequence(rt), loaded.Sample, "spec", "count") {
+			if count.(int64) > 10 {
+				rt.Fatalf("spec.count took %v, which the CRD's maximum of 10 refuses.", count)
+			}
+			drawn++
 		}
 	})
+	if drawn == 0 {
+		t.Error("No draw changed spec.count.")
+	}
+}
+
+func TestAMutatePathTheCRDRefusesInTheSampleIsAConfigurationError(t *testing.T) {
+	for _, testCase := range []struct {
+		path, mutate string
+		overlay      map[string]map[string]any
+		reported     string
+	}{
+		{toyTarget, "spec.count", map[string]map[string]any{"spec.count": {"minimum": 11, "maximum": 20}},
+			"less than or equal to 10"},
+		{rulesTarget, "spec.right", nil, "exactly one of left and right must be set"},
+	} {
+		t.Run(testCase.mutate, func(t *testing.T) {
+			loaded := loadTarget(t, testCase.path)
+			loaded.Generate = target.GenerateSpec{Mutate: []string{testCase.mutate}, Overlay: testCase.overlay}
+			_, err := New(loaded, Options{})
+			if err == nil {
+				t.Fatalf("New accepted generate.mutate %s, which no drawn value moves.", testCase.mutate)
+			}
+			for _, want := range []string{"generate.mutate " + testCase.mutate, testCase.reported} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("New reported %q, which does not mention %q.", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestNewDrawsAFieldAHundredTimesToFindAValueTheCRDAccepts(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	g := newGenerator(t, loaded, Options{})
+	for _, testCase := range []struct {
+		count    int64
+		draws    int
+		accepted bool
+	}{
+		{5, 1, true},
+		// No count reaches minCount's default.
+		{0, 100, false},
+	} {
+		draws := 0
+		err := g.rules.acceptsADraw(loaded.Sample, countsOf(testCase.count, &draws)[0])
+		if (err == nil) != testCase.accepted || draws != testCase.draws {
+			t.Errorf("With every count %d, New drew %d times and returned %v, want %d draws and accepted=%t.",
+				testCase.count, draws, err, testCase.draws, testCase.accepted)
+		}
+	}
 }
 
 func TestATransitionRuleSeesTheOldObjectsDefaults(t *testing.T) {
@@ -47,6 +103,16 @@ func TestATransitionRuleSeesTheOldObjectsDefaults(t *testing.T) {
 					testCase.field, testCase.value, err, testCase.refused)
 			}
 		})
+	}
+}
+
+func TestAFieldTheSampleCannotHoldIsRefused(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, rulesTarget), Options{})
+	draws := 0
+	inside := countsOf(5, &draws)[0]
+	inside.path = []string{"spec", "count", "inside"}
+	if err := g.rules.acceptsADraw(g.target.Sample, inside); err == nil {
+		t.Error("New drew a value inside the sample's spec.count, which holds an integer.")
 	}
 }
 

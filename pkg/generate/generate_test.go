@@ -141,37 +141,42 @@ func TestGeneratedGadgetsKeepTheirCRDsRules(t *testing.T) {
 	}
 }
 
-func TestARefusedUpdateIsDrawnAgain(t *testing.T) {
+// countsOf draws the count given, and counts the draws.
+func countsOf(count int64, draws *int) []field {
+	values := rapid.Custom(func(t *rapid.T) any {
+		*draws++
+		return rapid.Just(count).Draw(t, "count")
+	})
+	return []field{{path: []string{"spec", "count"}, dotted: "spec.count", values: values}}
+}
+
+func TestARefusedUpdateIsDrawnEightTimes(t *testing.T) {
 	loaded := loadTarget(t, rulesTarget)
-	loaded.Generate.Mutate = []string{"spec.left", "spec.maxUnavailable"}
-	// Every maxUnavailable exceeds the sample's count, so the CRD refuses it.
-	loaded.Generate.Overlay = map[string]map[string]any{"spec.maxUnavailable": {"minimum": 4}}
 	g := newGenerator(t, loaded, Options{})
-	updates := 0
-	for seed := int64(1); seed <= 200; seed++ {
-		sequence, err := g.Draw(seed)
-		if err != nil {
-			t.Fatalf("Draw(%d) failed: %v.", seed, err)
+	for _, testCase := range []struct {
+		count    int64
+		draws    int
+		accepted bool
+	}{
+		{5, 1, true},
+		// No count reaches minCount's default.
+		{0, 8, false},
+	} {
+		draws := 0
+		g.fields = countsOf(testCase.count, &draws)
+		patch := rapid.Custom(func(t *rapid.T) map[string]any { return g.patch(t, loaded.Sample.Object) }).Example(0)
+		if (patch != nil) != testCase.accepted || draws != testCase.draws {
+			t.Errorf("With every count %d, an update drew %d times and patched %v, want %d draws and accepted=%t.",
+				testCase.count, draws, patch, testCase.draws, testCase.accepted)
 		}
-		for _, op := range sequence.Ops {
-			if op.Type == run.OpUpdate {
-				updates++
-			}
-		}
-	}
-	// A left that changes passes a quarter of the draws. Drawn again, most
-	// update ops find one.
-	if updates < 50 {
-		t.Errorf("200 seeds drew %d updates; a refused update is not drawn again.", updates)
 	}
 }
 
 func TestAnUpdateTheCRDAlwaysRefusesBecomesASettle(t *testing.T) {
 	loaded := loadTarget(t, rulesTarget)
-	loaded.Generate.Mutate = []string{"spec.count"}
-	// The only count the overlay allows is below minCount's default.
-	loaded.Generate.Overlay = map[string]map[string]any{"spec.count": {"maximum": 0}}
 	g := newGenerator(t, loaded, Options{})
+	draws := 0
+	g.fields = countsOf(0, &draws)
 	rapid.Check(t, func(rt *rapid.T) {
 		sequence := g.sequence(rt)
 		if err := sequence.Validate(); err != nil {

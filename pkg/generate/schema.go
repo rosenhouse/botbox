@@ -353,10 +353,14 @@ func (w *walker) walk(s *schema, path []string, optional bool) []field {
 	dotted := strings.Join(path, ".")
 	values, err := valuesOf(s)
 	if err != nil {
-		w.leftAlone = append(w.leftAlone, fmt.Sprintf("generation leaves %s alone: %v", dotted, err))
+		w.leftAlone = append(w.leftAlone, leftAloneNote(dotted, err))
 		return nil
 	}
 	return []field{{path: path, dotted: dotted, values: values, optional: optional}}
+}
+
+func leftAloneNote(dotted string, why error) string {
+	return fmt.Sprintf("generation leaves %s alone: %v", dotted, why)
 }
 
 func (w *walker) carries(path []string) bool {

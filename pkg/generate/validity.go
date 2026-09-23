@@ -12,8 +12,10 @@ import (
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/defaulting"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/listtype"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/validation"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	celconfig "k8s.io/apiserver/pkg/apis/cel"
+	"pgregory.net/rapid"
 )
 
 // crdRules judges a CR with the API server's own code, as the API server
@@ -75,4 +77,26 @@ func (c *crdRules) defaulted(object map[string]any) map[string]any {
 	copied := runtime.DeepCopyJSON(object)
 	defaulting.Default(copied, c.structural)
 	return copied
+}
+
+// fieldDraws bounds the values drawn for a field to find one the CRD accepts
+// in the sample.
+const fieldDraws = 100
+
+// acceptsADraw is nil once the CRD accepts the sample with a value drawn for
+// the field, and otherwise says why it refused them.
+func (c *crdRules) acceptsADraw(sample *unstructured.Unstructured, f field) error {
+	return rapid.Custom(func(t *rapid.T) error {
+		var refused error
+		for range fieldDraws {
+			changed := sample.DeepCopy()
+			if err := unstructured.SetNestedField(changed.Object, f.values.Draw(t, f.dotted), f.path...); err != nil {
+				return err
+			}
+			if refused = c.refusal(changed.Object, nil); refused == nil {
+				return nil
+			}
+		}
+		return fmt.Errorf("the CRD refuses every value botbox drew for it in the sample: %w", refused)
+	}).Example(0)
 }

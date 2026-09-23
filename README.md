@@ -199,7 +199,8 @@ safety net. Where it allows more than your controller does, `generate.mutate`
 lists the only paths a sequence changes and `generate.overlay` tightens one path's schema, as
 `examples/cert-manager/target.yaml` does. An int-or-string field needs an overlay that says
 which it is: `type: integer`, or `type: string` with a `pattern` or an `enum`. Naming a path
-or an overlay keyword botbox cannot draw from is a configuration error, not a silent skip.
+or an overlay keyword botbox cannot draw from is a configuration error, not a silent skip. So
+is a path where the CRD refuses every value botbox draws for it into your sample.
 Without `generate.mutate`, botbox prints each spec path it leaves alone, and why. If the API
 server still refuses a CR, as a webhook might, botbox exits 2 and names the `sequence.json`
 that holds the op ([DESIGN.md §8.3](DESIGN.md#83-generation-constraints-and-admission-webhooks)).

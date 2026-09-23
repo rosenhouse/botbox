@@ -7,6 +7,7 @@ package generate
 
 import (
 	"fmt"
+	"slices"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -72,6 +73,10 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 	if err != nil {
 		return nil, err
 	}
+	fields, leftAlone, err = drawable(t, rules, fields, leftAlone)
+	if err != nil {
+		return nil, err
+	}
 	g := &Generator{target: t, rules: rules, fields: fields, leftAlone: leftAlone, maxOps: opts.MaxOps}
 	if g.maxOps < 1 {
 		g.maxOps = defaultMaxOps
@@ -85,6 +90,26 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 	}
 	g.sequences = rapid.Custom(g.sequence)
 	return g, nil
+}
+
+// drawable keeps the fields the CRD accepts a drawn value of in the sample.
+// generate.mutate names each field it keeps, so a field the CRD refuses there
+// is a configuration error.
+func drawable(t *target.Target, rules *crdRules, fields []field, leftAlone []string) ([]field, []string, error) {
+	var kept []field
+	for _, mutable := range fields {
+		refused := rules.acceptsADraw(t.Sample, mutable)
+		switch {
+		case refused == nil:
+			kept = append(kept, mutable)
+		case len(t.Generate.Mutate) > 0:
+			return nil, nil, fmt.Errorf("generate.mutate %s: %w", mutable.dotted, refused)
+		default:
+			leftAlone = append(leftAlone, leftAloneNote(mutable.dotted, refused))
+		}
+	}
+	slices.Sort(leftAlone)
+	return kept, leftAlone, nil
 }
 
 // LeftAlone says which spec paths generation never changes, and why. Only a

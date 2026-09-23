@@ -186,8 +186,11 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
 - Generation starts from the target's `sample` object. When the target declares
   `generate.mutate`, only those paths are mutated, and `generate.overlay` tightens the
   schema for a path (§8.3). An overlay keyword the generator does not read is a
-  configuration error. Without `generate.mutate`, botbox prints each spec path whose
-  schema says too little to draw from, such as an int-or-string, and leaves it alone.
+  configuration error. For each path it may change, the generator draws up to 100 values
+  into the sample until the CRD accepts one. A `generate.mutate` path whose every value
+  the CRD refuses is a configuration error too. Without `generate.mutate`, botbox prints
+  each spec path it leaves alone, and why: its schema says too little to draw from, such
+  as an int-or-string, or the CRD refuses every value drawn for it.
 - **Hand-written generators** per target override schema-driven ones for fields with
   semantics the schema does not capture. In-repo targets only.
 
@@ -1228,6 +1231,8 @@ built from source and run as a black-box binary.
   controller, so the two cannot drift apart unseen. A refusal still exits 2, since a rule
   botbox cannot see belongs in the target declaration (§8.3), and it now names the run and
   its `sequence.json`. Undoing a refused field biases draws away from a rule's boundary: a
-  sample that sets one of two exclusive fields never switches to the other. Map fields are
-  drawn now, an int-or-string names the overlay it needs, an overlay keyword the generator
-  does not read is an error, and a spec path generation leaves alone is printed.
+  sample that sets one of two exclusive fields never switches to the other. When the CRD
+  refuses all 100 values drawn for a field into the sample, the field would never move, so
+  New reports it instead of skipping it silently. Each value is judged against the sample
+  alone, so New also reports a field that only another field's change makes valid. A
+  sample that accepts the field fixes that.

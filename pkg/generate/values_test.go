@@ -232,13 +232,18 @@ func TestAnIntOrStringFollowsItsOverlay(t *testing.T) {
 			loaded.Generate.Mutate = []string{"spec.surge"}
 			loaded.Generate.Overlay = map[string]map[string]any{"spec.surge": testCase.overlay}
 			g := newGenerator(t, loaded, Options{})
+			drawn := 0
 			rapid.Check(t, func(rt *rapid.T) {
 				for _, surge := range generatedAt(g.sequence(rt), loaded.Sample, "spec", "surge") {
 					if !testCase.allowed(surge) {
 						rt.Fatalf("spec.surge is %#v, which the overlay %v does not allow.", surge, testCase.overlay)
 					}
+					drawn++
 				}
 			})
+			if drawn == 0 {
+				t.Error("No draw changed spec.surge.")
+			}
 		})
 	}
 }

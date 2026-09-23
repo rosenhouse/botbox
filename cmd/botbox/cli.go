@@ -424,8 +424,9 @@ func exitCode(result run.Result, err error) int {
 
 // named blames the --deadline for a run its own budget cut short. §11 makes
 // this exit 2, which a reader has to be able to tell from a broken target. The
-// context botbox built from the flag is what it asks: the teardown runs on a
-// budget of its own, and that one is nobody's flag (DESIGN.md §5.5).
+// context botbox built from the flag is what it asks. That context also ends
+// the teardown's wait for the target to recover from the faults. The rest of
+// the teardown runs on a budget of its own, which is nobody's flag.
 func (o options) named(ctx context.Context, err error) error {
 	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return err

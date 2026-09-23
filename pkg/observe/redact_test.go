@@ -102,8 +102,8 @@ func TestAValueThatIsNoStringIsMarkedToo(t *testing.T) {
 
 func TestAMarkerShowsWhetherAValueChanged(t *testing.T) {
 	written := writtenObjects(t,
-		secret("creds", "10", map[string]string{"token": "first", "ca": "same"}),
-		secret("creds", "11", map[string]string{"token": "second", "ca": "same"}),
+		secret("creds", "10", map[string]string{"token": "s3cr3t-1", "ca": "same"}),
+		secret("creds", "11", map[string]string{"token": "s3cr3t-2", "ca": "same"}),
 	)
 	before, after := field(t, written[0], "data"), field(t, written[1], "data")
 
@@ -170,7 +170,7 @@ func TestAnAnnotationsMarkerShowsWhetherItChanged(t *testing.T) {
 		obj.SetAnnotations(map[string]string{"data-hash": hash, "owner": "same"})
 		return obj
 	}
-	written := writtenObjects(t, annotated("10", "first"), annotated("11", "second"))
+	written := writtenObjects(t, annotated("10", "hash-1"), annotated("11", "hash-2"))
 	before, after := field(t, written[0], "metadata", "annotations"), field(t, written[1], "metadata", "annotations")
 
 	if digest(t, before["owner"]) != digest(t, after["owner"]) {

@@ -273,7 +273,10 @@ botbox owns the API server a run executes against.
 - **envtest** (default). botbox starts `kube-apiserver` and `etcd` from
   `KUBEBUILDER_ASSETS` (installed by `setup-envtest`) using
   `sigs.k8s.io/controller-runtime/pkg/envtest` inside `pkg/cluster`. This is the one
-  harness package allowed to import controller-runtime (§11).
+  harness package allowed to import controller-runtime (§11). Before it starts them,
+  botbox looks for both binaries where envtest does: `TEST_ASSET_ETCD` and
+  `TEST_ASSET_KUBE_APISERVER`, then `KUBEBUILDER_ASSETS`, then `/usr/local/kubebuilder/bin`.
+  It names the variable and the path when one is missing.
 - **kubeconfig**. An existing cluster, normally kind. Used by the nightly tier and, in
   phase 2, by `Image` targets.
 

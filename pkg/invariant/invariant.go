@@ -151,6 +151,8 @@ type Violation struct {
 type Readiness struct {
 	// Expr is the target's ready: CEL, or go:<name>.
 	Expr string `json:"expr,omitempty"`
+	// CR is the name of the CR it read.
+	CR string `json:"cr,omitempty"`
 	// Error is what evaluating Expr on the CR returned.
 	Error string `json:"error,omitempty"`
 	// Status is the CR's status, unbounded. A report bounds it.

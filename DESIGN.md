@@ -1195,15 +1195,15 @@ built from source and run as a black-box binary.
   report is what a reader acts on.
 - **D@49 A G4 says why `Ready` never held, and quotes the predicate and the CR's status.**
   A misspelled `ready`, a controller that never converges and one that never stops writing
-  each printed the same line and exited 1. The CEL error §8.4 promised was dropped, and a
-  `ready` that yields an int read as "not ready". The expired wait now walks `Ready` over
-  the CR's versions in the wait and names the cause. The Runner calls the engine's
-  function for it, so the two agree, and a checkpoint sits where its wait ended, where the
-  engine stamps the verdict. A wait can begin before the Observer sees the op's write, so
-  the walk counts a missing CR as not holding, and after an op that wrote the CR it does
-  not count the CR the wait found as having held. B4 otherwise read "held until 0s". The
-  report quotes the CR's status, which D35 left to `objects.jsonl`, because a reason such
-  as "0/10 replicas available" lives there. A controller can copy anything into its
-  status, so the quote is bounded. A non-bool ends the run at its first evaluation. The
-  same verdicts name a failing request the target repeated, which #46 found behind G4 and
-  G1 under controller-runtime's default backoff.
+  need different fixes, so the G4 of an expired wait names its cause. It walks `Ready`
+  over the CR's versions in the wait. The Runner calls the engine's function for it, so
+  the two agree, and a checkpoint sits where its wait ended, where the engine stamps the
+  verdict. A wait can begin before the Observer sees the op's write, so the walk counts a
+  missing CR as not holding, and `Ready` holding on a CR recorded before the op was
+  applied does not count as having held. Where several CRs are live, the verdict quotes
+  the one `Ready` failed on. The report quotes the CR's status, which D35 left to
+  `objects.jsonl`, because a reason such as "0/10 replicas available" lives there. A
+  controller can copy anything into its status, so the quote is bounded. The verdict
+  quotes the CEL error, and a non-bool ends the run at its first evaluation. The same
+  verdicts name a failing request the target repeated, which #46 found behind G4 and G1
+  under controller-runtime's default backoff.

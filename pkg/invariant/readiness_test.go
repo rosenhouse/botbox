@@ -131,19 +131,57 @@ func TestAnExpiredWaitReadsTheCRAsTheWaitFoundIt(t *testing.T) {
 	requireStatement(t, violation, "in 5s, ready held from 0s on, but the namespace never held still for stable (2s): 1 change")
 }
 
-// An update's wait can begin before the Observer sees the update, and the CR
-// it found then is the one the update replaced.
+// A wait can begin before the Observer sees the op's write, and the CR it
+// found then is the one the op replaced.
 func TestAnExpiredWaitJudgesTheCRFromTheWriteOn(t *testing.T) {
-	in := newRun().
-		record(time.Second, widget("10", spec(3), status(3, 1))).
-		op(invariant.OpUpdate, 2*time.Second).
-		record(2001*time.Millisecond, widget("11", spec(4), generation(2), status(3, 1))).
-		checkpoint(7*time.Second, invariant.Expired).
-		through(9 * time.Second)
+	for name, r := range map[string]*run{
+		"an update": newRun().
+			record(time.Second, widget("10", spec(3), status(3, 1))).
+			op(invariant.OpUpdate, 2*time.Second).
+			record(2001*time.Millisecond, widget("11", spec(4), generation(2), status(3, 1))),
+		"an update, the CR recorded as it was applied": newRun().
+			record(2*time.Second, widget("10", spec(3), status(3, 1))).
+			op(invariant.OpUpdate, 2*time.Second).
+			record(2001*time.Millisecond, widget("11", spec(4), generation(2), status(3, 1))),
+		"a delete": newRun().
+			record(time.Second, widget("10", spec(3), finalizers("toy"), status(3, 1))).
+			op(invariant.OpDelete, 2*time.Second).
+			record(2001*time.Millisecond, widget("11", spec(3), finalizers("toy"), deleting(2*time.Second), status(0, 1))),
+	} {
+		t.Run(name, func(t *testing.T) {
+			violation := expiredWait(t, r.checkpoint(7*time.Second, invariant.Expired).through(9*time.Second))
 
-	violation := expiredWait(t, in)
+			requireStatement(t, violation, "in 5s, ready never held: it evaluated to false")
+		})
+	}
+}
 
-	requireStatement(t, violation, "in 5s, ready never held: it evaluated to false")
+// The Observer can record the op's write before the wait begins or after, and
+// the verdict does not depend on which.
+func TestAnExpiredWaitJudgesTheWriteWhereverTheWaitBegan(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		began time.Duration
+		want  string
+	}{
+		{"the write recorded after the wait began", 2 * time.Second, "in 5s, ready held until 1s: it evaluated to false"},
+		{"the write recorded before it", 2010 * time.Millisecond, "in 4.99s, ready held until 990ms: it evaluated to false"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := newRun().
+				record(time.Second, widget("10", spec(3), status(3, 1))).
+				op(invariant.OpUpdate, 2*time.Second).
+				record(2005*time.Millisecond, widget("11", spec(3), labelled("x"), status(3, 1))).
+				record(3*time.Second, widget("12", spec(3), labelled("x"), status(2, 1))).
+				checkpoint(7*time.Second, invariant.Expired).
+				waitBegan(c.began).
+				through(9 * time.Second)
+
+			violation := expiredWait(t, in)
+
+			requireStatement(t, violation, c.want)
+		})
+	}
 }
 
 // A restart writes no CR, so the CR the wait found is the target's.
@@ -174,12 +212,34 @@ func TestAnExpiredWaitHoldsReadyOnlyOnEveryCR(t *testing.T) {
 	requireStatement(t, violation, "in 5s, ready never held: it evaluated to false")
 }
 
+func TestAnExpiredWaitQuotesTheCRReadyFailedOn(t *testing.T) {
+	in := newRun().
+		record(500*time.Millisecond, object(widgetGVK, "v", "9", generation(1), spec(3), status(3, 1))).
+		op(invariant.OpCreate, time.Second).
+		record(1100*time.Millisecond, widget("10", spec(3), status(0, 1))).
+		checkpoint(6*time.Second, invariant.Expired).
+		through(9 * time.Second)
+
+	violation := expiredWait(t, in)
+
+	requireStatement(t, violation, "in 5s, ready never held: it evaluated to false")
+	if ready := violation.Ready; ready == nil || ready.CR != "w" || ready.Status["ready"] != int64(0) {
+		t.Errorf("The violation quotes %+v, want the status of w, where ready failed.", ready)
+	}
+	if want := "toy.botbox/v1/Widget w"; violation.VersionsOf != want {
+		t.Errorf("The timeline is of %q, want %q.", violation.VersionsOf, want)
+	}
+}
+
 func TestAnExpiredWaitSaysWhereNothingChanged(t *testing.T) {
 	in := unreadyCreate(3, 1).checkpoint(5*time.Second, invariant.Expired).through(8 * time.Second)
 
 	violation := fired(t, invariant.Convergence, in)
 
 	requireStatement(t, violation, "in 5s, ready held from 1s on, and nothing changed in the last stable (2s)")
+	if got := quoted(violation); strings.Join(got, ",") != "w@10" || violation.Ready == nil || violation.Ready.CR != widgetName {
+		t.Errorf("The violation quotes the timeline %v and the ready of %+v, want the CR's.", got, violation.Ready)
+	}
 }
 
 func TestAnExpiredWaitSaysNoCRWasLeft(t *testing.T) {
@@ -246,6 +306,9 @@ func TestAReadinessVerdictQuotesTheReadyPredicate(t *testing.T) {
 			}
 			if ready.Expr != "status.readyy == spec.count" {
 				t.Errorf("The violation quotes the expression %q.", ready.Expr)
+			}
+			if ready.CR != widgetName {
+				t.Errorf("The violation names the CR %q, want %q.", ready.CR, widgetName)
 			}
 			if !strings.Contains(ready.Error, "no such key: readyy") {
 				t.Errorf("The violation quotes the error %q, want the one evaluating it.", ready.Error)

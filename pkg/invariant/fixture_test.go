@@ -136,6 +136,13 @@ func (r *run) checkpoint(when time.Duration, result invariant.SettleResult) *run
 	return r
 }
 
+// waitBegan moves where the last settle wait began, which the Runner stamps
+// once the op has returned.
+func (r *run) waitBegan(when time.Duration) *run {
+	r.in.Checkpoints[len(r.in.Checkpoints)-1].Began = at(when)
+	return r
+}
+
 // settled ends the last op's settle wait at when, which is where §6's quiet
 // window opens. The teardown follows one T_stable later, because §5.5 step 4
 // waits that long before it deletes.

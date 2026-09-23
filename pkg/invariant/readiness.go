@@ -16,14 +16,16 @@ import (
 // after, so the two cannot disagree. Its error is a configuration error.
 func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 	began, at := checkpoint.Began, checkpoint.Time
-	op, found := in.op(checkpoint.Op)
-	walk, err := in.walkReady(began, at, found && op.Type.touchesCR())
+	var wrote time.Time
+	if op, found := in.op(checkpoint.Op); found && op.Type.touchesCR() {
+		wrote = op.Time
+	}
+	walk, err := in.walkReady(began, at, wrote)
 	if err != nil {
 		return Violation{}, err
 	}
 	stable := in.timeouts().Stable
 	changes := in.versionsIn(at.Add(-stable), at)
-	seen := in.stateAt(at)
 	violation := Violation{
 		ID: "G4",
 		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active: in %s, %s%s",
@@ -31,26 +33,28 @@ func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 			in.repeated(began, at)),
 		At: at,
 	}.quotingRequests(Recent(requestsUpTo(in.Requests, at))).
-		quotingManaged(Sample(seen.managed(in)))
-	cr, found := seen.cr(in.Target.Primary)
+		quotingManaged(Sample(in.stateAt(at).managed(in)))
 	switch {
 	case (walk.held || walk.crs == 0) && len(changes) > 0:
 		violation = violation.quotingVersions(Recent(changes))
-	case found:
-		violation = violation.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), at)))
+	case walk.crs > 0:
+		violation = violation.quotingVersions(RecentHistory(walk.cr.Key, upTo(in.History.History(walk.cr.Key), at)))
 	}
-	if found {
-		violation.Ready = in.readiness(cr, walk.err)
+	if walk.crs > 0 {
+		violation.Ready = in.readiness(walk.cr, walk.err)
 	}
 	return violation, nil
 }
 
-// readyWalk is what Ready did over a settle wait, read as the wait read it:
-// it holds where every live primary CR satisfies it.
+// readyWalk is what Ready did over a settle wait. Ready holds at an instant
+// where a primary CR is live and every live one satisfies it.
 type readyWalk struct {
 	// crs is how many primary CRs were live at the end.
-	crs  int
+	crs int
+	// cr is the CR Ready last failed on, or the first where it held.
+	cr   observe.Version
 	held bool
+	// ever is whether Ready held after the op's write.
 	ever bool
 	// turned is when Ready last began or stopped holding.
 	turned time.Time
@@ -58,11 +62,11 @@ type readyWalk struct {
 	err error
 }
 
-// walkReady evaluates Ready on the CR as the wait found it and on every
-// version the Observer recorded after, up to the end. A wait after an op that
-// wrote the CR can begin before the Observer sees the write, so the CR it
-// found then does not count as having held.
-func (in Input) walkReady(began, end time.Time, written bool) (readyWalk, error) {
+// walkReady evaluates Ready on the CRs as the wait found them and on every
+// version the Observer recorded after, up to the end. The wait can begin
+// before the Observer sees the write of an op applied at wrote, so Ready
+// holding on a CR recorded by then does not count as having held.
+func (in Input) walkReady(began, end, wrote time.Time) (readyWalk, error) {
 	var walk readyWalk
 	versions := slices.DeleteFunc(in.versionsIn(time.Time{}, end), func(v observe.Version) bool {
 		return v.GVK != in.Target.Primary
@@ -72,10 +76,11 @@ func (in Input) walkReady(began, end time.Time, written bool) (readyWalk, error)
 	for ; next < len(versions) && !versions[next].Time.After(began); next++ {
 		latest[versions[next].Key] = versions[next]
 	}
-	if err := walk.step(in, began, live(latest)); err != nil {
+	found := live(latest)
+	if err := walk.step(in, began, found); err != nil {
 		return walk, err
 	}
-	walk.ever = walk.ever && !written
+	walk.ever = walk.ever && !slices.ContainsFunc(found, func(v observe.Version) bool { return !v.Time.After(wrote) })
 	for _, v := range versions[next:] {
 		latest[v.Key] = v
 		if err := walk.step(in, v.Time, live(latest)); err != nil {
@@ -89,13 +94,16 @@ func (in Input) walkReady(began, end time.Time, written bool) (readyWalk, error)
 // as the wait does.
 func (w *readyWalk) step(in Input, at time.Time, crs []observe.Version) error {
 	held, err := len(crs) > 0, error(nil)
+	if held {
+		w.cr = crs[0]
+	}
 	for _, cr := range crs {
 		held, err = in.Target.Ready(cr.Object)
 		if errors.Is(err, target.ErrNotBool) {
 			return err
 		}
 		if err != nil || !held {
-			held = false
+			held, w.cr = false, cr
 			break
 		}
 	}
@@ -140,7 +148,7 @@ func churn(stable time.Duration, changes []observe.Version) string {
 
 // readiness is what a verdict quotes of the predicate on the CR.
 func (in Input) readiness(cr observe.Version, err error) *Readiness {
-	ready := &Readiness{Expr: in.Target.ReadyExpr}
+	ready := &Readiness{Expr: in.Target.ReadyExpr, CR: cr.Name}
 	if err != nil {
 		ready.Error = err.Error()
 	}

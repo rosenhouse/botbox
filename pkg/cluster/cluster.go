@@ -43,7 +43,10 @@ func Start(opts Options) (*Cluster, error) {
 	if err := opts.Validate(); err != nil {
 		return nil, fmt.Errorf("starting the test cluster: %w", err)
 	}
-	env := &envtest.Environment{CRDDirectoryPaths: opts.CRDPaths}
+	// envtest would otherwise read USE_EXISTING_CLUSTER and reach whatever
+	// cluster KUBECONFIG names.
+	existing := false
+	env := &envtest.Environment{CRDDirectoryPaths: opts.CRDPaths, UseExistingCluster: &existing}
 	config, err := env.Start()
 	if err != nil {
 		return nil, fmt.Errorf("starting the envtest control plane: %w", err)

@@ -37,6 +37,19 @@ spec:
           type: object
 `
 
+func TestStartIgnoresUseExistingCluster(t *testing.T) {
+	t.Setenv("USE_EXISTING_CLUSTER", "true")
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "no-such-kubeconfig"))
+
+	c, err := cluster.Start(cluster.Options{})
+	if err != nil {
+		t.Fatalf("Start returned an error: %v", err)
+	}
+	if err := c.Stop(); err != nil {
+		t.Errorf("Stop returned an error: %v", err)
+	}
+}
+
 func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "thing.yaml"), []byte(thingCRD), 0o600); err != nil {

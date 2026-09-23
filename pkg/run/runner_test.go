@@ -1764,9 +1764,10 @@ func TestASettleExpiryWithADeadTargetIsAHarnessError(t *testing.T) {
 	}
 }
 
-// A target that stopped once botbox had created the CR may have crashed on it,
-// and the run directory holds the sequence that replays it.
-func TestAStoppedTargetsErrorSaysWhetherTheCRWasCreated(t *testing.T) {
+// A target that stopped once botbox had created the CR, and before it ran
+// supervised, may have crashed on it. The run directory holds the sequence
+// that replays it. A supervised target stops only where a restart failed.
+func TestAStoppedTargetsErrorSaysWhetherTheCRMayHaveCrashedIt(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		h       *fakeHarness
@@ -1774,6 +1775,7 @@ func TestAStoppedTargetsErrorSaysWhetherTheCRWasCreated(t *testing.T) {
 	}{
 		{"before the CR", &fakeHarness{clean: true, targetGone: true}, false},
 		{"after the CR", &fakeHarness{clean: true, stopsAfter: "createCR widget"}, true},
+		{"once a restart failed", &fakeHarness{clean: true, converged: true, restartFails: true, stopsAfter: "deleteCR widget"}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			test.h.targetExit = errors.New("exit status 2")

@@ -591,7 +591,8 @@ func (r *runner) targetStopped(status launch.Status) error {
 	if strings.Contains(said, "address already in use") {
 		err = fmt.Errorf("%w; another process holds that port, perhaps a concurrent run of this target, so give the target a free one in launch.args", err)
 	}
-	if r.cr != "" {
+	// A supervised target stops only where a restart failed.
+	if r.cr != "" && r.converged.IsZero() {
 		err = fmt.Errorf("%w; botbox had created the CR, so the CR may have crashed the target, and %s replays the run",
 			err, filepath.Join(r.dir, sequenceFile))
 	}

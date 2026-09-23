@@ -441,7 +441,11 @@ Details the example does not show:
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
 - A fault's `match.verb` is one of `get`, `list`, `watch`, `create`, `update`, `patch`,
-  `delete` and `deletecollection`, the verbs the proxy records.
+  `delete` and `deletecollection`, the verbs the proxy records. Its `match.resource` is
+  the plural the API server serves, such as `configmaps`, because the proxy records that.
+  The Runner asks discovery for it when it applies the fault op, so a CRD the target
+  installed counts, and a name the API server does not serve ends the run as a
+  configuration error.
 - Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
   tries faults in op order, the first that applies to a request wins, and each runs out on
   its own `until`.

@@ -146,6 +146,23 @@ func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
 	})
 }
 
+// The fault names the toy's CRD, which the API server serves as widgets.
+func TestAFaultOnAKindNameEndsTheRun(t *testing.T) {
+	toy := loadTarget(t, buildToy(t))
+	testCluster := startCluster(t, toy.CRDs)
+	sequence := run.Sequence{Seed: 1, Target: toy.Name, Ops: []run.Op{
+		{Index: 0, Type: run.OpCreate, Obj: toy.Sample.DeepCopy()},
+		{Index: 1, Type: run.OpFault, Fault: &run.Fault{Match: run.Match{Resource: "Widget"}, Action: run.Action{Error: 500}}},
+		{Index: 2, Type: run.OpSettle},
+	}}
+
+	_, err := run.Run(t.Context(), toy, sequence, run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+
+	if err == nil || !strings.Contains(err.Error(), "did you mean widgets?") {
+		t.Errorf("The run returned %v, want it to name widgets.", err)
+	}
+}
+
 // configMapCreates counts what the toy asked the API server to create and how
 // many of those the proxy refused.
 func configMapCreates(log []proxy.Request) (asked, denied int) {

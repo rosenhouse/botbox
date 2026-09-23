@@ -79,6 +79,10 @@ func (l *liveRun) clearFaults() { l.h.Proxy.ClearFaults() }
 
 func (l *liveRun) faultWindow(id proxy.FaultID) proxy.FaultWindow { return l.h.Proxy.Window(id) }
 
+func (l *liveRun) servedResources() ([]metav1.APIResource, error) {
+	return cluster.ServedResources(l.h.Config)
+}
+
 // createCR creates the op's object as the primary CR and tells the Observer
 // botbox created it, so that it never counts as managed (DESIGN.md §6).
 func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error) {

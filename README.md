@@ -217,6 +217,9 @@ That includes a fault still active when the sequence ends, like the one above: b
 it and waits for the controller before it tears the run down. The proxy tries faults in op
 order, the first that applies to a request wins, and each runs out on its own `until`. A fault
 that matches no request changes nothing and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
+`match.verb` is a Kubernetes verb such as `create` or `list`, and `match.resource` is the
+plural the API server serves, such as `configmaps`. botbox refuses any other value, because
+the fault would match nothing.
 
 Field values come from the CRD's own schema: its numeric ranges, enums, patterns and list
 lengths. A schema that says only `type: string` yields a random word, so the schema is not a

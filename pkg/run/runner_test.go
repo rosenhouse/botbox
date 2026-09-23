@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -180,6 +181,17 @@ func (f *fakeHarness) apply() {
 
 // faultWindow answers as the proxy does. A test either says what the proxy
 // did with each fault, or has it apply every fault as it is given.
+// fakeServed is what discovery answers every fake harness.
+var fakeServed = []metav1.APIResource{
+	{Name: "configmaps", SingularName: "configmap", Kind: "ConfigMap"},
+	{Name: "secrets", SingularName: "secret", Kind: "Secret"},
+	{Name: "widgets", SingularName: "widget", Kind: "Widget"},
+}
+
+func (f *fakeHarness) servedResources() ([]metav1.APIResource, error) {
+	return fakeServed, f.fail["servedResources"]
+}
+
 func (f *fakeHarness) faultWindow(id proxy.FaultID) proxy.FaultWindow {
 	var window proxy.FaultWindow
 	if int(id) < len(f.applying) {
@@ -777,6 +789,56 @@ func TestRunJudgesARunWhoseFaultMatchedNothing(t *testing.T) {
 	}
 	if got := result.Timeline.Faults; len(got) != 1 || !got[0].Start.IsZero() {
 		t.Errorf("The fault's window is %+v, want no window: the proxy applied nothing.", got)
+	}
+}
+
+// The proxy records a request's resource as the plural the API server serves,
+// so a fault on any other name would match nothing.
+func TestAFaultOnAResourceTheAPIServerDoesNotServeEndsTheRun(t *testing.T) {
+	for _, test := range []struct {
+		resource string
+		want     []string
+	}{
+		{"configmap", []string{"op 1 (fault)", `match.resource "configmap"`, "did you mean configmaps?"}},
+		{"ConfigMaps", []string{`match.resource "ConfigMaps"`, "did you mean configmaps?"}},
+		{"Secret", []string{"did you mean secrets?"}},
+		{"gizmos", []string{`match.resource "gizmos"`, "plural"}},
+	} {
+		t.Run(test.resource, func(t *testing.T) {
+			h := newFakeHarness()
+
+			_, err := runFake(t, h, nil, sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: test.resource}, Action: Action{Error: 500}}},
+				Op{Type: OpSettle},
+			))
+
+			if err == nil {
+				t.Fatal("The run accepted a fault on a resource the API server does not serve.")
+			}
+			for _, want := range test.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("The run returned %q, want %q.", err, want)
+				}
+			}
+			if h.added != 0 {
+				t.Errorf("The proxy was given %d faults, want none.", h.added)
+			}
+		})
+	}
+}
+
+func TestAFaultThatDiscoveryCannotResolveEndsTheRun(t *testing.T) {
+	h := newFakeHarness()
+	h.fail["servedResources"] = errors.New("discovery is down")
+
+	_, err := runFake(t, h, nil, sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: "configmaps"}, Action: Action{Error: 500}}},
+		Op{Type: OpSettle},
+	))
+
+	if err == nil || !strings.Contains(err.Error(), "discovery is down") {
+		t.Errorf("The run returned %v, want the discovery error.", err)
 	}
 }
 

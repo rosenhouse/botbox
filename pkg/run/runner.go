@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -256,6 +257,9 @@ type harness interface {
 	clearFaults()
 	// faultWindow is what the proxy has done with the fault.
 	faultWindow(id proxy.FaultID) proxy.FaultWindow
+	// servedResources is what the API server serves now, which includes the
+	// CRDs a target installed.
+	servedResources() ([]metav1.APIResource, error)
 	createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error)
 	patchCR(ctx context.Context, name string, patch map[string]any) error
 	deleteCR(ctx context.Context, name string) error
@@ -391,6 +395,9 @@ func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 	case OpRestart:
 		return applied, r.h.restart(ctx)
 	case OpFault:
+		if err := r.checkResource(op.Fault.Match.Resource); err != nil {
+			return applied, err
+		}
 		r.inject(op)
 		return applied, nil
 	case OpDeleteManaged:
@@ -631,6 +638,31 @@ func (r *runner) violate(violation Violation) {
 	if r.violation == nil {
 		r.violation = &violation
 	}
+}
+
+// checkResource refuses a fault on a resource the API server does not serve,
+// since the proxy records a request's resource as the plural it is served at.
+func (r *runner) checkResource(resource string) error {
+	if resource == "" {
+		return nil
+	}
+	served, err := r.h.servedResources()
+	if err != nil {
+		return err
+	}
+	var meant string
+	for _, s := range served {
+		if s.Name == resource {
+			return nil
+		}
+		if strings.EqualFold(s.Name, resource) || strings.EqualFold(s.SingularName, resource) || strings.EqualFold(s.Kind, resource) {
+			meant = s.Name
+		}
+	}
+	if meant != "" {
+		return fmt.Errorf("match.resource %q is not a resource the API server serves; did you mean %s?", resource, meant)
+	}
+	return fmt.Errorf("match.resource %q is not a resource the API server serves; it takes a plural such as configmaps", resource)
 }
 
 // inject adds the op's fault to those the proxy applies. Its window opens

@@ -255,7 +255,8 @@ counted only what it was handed would claim every bounded excerpt was whole. It 
 the instant it judged, which aligns the two tables, and whose history a one-object
 timeline is.
 
-A report quotes no value `objects.jsonl` hides (§11).
+A report's version rows carry no object body, so they quote no Secret value (§11). Its
+sequence and replay command hold the sample and the command line as given.
 
 A report is a snapshot taken where the check failed, and the recordings beside it are
 finalized when the run ends. A request still open at the snapshot, which a watch usually

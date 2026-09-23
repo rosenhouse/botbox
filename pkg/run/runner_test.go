@@ -1634,7 +1634,7 @@ func TestTheStoppedTargetsErrorWithoutAnExitStatus(t *testing.T) {
 func TestWhatTheTargetSaidOnTheWayOut(t *testing.T) {
 	// The sizes are literal, so that a wider maxTail fails this rather than
 	// scaling the log with it.
-	const pastTheTail = 5000
+	const pastTheTail = 1_100_000
 	for _, log := range []struct {
 		name  string
 		wrote string
@@ -1643,6 +1643,7 @@ func TestWhatTheTargetSaidOnTheWayOut(t *testing.T) {
 		{"one line and no newline", "toy-widget: --bug=12: want a bug ID from 0 to 11",
 			"toy-widget: --bug=12: want a bug ID from 0 to 11"},
 		{"a trailing blank line", "the message\n   \n", "the message"},
+		{"a line in spaces", "  fatal: bad flag \r\n", "fatal: bad flag"},
 		{"a panic before its stack",
 			"starting\npanic: runtime error: index out of range\n\ngoroutine 1 [running]:\nmain.main()\n\t/src/main.go:57 +0x1d5\n",
 			"panic: runtime error: index out of range"},
@@ -1667,6 +1668,58 @@ func TestWhatTheTargetSaidOnTheWayOut(t *testing.T) {
 	}
 	if got := whyItStopped(filepath.Join(t.TempDir(), "no-such-log")); got != "" {
 		t.Errorf("A log botbox never wrote reads as %q.", got)
+	}
+}
+
+// Real programs wrote these logs as they stopped. A stack trace follows the
+// line that says why, so the last line is a frame.
+func TestWhatTheTargetSaidAboveItsStackTrace(t *testing.T) {
+	for _, log := range []struct{ file, want string }{
+		{"zap-bind.log", "2026-09-23T16:06:01Z\tERROR\tsetup\tunable to start manager\t" +
+			`{"error": "error listening on :45147: listen tcp :45147: bind: address already in use"}`},
+		{"zap-reconcile.log", "2026-09-23T16:03:53Z\tERROR\tReconciler error\t" +
+			`{"controller": "configmap", "controllerGroup": "", "controllerKind": "ConfigMap", "ConfigMap": {"name":"widget-0","namespace":"default"}, "namespace": "default", "name": "widget-0", "reconcileID": "8a0fad41-f98f-47ea-87d1-990173d1d560", "error": "spec.count 11 is out of range"}`},
+		{"panic.log", "panic: runtime error: index out of range [150] with length 0"},
+		{"klog-fatal.log", "F0923 16:05:39.116650    7054 main.go:30] reconciling widget: the cache never synced"},
+		{"zap-json.log", `{"level":"error","ts":"2026-09-23T16:04:03Z","logger":"setup","msg":"unable to create controller","controller":"Widget","error":"no matches for kind \"Widget\" in version \"toy.botbox/v1\"","stacktrace":"main.main\n\tgithub.com/rosenhouse/botbox/zzprobe/main.go:39\nruntime.main\n\truntime/proc.go:290"}`},
+	} {
+		t.Run(log.file, func(t *testing.T) {
+			if got := whyItStopped(filepath.Join("testdata", "stopped", log.file)); got != log.want {
+				t.Errorf("%s reads as %q, want %q.", log.file, got, log.want)
+			}
+		})
+	}
+}
+
+func TestATargetThatCouldNotBindItsPortIsToldWhere(t *testing.T) {
+	for _, log := range []struct {
+		file string
+		hint bool
+	}{
+		{"zap-bind.log", true},
+		{"klog-fatal.log", false},
+	} {
+		t.Run(log.file, func(t *testing.T) {
+			wrote, err := os.ReadFile(filepath.Join("testdata", "stopped", log.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, targetLogFile), wrote, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			h := &fakeHarness{clean: true, targetGone: true, targetExit: errors.New("exit status 1")}
+
+			_, err = runSequence(t.Context(), toyTarget, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}),
+				Options{Check: &fakeChecker{}, Dir: dir}, h)
+
+			if err == nil {
+				t.Fatal("The run reported no error although the target had stopped.")
+			}
+			if hinted := strings.Contains(err.Error(), "launch.args"); hinted != log.hint {
+				t.Errorf("The error is %q; want it to name launch.args only where a port was taken.", err)
+			}
+		})
 	}
 }
 

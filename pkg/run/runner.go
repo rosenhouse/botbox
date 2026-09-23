@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -35,9 +36,9 @@ const (
 	Recovery = invariant.Recovery
 )
 
-// maxTail is how much of the target's output the harness reads to quote its
-// last line.
-const maxTail = 4096
+// maxTail is how much of the target's output the harness reads to quote what
+// it said as it stopped. A panic's stack follows the line it opens with.
+const maxTail = 1 << 20
 
 // deletionMargin holds the run namespace open past T_delete, because G3's
 // window opens when the Observer recorded the deletion, which is after the
@@ -533,35 +534,50 @@ func (r *runner) targetStopped(status launch.Status) error {
 	if status.Exit != nil {
 		stopped += ": " + status.Exit.Error()
 	}
-	if said := whyItStopped(log); said != "" {
-		return fmt.Errorf("%s; it wrote %q, and the rest of its output is in %s", stopped, said, log)
+	said := whyItStopped(log)
+	if said == "" {
+		return fmt.Errorf("%s; its output is in %s", stopped, log)
 	}
-	return fmt.Errorf("%s; its output is in %s", stopped, log)
+	err := fmt.Errorf("%s; it wrote %q, and the rest of its output is in %s", stopped, said, log)
+	if strings.Contains(said, "address already in use") {
+		err = fmt.Errorf("%w; another process holds that port, perhaps a concurrent run of this target, so give the target a free one in launch.args", err)
+	}
+	return err
 }
 
-// panicked opens the report a Go runtime writes on the way out. The lines
-// after it are the stack, so the last line of such a log is a frame.
+// panicked opens the report a Go runtime writes on the way out.
 var panicked = []string{"panic: ", "fatal error: "}
 
+var (
+	// frameLocation is the file line of a Go stack frame, below its function.
+	frameLocation   = regexp.MustCompile(`^\t.+:\d+( \+0x[0-9a-f]+)?$`)
+	goroutineHeader = regexp.MustCompile(`^goroutine \d+ .*:$`)
+)
+
 // whyItStopped is what the target said as it stopped: the line a panic opens
-// with, or the last whole line it wrote. It is empty where the log holds
-// neither, which leaves the reader the file itself.
+// with, or else the last whole line above any stack trace. It is empty where
+// the log holds neither, which leaves the reader the file itself.
 func whyItStopped(path string) string {
 	said := tailLines(path)
 	for _, line := range said {
+		line = strings.TrimSpace(line)
 		if slices.ContainsFunc(panicked, func(opener string) bool { return strings.HasPrefix(line, opener) }) {
 			return line
 		}
 	}
-	if len(said) == 0 {
-		return ""
+	for i, line := range slices.Backward(said) {
+		inTrace := strings.TrimSpace(line) == "" || frameLocation.MatchString(line) || goroutineHeader.MatchString(line) ||
+			(i+1 < len(said) && frameLocation.MatchString(said[i+1]))
+		if !inTrace {
+			return strings.TrimSpace(line)
+		}
 	}
-	return said[len(said)-1]
+	return ""
 }
 
-// tailLines are the whole lines at the end of the file, trimmed, innermost
-// last. A line longer than maxTail has no whole form to quote, and a file
-// botbox cannot read has nothing.
+// tailLines are the whole lines at the end of the file, innermost last. A
+// line longer than maxTail has no whole form to quote, and a file botbox
+// cannot read has nothing.
 func tailLines(path string) []string {
 	file, err := os.Open(path)
 	if err != nil {
@@ -586,13 +602,7 @@ func tailLines(path string) []string {
 		}
 		body = body[cut+1:]
 	}
-	var lines []string
-	for _, line := range strings.Split(body, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			lines = append(lines, trimmed)
-		}
-	}
-	return lines
+	return strings.Split(body, "\n")
 }
 
 // checkpoint evaluates the checks and keeps the first violation.

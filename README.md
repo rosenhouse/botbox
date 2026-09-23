@@ -278,6 +278,15 @@ property also quotes the state of the objects your controller managed where it f
 over the kinds your target declares: a second table with its own bound of twenty and
 the count beside it. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-report)).
 
+## When botbox exits 2
+
+Exit 2 means botbox could not test your controller, and the message says what to change.
+
+- A controller that stops during a run ends the invocation. botbox quotes the line it wrote
+  as it stopped, above any stack trace, and `target.log` in the run directory holds the rest.
+  A controller that binds a fixed port, such as a health probe on `:8081`, collides with a
+  second invocation of itself. Give it a free port in `launch.args`, or with `--launch-arg`.
+
 ## Running in CI
 
 ```yaml

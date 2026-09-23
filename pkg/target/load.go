@@ -161,6 +161,9 @@ func load(path string) (*Target, error) {
 		}
 		loaded.EqualIgnore = append(loaded.EqualIgnore, path)
 	}
+	if loaded.Equal != nil && len(loaded.EqualIgnore) > 0 {
+		return nil, errors.New("equalIgnore does nothing beside an equal hook, which replaces the default equality")
+	}
 
 	seen := map[string]bool{}
 	for _, declaredProperty := range declared.Properties {

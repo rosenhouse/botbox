@@ -148,13 +148,13 @@ func TestG6IgnoresFailuresAnOpSplits(t *testing.T) {
 }
 
 func TestG6TakesTheThresholdSection6DefaultsWhenTheTargetDeclaresNone(t *testing.T) {
-	in := loop(target.DefaultThresholds.ErrLoop, failedGet("w-0", 404)).through(40 * time.Second)
+	in := loop(10, failedGet("w-0", 404)).through(40 * time.Second)
 	in.Target.Thresholds = target.Thresholds{}
 	in.Target.Timeouts = target.Timeouts{}
 
 	silent(t, invariant.NoErrorLoop, in)
 
-	in = loop(target.DefaultThresholds.ErrLoop+1, failedGet("w-0", 404)).through(40 * time.Second)
+	in = loop(11, failedGet("w-0", 404)).through(40 * time.Second)
 	in.Target.Thresholds = target.Thresholds{}
 	in.Target.Timeouts = target.Timeouts{}
 
@@ -163,7 +163,8 @@ func TestG6TakesTheThresholdSection6DefaultsWhenTheTargetDeclaresNone(t *testing
 
 // controller-runtime's default rate limiter doubles a failing item's delay
 // from 5ms, so the densest 30s holds 13 identical failures however long the
-// loop runs, and G6 sees them only at a threshold of 12 or less.
+// loop runs, and G6 sees them at a threshold of 12 or less, such as the
+// default.
 func TestG6SeesControllerRuntimesDefaultBackoff(t *testing.T) {
 	limiter := workqueue.DefaultTypedControllerRateLimiter[string]()
 	backingOff := newRun().op(invariant.OpCreate, 0)
@@ -172,6 +173,9 @@ func TestG6SeesControllerRuntimesDefaultBackoff(t *testing.T) {
 	}
 	in := backingOff.through(3 * time.Minute)
 	in.Target.Timeouts = target.Timeouts{}
+
+	in.Target.Thresholds = target.Thresholds{}
+	fired(t, invariant.NoErrorLoop, in)
 
 	in.Target.Thresholds = target.Thresholds{ErrLoop: 13}
 	silent(t, invariant.NoErrorLoop, in)

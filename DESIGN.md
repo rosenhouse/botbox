@@ -321,7 +321,7 @@ real targets; the toy target sets much shorter ones (§9).
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
-| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
+| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 10) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
 
 **The quiet window.** G1 and G2 judge the `T_stable` that follows a settle wait, which
 ends where the run converged or where the wait gave up (§5.5). Measuring
@@ -395,12 +395,12 @@ which G1 excludes: G1 ignores a watch because a watch that hangs is the target w
 while a watch that fails returns at once and repeating it is a loop.
 
 **Backoff.** controller-runtime's default rate limiter doubles a failing request's delay
-from 5 ms. A loop on one object therefore repeats 10 times in its first 5 s and 13 times
-in its densest 30 s, however long it runs. The default `N_errloop` misses it, and a
-readiness verdict or G1 names the loop instead (§5.7). G6 sees it only at an
-`N_errloop` of 12 or less, or of 9 or less with a `T_settle` of 5 s, which is why the toy
-declares 5 (§9). A loop on a fixed interval longer than `T_settle / N_errloop` escapes
-G6.
+from 5 ms. A loop on one object therefore fails 10 times in its first 5 s, 11 times by
+5.1 s, and 13 times in its densest 30 s, however long it runs. The default `N_errloop`
+sees it once it has run 5.1 s under one spec. A `T_settle` of 5 s holds only 10, so it
+needs an `N_errloop` of 9 or less, which is why the toy declares 5 (§9). A loop on a
+fixed interval longer than `T_settle / N_errloop` escapes G6, and a readiness verdict or
+G1 often names it instead (§5.7).
 
 **Notes.** A check that could not judge something records a note naming it: G3 for a
 deletion whose deadline the run did not reach, that a fault reached into, or that botbox
@@ -537,7 +537,7 @@ timeouts:                                     # optional; defaults in §6
   stable: 10s
   delete: 60s
 thresholds:                                   # optional; defaults in §6
-  errloop: 20                                 # N_errloop for G6
+  errloop: 10                                 # N_errloop for G6
   quiet: 0                                    # N_quiet for G1 and G2
 ```
 
@@ -1300,13 +1300,13 @@ built from source and run as a black-box binary.
   still churn (§14 question 1). An `N_quiet` above zero lets a slow loop through G1, and
   G6 catches only a loop that fails often enough (D@46). The toy's `--resync` runs under
   envtest with `quiet: 3` and with the default.
-- **D@46 `N_errloop` stays 20, and G6 sees controller-runtime's default backoff only at
-  12 or less.** That backoff puts 13 identical failures in the densest 30 s, so at 20 such
-  a loop surfaces as G4 or G1. A default of 10 waits on a harness leak. A scratch build
-  kept the recordings of passing runs. The worst count of one failing request within
-  30 s was 2 over 24 cert-manager runs and 26 over 35 external-secrets runs: drawn seeds,
-  pinned sequences and controls. Every external-secrets count above 3 was event creates
-  refused with 403 in earlier runs' namespaces. The teardown leaves the SecretStore
-  fixture in a namespace envtest never deletes, and each later run of the invocation
-  reconciles all of them. The count grows with each run, and the seventh run of one
-  invocation failed G6 at 20.
+- **D@46 `N_errloop` defaults to 10, and the teardown deletes the fixtures.**
+  controller-runtime's default backoff fails 11 times by 5.1 s and 13 times in the densest
+  30 s, so G6 missed such a loop at 20. A lower default can fail a correct controller that
+  retries one request fast, so the adopted examples set the bar. The worst count of one
+  failing request within 30 s was 3 over 23 external-secrets runs and 2 over 13
+  cert-manager runs, on drawn seeds, pinned sequences and controls. Before the teardown
+  deleted the fixtures, external-secrets reached 26 by the seventh run of one invocation.
+  It reconciled each earlier run's SecretStore, left in a namespace envtest never deletes,
+  and the API server refused every Event it created there. A `T_settle` of 5 s still
+  needs 9 or less (§6, backoff).

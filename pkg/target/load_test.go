@@ -377,7 +377,7 @@ func TestLoadDefaults(t *testing.T) {
 	if loaded.Timeouts != wantTimeouts {
 		t.Errorf("Load defaulted timeouts to %+v, want %+v.", loaded.Timeouts, wantTimeouts)
 	}
-	if want := (target.Thresholds{ErrLoop: 20}); loaded.Thresholds != want {
+	if want := (target.Thresholds{ErrLoop: 10}); loaded.Thresholds != want {
 		t.Errorf("Load defaulted thresholds to %+v, want %+v.", loaded.Thresholds, want)
 	}
 
@@ -438,8 +438,8 @@ func TestLoadDefaultsEachTimeoutSeparately(t *testing.T) {
 	if loaded.Timeouts != want {
 		t.Errorf("Load read timeouts %+v, want %+v.", loaded.Timeouts, want)
 	}
-	if loaded.Thresholds.ErrLoop != 20 {
-		t.Errorf("Load read errloop %d, want the default 20.", loaded.Thresholds.ErrLoop)
+	if loaded.Thresholds.ErrLoop != 10 {
+		t.Errorf("Load read errloop %d, want the default 10.", loaded.Thresholds.ErrLoop)
 	}
 }
 

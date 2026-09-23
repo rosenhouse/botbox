@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/runtime"
+
 	"github.com/rosenhouse/botbox/pkg/target"
 	"github.com/rosenhouse/botbox/targets/toy-widget/controller"
 )
@@ -68,7 +70,20 @@ func TestManagerOptionsWatchOnlyWatchNamespace(t *testing.T) {
 	watched := managerOptions(nil, "0").Cache.DefaultNamespaces
 
 	if namespaces := slices.Collect(maps.Keys(watched)); !slices.Equal(namespaces, []string{"botbox-run-x"}) {
-		t.Errorf("The manager watches %v, want only $WATCH_NAMESPACE.", namespaces)
+		t.Errorf("The manager watches %v, want only botbox-run-x.", namespaces)
+	}
+}
+
+func TestManagerOptionsKeepTheSchemeAndMetricsAddress(t *testing.T) {
+	scheme := runtime.NewScheme()
+
+	options := managerOptions(scheme, "127.0.0.1:0")
+
+	if options.Scheme != scheme {
+		t.Error("The manager does not use the scheme it was given.")
+	}
+	if options.Metrics.BindAddress != "127.0.0.1:0" {
+		t.Errorf("The manager binds metrics at %q, want 127.0.0.1:0.", options.Metrics.BindAddress)
 	}
 }
 

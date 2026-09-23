@@ -80,8 +80,8 @@ func run(args []string, out io.Writer) error {
 	return manager.Start(ctrl.SetupSignalHandler())
 }
 
-// managerOptions watch only $WATCH_NAMESPACE where it is set, as an
-// operator-sdk operator does.
+// managerOptions confines the cache to the namespace WATCH_NAMESPACE names,
+// where it is set, as an operator-sdk operator does.
 func managerOptions(scheme *runtime.Scheme, metricsAddress string) ctrl.Options {
 	options := ctrl.Options{
 		Scheme:         scheme,

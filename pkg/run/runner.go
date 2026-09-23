@@ -28,13 +28,11 @@ const defaultMaxManaged = 500
 // that reached its deadline still takes itself down.
 const teardownMargin = 30 * time.Second
 
-// Teardown is the Checkpoint.Op of the checkpoint after the teardown deletion
-// window, which no op opened.
-const Teardown = -1
-
-// Recovery is the Checkpoint.Op of the checkpoint after the settle wait the
-// teardown gives a target still owed time to recover from the faults.
-const Recovery = invariant.Recovery
+// Teardown and Recovery are the Checkpoint.Op of the checkpoints no op opened.
+const (
+	Teardown = invariant.Teardown
+	Recovery = invariant.Recovery
+)
 
 // maxTail is how much of the target's output the harness reads to quote its
 // last line.

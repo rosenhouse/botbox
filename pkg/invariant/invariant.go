@@ -63,10 +63,17 @@ const (
 	Expired   SettleResult = "expired"
 )
 
+// Teardown and Recovery are the Op of the checkpoints no op opened. Teardown
+// follows the teardown's deletion window. Recovery follows the settle wait the
+// teardown gives a target still owed time to recover from the faults.
+const (
+	Teardown = -1
+	Recovery = -2
+)
+
 // Checkpoint is a point at which the engine evaluates (DESIGN.md §4).
 type Checkpoint struct {
-	// Op is the Index of the op the checkpoint follows, -1 after the teardown
-	// window, or Recovery.
+	// Op is the Index of the op the checkpoint follows, Teardown or Recovery.
 	Op     int
 	Time   time.Time
 	Settle SettleResult

@@ -2,10 +2,6 @@ package invariant
 
 import "time"
 
-// Recovery is the Op of the checkpoint after the settle wait the teardown
-// gives the target once the last fault stops.
-const Recovery = -2
-
 // Owed is when the target must have converged by, after the faults that
 // stopped by t: as long after the last of them as they lasted, and T_settle
 // more. A target backs off while its requests fail, and one that doubles its

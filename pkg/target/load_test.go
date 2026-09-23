@@ -545,7 +545,7 @@ func TestLoadRefusesAFixtureThatNamesANamespace(t *testing.T) {
 	if err == nil {
 		t.Fatal("Load accepted a fixture that names a namespace.")
 	}
-	for _, want := range []string{"issuer.yaml", "ca", "metadata.namespace", "drop it"} {
+	for _, want := range []string{"issuer.yaml", "ca", "metadata.namespace", "drop it", "the target may look for this one in default"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Load returned %q, which does not say %q.", err, want)
 		}

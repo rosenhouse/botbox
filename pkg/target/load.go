@@ -144,8 +144,8 @@ func load(path string) (*Target, error) {
 		}
 		for _, object := range objects {
 			if namespace := object.GetNamespace(); namespace != "" {
-				return nil, fmt.Errorf("fixture %s: %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace",
-					fixturePath, object.GetKind(), object.GetName(), namespace)
+				return nil, fmt.Errorf("fixture %s: %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace, and the target may look for this one in %s",
+					fixturePath, object.GetKind(), object.GetName(), namespace, namespace)
 			}
 		}
 		loaded.Fixtures = append(loaded.Fixtures, objects...)

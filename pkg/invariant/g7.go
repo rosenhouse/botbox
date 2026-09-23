@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rosenhouse/botbox/pkg/observe"
+	"github.com/rosenhouse/botbox/pkg/proxy"
 )
 
 // SelfHealing is G7: an object a DeleteManaged op deleted exists again, by
@@ -38,6 +39,11 @@ func SelfHealing(in Input) (Result, error) {
 				describe(op), object)
 			continue
 		}
+		if restart, starting := in.stillStarting(op); starting {
+			out.note("for %s: the target had requested no resource other than a lease since %s, so it may not yet have been running to recreate the %s",
+				describe(op), describe(restart), object)
+			continue
+		}
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the %s that %s deleted never came back within the %s the run waited after it",
 				object, describe(op), end.Sub(op.Time).Round(time.Millisecond)),
@@ -45,4 +51,30 @@ func SelfHealing(in Input) (Result, error) {
 		}.quotingVersions(RecentHistory(deleted, upTo(in.History.History(deleted), end))))
 	}
 	return out, nil
+}
+
+// stillStarting returns the last Restart before the op if the target requested
+// nothing between the two that shows it running, since botbox has no other sign
+// that a restarted target is back.
+func (in Input) stillStarting(op Op) (Op, bool) {
+	var restart *Op
+	for i, earlier := range in.Ops {
+		if earlier.Type == OpRestart && earlier.Time.Before(op.Time) {
+			restart = &in.Ops[i]
+		}
+	}
+	if restart == nil {
+		return Op{}, false
+	}
+	running := slices.ContainsFunc(in.Requests, func(r proxy.Request) bool {
+		return r.Start.After(restart.Time) && r.Start.Before(op.Time) && showsRunning(r)
+	})
+	return *restart, !running
+}
+
+// showsRunning reports whether a request shows the target past starting up. A
+// process waiting to lead requests only its lease and paths that name no
+// resource, such as discovery.
+func showsRunning(r proxy.Request) bool {
+	return r.Resource != "" && !(r.Group == leaseGroup && r.Resource == leaseResource)
 }

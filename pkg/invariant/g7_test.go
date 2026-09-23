@@ -155,6 +155,52 @@ func TestG7PassesAnObjectThatCameBack(t *testing.T) {
 	}
 }
 
+// botbox cannot tell when a restarted target is back. One still starting, or
+// waiting out its predecessor's lease, recreates nothing.
+func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
+	const noted1 = "G7 is not evaluated for op 2 (deleteManaged): the target had requested no resource other than a lease since op 1 (restart)"
+	deletedAfter := func(r *run) invariant.Input {
+		return r.
+			deletedManaged(10*time.Second, "w-0").
+			remove(10100*time.Millisecond, child("w-0", "15")).
+			checkpoint(12100*time.Millisecond, invariant.Converged).
+			through(12100 * time.Millisecond)
+	}
+	restarted := func() *run { return converged().op(invariant.OpRestart, 9*time.Second) }
+	for _, c := range []struct {
+		name string
+		in   invariant.Input
+		want string
+	}{
+		{"with no request", deletedAfter(restarted()), noted1},
+		{"with lease requests alone", deletedAfter(restarted().requests(9100*time.Millisecond, 500*time.Millisecond, 4, lease("update"))), noted1},
+		{"with discovery reads alone", deletedAfter(restarted().request(9100*time.Millisecond, nonResource("/api"))), noted1},
+		{"with a request before the restart alone", deletedAfter(restarted().request(8500*time.Millisecond, get("w-1"))), noted1},
+		{"with a request in the wait alone", deletedAfter(restarted().request(10500*time.Millisecond, watch())), noted1},
+		{"with a request before the last restart alone", deletedAfter(converged().
+			op(invariant.OpRestart, 8*time.Second).
+			request(8500*time.Millisecond, get("w-1")).
+			op(invariant.OpRestart, 9*time.Second)),
+			"G7 is not evaluated for op 3 (deleteManaged): the target had requested no resource other than a lease since op 2 (restart)"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			noted(t, invariant.SelfHealing, c.in, c.want)
+		})
+	}
+}
+
+func TestG7JudgesAnObjectDeletedOnceARestartedTargetWasBack(t *testing.T) {
+	in := converged().
+		op(invariant.OpRestart, 9*time.Second).
+		request(9500*time.Millisecond, watch()).
+		deletedManaged(10*time.Second, "w-0").
+		remove(10100*time.Millisecond, child("w-0", "15")).
+		checkpoint(12100*time.Millisecond, invariant.Converged).
+		through(12100 * time.Millisecond)
+
+	fired(t, invariant.SelfHealing, in)
+}
+
 // An index that resolved to nothing deleted nothing, which the Runner notes.
 func TestG7IgnoresAnOpThatDeletedNothing(t *testing.T) {
 	in := converged().

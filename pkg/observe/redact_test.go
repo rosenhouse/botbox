@@ -79,10 +79,17 @@ func TestAHistoryLineHidesASecretsValuesAndNamesItsKeys(t *testing.T) {
 }
 
 func TestAMarkerCountsTheBytesTheSecretHolds(t *testing.T) {
-	written := writtenObjects(t, secret("creds", "10", map[string]string{"token": "s3cr3t"}))[0]
+	values := map[string]string{
+		"token":  "s3cr3t",
+		"padded": "\xfb\xff", // +/8=
+	}
+	data := field(t, writtenObjects(t, secret("creds", "10", values))[0], "data")
 
-	if got := marker.FindStringSubmatch(fmt.Sprint(field(t, written, "data")["token"])); got == nil || got[1] != "6" {
-		t.Errorf("data.token is marked %v, want 6 bytes: the value, not its base64.", got)
+	for key, value := range values {
+		want := fmt.Sprint(len(value))
+		if got := marker.FindStringSubmatch(fmt.Sprint(data[key])); got == nil || got[1] != want {
+			t.Errorf("data.%s is %v, want a marker of %s bytes: the value, not its base64.", key, data[key], want)
+		}
 	}
 }
 
@@ -168,6 +175,23 @@ func TestAHistoryLineHidesASecretsAnnotations(t *testing.T) {
 
 	for key := range obj.GetAnnotations() {
 		digest(t, annotations[key])
+	}
+}
+
+func TestAnAnnotationsMarkerShowsWhetherItChanged(t *testing.T) {
+	annotated := func(resourceVersion, hash string) *unstructured.Unstructured {
+		obj := secret("creds", resourceVersion, map[string]string{"token": "s3cr3t"})
+		obj.SetAnnotations(map[string]string{"data-hash": hash, "owner": "same"})
+		return obj
+	}
+	written := writtenObjects(t, annotated("10", "first"), annotated("11", "second"))
+	before, after := field(t, written[0], "metadata", "annotations"), field(t, written[1], "metadata", "annotations")
+
+	if digest(t, before["owner"]) != digest(t, after["owner"]) {
+		t.Errorf("An unchanged annotation is %v, then %v.", before["owner"], after["owner"])
+	}
+	if digest(t, before["data-hash"]) == digest(t, after["data-hash"]) {
+		t.Errorf("A changed annotation is %v both times.", before["data-hash"])
 	}
 }
 

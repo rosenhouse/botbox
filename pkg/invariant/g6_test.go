@@ -43,6 +43,17 @@ func TestG6FiresPastTheThreshold(t *testing.T) {
 	}
 }
 
+// A loop every T_settle/N_errloop puts a failure at each end of T_settle, and
+// both count.
+func TestG6CountsFailuresAtBothEndsOfTheWindow(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		requests(time.Second, settleTimeout/errLoop, errLoop+1, failedGet("w-0", 404)).
+		through(8 * time.Second)
+
+	fired(t, invariant.NoErrorLoop, in)
+}
+
 func TestG6CountsServerErrorsToo(t *testing.T) {
 	in := loop(errLoop+1, failedGet("w-0", 500)).through(8 * time.Second)
 

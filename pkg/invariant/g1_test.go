@@ -76,19 +76,19 @@ func TestG1FiresPastTheQuietThreshold(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
 		settled(2*time.Second, invariant.Converged).
-		requests(2500*time.Millisecond, 500*time.Millisecond, 3, get("w-0")).
+		requests(2500*time.Millisecond, 400*time.Millisecond, 4, get("w-0")).
 		through(14 * time.Second)
 	in.Target.Thresholds.Quiet = 2
 
 	violation := fired(t, invariant.BoundedReconciliation, in)
 
-	if want := "made 3 API requests"; !strings.Contains(violation.Statement, want) {
+	if want := "made 4 API requests"; !strings.Contains(violation.Statement, want) {
 		t.Errorf("The statement is %q, want it to say it %s.", violation.Statement, want)
 	}
 	if want := "thresholds.quiet allows 2"; !strings.Contains(violation.Statement, want) {
 		t.Errorf("The statement is %q, want it to name the threshold: %q.", violation.Statement, want)
 	}
-	if want := at(3500 * time.Millisecond); !violation.At.Equal(want) {
+	if want := at(3300 * time.Millisecond); !violation.At.Equal(want) {
 		t.Errorf("The violation is at %v, want the request that went past the threshold, at %v.", violation.At, want)
 	}
 }
@@ -99,10 +99,15 @@ func TestG1ReadsANegativeQuietAsZero(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
 		settled(2*time.Second, invariant.Converged).
+		request(3*time.Second, get("w-0")).
 		through(14 * time.Second)
 	in.Target.Thresholds.Quiet = -1
 
-	silent(t, invariant.BoundedReconciliation, in)
+	violation := fired(t, invariant.BoundedReconciliation, in)
+
+	if want := "thresholds.quiet allows 0"; !strings.Contains(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to name the threshold: %q.", violation.Statement, want)
+	}
 }
 
 // The threshold bounds one window, not the run.

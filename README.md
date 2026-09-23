@@ -147,7 +147,7 @@ launch:
   binary: bin/cert-manager-controller       # relative to the working directory, not to this file
   args:
     - --kubeconfig=$KUBECONFIG                # replaced with a kubeconfig for the proxy
-    - --leader-elect=false                    # restart kills it before it releases its lease
+    - --leader-elect=false                    # a target runs with leader election off
     - --enable-certificate-owner-ref=true
 timeouts:                                     # optional; 30s, 10s and 60s by default
   settle: 30s                                 # the whole budget for one spec change

@@ -32,6 +32,10 @@ const teardownMargin = 30 * time.Second
 // window, which no op opened.
 const Teardown = -1
 
+// Recovery is the Checkpoint.Op of the checkpoint after the settle wait the
+// teardown gives a target still owed time to recover from the faults.
+const Recovery = invariant.Recovery
+
 // maxTail is how much of the target's output the harness reads to quote its
 // last line.
 const maxTail = 4096
@@ -140,6 +144,9 @@ type Timeline struct {
 	Namespace   string
 	Ops         []AppliedOp
 	Checkpoints []Checkpoint
+	// Recovery is the settle wait the teardown gave a target still owed time
+	// to recover from the faults, or nil if it owed none.
+	Recovery *Wait
 	// Quiet is the T_stable the teardown waits before it deletes anything,
 	// which §5.5 step 4 makes the run's last quiet window. It closes where
 	// Deletion opens.
@@ -238,7 +245,9 @@ func WriteRunSequence(dir string, sequence Sequence) error {
 // implements it over a started Harness.
 type harness interface {
 	namespace() string
-	settle(ctx context.Context) (bool, error)
+	// settle waits for the target to converge, past T_settle while owed
+	// returns a later instant.
+	settle(ctx context.Context, owed func() time.Time) (bool, error)
 	sleep(ctx context.Context, d time.Duration) error
 	restart(ctx context.Context) error
 	setFaults(specs []proxy.FaultSpec)
@@ -444,40 +453,71 @@ func (r *runner) applyDeleteManaged(ctx context.Context, op Op) (string, error) 
 }
 
 // settle waits for the target's reaction and checkpoints where the wait ends
-// (DESIGN.md §4). A wait that expires while no fault is active is a G4
-// violation, which ends the run.
+// (DESIGN.md §4).
 func (r *runner) settle(ctx context.Context, op Op) error {
-	wait := Wait{Window: Window{Start: r.now()}}
-	converged, err := r.h.settle(ctx)
+	wait, err := r.wait(ctx)
 	if err != nil {
 		return err
 	}
-	wait.Window.End, wait.Converged = r.now(), converged
 	r.timeline.Ops[len(r.timeline.Ops)-1].Settled = &wait
-	if !converged {
+	return r.judge(op.Index, fmt.Sprintf("op %d (%s)", op.Index, op.Type), wait)
+}
+
+// wait waits for the target to converge, for as long as the faults leave it
+// to recover as well.
+func (r *runner) wait(ctx context.Context) (Wait, error) {
+	wait := Wait{Window: Window{Start: r.now()}}
+	converged, err := r.h.settle(ctx, r.owed)
+	wait.Window.End, wait.Converged = r.now(), converged
+	return wait, err
+}
+
+// owed is when the target must have recovered from the faults by, as the
+// checks judge it.
+func (r *runner) owed() time.Time { return r.faultsSoFar().Owed(r.now()) }
+
+// faultsSoFar is the run's faults and settle waits as the checks read them.
+func (r *runner) faultsSoFar() invariant.Input {
+	r.readFaultWindows()
+	return invariant.Input{
+		Target:      r.target,
+		Checkpoints: engineCheckpoints(r.timeline.Checkpoints),
+		Faults:      engineFaults(r.timeline.Faults),
+	}
+}
+
+// judge checkpoints where a settle wait ended. A wait that expired while no
+// fault was active is a G4 violation, which ends the run.
+func (r *runner) judge(checkpoint int, after string, wait Wait) error {
+	if !wait.Converged {
 		// A target that is gone cannot converge, so that is the harness's
 		// failure to report, not the target's to answer for.
 		if status := r.h.targetStatus(); !status.Running {
 			return r.targetStopped(status)
 		}
 		if !r.faultActive() {
-			// One read of the managed objects answers both, so that the count
-			// cannot disagree with the state quoted beside it.
-			managed := r.h.objects().Managed()
-			cr := observe.Key{GVK: r.target.Primary, Namespace: r.timeline.Namespace, Name: r.cr}
-			r.violate(Violation{
-				ID: "G4",
-				Statement: fmt.Sprintf("the settle wait after op %d (%s) expired with no fault active",
-					op.Index, op.Type),
-				At: wait.Window.End,
-				Evidence: fmt.Sprintf("in %v of T_settle the target never held its Ready predicate with %v of quiet behind it; %s",
-					r.target.Timeouts.Settle, r.target.Timeouts.Stable, managedClause(len(managed))),
-			}.quotingRequests(invariant.Recent(r.h.requests())).
-				quotingVersions(invariant.RecentHistory(cr, r.h.objects().History(cr))).
-				quotingManaged(invariant.Sample(managed)))
+			r.violate(r.expired(after, wait))
 		}
 	}
-	return r.checkpoint(op.Index, converged)
+	return r.checkpoint(checkpoint, wait.Converged)
+}
+
+// expired is the G4 of a settle wait that ran out with no fault active.
+func (r *runner) expired(after string, wait Wait) Violation {
+	// One read of the managed objects answers both, so that the count cannot
+	// disagree with the state quoted beside it.
+	managed := r.h.objects().Managed()
+	cr := observe.Key{GVK: r.target.Primary, Namespace: r.timeline.Namespace, Name: r.cr}
+	return Violation{
+		ID:        "G4",
+		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active", after),
+		At:        wait.Window.End,
+		Evidence: fmt.Sprintf("in %v the target never held its Ready predicate with %v of quiet behind it; %s",
+			wait.Window.End.Sub(wait.Window.Start).Round(time.Millisecond), r.target.Timeouts.Stable,
+			managedClause(len(managed))),
+	}.quotingRequests(invariant.Recent(r.h.requests())).
+		quotingVersions(invariant.RecentHistory(cr, r.h.objects().History(cr))).
+		quotingManaged(invariant.Sample(managed))
 }
 
 // targetStopped is the harness error for a target that is no longer running.
@@ -640,8 +680,9 @@ func (r *runner) setFaults() {
 }
 
 // faultActive reports whether the proxy is still applying a fault it has
-// applied at least once. That window is what a check excuses the target over,
-// so it is what the Runner's own G4 stands down for (DESIGN.md §6, D36).
+// applied at least once. A settle wait runs until the target owes no recovery
+// from the faults that stopped, so an active fault is what excuses one that
+// expired.
 func (r *runner) faultActive() bool {
 	r.readFaultWindows()
 	return slices.ContainsFunc(r.faults, func(f activeFault) bool { return f.applied && !f.retired })
@@ -660,15 +701,35 @@ func (r *runner) clearFaults() {
 	r.h.setFaults(nil)
 }
 
-// teardown is step 4 of DESIGN.md §5.5. Every step runs even if one fails, and
-// the caller's deadline does not cut it short.
+// recover gives a target the faults still excuse a settle wait of its own,
+// since no op's wait gave it time to recover from them.
+func (r *runner) recover(ctx context.Context) error {
+	if r.violation != nil || r.failed || !r.faultsSoFar().Recovering(r.now()) {
+		return nil
+	}
+	wait, err := r.wait(ctx)
+	if err == nil {
+		r.timeline.Recovery = &wait
+		err = r.judge(Recovery, "the last fault stopped", wait)
+	}
+	if err != nil {
+		r.failed = true
+		return fmt.Errorf("the settle wait after the last fault stopped: %w", err)
+	}
+	return nil
+}
+
+// teardown is step 4 of DESIGN.md §5.5. Every step runs even if one fails.
+// The caller's deadline can end the recovery, which is judged as an op's wait
+// is, but no step after it.
 func (r *runner) teardown(ctx context.Context) error {
+	r.clearFaults()
+	failures := []error{r.recover(ctx)}
+
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.teardownBudget())
 	defer cancel()
-
-	r.clearFaults()
 	r.timeline.Quiet.Start = r.now()
-	failures := []error{r.h.sleep(ctx, r.target.Timeouts.Stable)}
+	failures = append(failures, r.h.sleep(ctx, r.target.Timeouts.Stable))
 
 	// Stamped before the delete, not after it: from here on botbox is the one
 	// changing the namespace, and no invariant window reaches past this instant

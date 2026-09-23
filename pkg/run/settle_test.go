@@ -45,6 +45,12 @@ var neverStops = make(chan struct{})
 // how long it took on the clock.
 func waitOn(t *testing.T, ctx context.Context, c *clock, state func(since time.Time) (bool, time.Time), stopped <-chan struct{}) (bool, time.Duration, error) {
 	t.Helper()
+	return waitOwing(t, ctx, c, state, stopped, owesNothing)
+}
+
+// waitOwing is waitOn for a target owed time to recover from faults.
+func waitOwing(t *testing.T, ctx context.Context, c *clock, state func(since time.Time) (bool, time.Time), stopped <-chan struct{}, owed func() time.Time) (bool, time.Duration, error) {
+	t.Helper()
 	start := c.now
 	wait := settle{
 		timeouts: testTimeouts,
@@ -53,9 +59,66 @@ func waitOn(t *testing.T, ctx context.Context, c *clock, state func(since time.T
 		sleep:    c.sleep,
 		state:    state,
 		stopped:  stopped,
+		owed:     owed,
 	}
 	converged, err := wait.wait(ctx)
 	return converged, c.now.Sub(start), err
+}
+
+func owesNothing() time.Time { return time.Time{} }
+
+// A fault that stops 4s into the wait leaves the target owed until 9s, which
+// the wait learns only then.
+func TestSettleRunsAsLongAsRecoveryIsOwed(t *testing.T) {
+	c := newClock()
+	start := c.now
+	notReady := func(since time.Time) (bool, time.Time) { return false, since }
+	owed := func() time.Time {
+		if c.now.Sub(start) < 4*time.Second {
+			return time.Time{}
+		}
+		return start.Add(9 * time.Second)
+	}
+
+	converged, elapsed, err := waitOwing(t, t.Context(), c, notReady, neverStops, owed)
+
+	if err != nil || converged {
+		t.Fatalf("The wait returned (%t, %v), want no convergence: the target is not ready.", converged, err)
+	}
+	if want := 9 * time.Second; elapsed != want {
+		t.Errorf("The wait took %v, want the %v the target was owed.", elapsed, want)
+	}
+}
+
+func TestSettleGivesTSettleWhenLessIsOwed(t *testing.T) {
+	c := newClock()
+	owedEarly := func() time.Time { return c.now.Add(-time.Second) }
+	notReady := func(since time.Time) (bool, time.Time) { return false, since }
+
+	converged, elapsed, err := waitOwing(t, t.Context(), c, notReady, neverStops, owedEarly)
+
+	if err != nil || converged {
+		t.Fatalf("The wait returned (%t, %v), want no convergence: the target is not ready.", converged, err)
+	}
+	if elapsed != testTimeouts.Settle {
+		t.Errorf("The wait took %v, want T_settle of %v.", elapsed, testTimeouts.Settle)
+	}
+}
+
+func TestSettleConvergesPastTSettleWhileRecoveryIsOwed(t *testing.T) {
+	c := newClock()
+	start := c.now
+	readyAt7s := func(since time.Time) (bool, time.Time) { return c.now.Sub(start) >= 7*time.Second, since }
+	owed := func() time.Time { return start.Add(9 * time.Second) }
+
+	converged, elapsed, err := waitOwing(t, t.Context(), c, readyAt7s, neverStops, owed)
+
+	if err != nil || !converged {
+		t.Fatalf("The wait returned (%t, %v), want convergence.", converged, err)
+	}
+	if want := 7 * time.Second; elapsed != want {
+		t.Errorf("The wait took %v, want the %v the target took.", elapsed, want)
+	}
 }
 
 func TestSettleConvergesOnceTheRunHoldsStill(t *testing.T) {

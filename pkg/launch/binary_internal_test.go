@@ -78,13 +78,16 @@ func TestSuperviseRestartsATargetThatAlreadyExited(t *testing.T) {
 
 	binary.Supervise(func(exit error) { heard <- exit })
 
-	select {
-	case exit := <-heard:
-		if exit == nil || !strings.Contains(exit.Error(), "exit status 3") {
-			t.Errorf("The supervisor reported %v, want exit status 3.", exit)
+	// The restarted target exits too, so a second exit shows the restart.
+	for _, which := range []string{"the exit that came before it", "an exit of the restarted target"} {
+		select {
+		case exit := <-heard:
+			if exit == nil || !strings.Contains(exit.Error(), "exit status 3") {
+				t.Errorf("The supervisor reported %v for %s, want exit status 3.", exit, which)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("The supervisor never reported %s.", which)
 		}
-	case <-time.After(10 * time.Second):
-		t.Fatal("The supervisor never reported the exit that came before it.")
 	}
 }
 

@@ -79,7 +79,7 @@ func (s *Store) RecordDeletion(gvk schema.GroupVersionKind, obj *unstructured.Un
 }
 
 // Exclude records that the named object is not the target's: botbox created
-// it, or the cluster did. It is never managed (§6), and neither is an object
+// it, or the cluster did. It is never managed, and neither is an object
 // recreated under its name.
 func (s *Store) Exclude(gvk schema.GroupVersionKind, name string) {
 	s.mu.Lock()
@@ -111,7 +111,7 @@ func (s *Store) Current(gvk schema.GroupVersionKind) []Version {
 }
 
 // Managed returns the latest version of every live managed object: an object
-// of a managed kind that is not excluded (DESIGN.md §6).
+// of a managed kind that is not excluded.
 func (s *Store) Managed() []Version {
 	return s.live(func(v Version) bool { return s.isManaged(v) })
 }

@@ -58,8 +58,7 @@ type Options struct {
 	Config *rest.Config
 	// ControllerManager says the cluster runs kube-controller-manager, as kind
 	// does and envtest does not. Its garbage collector replaces botbox's
-	// emulation (DESIGN.md §5.8), and botbox waits for what it adds to every
-	// namespace.
+	// emulation, and botbox waits for what it adds to every namespace.
 	ControllerManager bool
 	// Check evaluates the invariants and properties at each checkpoint. Run
 	// requires it; Start does not use it.
@@ -319,7 +318,8 @@ func awaitNamespaceDefaults(ctx context.Context, store *observe.Store, watched [
 		}
 		for len(store.HistoryOf(object.gvk, object.name)) == 0 {
 			if !time.Now().Before(deadline) {
-				return fmt.Errorf("the cluster created no %s %s in the run namespace within %v. botbox waits for it so that it never counts as the target's",
+				return fmt.Errorf("the cluster created no %s %s in the run namespace within %v. "+
+					"kube-controller-manager creates one in every namespace, and botbox waits for it so as not to count it as the target's",
 					kindName(object.gvk), object.name, within)
 			}
 			if err := sleep(ctx, settlePoll); err != nil {

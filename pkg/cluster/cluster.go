@@ -1,7 +1,6 @@
 // Package cluster provides the test cluster a botbox run executes against: an
-// envtest control plane it starts, or an existing cluster a kubeconfig names
-// (DESIGN.md §5.8). envtest reads KUBEBUILDER_ASSETS itself; `make setup`
-// installs the binaries.
+// envtest control plane it starts, or an existing cluster a kubeconfig names.
+// envtest reads KUBEBUILDER_ASSETS itself; `make setup` installs the binaries.
 //
 // This is the one harness package allowed to import controller-runtime
 // (DESIGN.md §11).

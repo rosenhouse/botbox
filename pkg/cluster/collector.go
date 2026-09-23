@@ -280,9 +280,9 @@ func (c *Collector) liveOwners(ctx context.Context, objects []object) owners {
 	for _, obj := range objects {
 		for _, ref := range obj.meta.OwnerReferences {
 			key := keyOf(ref)
-			kind, resolved, _ := live.resolve(ref)
+			kind, resolvable, _ := live.resolve(ref)
 			_, alreadyRead := live.resolved[key]
-			if !resolved || alreadyRead {
+			if !resolvable || alreadyRead {
 				continue
 			}
 			found, err := c.client.Resource(kind.resource).Namespace(c.namespace).
@@ -358,7 +358,7 @@ type owners struct {
 
 // resolve finds the watched kind a reference names. Like the garbage
 // collector, it resolves a reference only at a version the API server serves.
-func (o owners) resolve(ref metav1.OwnerReference) (kind watchedKind, resolved, watched bool) {
+func (o owners) resolve(ref metav1.OwnerReference) (kind watchedKind, resolvable, watched bool) {
 	gvk := schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind)
 	if kind, watched = o.watched[gvk.GroupKind()]; !watched {
 		return watchedKind{}, false, false
@@ -379,7 +379,7 @@ func (o owners) collectible(obj object) (bool, []Unresolved) {
 	collect := len(refs) > 0
 	var unresolved []Unresolved
 	for _, ref := range refs {
-		if _, resolved, watched := o.resolve(ref); !resolved {
+		if _, resolvable, watched := o.resolve(ref); !resolvable {
 			unresolved = append(unresolved, Unresolved{
 				DependentKind: obj.kind,
 				DependentName: obj.meta.Name,

@@ -989,15 +989,33 @@ func TestTheReplayCommandQuotesAWordZshWouldExpand(t *testing.T) {
 	}
 }
 
-// literalBytes are the bytes sh and zsh read as themselves, but for a leading =.
+// literalBytes are the bytes shellQuote leaves bare. sh and zsh read each as
+// itself, but for a leading =.
 const literalBytes = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./=:@%+,-"
 
-func TestTheReplayCommandQuotesEveryByteAShellInterprets(t *testing.T) {
-	for c := byte(0); c < 0x7f; c++ {
-		if (c < ' ' && c != '\t' && c != '\n') || strings.IndexByte(literalBytes, c) >= 0 {
-			continue
+func TestTheReplayCommandLeavesAWordOfLiteralBytesBare(t *testing.T) {
+	words := []string{literalBytes}
+	for _, c := range strings.ReplaceAll(literalBytes, "=", "") {
+		words = append(words, string(c))
+	}
+	for _, word := range words {
+		if quoted := shellQuote(word); quoted != word {
+			t.Errorf("shellQuote(%q) is %q, want it bare.", word, quoted)
 		}
-		for _, word := range []string{string(c), "x" + string(c)} {
+	}
+}
+
+// A shell reads some of these bytes as themselves, but quoting them costs
+// nothing.
+func TestTheReplayCommandQuotesEveryOtherByte(t *testing.T) {
+	others := []string{"é", " ", "🤖", "\xff"}
+	for c := range rune(0x80) {
+		if !strings.ContainsRune(literalBytes, c) {
+			others = append(others, string(c))
+		}
+	}
+	for _, other := range others {
+		for _, word := range []string{other, "x" + other} {
 			if quoted := shellQuote(word); !strings.HasPrefix(quoted, "'") {
 				t.Errorf("shellQuote(%q) is %q, want it single-quoted.", word, quoted)
 			}

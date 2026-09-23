@@ -15,9 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-
 	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/generate"
 	"github.com/rosenhouse/botbox/pkg/report"
@@ -587,43 +584,38 @@ func readSequences(paths []string) ([]run.Sequence, error) {
 // clusterSession runs against one test cluster: an envtest control plane
 // botbox starts, or the cluster a kubeconfig names (DESIGN.md §5.8).
 type clusterSession struct {
-	config *rest.Config
-	// collected says the cluster collects owned objects itself, which envtest
-	// does not.
-	collected bool
-	stop      func() error
+	*cluster.Cluster
+	// controllerManager says the cluster runs kube-controller-manager, which
+	// envtest does not.
+	controllerManager bool
 }
 
 func openSession(opts options, t *target.Target) (session, error) {
+	crds := cluster.Options{CRDPaths: t.CRDs}
 	if opts.kubeconfig != "" {
-		config, err := clientcmd.BuildConfigFromFlags("", opts.kubeconfig)
+		connected, err := cluster.Connect(opts.kubeconfig, crds)
 		if err != nil {
-			return nil, fmt.Errorf("reading the kubeconfig %s: %w", opts.kubeconfig, err)
+			return nil, err
 		}
-		return &clusterSession{config: config, collected: true}, nil
+		return &clusterSession{Cluster: connected, controllerManager: true}, nil
 	}
-	started, err := cluster.Start(cluster.Options{CRDPaths: t.CRDs})
+	started, err := cluster.Start(crds)
 	if err != nil {
 		return nil, err
 	}
-	return &clusterSession{config: started.Config(), stop: started.Stop}, nil
+	return &clusterSession{Cluster: started}, nil
 }
 
 func (s *clusterSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
 	return run.Run(ctx, t, sequence, run.Options{
 		Dir:               dir,
-		Config:            s.config,
-		ControllerManager: s.collected,
+		Config:            s.Config(),
+		ControllerManager: s.controllerManager,
 		Check:             check,
 	})
 }
 
-func (s *clusterSession) close() error {
-	if s.stop == nil {
-		return nil
-	}
-	return s.stop()
-}
+func (s *clusterSession) close() error { return s.Stop() }
 
 func version() string {
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {

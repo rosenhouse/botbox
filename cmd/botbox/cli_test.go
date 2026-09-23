@@ -25,8 +25,9 @@ import (
 )
 
 const (
-	toyTargetYAML   = "../../targets/toy-widget/target.yaml"
-	rulesTargetYAML = "../../pkg/generate/testdata/rules/target.yaml"
+	toyTargetYAML       = "../../targets/toy-widget/target.yaml"
+	rulesTargetYAML     = "../../pkg/generate/testdata/rules/target.yaml"
+	workloadsTargetYAML = "testdata/workloads/target.yaml"
 )
 
 // fakeSession executes nothing: it records what the CLI asked for and answers
@@ -1232,5 +1233,76 @@ func TestTheReportSaysWhatTheChecksBoundLeftOut(t *testing.T) {
 	}
 	if carried.VersionsOf != violation.VersionsOf {
 		t.Errorf("report.json says the timeline is of %q, want %q.", carried.VersionsOf, violation.VersionsOf)
+	}
+}
+
+func TestAnEnvtestInvocationWarnsOnceOfTheWorkloadsItManages(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		args  []string
+		warns bool
+	}{
+		{name: "workloads on envtest", args: []string{"--target", workloadsTargetYAML}, warns: true},
+		{name: "workloads on a kubeconfig cluster", args: []string{"--target", workloadsTargetYAML, "--kubeconfig", "kind.kubeconfig"}},
+		{name: "no workloads", args: []string{"--target", toyTargetYAML}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			args := append([]string{"run", "--out", t.TempDir(), "--runs", "3"}, test.args...)
+
+			code, _, stderr := invoke(t, &fakeSession{}, args...)
+
+			if code != exitOK {
+				t.Fatalf("botbox run exited %d: %s", code, stderr)
+			}
+			want := 0
+			if test.warns {
+				want = 1
+			}
+			if warned := strings.Count(stderr, "kubelet"); warned != want {
+				t.Fatalf("botbox run printed %q on stderr, which warns %d times of what envtest never runs, want %d.",
+					stderr, warned, want)
+			}
+			if !test.warns {
+				return
+			}
+			// The target also manages a ConfigMap and an example.com Deployment.
+			static := ": Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob, ReplicationController, Pod, PersistentVolumeClaim."
+			for _, want := range []string{static, "--kubeconfig", "kind cluster"} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("botbox run warned %q, want it to name %q.", stderr, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAG4ReportFromEnvtestRepeatsTheWorkloadWarning(t *testing.T) {
+	for _, test := range []struct {
+		name, check string
+		args        []string
+		notes       bool
+	}{
+		{name: "G4 on envtest", check: "G4", notes: true},
+		{name: "G4 on a kubeconfig cluster", check: "G4", args: []string{"--kubeconfig", "kind.kubeconfig"}},
+		{name: "G3 on envtest", check: "G3"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			violation := run.Violation{ID: test.check}
+			session := &fakeSession{results: []run.Result{{Violation: &violation}}}
+			args := append([]string{"replay", "--target", workloadsTargetYAML, "--out", t.TempDir()}, test.args...)
+
+			code, _, stderr := invoke(t, session, append(args, writeSequence(t, 1))...)
+
+			if code != exitViolation {
+				t.Fatalf("botbox replay exited %d, want %d: %s", code, exitViolation, stderr)
+			}
+			written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if noted := strings.Contains(string(written), "kubelet"); noted != test.notes {
+				t.Errorf("The report is\n%s\nand says what envtest never runs: %v, want %v.", written, noted, test.notes)
+			}
+		})
 	}
 }

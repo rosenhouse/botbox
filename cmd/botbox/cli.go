@@ -12,8 +12,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/generate"
@@ -137,7 +140,7 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		return c.fail(err)
 	}
 
-	s, err := c.open(opts, exercised)
+	s, err := c.startSession(opts, exercised)
 	if err != nil {
 		return c.fail(err)
 	}
@@ -346,12 +349,16 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 		return err
 	}
 	violation := *result.Violation
+	notes := result.Notes
+	if limit := envtestLimit(opts, t); limit != "" && violation.ID == "G4" {
+		notes = append(notes, limit)
+	}
 	return report.Write(dir, report.Report{
 		Check:         report.Check{ID: violation.ID, Statement: violation.Statement, At: violation.At, Evidence: violation.Evidence},
 		Target:        report.Target{Name: t.Name, Version: t.Version},
 		Botbox:        version(),
 		Seed:          sequence.Seed,
-		Notes:         result.Notes,
+		Notes:         notes,
 		Replay:        opts.replayCommand(replay),
 		Sequence:      encoded,
 		Applied:       len(result.Timeline.Ops),
@@ -588,6 +595,47 @@ type clusterSession struct {
 	// controllerManager says the cluster runs kube-controller-manager, which
 	// envtest does not.
 	controllerManager bool
+}
+
+// envtestStatic are the kinds that run Pods, and the claims Pods mount. Only
+// kube-controller-manager and a kubelet move their status.
+var envtestStatic = []schema.GroupKind{
+	{Group: "apps", Kind: "Deployment"},
+	{Group: "apps", Kind: "StatefulSet"},
+	{Group: "apps", Kind: "DaemonSet"},
+	{Group: "apps", Kind: "ReplicaSet"},
+	{Group: "batch", Kind: "Job"},
+	{Group: "batch", Kind: "CronJob"},
+	{Kind: "ReplicationController"},
+	{Kind: "Pod"},
+	{Kind: "PersistentVolumeClaim"},
+}
+
+// envtestLimit names the managed kinds envtest never moves, or is empty.
+func envtestLimit(opts options, t *target.Target) string {
+	if opts.kubeconfig != "" {
+		return ""
+	}
+	var static []string
+	for _, gvk := range t.Manages {
+		if slices.Contains(envtestStatic, gvk.GroupKind()) {
+			static = append(static, gvk.Kind)
+		}
+	}
+	if len(static) == 0 {
+		return ""
+	}
+	return "envtest runs no controller manager and no kubelet, so no Pod runs, and the status of these kinds never changes: " +
+		strings.Join(static, ", ") + ". A ready predicate that waits on that status never holds, and a controller that" +
+		" requeues while it waits can hide a missed watch. Run this target with --kubeconfig against a kind cluster."
+}
+
+// startSession warns of what envtest never runs, then opens the session.
+func (c *cli) startSession(opts options, t *target.Target) (session, error) {
+	if limit := envtestLimit(opts, t); limit != "" {
+		fmt.Fprintln(c.stderr, "botbox:", limit)
+	}
+	return c.open(opts, t)
 }
 
 func openSession(opts options, t *target.Target) (session, error) {

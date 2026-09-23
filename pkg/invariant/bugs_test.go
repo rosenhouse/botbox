@@ -226,7 +226,7 @@ func b9() invariant.Input {
 }
 
 // restartedAndScaledDown is b10.json up to its scale-down: three children, a
-// restart at 10s and an update to one child before anything settles.
+// restart at 10s and an update of spec.count to 1 before anything settles.
 func restartedAndScaledDown() *run {
 	return newRun().
 		op(invariant.OpCreate, 0).
@@ -267,8 +267,8 @@ func TestTheCorrectToyPassesTheSequenceOfB10(t *testing.T) {
 	for _, result := range results {
 		notes = append(notes, result.Notes...)
 	}
-	if len(notes) != 1 || !strings.HasPrefix(notes[0], "G5") || !strings.Contains(notes[0], "op 2 (update)") {
-		t.Fatalf("The checks noted %v, want one G5 note naming op 2 (update).", notes)
+	if len(notes) != 1 || !strings.HasPrefix(notes[0], "G5") || !strings.Contains(notes[0], "for op 1 (restart): op 2 (update) ran") {
+		t.Fatalf("The checks noted %v, want one G5 note saying op 2 (update) ran across op 1 (restart).", notes)
 	}
 }
 

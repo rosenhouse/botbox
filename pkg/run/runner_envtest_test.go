@@ -156,7 +156,7 @@ func TestRunner(t *testing.T) {
 	})
 
 	// b10.json scales the toy down right after a restart, before anything
-	// settles, so the toy's own scale-down lies between the states G5 compares.
+	// settles, so botbox's update lies between the states G5 compares.
 	t.Run("passes the toy without a bug on b10.json and notes the restart", func(t *testing.T) {
 		toy := loadTarget(t, binary)
 		sequence, err := run.ReadSequence(repoRoot + "/targets/toy-widget/sequences/b10.json")
@@ -175,9 +175,9 @@ func TestRunner(t *testing.T) {
 			t.Errorf("The run reported %s, want none: the toy runs without a bug.", result.Violation)
 		}
 		if !slices.ContainsFunc(result.Notes, func(note string) bool {
-			return strings.HasPrefix(note, "G5") && strings.Contains(note, "op 2 (update)")
+			return strings.HasPrefix(note, "G5") && strings.Contains(note, "for op 1 (restart): op 2 (update) ran")
 		}) {
-			t.Errorf("The run noted %q, want G5 to say the update of op 2 kept it from judging the restart.", result.Notes)
+			t.Errorf("The run noted %q, want G5 to say the update of op 2 kept it from judging the restart of op 1.", result.Notes)
 		}
 	})
 

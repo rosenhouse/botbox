@@ -168,51 +168,56 @@ func TestG5RunsOncePerRestart(t *testing.T) {
 	}
 }
 
-// changedAround restarts at 10s between states converged at 5s and 15s that
-// differ, and applies between whatever ops botbox runs at 11s.
-func changedAround(between func(*run) *run) invariant.Input {
-	r := newRun().
+// changedAcross converges at 5s and at 15s on states that differ, with
+// whatever ops botbox runs in between.
+func changedAcross(ops func(*run) *run) invariant.Input {
+	return ops(newRun().
 		record(time.Second, widget("10", spec(1), status(1, 1)), child("w-0", "11", data("0"))).
-		checkpoint(5*time.Second, invariant.Converged).
-		op(invariant.OpRestart, 10*time.Second)
-	return between(r).
+		checkpoint(5*time.Second, invariant.Converged)).
 		record(13*time.Second, widget("20", spec(1), status(1, 1)), child("w-0", "21", data("1"))).
 		checkpoint(15*time.Second, invariant.Converged).
 		through(20 * time.Second)
 }
 
-func TestG5LeavesARestartUnjudgedWhenBotboxChangedTheRunBeforeTheStateAfterIt(t *testing.T) {
-	in := changedAround(func(r *run) *run { return r.op(invariant.OpUpdate, 11*time.Second) })
-
-	noted(t, invariant.RestartStable, in, "op 1 (update)")
+// changedAround restarts the target at 10s between states converged at 5s and
+// 15s that differ, and then runs whatever ops botbox runs next.
+func changedAround(next func(*run) *run) invariant.Input {
+	return changedAcross(func(r *run) *run { return next(r.op(invariant.OpRestart, 10*time.Second)) })
 }
 
-func TestG5LeavesARestartUnjudgedWhenBotboxChangedTheRunAfterTheStateBeforeIt(t *testing.T) {
-	in := newRun().
-		record(time.Second, widget("10", spec(1), status(1, 1)), child("w-0", "11", data("0"))).
-		checkpoint(5*time.Second, invariant.Converged).
-		op(invariant.OpUpdate, 7*time.Second).
-		op(invariant.OpRestart, 10*time.Second).
-		record(13*time.Second, widget("20", spec(1), status(1, 1)), child("w-0", "21", data("1"))).
-		checkpoint(15*time.Second, invariant.Converged).
-		through(20 * time.Second)
-
-	noted(t, invariant.RestartStable, in, "op 0 (update)")
+// updatedAround is changedAround with botbox's update at the given time.
+func updatedAround(update time.Duration) invariant.Input {
+	if update > 10*time.Second {
+		return changedAround(func(r *run) *run { return r.op(invariant.OpUpdate, update) })
+	}
+	return changedAcross(func(r *run) *run {
+		return r.op(invariant.OpUpdate, update).op(invariant.OpRestart, 10*time.Second)
+	})
 }
 
-// An op stamped at the instant the state before the restart converged came
-// after that state.
-func TestG5LeavesARestartUnjudgedWhenBotboxChangedTheRunAsTheStateBeforeItConverged(t *testing.T) {
-	in := newRun().
-		record(time.Second, widget("10", spec(1), status(1, 1)), child("w-0", "11", data("0"))).
-		checkpoint(5*time.Second, invariant.Converged).
-		op(invariant.OpUpdate, 5*time.Second).
-		op(invariant.OpRestart, 10*time.Second).
-		record(13*time.Second, widget("20", spec(1), status(1, 1)), child("w-0", "21", data("1"))).
-		checkpoint(15*time.Second, invariant.Converged).
-		through(20 * time.Second)
+// An op stamped at the instant a state converged came after that state.
+func TestG5LeavesARestartUnjudgedOnlyForAnUpdateBetweenTheStatesItCompares(t *testing.T) {
+	for _, update := range []struct {
+		at   time.Duration
+		note string
+	}{
+		{0, ""},
+		{5 * time.Second, "for op 1 (restart): op 0 (update) ran"},
+		{7 * time.Second, "for op 1 (restart): op 0 (update) ran"},
+		{11 * time.Second, "for op 0 (restart): op 1 (update) ran"},
+		{15 * time.Second, ""},
+		{16 * time.Second, ""},
+	} {
+		t.Run(update.at.String(), func(t *testing.T) {
+			in := updatedAround(update.at)
 
-	noted(t, invariant.RestartStable, in, "op 0 (update)")
+			if update.note == "" {
+				fired(t, invariant.RestartStable, in)
+				return
+			}
+			noted(t, invariant.RestartStable, in, update.note)
+		})
+	}
 }
 
 func TestG5LeavesARestartUnjudgedOnlyForAnOpThatChangesTheRun(t *testing.T) {
@@ -235,7 +240,7 @@ func TestG5LeavesARestartUnjudgedOnlyForAnOpThatChangesTheRun(t *testing.T) {
 			in := changedAround(between.apply)
 
 			if between.confound {
-				noted(t, invariant.RestartStable, in, "op 1 ("+string(in.Ops[1].Type)+")")
+				noted(t, invariant.RestartStable, in, "for op 0 (restart): op 1 ("+string(in.Ops[1].Type)+") ran")
 				return
 			}
 			result := evaluate(t, invariant.RestartStable, in)
@@ -246,34 +251,12 @@ func TestG5LeavesARestartUnjudgedOnlyForAnOpThatChangesTheRun(t *testing.T) {
 	}
 }
 
-func TestG5JudgesARestartWhateverBotboxDidOutsideTheStatesItCompares(t *testing.T) {
-	for _, outside := range []struct {
-		name string
-		in   invariant.Input
-	}{
-		{"the op the state before the restart settled", newRun().
-			op(invariant.OpUpdate, 0).
-			record(time.Second, widget("10", spec(1), status(1, 1)), child("w-0", "11", data("0"))).
-			checkpoint(5*time.Second, invariant.Converged).
-			op(invariant.OpRestart, 10*time.Second).
-			record(13*time.Second, widget("20", spec(1), status(1, 1)), child("w-0", "21", data("1"))).
-			checkpoint(15*time.Second, invariant.Converged).
-			through(20 * time.Second)},
-		{"an op after the state after the restart", restartRun(
-			[]*unstructured.Unstructured{child("w-0", "11", data("0"))},
-			[]*unstructured.Unstructured{child("w-0", "21", data("1"))}).
-			op(invariant.OpDelete, 16*time.Second).
-			through(20 * time.Second)},
-		{"an op at the instant the state after the restart converged", restartRun(
-			[]*unstructured.Unstructured{child("w-0", "11", data("0"))},
-			[]*unstructured.Unstructured{child("w-0", "21", data("1"))}).
-			op(invariant.OpDelete, 15*time.Second).
-			through(20 * time.Second)},
-	} {
-		t.Run(outside.name, func(t *testing.T) {
-			fired(t, invariant.RestartStable, outside.in)
-		})
-	}
+func TestG5NamesTheFirstOpThatKeptItFromJudgingARestart(t *testing.T) {
+	in := changedAround(func(r *run) *run {
+		return r.op(invariant.OpUpdate, 11*time.Second).op(invariant.OpDelete, 12*time.Second)
+	})
+
+	noted(t, invariant.RestartStable, in, "op 1 (update) ran")
 }
 
 func TestG5ComparesTheMetadataSection6DoesNotIgnore(t *testing.T) {

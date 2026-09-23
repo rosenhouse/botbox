@@ -38,7 +38,7 @@ type Proxy struct {
 	log []Request
 	// faults are every fault the proxy was given, removed or not, in order.
 	// A FaultID is an index into them.
-	faults []*activeFault
+	faults []*injectedFault
 }
 
 // Start listens on 127.0.0.1 over plain HTTP and forwards to the server cfg

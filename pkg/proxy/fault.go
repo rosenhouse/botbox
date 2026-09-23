@@ -76,8 +76,8 @@ func (a Delay) String() string { return fmt.Sprintf("delay(%s)", a.For) }
 func (Drop) String() string    { return "drop" }
 
 // Trigger ends a fault after a count of applications or a duration from the
-// AddFault call. The zero Trigger never ends, which is how the Runner drives
-// the op-index trigger of DESIGN.md §5.2.
+// AddFault call. A fault with the zero Trigger ends only at RemoveFault or
+// ClearFaults.
 type Trigger struct {
 	Count int
 	For   time.Duration
@@ -93,7 +93,7 @@ func (p *Proxy) AddFault(spec FaultSpec) FaultID {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	id := FaultID(len(p.faults))
-	p.faults = append(p.faults, &activeFault{
+	p.faults = append(p.faults, &injectedFault{
 		spec:   spec,
 		since:  time.Now(),
 		random: rand.New(rand.NewPCG(uint64(p.seed), uint64(id))),
@@ -139,7 +139,7 @@ func (p *Proxy) Window(id FaultID) FaultWindow {
 	return FaultWindow{First: fault.first, Retired: fault.retiredBy(now)}
 }
 
-type activeFault struct {
+type injectedFault struct {
 	spec    FaultSpec
 	since   time.Time
 	random  *rand.Rand
@@ -150,17 +150,17 @@ type activeFault struct {
 	first, spent, removed time.Time
 }
 
-// remove stamps the removal under the proxy's lock, so that no request the
-// fault applied to comes after it.
-func (f *activeFault) remove() {
+// remove stamps the removal. The caller holds the proxy's lock, so no request
+// the fault applied to comes after it.
+func (f *injectedFault) remove() {
 	if f.removed.IsZero() {
 		f.removed = time.Now()
 	}
 }
 
-func (f *activeFault) expired(now time.Time) bool { return !f.retiredBy(now).IsZero() }
+func (f *injectedFault) expired(now time.Time) bool { return !f.retiredBy(now).IsZero() }
 
-func (f *activeFault) applies(r Request, now time.Time) bool {
+func (f *injectedFault) applies(r Request, now time.Time) bool {
 	if !f.spec.Match.Matches(r) {
 		return false
 	}
@@ -181,7 +181,7 @@ func (f *activeFault) applies(r Request, now time.Time) bool {
 // while it still applies. A count runs out on the request that spends it, a
 // window runs out on the clock, whether or not a request came, and a removal
 // retires the fault at once.
-func (f *activeFault) retiredBy(now time.Time) time.Time {
+func (f *injectedFault) retiredBy(now time.Time) time.Time {
 	retired := earliest(f.spent, f.removed)
 	if windowEnd := f.since.Add(f.spec.Until.For); f.spec.Until.For > 0 && !windowEnd.After(now) {
 		retired = earliest(retired, windowEnd)

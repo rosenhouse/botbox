@@ -143,15 +143,34 @@ func TestAnExpiredWaitJudgesTheCRFromTheWriteOn(t *testing.T) {
 			record(2*time.Second, widget("10", spec(3), status(3, 1))).
 			op(invariant.OpUpdate, 2*time.Second).
 			record(2001*time.Millisecond, widget("11", spec(4), generation(2), status(3, 1))),
-		"a delete": newRun().
-			record(time.Second, widget("10", spec(3), finalizers("toy"), status(3, 1))).
-			op(invariant.OpDelete, 2*time.Second).
-			record(2001*time.Millisecond, widget("11", spec(3), finalizers("toy"), deleting(2*time.Second), status(0, 1))),
 	} {
 		t.Run(name, func(t *testing.T) {
 			violation := expiredWait(t, r.checkpoint(7*time.Second, invariant.Expired).through(9*time.Second))
 
 			requireStatement(t, violation, "in 5s, ready never held: it evaluated to false")
+		})
+	}
+}
+
+// Ready need not hold on a CR being deleted, so a wait that ends on one names
+// what holds it.
+func TestAnExpiredWaitSaysTheCRWasStillBeingDeleted(t *testing.T) {
+	stuck := []option{spec(3), finalizers("example.com/stuck", "toy"), deleting(2 * time.Second)}
+	for name, r := range map[string]*run{
+		"ready never held": newRun().
+			record(time.Second, widget("10", spec(3), finalizers("example.com/stuck"), status(3, 1))).
+			op(invariant.OpDelete, 2*time.Second).
+			record(2001*time.Millisecond, widget("11", append(stuck, generation(2), status(3, 1))...)),
+		"ready held and stopped": newRun().
+			record(time.Second, widget("10", spec(3), finalizers("example.com/stuck"), status(3, 1))).
+			op(invariant.OpDelete, 2*time.Second).
+			record(2001*time.Millisecond, widget("11", append(stuck, status(3, 1))...)).
+			record(3*time.Second, widget("12", append(stuck, status(2, 1))...)),
+	} {
+		t.Run(name, func(t *testing.T) {
+			violation := expiredWait(t, r.checkpoint(7*time.Second, invariant.Expired).through(9*time.Second))
+
+			requireStatement(t, violation, "in 5s, the CR w was still being deleted, held by the finalizers example.com/stuck, toy")
 		})
 	}
 }

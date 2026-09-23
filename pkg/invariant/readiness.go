@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -122,6 +123,8 @@ func (w readyWalk) why(began time.Time, stable time.Duration, changes []observe.
 		return "no CR was left to be ready, " + churn(stable, changes)
 	case w.held:
 		return fmt.Sprintf("ready held from %s on, %s", w.turned.Sub(began).Round(time.Millisecond), churn(stable, changes))
+	case w.cr.DeletionTimestamp != nil:
+		return fmt.Sprintf("the CR %s was still being deleted, held by the finalizers %s", w.cr.Name, strings.Join(w.cr.Finalizers, ", "))
 	case w.ever:
 		return fmt.Sprintf("ready held until %s: %s", w.turned.Sub(began).Round(time.Millisecond), w.failure())
 	default:

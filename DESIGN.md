@@ -347,7 +347,9 @@ is not judged, rather than judged early: judging early would hold the target to 
 window than §6 gives it, and where the boundary falls would depend on harness timing. G3
 is the exception, since §5.5 step 4 opens its window deliberately, and §4's teardown
 checkpoint still evaluates properties. A primary CR with a deletionTimestamp need not
-satisfy `Ready`: it is being deleted, so G3 judges it, not G4.
+satisfy `Ready`: it is being deleted, so G3 judges it, not G4. A settle wait still waits
+for `Ready`, so a wait can expire on such a CR, and its G4 then blames the CR's
+finalizers, not `Ready`.
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
 namespace that is neither a fixture nor created by botbox. The namespace is private to one

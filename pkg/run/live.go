@@ -35,6 +35,9 @@ type liveRun struct {
 	target    *target.Target
 	client    dynamic.Interface
 	resources map[schema.GroupVersionKind]schema.GroupVersionResource
+	// emptied are the kinds the teardown deletes: the target's and its
+	// fixtures'.
+	emptied []schema.GroupVersionKind
 }
 
 var _ harness = (*liveRun)(nil)
@@ -44,15 +47,21 @@ func newLiveRun(h *Harness, t *target.Target) (*liveRun, error) {
 	if err != nil {
 		return nil, fmt.Errorf("building botbox's dynamic client: %w", err)
 	}
+	emptied := t.WatchedKinds()
+	for _, fixture := range t.Fixtures {
+		if gvk := fixture.GroupVersionKind(); !slices.Contains(emptied, gvk) {
+			emptied = append(emptied, gvk)
+		}
+	}
 	resources := map[schema.GroupVersionKind]schema.GroupVersionResource{}
-	for _, gvk := range t.WatchedKinds() {
+	for _, gvk := range emptied {
 		mapping, err := h.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
 			return nil, fmt.Errorf("resolving the resource of %s: %w", kindName(gvk), err)
 		}
 		resources[gvk] = mapping.Resource
 	}
-	return &liveRun{h: h, target: t, client: client, resources: resources}, nil
+	return &liveRun{h: h, target: t, client: client, resources: resources, emptied: emptied}, nil
 }
 
 func (l *liveRun) of(gvk schema.GroupVersionKind) dynamic.ResourceInterface {
@@ -213,7 +222,7 @@ func (l *liveRun) forceFinalizers(ctx context.Context) ([]string, error) {
 // empty deletes what the run left in the namespace (DESIGN.md §5.5).
 func (l *liveRun) empty(ctx context.Context) error {
 	var failures []error
-	for _, gvk := range l.target.WatchedKinds() {
+	for _, gvk := range l.emptied {
 		err := l.of(gvk).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
 			failures = append(failures, fmt.Errorf("deleting the %s left behind: %w", kindName(gvk), err))

@@ -219,10 +219,10 @@ The Runner executes one sequence:
    deletion either, because its ops did not all run. Then
    force-remove any finalizer still present in the run namespace; the report notes each one
    (D37). G3 judged the deletion window, which closed before this. Delete every remaining
-   object
-   in the namespace that botbox or the target created. Stop the target if it was started
-   for this run. Delete the namespace. Namespace names are never reused, so a namespace
-   that never finishes terminating (envtest, §5.8) is harmless.
+   object in the namespace of a kind the target declares or a fixture has, because a later
+   run's target may watch every namespace. Stop the target if it was started for this run.
+   Delete the namespace. Namespace names are never reused, so a namespace that never
+   finishes terminating (envtest, §5.8) is harmless.
 
 Cleanup between runs never restarts the API server, because rapid's shrinker re-invokes
 the test function many times.

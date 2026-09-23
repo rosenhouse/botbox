@@ -12,8 +12,10 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/invariant"
@@ -1181,6 +1183,51 @@ func TestRunReportsAFailedOp(t *testing.T) {
 	}
 	if !slices.Contains(h.calls, "stop") {
 		t.Errorf("The run did %v, want it torn down anyway.", h.calls)
+	}
+}
+
+func TestAWriteTheAPIServerRefusesIsARefusalOfItsOp(t *testing.T) {
+	widgets := schema.GroupResource{Group: "toy.botbox", Resource: "widgets"}
+	invalid := apierrors.NewInvalid(schema.GroupKind{Group: "toy.botbox", Kind: "Widget"}, "widget",
+		field.ErrorList{field.Invalid(field.NewPath("spec"), "object", "maxUnavailable must not exceed count")})
+	for _, test := range []struct {
+		name, call string
+		err        error
+		refusedOp  int
+	}{
+		{"a create its CRD refuses", "createCR widget", invalid, 0},
+		{"an update its CRD refuses", "patchCR widget map[spec:map[count:5]]", invalid, 2},
+		{"a create a webhook denies with its default code", "createCR widget",
+			apierrors.NewBadRequest(`admission webhook "validate.toy.botbox" denied the request: no`), 0},
+		{"a create a webhook forbids", "createCR widget",
+			apierrors.NewForbidden(widgets, "widget", errors.New(`admission webhook "validate.toy.botbox" denied the request`)), 0},
+		{"a server that fails", "createCR widget", apierrors.NewInternalError(errors.New("etcd is down")), -1},
+		{"a managed object botbox may not delete", "deleteManaged v1/ConfigMap widget-0",
+			apierrors.NewForbidden(schema.GroupResource{Resource: "configmaps"}, "widget-0", errors.New("no")), -1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newFakeHarness()
+			h.fail[test.call] = test.err
+
+			_, err := runFake(t, h, nil, sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)},
+				Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(5)}}},
+			))
+
+			var refused *Refused
+			switch isRefused := errors.As(err, &refused); {
+			case test.refusedOp < 0 && isRefused:
+				t.Errorf("The run returned %v, a refusal of what op %d wrote.", err, refused.Op.Index)
+			case test.refusedOp >= 0 && !isRefused:
+				t.Errorf("The run returned %v, want a refusal of op %d.", err, test.refusedOp)
+			case isRefused && refused.Op.Index != test.refusedOp:
+				t.Errorf("The run blamed op %d, want op %d.", refused.Op.Index, test.refusedOp)
+			}
+			if err == nil || !strings.Contains(err.Error(), test.err.Error()) {
+				t.Errorf("The run returned %v, want the API server's %v.", err, test.err)
+			}
+		})
 	}
 }
 

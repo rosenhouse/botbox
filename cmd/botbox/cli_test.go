@@ -826,6 +826,61 @@ func TestAHarnessErrorExitsTwo(t *testing.T) {
 	}
 }
 
+func TestAHarnessErrorNamesItsRunAndDirectory(t *testing.T) {
+	session := &fakeSession{failures: []error{nil, errors.New("the control plane did not start")}}
+
+	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
+
+	if code != exitError {
+		t.Errorf("A run that failed exited %d, want %d.", code, exitError)
+	}
+	for _, want := range []string{"run 2: the control plane did not start", session.dirs[1]} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("botbox run reported %q, which does not mention %q.", stderr, want)
+		}
+	}
+}
+
+func TestARefusedDrawSaysWhereItsSequenceIs(t *testing.T) {
+	refusal := &run.Refused{Op: run.Op{Index: 0, Type: run.OpCreate}, Reason: errors.New("maxUnavailable must not exceed count")}
+	session := &fakeSession{failures: []error{nil, refusal}}
+
+	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3", "--seed", "1")
+
+	if code != exitError {
+		t.Errorf("A run the API server refused exited %d, want %d.", code, exitError)
+	}
+	if len(session.sequences) != 2 {
+		t.Errorf("botbox ran %d sequences, want it to stop at the refused one.", len(session.sequences))
+	}
+	for _, want := range []string{
+		"run 2: the API server refused op 0 (create)", "maxUnavailable must not exceed count",
+		filepath.Join(session.dirs[1], "sequence.json"), "generate.mutate", "generate.overlay",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("botbox run reported %q, which does not mention %q.", stderr, want)
+		}
+	}
+}
+
+func TestARefusedSequenceFileIsNamed(t *testing.T) {
+	refusal := &run.Refused{Op: run.Op{Index: 0, Type: run.OpCreate}, Reason: errors.New("spec.count: must be at most 10")}
+	session := &fakeSession{failures: []error{refusal}}
+	path := writeSequence(t, 1)
+
+	code, _, stderr := invoke(t, session, "replay", "--target", toyTargetYAML, "--out", t.TempDir(), path)
+
+	if code != exitError {
+		t.Errorf("A sequence the API server refused exited %d, want %d.", code, exitError)
+	}
+	if !strings.Contains(stderr, path) {
+		t.Errorf("botbox replay reported %q, which does not name %s.", stderr, path)
+	}
+	if strings.Contains(stderr, "generate.") {
+		t.Errorf("botbox replay reported %q, which blames generation for a sequence botbox did not draw.", stderr)
+	}
+}
+
 func TestRunStopsAtTheFirstFailingSequence(t *testing.T) {
 	violation := run.Violation{ID: "G1"}
 	session := &fakeSession{results: []run.Result{{}, {Violation: &violation}}}

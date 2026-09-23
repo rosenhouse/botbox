@@ -170,7 +170,7 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		}
 		switch exitCode(result, err) {
 		case exitError:
-			return c.fail(opts.named(ctx, err))
+			return c.failRun(number, planned, dir, opts.named(ctx, err))
 		case exitViolation:
 			return c.reportFailure(ctx, opts, s, exercised, planned, result, number, dir)
 		}
@@ -411,6 +411,24 @@ func quotes(violation run.Violation) string {
 
 func (c *cli) fail(err error) int {
 	fmt.Fprintln(c.stderr, "botbox:", err)
+	return exitError
+}
+
+// failRun reports a run that could not finish and says where to look.
+func (c *cli) failRun(number int, failed planned, dir string, err error) int {
+	fmt.Fprintf(c.stderr, "botbox: run %d: %v\n", number, err)
+	var refused *run.Refused
+	switch {
+	case !errors.As(err, &refused):
+		fmt.Fprintf(c.stderr, "  the run's files are in %s\n", dir)
+	case failed.generated():
+		fmt.Fprintf(c.stderr, "  the op is in %s\n", filepath.Join(dir, sequenceFile))
+		fmt.Fprintln(c.stderr, "  botbox drew it to pass the CRD's schema and validation rules, so a rule botbox cannot see"+
+			" refused it, such as an admission webhook's. Keep drawn values inside that rule with generate.mutate"+
+			" or generate.overlay.")
+	default:
+		fmt.Fprintf(c.stderr, "  the op is in %s\n", failed.path)
+	}
 	return exitError
 }
 

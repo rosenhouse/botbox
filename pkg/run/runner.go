@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -337,6 +338,19 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 	return result, errors.Join(failure, teardown)
 }
 
+// Refused is the API server turning away the CR an op wrote. The CRD's schema
+// or rules refused it, or an admission webhook did.
+type Refused struct {
+	Op     Op
+	Reason error
+}
+
+func (r *Refused) Error() string {
+	return fmt.Sprintf("the API server refused op %d (%s): %v", r.Op.Index, r.Op.Type, r.Reason)
+}
+
+func (r *Refused) Unwrap() error { return r.Reason }
+
 // applyOps applies the sequence in order and stops at the first violation
 // (DESIGN.md §5.5).
 func (r *runner) applyOps(ctx context.Context) error {
@@ -345,10 +359,19 @@ func (r *runner) applyOps(ctx context.Context) error {
 			return nil
 		}
 		if err := r.applyOp(ctx, op); err != nil {
+			if op.Type.OnCR() && refused(err) {
+				return &Refused{Op: op, Reason: err}
+			}
 			return fmt.Errorf("op %d (%s): %w", op.Index, op.Type, err)
 		}
 	}
 	return nil
+}
+
+// refused says the API server turned a write away for what it carried: 422
+// from validation, and 400 or 403 from an admission webhook.
+func refused(err error) bool {
+	return apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) || apierrors.IsForbidden(err)
 }
 
 // applyOp applies one op and waits for the target's reaction. A target that

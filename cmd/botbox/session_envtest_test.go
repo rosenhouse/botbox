@@ -21,7 +21,27 @@ import (
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
+	"github.com/rosenhouse/botbox/pkg/target"
 )
+
+func TestClosingAnEnvtestSessionStopsItsControlPlane(t *testing.T) {
+	s, err := openSession(options{}, &target.Target{})
+	if err != nil {
+		t.Fatalf("Opening a session failed: %v", err)
+	}
+	client, err := kubernetes.NewForConfig(s.(*clusterSession).Config())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.close(); err != nil {
+		t.Fatalf("Closing the session failed: %v", err)
+	}
+
+	if _, err := client.Discovery().ServerVersion(); err == nil {
+		t.Error("The API server still answers after the session closed.")
+	}
+}
 
 // A bare control plane stands in for kind: it has none of the target's CRDs,
 // and a stand-in adds what kube-controller-manager adds to every namespace.

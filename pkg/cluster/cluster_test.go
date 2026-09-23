@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+
 	"github.com/rosenhouse/botbox/pkg/cluster"
 )
 
@@ -51,6 +54,23 @@ func TestConnectNamesAKubeconfigItCannotRead(t *testing.T) {
 	_, err := cluster.Connect(kubeconfig, cluster.Options{})
 	if err == nil || !strings.Contains(err.Error(), kubeconfig) {
 		t.Errorf("Connect returned %v, want an error naming %s.", err, kubeconfig)
+	}
+}
+
+func TestConnectReportsCRDsItCouldNotInstall(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
+	unreachable := clientcmdapi.Config{
+		Clusters:       map[string]*clientcmdapi.Cluster{"nowhere": {Server: "http://127.0.0.1:1"}},
+		Contexts:       map[string]*clientcmdapi.Context{"nowhere": {Cluster: "nowhere"}},
+		CurrentContext: "nowhere",
+	}
+	if err := clientcmd.WriteToFile(unreachable, kubeconfig); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := cluster.Connect(kubeconfig, cluster.Options{CRDPaths: []string{"../../targets/toy-widget/crds"}})
+	if err == nil || !strings.Contains(err.Error(), "installing the CRDs") {
+		t.Errorf("Connect returned %v, want an error saying it could not install the CRDs.", err)
 	}
 }
 

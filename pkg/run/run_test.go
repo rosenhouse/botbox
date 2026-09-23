@@ -106,8 +106,12 @@ func TestAwaitNamespaceDefaults(t *testing.T) {
 			made: []*unstructured.Unstructured{serviceAccount}, later: []*unstructured.Unstructured{rootCA},
 		},
 		{
-			name: "one never made", watched: both,
+			name: "the ConfigMap never made", watched: both,
 			made: []*unstructured.Unstructured{serviceAccount}, want: "v1/ConfigMap kube-root-ca.crt",
+		},
+		{
+			name: "the ServiceAccount never made", watched: both,
+			made: []*unstructured.Unstructured{rootCA}, want: "v1/ServiceAccount default",
 		},
 		{
 			name: "an unwatched kind never made", watched: []schema.GroupVersionKind{widgetKind, configMapKind},

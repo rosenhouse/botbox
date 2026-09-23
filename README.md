@@ -28,9 +28,10 @@ kind delete cluster --kubeconfig kind.kubeconfig
 
 - botbox installs the target's `crds`, replacing any CRD of the same name, and leaves them
   installed.
-- Each run creates a namespace and deletes it at the end.
-- Your controller still runs on your machine, behind botbox's proxy. Do not deploy it to the
-  cluster as well, because botbox would judge both copies' work as one.
+- Each run creates a namespace and deletes it at the end, unless botbox is killed.
+- Your controller still runs on your machine, behind botbox's proxy. Do not also deploy it to
+  the cluster, or run a second botbox against the cluster at the same time: botbox would
+  count the other copy's work as your controller's.
 - The cluster puts the `default` ServiceAccount and the `kube-root-ca.crt` ConfigMap in every
   namespace. botbox waits for them and never counts them, or anything else there before your
   controller starts, as your controller's.

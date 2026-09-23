@@ -294,7 +294,9 @@ botbox owns the API server a run executes against.
   `kube-controller-manager`, whose garbage collector replaces the emulation below. It also
   adds the `default` ServiceAccount and the `kube-root-ca.crt` ConfigMap to every
   namespace. A run waits up to 30 s for those of a kind it watches, and a missing one is a
-  harness error.
+  harness error. The cluster serves one botbox invocation at a time: a target that watches
+  every namespace acts in another invocation's run namespace too, and each invocation
+  would count that work as its own target's.
 
 envtest runs only the API server and etcd. There is no `kube-controller-manager`, so
 nothing garbage-collects owned objects, namespaces never finish terminating, no default
@@ -369,8 +371,9 @@ satisfy `Ready`: it is being deleted, so G3 judges it, not G4.
 namespace that neither botbox nor the cluster created. Fixtures and the primary CR are
 botbox's. The cluster's are what the namespace holds before the fixtures and the target,
 once §5.8's wait is over. Both are excluded by name, so an object the cluster recreates
-stays excluded. The namespace is private to one run, so everything else in it came from
-the target, except what a cluster adds later: the optional selector leaves that out.
+stays excluded. The namespace is private to one run, since a kubeconfig cluster serves one
+invocation at a time (§5.8). Everything else in it came from the target, except what a
+cluster adds later: the optional selector leaves that out.
 ownerReferences and the selector refine attribution to a particular CR; they are not
 required for it.
 
@@ -1273,7 +1276,10 @@ built from source and run as a black-box binary.
   the target. Without the wait, a root CA published late counts as the target's. Objects
   a cluster adds later stay attributed to the target, and `selector` leaves them out.
   botbox installs the CRDs with envtest's `InstallCRDs`, which creates or replaces each
-  one and waits until it is served. It leaves them, since the next invocation needs them.
+  one and waits until it is served. It leaves them, because deleting a CRD deletes every
+  object of that kind in the cluster. A kubeconfig cluster serves one invocation at a time:
+  two invocations on one kind cluster failed the correct toy on G1 and G6, because each toy
+  reconciled the other's Widget.
   envtest also read `USE_EXISTING_CLUSTER`, which pointed botbox's default mode, collector
   emulation and all, at whatever `KUBECONFIG` named. `cluster.Start` now turns that off.
   `make test-kind` runs on kind v0.33.0 and its default node image, Kubernetes 1.37.0.

@@ -278,9 +278,10 @@ The first settle wait expired. What follows `expired with no fault active` says 
   field the CR does not have. Check the spelling, and guard an optional field with `has()`.
 - `ready never held: it evaluated to false` means your controller never reached the state
   your `ready` describes. The report's Ready predicate section shows the CR's conditions
-  and status, which is where a reason such as `0/10 replicas available` appears. envtest
-  runs only the API server and etcd: no Deployment, ReplicaSet or Pod controller runs, so a
-  CR that waits on a Deployment's replicas never becomes ready there.
+  and status, which is where a reason such as `0/10 replicas available` appears. Compare
+  that status with your `ready`: a misspelled field under `has()` also evaluates to false.
+  envtest runs only the API server and etcd: no Deployment, ReplicaSet or Pod controller
+  runs, so a CR that waits on a Deployment's replicas never becomes ready there.
 - `ready held from … on, but the namespace never held still for stable (2s)` means your
   controller converged and kept writing. The Object versions table lists the writes. A
   status field rewritten on every reconcile, such as a timestamp, does this.

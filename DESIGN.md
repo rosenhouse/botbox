@@ -197,10 +197,11 @@ The Runner executes one sequence:
    `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
    that expires while no fault excuses it records a G4 violation, which says why from the
    Observer's history of the wait: `Ready` never held, held and then stopped, or held while
-   the namespace kept changing within `T_stable`. The Runner and the engine raise it with
-   one function, so they agree. A fault excuses it while
-   active, which is once the proxy has applied it and until the proxy stops (D36), and
-   while the target is still owed time to recover from it (§6). A wait also ends
+   the namespace kept changing within `T_stable`; or no CR was left to be ready. Where
+   `Ready` held and nothing changed within `T_stable`, it says that. The Runner and the
+   engine raise it with one function, so they agree. A fault excuses it while active, which
+   is once the proxy has applied it and until the proxy stops (D36), and while the target
+   is still owed time to recover from it (§6). A wait also ends
    where the target's process exits, and the Runner checks the target is running before it
    applies each op. A target that stopped ends the run as a harness error naming the op it
    was at (§11), because the ops behind it would run against nothing.

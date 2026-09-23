@@ -167,7 +167,8 @@ type Wait struct {
 
 // Checkpoint is where the checks ran (DESIGN.md §4).
 type Checkpoint struct {
-	// At is where the settle wait ended, or the teardown's deletion window.
+	// At is where the settle wait ended, or where the teardown's deletion
+	// window closed.
 	At time.Time
 	// Began is where that settle wait began. The teardown's is zero.
 	Began time.Time

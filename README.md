@@ -169,10 +169,14 @@ that target rather than reporting G4 against your controller.
 
 envtest runs no garbage collector, so botbox runs its own over the kinds your target
 declares. It deletes an object once every owner the object names is gone. It finds an owner
-by group, kind, name and UID, at any version the API server serves. It counts as live an
-owner of a kind your target does not declare, or one named at a version the API server does
-not serve. The run prints a note for each such owner, and the report carries it, because
-botbox then never deletes the object that names it.
+by group, kind and name, at any version the API server serves, and then compares the UID.
+It counts as live an owner of a kind your target does not declare, or one named at a version
+the API server does not serve, so it never deletes an object that names one. The run prints
+a note for each such object and owner, and the report carries it. A real garbage collector
+cannot resolve an unserved version either, so fix that reference in your controller. If your
+controller creates an owner of an undeclared kind, add the kind to `manages`. Otherwise,
+point `botbox run --kubeconfig` at a cluster such as kind, whose garbage collector resolves
+every kind.
 
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the

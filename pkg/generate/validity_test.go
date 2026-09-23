@@ -54,6 +54,17 @@ func TestAMutatePathTheCRDRefusesInTheSampleIsAConfigurationError(t *testing.T) 
 	}
 }
 
+func TestNewKeepsAFieldOnlyACreateMayChange(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	loaded.Generate = target.GenerateSpec{
+		Mutate:  []string{"spec.mode"},
+		Overlay: map[string]map[string]any{"spec.mode": {"enum": []any{"safe"}}},
+	}
+	if _, err := New(loaded, Options{}); err != nil {
+		t.Errorf("New refused a mode that a create may set and an update may not: %v.", err)
+	}
+}
+
 func TestNewDrawsAFieldAHundredTimesToFindAValueTheCRDAccepts(t *testing.T) {
 	loaded := loadTarget(t, rulesTarget)
 	g := newGenerator(t, loaded, Options{})

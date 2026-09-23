@@ -204,28 +204,33 @@ func TestMatrixListsTheBugsInCatalogOrder(t *testing.T) {
 	}
 }
 
-// The acceptance of DESIGN.md §10 M3: no bug's row is empty, and the control's
-// row is.
+// The acceptance: some check catches each bug, and none fires against the toy
+// with no bug.
 func TestMatrixFailsOnARowThatBreaksTheAcceptance(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		results []run.Result
-		want    string
+		want    []string
 	}{
 		{
 			name:    "a bug nothing caught",
 			results: []run.Result{recorded(t, true), recorded(t, true), recorded(t, true)},
-			want:    "B1",
+			want:    []string{"B1 (b1.json) under --bug=1 fired nothing"},
 		},
 		{
 			name:    "a control something caught",
 			results: []run.Result{recorded(t, false), recorded(t, false), recorded(t, true)},
-			want:    "B0",
+			want:    []string{"B0 (b0.json) with no bug fired G4, G6"},
 		},
 		{
 			name:    "a sequence something caught against the toy with no bug",
 			results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, false)},
-			want:    "B1",
+			want:    []string{"B1 (b1.json) with no bug fired G4, G6"},
+		},
+		{
+			name:    "both runs of one sequence",
+			results: []run.Result{recorded(t, true), recorded(t, true), recorded(t, false)},
+			want:    []string{"B1 (b1.json) under --bug=1 fired nothing", "B1 (b1.json) with no bug fired G4, G6"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -238,8 +243,10 @@ func TestMatrixFailsOnARowThatBreaksTheAcceptance(t *testing.T) {
 			if code != exitViolation {
 				t.Errorf("botbox matrix exited %d, want %d.", code, exitViolation)
 			}
-			if !strings.Contains(stderr, test.want) {
-				t.Errorf("botbox matrix reported %q, want it to name %s.", stderr, test.want)
+			for _, want := range test.want {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("botbox matrix reported %q, want %q.", stderr, want)
+				}
 			}
 			if readMatrix(t, out) == "" {
 				t.Errorf("botbox matrix wrote no matrix, want the one it judged.")

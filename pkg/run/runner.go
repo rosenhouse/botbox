@@ -458,12 +458,12 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		return err
 	}
 	r.timeline.Ops[len(r.timeline.Ops)-1].Settled = &wait
-	excused := r.faultsSoFar().Recovering(wait.Window.End)
+	excused := r.soFar().Recovering(wait.Window.End)
 	return r.judge(op.Index, fmt.Sprintf("op %d (%s)", op.Index, op.Type), wait, excused)
 }
 
-// wait waits for the target to converge, for as long as the faults leave it
-// to recover as well.
+// wait waits up to T_settle for the target to converge, or longer while it is
+// owed time to recover from the faults.
 func (r *runner) wait(ctx context.Context) (Wait, error) {
 	wait := Wait{Window: Window{Start: r.now()}}
 	converged, err := r.h.settle(ctx, r.owed)
@@ -473,10 +473,10 @@ func (r *runner) wait(ctx context.Context) (Wait, error) {
 
 // owed is when the target must have recovered from the faults by, as the
 // checks judge it.
-func (r *runner) owed() time.Time { return r.faultsSoFar().Owed(r.now()) }
+func (r *runner) owed() time.Time { return r.soFar().Owed(r.now()) }
 
-// faultsSoFar is the run's faults and settle waits as the checks read them.
-func (r *runner) faultsSoFar() invariant.Input {
+// soFar is the run's faults and settle waits so far, as the checks read them.
+func (r *runner) soFar() invariant.Input {
 	r.readFaultWindows()
 	return invariant.Input{
 		Target:      r.target,
@@ -487,7 +487,7 @@ func (r *runner) faultsSoFar() invariant.Input {
 
 // judge checkpoints where a settle wait ended. A wait that expired where the
 // faults did not excuse it is a G4 violation, which ends the run.
-func (r *runner) judge(checkpoint int, after string, wait Wait, excused bool) error {
+func (r *runner) judge(op int, after string, wait Wait, excused bool) error {
 	if !wait.Converged {
 		// A target that is gone cannot converge, so that is the harness's
 		// failure to report, not the target's to answer for.
@@ -498,7 +498,7 @@ func (r *runner) judge(checkpoint int, after string, wait Wait, excused bool) er
 			r.violate(r.expired(after, wait))
 		}
 	}
-	return r.checkpoint(checkpoint, wait.Converged)
+	return r.checkpoint(op, wait.Converged)
 }
 
 // expired is the G4 of a settle wait that ran out with no fault to excuse it.
@@ -691,10 +691,9 @@ func (r *runner) clearFaults() {
 	r.h.setFaults(nil)
 }
 
-// awaitRecovery gives a target the faults still excuse a settle wait of its
-// own, since no op's wait gave it time to recover from them.
+// awaitRecovery waits for a target still owed time to recover from the faults.
 func (r *runner) awaitRecovery(ctx context.Context) error {
-	if r.violation != nil || r.failed || !r.faultsSoFar().Recovering(r.now()) {
+	if r.violation != nil || r.failed || !r.soFar().Recovering(r.now()) {
 		return nil
 	}
 	wait, err := r.wait(ctx)

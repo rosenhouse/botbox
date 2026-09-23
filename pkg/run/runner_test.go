@@ -179,8 +179,6 @@ func (f *fakeHarness) apply() {
 	}
 }
 
-// faultWindow answers as the proxy does. A test either says what the proxy
-// did with each fault, or has it apply every fault as it is given.
 // fakeServed is what discovery answers every fake harness.
 var fakeServed = []metav1.APIResource{
 	{Name: "configmaps", SingularName: "configmap", Kind: "ConfigMap"},
@@ -192,6 +190,8 @@ func (f *fakeHarness) servedResources() ([]metav1.APIResource, error) {
 	return fakeServed, f.fail["servedResources"]
 }
 
+// faultWindow answers as the proxy does. A test either says what the proxy
+// did with each fault, or has it apply every fault as it is given.
 func (f *fakeHarness) faultWindow(id proxy.FaultID) proxy.FaultWindow {
 	var window proxy.FaultWindow
 	if int(id) < len(f.applying) {
@@ -818,6 +818,27 @@ func TestOnlyAFaultTheProxyNeverAppliedLeavesANote(t *testing.T) {
 	}
 	if want := []string{"the proxy applied the fault of op 2 to no request"}; !slices.Equal(noted, want) {
 		t.Errorf("The run noted %q, want %q: the proxy applied the fault of op 1.", noted, want)
+	}
+}
+
+// No op follows the fault op here, so no op reads the fault's window after
+// the proxy first applied it.
+func TestAFaultTheProxyFirstAppliedAfterTheLastOpLeavesNoNote(t *testing.T) {
+	h := newFakeHarness()
+	h.faulting = true
+
+	result, err := runFake(t, h, nil, sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}},
+	))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	for _, note := range result.Notes {
+		if strings.Contains(note, "to no request") {
+			t.Errorf("The run noted %q about a fault the proxy applied.", note)
+		}
 	}
 }
 

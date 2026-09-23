@@ -1245,4 +1245,5 @@ built from source and run as a black-box binary.
   refuses all 100 values drawn for a field into the sample, the field would never move, so
   New reports it instead of skipping it silently. Each value is judged against the sample
   alone, so New also reports a field that only another field's change makes valid. A
-  sample that accepts the field fixes that.
+  sample that accepts the field fixes that. No sample accepts both of two exclusive
+  fields, so `generate.mutate` names only one of them.

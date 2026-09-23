@@ -67,8 +67,7 @@ func Connect(kubeconfig string, opts Options) (*Cluster, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading the kubeconfig %s: %w", kubeconfig, err)
 	}
-	install := envtest.CRDInstallOptions{Paths: opts.CRDPaths, ErrorIfPathMissing: true}
-	if _, err := envtest.InstallCRDs(config, install); err != nil {
+	if _, err := envtest.InstallCRDs(config, envtest.CRDInstallOptions{Paths: opts.CRDPaths}); err != nil {
 		return nil, fmt.Errorf("installing the CRDs on the cluster %s names: %w", kubeconfig, err)
 	}
 	return &Cluster{config: config}, nil

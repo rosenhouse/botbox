@@ -14,7 +14,7 @@ import (
 // thresholds.quiet bounds.
 func NoChurn(in Input) (Result, error) {
 	out := Result{ID: "G2"}
-	allowed := in.quiet()
+	allowed := in.quietAllowance()
 	for _, window := range in.quietWindows() {
 		if moved := in.changesIn(window); len(moved) > 0 {
 			out.violate(Violation{

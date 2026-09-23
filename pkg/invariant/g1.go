@@ -15,7 +15,7 @@ const leaseGroup, leaseResource = "coordination.k8s.io", "leases"
 // (DESIGN.md §6).
 func BoundedReconciliation(in Input) (Result, error) {
 	out := Result{ID: "G1"}
-	allowed := in.quiet()
+	allowed := in.quietAllowance()
 	for _, window := range in.quietWindows() {
 		noisy := in.requestsIn(window, reconciles)
 		if len(noisy) <= allowed {

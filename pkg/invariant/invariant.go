@@ -286,9 +286,9 @@ func (in Input) errLoop() int {
 	return target.DefaultThresholds.ErrLoop
 }
 
-// quiet is N_quiet, the requests G1 and the status writes G2 allow in one
-// quiet window.
-func (in Input) quiet() int { return max(in.Target.Thresholds.Quiet, 0) }
+// quietAllowance is N_quiet, the requests G1 and the status writes G2 allow in
+// one quiet window.
+func (in Input) quietAllowance() int { return max(in.Target.Thresholds.Quiet, 0) }
 
 // end is the instant the run stops being observed.
 func (in Input) end() time.Time {

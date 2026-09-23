@@ -290,6 +290,18 @@ func TestWindowSpansEveryKind(t *testing.T) {
 	}
 }
 
+func TestWindowOfReturnsOneKind(t *testing.T) {
+	s := observe.NewStore(managing(configMapGVK))
+	s.Record(widgetGVK, object(widgetGVK, "widget", "10"), at(0))
+	s.Record(configMapGVK, object(configMapGVK, "child", "11"), at(1))
+	s.Record(widgetGVK, object(widgetGVK, "widget", "12"), at(2))
+	s.Record(widgetGVK, object(widgetGVK, "widget", "13"), at(3))
+
+	if got := resourceVersions(s.WindowOf(widgetGVK, at(0), at(2))); !slices.Equal(got, []string{"10", "12"}) {
+		t.Errorf("WindowOf returned %v, want the Widget's versions within the window.", got)
+	}
+}
+
 func TestManagedExcludesFixturesAndTheKindsTheTargetDoesNotManage(t *testing.T) {
 	s := observe.NewStore(managing(configMapGVK))
 	s.MarkBotboxCreated(configMapGVK, "fixture")

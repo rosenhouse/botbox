@@ -76,13 +76,13 @@ func TestG7ExemptsOnlyTheKindsTheTargetDoesNotRecreate(t *testing.T) {
 		return r.
 			op(invariant.OpCreate, 0).
 			record(100*time.Millisecond, widget("11", spec(1), status(1, 1))).
-			record(200*time.Millisecond, child("w-0", "12"), secret("s-0", "13")).
+			record(200*time.Millisecond, child("w-0", "12"), secret("w-0", "13")).
 			checkpoint(2200*time.Millisecond, invariant.Converged)
 	}
 	t.Run("the kind listed", func(t *testing.T) {
 		in := both().
-			deletedManagedOf(10*time.Second, secretGVK, "s-0").
-			remove(10100*time.Millisecond, secret("s-0", "14")).
+			deletedManagedOf(10*time.Second, secretGVK, "w-0").
+			remove(10100*time.Millisecond, secret("w-0", "14")).
 			checkpoint(12100*time.Millisecond, invariant.Converged).
 			through(12100 * time.Millisecond)
 
@@ -99,6 +99,24 @@ func TestG7ExemptsOnlyTheKindsTheTargetDoesNotRecreate(t *testing.T) {
 
 		fired(t, invariant.SelfHealing, in)
 	})
+	t.Run("a kind of the same name in another group", func(t *testing.T) {
+		r := childDeleted()
+		r.in.Target.NotRecreated = []schema.GroupVersionKind{{Group: "example.com", Version: "v1", Kind: "ConfigMap"}}
+		in := r.
+			checkpoint(12100*time.Millisecond, invariant.Converged).
+			through(12100 * time.Millisecond)
+
+		fired(t, invariant.SelfHealing, in)
+	})
+}
+
+// A wait that expired is still where the target had to have acted.
+func TestG7FiresWhereTheWaitExpired(t *testing.T) {
+	in := childDeleted().
+		checkpoint(15*time.Second, invariant.Expired).
+		through(15 * time.Second)
+
+	fired(t, invariant.SelfHealing, in)
 }
 
 // An index that resolved to nothing deleted nothing, which the Runner notes.
@@ -142,6 +160,23 @@ func TestG7NotesAnObjectDeletedBeforeTheRunConverged(t *testing.T) {
 		through(12200 * time.Millisecond)
 
 	noted(t, invariant.SelfHealing, in, "G7 is not evaluated for op 2 (deleteManaged): the run had not converged since op 1 (update)")
+}
+
+// botbox deleted the CR without waiting, and the Observer saw it go only after
+// the op had deleted the object.
+func TestG7ReadsTheCRWhereTheWaitEnds(t *testing.T) {
+	in := converged().
+		record(300*time.Millisecond, child("kept", "13", orphaned)).
+		op(invariant.OpDelete, 5*time.Second).
+		deletedManaged(5050*time.Millisecond, "kept").
+		record(5100*time.Millisecond, widget("15", spec(2), status(2, 1), deleting(5*time.Second), finalizers(cleanup))).
+		remove(5150*time.Millisecond, child("kept", "16", orphaned)).
+		checkpoint(7150*time.Millisecond, invariant.Converged).
+		through(7150 * time.Millisecond)
+
+	if notes := silent(t, invariant.SelfHealing, in).Notes; len(notes) > 0 {
+		t.Errorf("G7 noted %v, want nothing: the CR was going when the wait ended.", notes)
+	}
 }
 
 // A target owes nothing to a CR that botbox deleted.

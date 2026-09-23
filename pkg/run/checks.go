@@ -25,29 +25,38 @@ func (Engine) Check(in Input) (Findings, error) {
 	var found Findings
 	for _, result := range results {
 		for _, violation := range result.Violations {
-			found.Violations = append(found.Violations, Violation{
-				ID:            violation.ID,
-				Statement:     violation.Statement,
-				At:            violation.At,
-				Evidence:      evidence(violation),
-				Requests:      violation.Requests,
-				RequestsTotal: violation.RequestsTotal,
-				Versions:      violation.Versions,
-				VersionsTotal: violation.VersionsTotal,
-				VersionsOf:    violation.VersionsOf,
-				Managed:       violation.Managed,
-				ManagedTotal:  violation.ManagedTotal,
-			})
+			found.Violations = append(found.Violations, fromEngine(violation))
 		}
 		found.Notes = append(found.Notes, result.Notes...)
 	}
 	return found, nil
 }
 
+func fromEngine(violation invariant.Violation) Violation {
+	return Violation{
+		ID:            violation.ID,
+		Statement:     violation.Statement,
+		At:            violation.At,
+		Evidence:      evidence(violation),
+		Requests:      violation.Requests,
+		RequestsTotal: violation.RequestsTotal,
+		Versions:      violation.Versions,
+		VersionsTotal: violation.VersionsTotal,
+		VersionsOf:    violation.VersionsOf,
+		Managed:       violation.Managed,
+		ManagedTotal:  violation.ManagedTotal,
+		Ready:         violation.Ready,
+	}
+}
+
 // Evaluate runs every check over the run so far and returns what each one
 // found. The bug matrix reads the results; a run reads the violations.
 func Evaluate(in Input) ([]invariant.Result, error) {
-	return invariant.Evaluate(invariant.Input{
+	return invariant.Evaluate(engineInput(in))
+}
+
+func engineInput(in Input) invariant.Input {
+	return invariant.Input{
 		Target:      in.Target,
 		Requests:    in.Requests,
 		History:     in.Objects,
@@ -61,7 +70,7 @@ func Evaluate(in Input) ([]invariant.Result, error) {
 		// It is zero until the teardown closes it, and the engine then
 		// evaluates at the last checkpoint.
 		End: in.Timeline.Deletion.End,
-	})
+	}
 }
 
 // engineOps carries each op's index, which is what a checkpoint names and not
@@ -86,9 +95,13 @@ func engineOps(t *target.Target, timeline Timeline) []invariant.Op {
 func engineCheckpoints(checkpoints []Checkpoint) []invariant.Checkpoint {
 	engine := make([]invariant.Checkpoint, len(checkpoints))
 	for i, checkpoint := range checkpoints {
-		engine[i] = invariant.Checkpoint{Op: checkpoint.Op, Time: checkpoint.At, Settle: settleResult(checkpoint)}
+		engine[i] = engineCheckpoint(checkpoint)
 	}
 	return engine
+}
+
+func engineCheckpoint(checkpoint Checkpoint) invariant.Checkpoint {
+	return invariant.Checkpoint{Op: checkpoint.Op, Began: checkpoint.Began, Time: checkpoint.At, Settle: settleResult(checkpoint)}
 }
 
 // settleResult reads a checkpoint's Converged. The teardown's checkpoint

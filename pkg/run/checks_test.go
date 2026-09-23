@@ -140,6 +140,18 @@ func TestTheChecksReadTheRecoveryCheckpointAsASettleWait(t *testing.T) {
 	}
 }
 
+func TestTheChecksMeasureAnExpiredWaitFromWhereItBegan(t *testing.T) {
+	in := convergedRun()
+	in.Timeline.Ops = append(in.Timeline.Ops, appliedOp(1, OpSettle, at(3)))
+	in.Timeline.Checkpoints = append(in.Timeline.Checkpoints, Checkpoint{At: at(9), Began: at(4), Op: 1, Converged: false})
+
+	violations := checked(t, in)
+
+	if len(violations) != 1 || !strings.Contains(violations[0].Statement, "expired with no fault active: in 5s, ready held from 0s on") {
+		t.Errorf("The checks reported %v, want the G4 of a wait that ran 5s on a ready CR.", violations)
+	}
+}
+
 // A namespace that came clean settles G3 where the teardown stopped watching,
 // which is before T_delete is up whenever the target cleans up promptly
 // (DESIGN.md §6). The timeline carries that instant, not a teardown

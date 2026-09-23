@@ -178,11 +178,13 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   string patterns, optional-field presence, list length, map size. Generic and works on
   any CRD.
 - **Valid by the CRD's own rules.** Every create, recreate and update the generator draws
-  passes the CRD as the API server judges it: defaults, value validations, list types and
-  `x-kubernetes-validations` rules, transition rules included. The generator runs the API
-  server's own code for this (D@48). A create keeps a drawn field only if the CRD accepts
-  it. A refused update is drawn again up to eight times, then becomes a `Settle`. Judging
-  consumes no randomness. The sample must pass its CRD.
+  passes the CRD as the API server judges the CR botbox wrote: defaults, value
+  validations, list types and `x-kubernetes-validations` rules, transition rules included.
+  The check does not see the status the controller writes, so a CRD rule that reads status
+  can still refuse a draw. The generator runs the API server's own code for this (D@48). A
+  create keeps a drawn field only if the CRD accepts it. A refused update is drawn again up
+  to eight times, then becomes a `Settle`. Judging consumes no randomness. The sample must
+  pass its CRD.
 - Generation starts from the target's `sample` object. When the target declares
   `generate.mutate`, only those paths are mutated, and `generate.overlay` tightens the
   schema for a path (§8.3). An overlay keyword the generator does not read is a
@@ -597,8 +599,9 @@ against its predecessor.
 
 ### 8.3 Generation constraints and admission webhooks
 
-botbox generates from the CRD's OpenAPI v3 schema and keeps every rule the CRD states,
-`x-kubernetes-validations` included (§5.4). Phase 1 does not install the target's
+botbox generates from the CRD's OpenAPI v3 schema and keeps the rules the CRD states,
+`x-kubernetes-validations` included, on the CR botbox writes. It cannot keep a rule that
+reads the status the controller writes (§5.4). Phase 1 does not install the target's
 admission webhooks. Rules that only a webhook enforces are therefore invisible to the
 generator. For cert-manager these include: a Certificate needs at least one of
 `commonName`, `dnsNames`, `ipAddresses`, `uris` or `emailAddresses`; `duration` must
@@ -1228,9 +1231,11 @@ built from source and run as a black-box binary.
   `k8s.io/component-base` at v0.37.0. Naming them in `go.mod` adds seven modules to the
   module graph, none of them built, and the binary grows by 4.6 MB. An
   envtest test applies 200 drawn sequences per target to a real API server with no
-  controller, so the two cannot drift apart unseen. A refusal still exits 2, since a rule
-  botbox cannot see belongs in the target declaration (§8.3), and it now names the run and
-  its `sequence.json`. Undoing a refused field biases draws away from a rule's boundary: a
+  controller, so the two cannot drift apart unseen on a CR without status. With a
+  controller, the API server judges an update with the stored status copied in, which the
+  generator never sees. A CRD rule that reads status can therefore still refuse a draw. A
+  refusal still exits 2, since a rule botbox cannot keep belongs in the target declaration
+  (§8.3), and it names the run, its `sequence.json` and status rules as a cause. Undoing a refused field biases draws away from a rule's boundary: a
   sample that sets one of two exclusive fields never switches to the other. When the CRD
   refuses all 100 values drawn for a field into the sample, the field would never move, so
   New reports it instead of skipping it silently. Each value is judged against the sample

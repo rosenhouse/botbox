@@ -425,9 +425,9 @@ func (c *cli) failRun(number int, failed planned, dir string, err error) int {
 		}
 	case failed.generated():
 		fmt.Fprintf(c.stderr, "  the op is in %s\n", filepath.Join(dir, sequenceFile))
-		fmt.Fprintln(c.stderr, "  botbox drew it to pass the CRD's schema and validation rules, so a rule botbox cannot see"+
-			" refused it, such as an admission webhook's. Keep drawn values inside that rule with generate.mutate"+
-			" or generate.overlay.")
+		fmt.Fprintln(c.stderr, "  botbox drew it to pass the CRD's schema and rules without the status the controller"+
+			" writes. So a CRD rule that reads status refused it, or a rule botbox cannot see, such as an admission"+
+			" webhook's. Keep drawn values inside that rule with generate.mutate or generate.overlay.")
 	default:
 		fmt.Fprintf(c.stderr, "  the op is in %s\n", failed.path)
 	}

@@ -873,7 +873,8 @@ func TestARefusedDrawSaysWhereItsSequenceIs(t *testing.T) {
 	}
 	for _, want := range []string{
 		"run 2: the API server refused op 0 (create)", "maxUnavailable must not exceed count",
-		filepath.Join(session.dirs[1], "sequence.json"), "generate.mutate", "generate.overlay",
+		filepath.Join(session.dirs[1], "sequence.json"), "a CRD rule that reads status", "generate.mutate",
+		"generate.overlay",
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("botbox run reported %q, which does not mention %q.", stderr, want)

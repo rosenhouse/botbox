@@ -253,6 +253,10 @@ func TestLoadRejects(t *testing.T) {
 		{"sample that is not YAML", minimalTarget, "name: \"unterminated\n", []string{"widget.yaml"}},
 		{"missing crds path", minimalTarget + "crds: [nosuch/]\n", "", []string{"crds", "nosuch"}},
 		{"managed group read as a version", minimalTarget + "manages:\n  - apps/Deployment\n", "", []string{"manages", "apps"}},
+		{"a kind not recreated that is not managed", minimalTarget + "manages: [v1/ConfigMap]\nnotRecreated: [v1/Secret]\n", "",
+			[]string{"notRecreated", "v1/Secret", "manages"}},
+		{"a malformed kind not recreated", minimalTarget + "manages: [v1/ConfigMap]\nnotRecreated: [ConfigMap]\n", "",
+			[]string{"notRecreated", `"ConfigMap"`, "want group/version/Kind"}},
 		{"duplicate property id", minimalTarget + "properties:\n  - id: P1\n    cel: 'true'\n  - id: P1\n    cel: 'false'\n", "", []string{"P1", "twice"}},
 		{"property without cel", minimalTarget + "properties:\n  - id: P1\n", "", []string{"P1", "cel"}},
 		{"equal written as CEL", minimalTarget + "equal: 'a == b'\n", "", []string{"equal", "go:"}},
@@ -439,6 +443,25 @@ func TestLoadDefaultsEachTimeoutSeparately(t *testing.T) {
 	}
 	if loaded.Thresholds.ErrLoop != 20 {
 		t.Errorf("Load read errloop %d, want the default 20.", loaded.Thresholds.ErrLoop)
+	}
+}
+
+func TestLoadNotRecreated(t *testing.T) {
+	path := writeTarget(t, minimalTarget+`manages:
+  - v1/Secret
+  - cert-manager.io/v1/CertificateRequest
+notRecreated:
+  - cert-manager.io/v1/CertificateRequest
+`, map[string]string{"widget.yaml": sampleWidget})
+
+	loaded, err := target.Load(path)
+
+	if err != nil {
+		t.Fatalf("Load rejected notRecreated: %v", err)
+	}
+	want := []schema.GroupVersionKind{{Group: "cert-manager.io", Version: "v1", Kind: "CertificateRequest"}}
+	if !reflect.DeepEqual(loaded.NotRecreated, want) {
+		t.Errorf("Load read notRecreated %v, want %v.", loaded.NotRecreated, want)
 	}
 }
 

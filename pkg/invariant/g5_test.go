@@ -126,10 +126,24 @@ func TestG5ComparesEverythingElse(t *testing.T) {
 }
 
 func TestG5IgnoresThePathsTheTargetExcludes(t *testing.T) {
-	in := restarted(child("w-0", "11", data("0")), child("w-0", "21", data("1")))
-	in.Target.EqualIgnore = []target.Path{target.MustParsePath("data.index")}
+	in := restarted(
+		child("w-0", "11", data("0"), annotations(map[string]string{startedAt: "1"})),
+		child("w-0", "21", data("1"), annotations(map[string]string{startedAt: "2"})))
+	in.Target.EqualIgnore = []target.Path{
+		target.MustParsePath("data.index"),
+		target.MustParsePath(`metadata.annotations["` + startedAt + `"]`),
+	}
 
 	silent(t, invariant.RestartStable, in)
+}
+
+// The owner's UID is what tells a live owner from a dangling reference, so
+// G5 reads it before it ignores it.
+func TestG5ComparesALiveOwnerWhoseUIDItIgnores(t *testing.T) {
+	in := restarted(child("w-0", "11", ownedByWidget), child("w-0", "21", orphaned))
+	in.Target.EqualIgnore = []target.Path{target.MustParsePath("metadata.ownerReferences[*].uid")}
+
+	fired(t, invariant.RestartStable, in)
 }
 
 const startedAt = "probe.example.com/started-at"

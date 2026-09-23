@@ -136,7 +136,7 @@ func whole(object Difference, before, after string) Difference {
 	return object
 }
 
-// spread bounds the differences at MaxEvidence, taking one of each object's in
+// spread bounds the differences at MaxEvidence, taking one from each object in
 // turn, so that the bound drops those of the objects with the most rather than
 // every object after the first.
 func spread(changed []changedObject) Excerpt[Difference] {

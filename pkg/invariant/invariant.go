@@ -148,8 +148,9 @@ type Violation struct {
 }
 
 // Difference is one field that differs between two versions of an object,
-// with its value in each. Path is (object) where one version is absent or the
-// target's own equality compared the whole object.
+// with its value in each. Path is (object) where one version is absent, whose
+// resourceVersion is then empty, or where the target's own equality compared
+// the whole object.
 type Difference struct {
 	Object           string    `json:"object"`
 	ResourceVersions [2]string `json:"resourceVersions"`

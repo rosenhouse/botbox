@@ -156,10 +156,10 @@ type Timeline struct {
 	// Cleaned is when the teardown saw the run namespace empty, or zero if it
 	// never did (DESIGN.md §6, D34).
 	Cleaned time.Time
-	// Faults are the windows the proxy applied a fault op's spec in, one per
-	// fault op. A window with no Start is a fault that matched no request,
-	// which changed nothing and excuses nothing (D36). An open window has no
-	// End: the fault outlived the run.
+	// Faults are the windows the proxy applied each fault op's fault in, one
+	// per fault op. A window with no Start is a fault that matched no request,
+	// which changed nothing and excuses nothing (D36). A window with no End is
+	// a fault the proxy still applies.
 	Faults []Window
 	// Forced names every object the teardown force-removed a finalizer from.
 	// The run notes each one: G3 judged the deletion window, which closed
@@ -253,7 +253,7 @@ type harness interface {
 	addFault(spec proxy.FaultSpec) proxy.FaultID
 	removeFault(id proxy.FaultID)
 	clearFaults()
-	// faultWindow is what the proxy has done with a fault it holds.
+	// faultWindow is what the proxy has done with the fault.
 	faultWindow(id proxy.FaultID) proxy.FaultWindow
 	createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error)
 	patchCR(ctx context.Context, name string, patch map[string]any) error
@@ -634,8 +634,8 @@ func (r *runner) inject(op Op) {
 }
 
 // expireFaults removes the faults whose until trigger names this op or an
-// earlier one, and drops the ones the proxy has retired. It reads the windows
-// after the removal, so that none loses a request.
+// earlier one. It drops a fault once its window is closed, so that the window
+// holds every request the proxy faulted with it.
 func (r *runner) expireFaults(op int) {
 	for _, fault := range r.faults {
 		if fault.until != nil && *fault.until <= op {

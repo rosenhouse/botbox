@@ -308,8 +308,7 @@ func TestRemoveFaultStopsOnlyTheFaultItNames(t *testing.T) {
 	}
 }
 
-// A request the proxy faulted before a removal stays in the fault's window, so
-// the Runner removes a fault first and reads its window after.
+// A removed fault keeps its window, which ends where it was removed.
 func TestRemovingAFaultClosesItsWindow(t *testing.T) {
 	error500 := func(resource string) proxy.FaultSpec {
 		return proxy.FaultSpec{Match: proxy.RequestMatcher{Resource: resource}, Action: proxy.Error{Code: http.StatusInternalServerError}}

@@ -35,7 +35,8 @@ type fakeHarness struct {
 	added   int
 	removed map[proxy.FaultID]time.Time
 	// faulting makes the harness answer as a proxy that applies every fault
-	// the moment it is given it, and retires none. faultingInWait has it
+	// the moment it is given it, and that only a removal retires. It ignores
+	// that the first fault to match a request wins. faultingInWait has it
 	// first apply them once a wait begins, as the target's requests do.
 	// faultingAsRemoved has it apply a fault just as it is removed, as a
 	// request that raced the removal would.
@@ -158,7 +159,7 @@ func (f *fakeHarness) clearFaults() {
 
 // remove retires the fault, as the proxy does, unless it is retired already.
 func (f *fakeHarness) remove(id proxy.FaultID) {
-	if _, removed := f.removed[id]; removed {
+	if !f.faultWindow(id).Retired.IsZero() {
 		return
 	}
 	if _, applied := f.applied[id]; f.faultingAsRemoved && !applied {
@@ -1250,8 +1251,8 @@ func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 	h := newFakeHarness()
 	h.faulting = true
 	sequence := sequenceOf(
-		Op{Type: OpFault, Fault: &Fault{Action: Action{Drop: true}}},
-		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
+		Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: "secrets"}, Action: Action{Drop: true}}},
+		Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: "configmaps"}, Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
 		Op{Type: OpSettle},
 		Op{Type: OpSettle},
 	)

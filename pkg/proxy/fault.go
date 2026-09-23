@@ -83,11 +83,12 @@ type Trigger struct {
 	For   time.Duration
 }
 
-// FaultID names a fault the proxy was given. Two faults can have equal specs.
+// FaultID names a fault that AddFault gave the proxy. Two faults can have
+// equal specs.
 type FaultID int
 
 // AddFault has the proxy apply the fault after those it already holds. The
-// first fault that matches a request wins.
+// first fault that applies to a request wins.
 func (p *Proxy) AddFault(spec FaultSpec) FaultID {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -102,19 +103,17 @@ func (p *Proxy) AddFault(spec FaultSpec) FaultID {
 
 // RemoveFault retires the fault at once.
 func (p *Proxy) RemoveFault(id FaultID) {
-	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.faults[id].remove(now)
+	p.faults[id].remove()
 }
 
 // ClearFaults retires every fault at once.
 func (p *Proxy) ClearFaults() {
-	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, fault := range p.faults {
-		fault.remove(now)
+		fault.remove()
 	}
 }
 
@@ -151,9 +150,11 @@ type activeFault struct {
 	first, spent, removed time.Time
 }
 
-func (f *activeFault) remove(now time.Time) {
+// remove stamps the removal under the proxy's lock, so that no request the
+// fault applied to comes after it.
+func (f *activeFault) remove() {
 	if f.removed.IsZero() {
-		f.removed = now
+		f.removed = time.Now()
 	}
 }
 
@@ -179,19 +180,21 @@ func (f *activeFault) applies(r Request, now time.Time) bool {
 // retiredBy is when the proxy stopped applying the fault, or the zero time
 // while it still applies. A count runs out on the request that spends it, a
 // window runs out on the clock, whether or not a request came, and a removal
-// retires the fault at once. The earliest of them is when it stopped.
+// retires the fault at once.
 func (f *activeFault) retiredBy(now time.Time) time.Time {
-	ends := []time.Time{f.spent, f.removed}
+	retired := earliest(f.spent, f.removed)
 	if windowEnd := f.since.Add(f.spec.Until.For); f.spec.Until.For > 0 && !windowEnd.After(now) {
-		ends = append(ends, windowEnd)
-	}
-	var retired time.Time
-	for _, end := range ends {
-		if !end.IsZero() && (retired.IsZero() || end.Before(retired)) {
-			retired = end
-		}
+		retired = earliest(retired, windowEnd)
 	}
 	return retired
+}
+
+// earliest is the earlier of two instants, where a zero one has not come.
+func earliest(a, b time.Time) time.Time {
+	if a.IsZero() || (!b.IsZero() && b.Before(a)) {
+		return b
+	}
+	return a
 }
 
 // faultFor returns the action of the first active fault the request matches.

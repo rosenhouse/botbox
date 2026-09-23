@@ -166,7 +166,7 @@ func TestG7PassesAnObjectThatCameBack(t *testing.T) {
 // botbox cannot tell when a restarted target is back. One still starting, or
 // waiting out its predecessor's lease, recreates nothing.
 func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
-	const noted1 = "G7 is not evaluated for op 2 (deleteManaged): the target had requested no resource other than a lease between op 1 (restart) and it"
+	const wantNote = "G7 is not evaluated for op 2 (deleteManaged): the target had requested no resource other than a lease between op 1 (restart) and it"
 	deletedAfter := func(r *run) invariant.Input {
 		return r.
 			deletedManaged(10*time.Second, "w-0").
@@ -180,11 +180,11 @@ func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 		in   invariant.Input
 		want string
 	}{
-		{"with no request", deletedAfter(restarted()), noted1},
-		{"with lease requests alone", deletedAfter(restarted().requests(9100*time.Millisecond, 500*time.Millisecond, 4, lease("update"))), noted1},
-		{"with discovery reads alone", deletedAfter(restarted().request(9100*time.Millisecond, nonResource("/api"))), noted1},
-		{"with a request before the restart alone", deletedAfter(restarted().request(8500*time.Millisecond, get("w-1"))), noted1},
-		{"with a request in the wait alone", deletedAfter(restarted().request(10500*time.Millisecond, watch())), noted1},
+		{"with no request", deletedAfter(restarted()), wantNote},
+		{"with lease requests alone", deletedAfter(restarted().requests(9100*time.Millisecond, 500*time.Millisecond, 4, lease("update"))), wantNote},
+		{"with discovery reads alone", deletedAfter(restarted().request(9100*time.Millisecond, nonResource("/api"))), wantNote},
+		{"with a request before the restart alone", deletedAfter(restarted().request(8500*time.Millisecond, get("w-1"))), wantNote},
+		{"with a request in the wait alone", deletedAfter(restarted().request(10500*time.Millisecond, watch())), wantNote},
 		{"with a request before the last restart alone", deletedAfter(converged().
 			op(invariant.OpRestart, 8*time.Second).
 			request(8500*time.Millisecond, get("w-1")).

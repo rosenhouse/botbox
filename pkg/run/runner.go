@@ -738,7 +738,7 @@ func (r *runner) teardown(ctx context.Context) error {
 	r.clearFaults()
 	for i, window := range r.timeline.Faults {
 		if window.Start.IsZero() {
-			r.skipped = append(r.skipped, fmt.Sprintf("the fault of op %d matched no request", r.faultOps[i]))
+			r.skipped = append(r.skipped, fmt.Sprintf("the proxy applied the fault of op %d to no request", r.faultOps[i]))
 		}
 	}
 	failures := []error{r.awaitRecovery(ctx)}

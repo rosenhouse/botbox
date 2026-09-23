@@ -2,28 +2,39 @@ package invariant
 
 import "time"
 
-// DeletionOwed is when a settle wait may end without convergence, given each
-// deletion of the primary CR recorded by t: T_stable past when the CR went,
-// or past its G3 deadline if that came first. Zero means no CR was deleted.
-func (in Input) DeletionOwed(t time.Time) time.Time {
+// WaitOwed is when a settle wait that has not converged may end: once the
+// target has had its time to recover from the faults, each deleted CR has gone
+// or reached its G3 deadline, and the run has had T_settle to settle after a
+// CR went.
+func (in Input) WaitOwed(t time.Time) time.Time {
+	return later(in.Owed(t), in.deletionOwed(t))
+}
+
+func (in Input) deletionOwed(t time.Time) time.Time {
 	var owed time.Time
 	for _, deleted := range in.crDeletionsBy(t) {
-		ended := deleted.at.Add(in.timeouts().Delete)
-		if gone, found := in.goneBy(deleted, t); found && gone.Before(ended) {
-			ended = gone
+		deadline := deleted.at.Add(in.timeouts().Delete)
+		if gone, found := in.goneBy(deleted, t); found && !gone.After(deadline) {
+			deadline = gone.Add(in.timeouts().Settle)
 		}
-		owed = later(owed, ended.Add(in.timeouts().Stable))
+		owed = later(owed, deadline)
 	}
 	return owed
 }
 
-// DeletionOverdue reports whether a settle wait saw a CR outlive its deletion
-// deadline: the CR was still there at the deadline, or where the wait began if
-// that was later. G3 judges such a wait, not G4.
+// Excused reports whether a settle wait that expired is not G4's to report: a
+// fault excuses it, or G3 judges it.
+func (in Input) Excused(checkpoint Checkpoint) bool {
+	return in.Recovering(checkpoint.Time) || in.DeletionOverdue(checkpoint)
+}
+
+// DeletionOverdue reports whether a settle wait saw a CR outlive a deletion
+// deadline G3 judges: the CR was still there at the deadline, or where the
+// wait began if that was later.
 func (in Input) DeletionOverdue(checkpoint Checkpoint) bool {
 	for _, deleted := range in.crDeletionsBy(checkpoint.Time) {
 		deadline := deleted.at.Add(in.timeouts().Delete)
-		if deadline.After(checkpoint.Time) {
+		if deadline.After(checkpoint.Time) || in.faulted(deleted.at, deadline) {
 			continue
 		}
 		if cr, found := in.stateAt(later(deadline, checkpoint.Began)).version(deleted.key); found && cr.UID == deleted.uid {

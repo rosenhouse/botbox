@@ -870,7 +870,7 @@ func TestRunTellsTheSettleWaitWhatRecoveryTheFaultsAreOwed(t *testing.T) {
 	}
 }
 
-func TestRunGivesADeletionUntilTStablePastItsDeadline(t *testing.T) {
+func TestRunGivesADeletionUntilItsDeadline(t *testing.T) {
 	h := newFakeHarness()
 	deleted := time.Now()
 	h.recordDeletingCR("widget", "11", deleted)
@@ -880,7 +880,7 @@ func TestRunGivesADeletionUntilTStablePastItsDeadline(t *testing.T) {
 	if err != nil {
 		t.Fatalf("The run failed: %v", err)
 	}
-	want := deleted.Add(testTimeouts.Delete + testTimeouts.Stable)
+	want := deleted.Add(testTimeouts.Delete)
 	if len(h.owed) != 2 || !h.owed[1].Equal(want) {
 		t.Errorf("The settle waits were told the run owed %v, want the delete's to run to %v.", h.owed, want)
 	}

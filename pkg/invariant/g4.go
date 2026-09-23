@@ -89,11 +89,11 @@ func (in Input) respecified(from, to time.Time) bool {
 	})
 }
 
-// reportExpiredWaits records the settle waits that ran out while the target
-// had no fault to blame and no overdue deletion left them to G3 (DESIGN.md §5.5).
+// reportExpiredWaits records the settle waits that ran out while nothing
+// excused them (DESIGN.md §5.5).
 func (out *Result) reportExpiredWaits(in Input) error {
 	for _, checkpoint := range in.Checkpoints {
-		if checkpoint.Settle != Expired || in.Recovering(checkpoint.Time) || in.DeletionOverdue(checkpoint) {
+		if checkpoint.Settle != Expired || in.Excused(checkpoint) {
 			continue
 		}
 		violation, err := in.ExpiredWait(checkpoint)

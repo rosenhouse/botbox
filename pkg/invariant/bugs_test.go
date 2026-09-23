@@ -227,12 +227,12 @@ func b9() invariant.Input {
 }
 
 // b12 never runs its cleanup. The delete's settle wait gives the Widget until
-// T_stable past its deletion deadline, and expires with the Widget still there.
+// its deletion deadline, and expires with the Widget still there.
 func b12() invariant.Input {
 	return converged().
 		op(invariant.OpDelete, 10*time.Second).
 		record(10100*time.Millisecond, deletedWidget("15", finalizers(cleanup))).
-		checkpoint(22100*time.Millisecond, invariant.Expired).
+		checkpoint(20150*time.Millisecond, invariant.Expired).
 		checkpoint(35*time.Second, invariant.NoSettle).
 		through(35 * time.Second)
 }

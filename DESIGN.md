@@ -198,12 +198,14 @@ The Runner executes one sequence:
    still owed time to recover from a fault that stopped (§6) or to delete a primary CR. The
    wait ends once the `Ready` predicate holds, no primary CR is being deleted, and neither
    the CR nor a managed object has changed for `T_stable`, so a checkpoint lands after the
-   target's reaction, not before it. The wait runs until `T_stable` past a deleted CR's G3
-   deadline, or past the instant the CR went if that came first. A wait in which a CR outlived
-   its G3 deadline is G3's to judge (§6). Any other wait
+   target's reaction, not before it. After a deletion of the primary CR, the wait may run
+   until the deletion's G3 deadline, or `T_settle` past the instant the CR went if it went
+   by then. A wait in which a CR outlived a G3 deadline that no fault reached into is G3's
+   to judge (§6). Any other wait
    that expires while no fault excuses it records a G4 violation, which says why from the
    Observer's history of the wait: `Ready` never held, held and then stopped, or held while
-   the namespace kept changing within `T_stable`; or no CR was left to be ready. Where
+   the namespace kept changing within `T_stable`; a CR was still being deleted; or no CR
+   was left to be ready. Where
    `Ready` held and nothing changed within `T_stable`, it says that. The Runner and the
    engine raise it with one function, so they agree. A fault excuses it while active, which
    is once the proxy has applied it and until the proxy stops (D36), and while the target
@@ -363,8 +365,9 @@ window than §6 gives it, and where the boundary falls would depend on harness t
 is the exception, since §5.5 step 4 opens its window deliberately, and §4's teardown
 checkpoint still evaluates properties. A primary CR with a deletionTimestamp need not
 satisfy `Ready`: it is being deleted, so G3 judges it, not G4. A settle wait waits for such
-a CR to go, past its G3 deadline (§5.5), so a wait in which it outlived that deadline ends
-where G3 can judge it, and G4 leaves that wait to G3.
+a CR to go, until its G3 deadline (§5.5), so a wait in which it outlived that deadline ends
+where G3 can judge it, and G4 leaves that wait to G3. Where a fault reached into the
+deletion, G3 only notes it, and G4 judges the wait.
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
 namespace that is neither a fixture nor created by botbox. The namespace is private to one
@@ -1342,10 +1345,12 @@ built from source and run as a black-box binary.
   7 s cleanup, under a `T_settle` of 5 s and a `T_delete` of 10 s, failed G4 on a
   `create` and a `delete`, and G3 noted that the run ended before its deadline. B12, whose
   finalizer never clears, failed G4 too, where G3 names the finalizer with its evidence. The
-  wait now waits for the CR to go, until `T_stable` past its G3 deadline, or past the
-  instant it went if that came first, so the namespace can hold still after a cleanup that
-  ends near the deadline. G3's window stays `T_delete`. A wait in which a CR outlived that deadline is
-  G3's, so G4 does not report it, whichever wait it is. A CR under deletion is not ready,
-  whatever `Ready` says, because a wait that converged mid-cleanup would put the rest of
-  the cleanup in the quiet window. The toy proves both: `--cleanup-delay=7s` passes a
-  `create` and a `delete`, and B12 fails G3 alone.
+  wait now waits for the CR to go, until its G3 deadline. Once the CR has gone, the run has
+  `T_settle` to settle, as after a spec change, because the garbage collector deletes the
+  CR's children after it. `T_stable` would not do: a child deleted after the CR restarts
+  the quiet. G3's window stays `T_delete`. A wait in which a CR outlived that deadline is
+  G3's, so G4 does not report it, whichever wait it is. Where a fault reached into the
+  deletion, G3 only notes it, so G4 still judges that wait and blames the finalizers. A CR
+  under deletion is not ready, whatever `Ready` says, because a wait that converged
+  mid-cleanup would put the rest of the cleanup in the quiet window. The toy proves both:
+  `--cleanup-delay=7s` passes a `create` and a `delete`, and B12 fails G3 alone.

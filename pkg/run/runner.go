@@ -458,8 +458,7 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		return err
 	}
 	r.timeline.Ops[len(r.timeline.Ops)-1].Settled = &wait
-	excused := r.asOf(wait.Window.End).Recovering(wait.Window.End)
-	return r.judge(op.Index, wait, excused)
+	return r.judge(op.Index, wait, invariant.Input.Excused)
 }
 
 // wait waits up to T_settle for the target to converge, or longer while it is
@@ -474,8 +473,7 @@ func (r *runner) wait(ctx context.Context) (Wait, error) {
 // owed is when a settle wait may give up, as the checks judge it.
 func (r *runner) owed() time.Time {
 	now := r.now()
-	in := r.asOf(now)
-	return later(in.Owed(now), in.DeletionOwed(now))
+	return r.asOf(now).WaitOwed(now)
 }
 
 // asOf is what the checks read of the run at t.
@@ -490,10 +488,9 @@ func (r *runner) asOf(t time.Time) invariant.Input {
 	}
 }
 
-// judge checkpoints where a settle wait ended. A wait that expired where the
-// faults did not excuse it, and no overdue deletion left it to G3, is a G4
-// violation, which ends the run.
-func (r *runner) judge(op int, wait Wait, excused bool) error {
+// judge checkpoints where a settle wait ended. A wait that expired where
+// excused does not excuse it is a G4 violation, which ends the run.
+func (r *runner) judge(op int, wait Wait, excused func(invariant.Input, invariant.Checkpoint) bool) error {
 	if !wait.Converged {
 		// A target that is gone cannot converge, so that is the harness's
 		// failure to report, not the target's to answer for.
@@ -502,15 +499,8 @@ func (r *runner) judge(op int, wait Wait, excused bool) error {
 		}
 	}
 	checkpoint := Checkpoint{At: wait.Window.End, Began: wait.Window.Start, Op: op, Converged: wait.Converged}
-	expired := !wait.Converged && !excused && !r.asOf(checkpoint.At).DeletionOverdue(engineCheckpoint(checkpoint))
+	expired := !wait.Converged && !excused(r.asOf(checkpoint.At), engineCheckpoint(checkpoint))
 	return r.checkpoint(checkpoint, expired)
-}
-
-func later(a, b time.Time) time.Time {
-	if b.After(a) {
-		return b
-	}
-	return a
 }
 
 // targetStopped is the harness error for a target that is no longer running.
@@ -675,8 +665,8 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 	if err == nil {
 		r.timeline.Recovery = &wait
 		// The faults are cleared, and the wait ran until the time they left
-		// the target was up, so nothing excuses it.
-		err = r.judge(Recovery, wait, false)
+		// the target was up, so no fault excuses it.
+		err = r.judge(Recovery, wait, invariant.Input.DeletionOverdue)
 	}
 	if err != nil {
 		r.failed = true

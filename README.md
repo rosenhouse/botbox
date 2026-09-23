@@ -299,10 +299,12 @@ A settle wait expired. What follows `expired with no fault active` says why:
   status field rewritten on every reconcile, such as a timestamp, does this.
 - `ready held until …` means `ready` held and then stopped holding.
 
-After a `delete`, the run waits up to `timeouts.delete` for the CR to go, so a slow cleanup
-needs no wider `settle`. A CR that outlives `delete` fails G3, which names the finalizers
-still on it. `no CR was left to be ready, but the namespace never held still …` means
-something kept writing after the CR was gone.
+After a `delete`, the run waits up to `timeouts.delete` for the CR to go and then up to
+`settle` for the rest to settle, so a slow cleanup needs no wider `settle`. A CR still there
+after `delete` fails G3, which names the finalizers still on it. Where a fault reached into
+the deletion, G3 cannot judge it, and `the CR … was still being deleted, held by the
+finalizers …` names them instead. `no CR was left to be ready, but the namespace never held
+still …` means something kept writing after the CR was gone.
 
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
 `settle`. Where your controller repeated a failing request, the line names it and its

@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/api/meta"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rosenhouse/botbox/pkg/target"
@@ -23,6 +25,44 @@ func TestWatchedKindsHoldThePrimaryOnce(t *testing.T) {
 
 	if want := []schema.GroupVersionKind{widget, configMap}; !slices.Equal(watched, want) {
 		t.Errorf("botbox watches %v, want %v.", watched, want)
+	}
+}
+
+func TestCheckScopesNamesEveryClusterScopedKind(t *testing.T) {
+	widget := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
+	clusterRole := schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"}
+	webhook := schema.GroupVersionKind{Group: "admissionregistration.k8s.io", Version: "v1", Kind: "ValidatingWebhookConfiguration"}
+	unserved := schema.GroupVersionKind{Group: "example.com", Version: "v1", Kind: "Unserved"}
+	mapper := meta.NewDefaultRESTMapper(nil)
+	mapper.Add(widget, meta.RESTScopeNamespace)
+	mapper.Add(clusterRole, meta.RESTScopeRoot)
+	mapper.Add(webhook, meta.RESTScopeRoot)
+	fixture := &unstructured.Unstructured{}
+	fixture.SetGroupVersionKind(webhook)
+	fixture.SetName("widget-validator")
+
+	err := (&target.Target{
+		Primary:  widget,
+		Manages:  []schema.GroupVersionKind{clusterRole, unserved},
+		Fixtures: []*unstructured.Unstructured{fixture},
+	}).CheckScopes(mapper)
+
+	if err == nil {
+		t.Fatal("CheckScopes accepted cluster-scoped kinds.")
+	}
+	for _, want := range []string{"managed rbac.authorization.k8s.io/v1/ClusterRole",
+		"fixture admissionregistration.k8s.io/v1/ValidatingWebhookConfiguration widget-validator"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("CheckScopes returned %q, which does not name %q.", err, want)
+		}
+	}
+	for _, other := range []string{"Widget", "Unserved"} {
+		if strings.Contains(err.Error(), other) {
+			t.Errorf("CheckScopes returned %q, which names %s.", err, other)
+		}
+	}
+	if err := (&target.Target{Primary: widget}).CheckScopes(mapper); err != nil {
+		t.Errorf("CheckScopes refused a namespaced primary: %v", err)
 	}
 }
 

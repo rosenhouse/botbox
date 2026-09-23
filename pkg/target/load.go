@@ -134,11 +134,25 @@ func load(path string) (*Target, error) {
 		return nil, fmt.Errorf("sample %s: holds %s, not the primary %s", samplePath, gvk, loaded.Primary)
 	}
 	for _, fixture := range declared.Fixtures {
-		objects, err := loadObjects(resolve(dir, fixture))
+		fixturePath := resolve(dir, fixture)
+		objects, err := loadObjects(fixturePath)
 		if err != nil {
 			return nil, fmt.Errorf("fixture: %w", err)
 		}
+		for _, object := range objects {
+			if namespace := object.GetNamespace(); namespace != "" {
+				return nil, fmt.Errorf("fixture %s: %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace",
+					fixturePath, object.GetKind(), object.GetName(), namespace)
+			}
+		}
 		loaded.Fixtures = append(loaded.Fixtures, objects...)
+	}
+	crds, err := ReadCRDs(loaded.CRDs)
+	if err != nil {
+		return nil, fmt.Errorf("crds: %w", err)
+	}
+	if err := loaded.refuseClusterScoped(clusterScopedByCRD(crds)); err != nil {
+		return nil, err
 	}
 
 	if declared.Selector != "" {

@@ -371,7 +371,7 @@ launch:
 `, map[string]string{
 		"widget.yaml":  sampleWidget,
 		"fixture.yaml": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: fixture\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: also-a-fixture\n",
-		"crds/w.yaml":  "# the loader resolves the path without reading it\n",
+		"crds/w.yaml":  "# a comment and no CRD\n",
 	})
 	dir := filepath.Dir(path)
 	t.Chdir(t.TempDir())
@@ -389,6 +389,75 @@ launch:
 	}
 	if loaded.Launch.Binary != "bin/min" {
 		t.Errorf("Load resolved launch.binary to %q; it is relative to the working directory.", loaded.Launch.Binary)
+	}
+}
+
+// clusterScopedCRDs define a cluster-scoped Widget and Gadget and a
+// namespaced Thing.
+const clusterScopedCRDs = `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+spec:
+  group: toy.botbox
+  names: {kind: Widget, plural: widgets}
+  scope: Cluster
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+spec:
+  group: toy.botbox
+  names: {kind: Gadget, plural: gadgets}
+  scope: Cluster
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+spec:
+  group: toy.botbox
+  names: {kind: Thing, plural: things}
+  scope: Namespaced
+`
+
+func TestLoadRefusesEveryClusterScopedKindItsCRDsDefine(t *testing.T) {
+	path := writeTarget(t, minimalTarget+`crds: [crds/]
+manages: [toy.botbox/v1/Gadget, toy.botbox/v1/Thing, v1/ConfigMap]
+fixtures: [fixtures.yaml]
+`, map[string]string{
+		"widget.yaml":    sampleWidget,
+		"crds/toys.yaml": clusterScopedCRDs,
+		"fixtures.yaml":  "apiVersion: toy.botbox/v1\nkind: Gadget\nmetadata:\n  name: shared-gadget\n---\napiVersion: toy.botbox/v1\nkind: Thing\nmetadata:\n  name: a-thing\n",
+	})
+
+	_, err := target.Load(path)
+
+	if err == nil {
+		t.Fatal("Load accepted cluster-scoped kinds.")
+	}
+	for _, want := range []string{"cluster-scoped", "primary toy.botbox/v1/Widget", "managed toy.botbox/v1/Gadget", "fixture toy.botbox/v1/Gadget shared-gadget"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load returned %q, which does not name %q.", err, want)
+		}
+	}
+	for _, namespaced := range []string{"Thing", "a-thing", "ConfigMap"} {
+		if strings.Contains(err.Error(), namespaced) {
+			t.Errorf("Load returned %q, which names the namespaced %s.", err, namespaced)
+		}
+	}
+}
+
+func TestLoadRefusesAFixtureThatNamesANamespace(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"fixtures: [issuer.yaml]\n", map[string]string{
+		"widget.yaml": sampleWidget,
+		"issuer.yaml": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: ca\n  namespace: default\n",
+	})
+
+	_, err := target.Load(path)
+
+	if err == nil {
+		t.Fatal("Load accepted a fixture that names a namespace.")
+	}
+	for _, want := range []string{"issuer.yaml", "ca", "metadata.namespace", "drop it"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load returned %q, which does not say %q.", err, want)
+		}
 	}
 }
 

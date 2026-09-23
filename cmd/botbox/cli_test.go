@@ -43,7 +43,11 @@ type fakeSession struct {
 	dirs      []string
 	args      [][]string
 	closed    bool
+	// refused is what vet answers.
+	refused error
 }
+
+func (s *fakeSession) vet(*target.Target) error { return s.refused }
 
 func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
 	s.sequences = append(s.sequences, sequence)
@@ -807,6 +811,33 @@ func TestAHarnessErrorExitsTwo(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "the control plane did not start") {
 		t.Errorf("botbox run reported %q, want the harness error.", stderr)
+	}
+}
+
+func TestATargetTheClusterRefusesEndsTheInvocationBeforeARun(t *testing.T) {
+	refused := errors.New("these are cluster-scoped: the managed rbac.authorization.k8s.io/v1/ClusterRole")
+	for _, args := range [][]string{
+		{"run", "--target", toyTargetYAML, "--out", t.TempDir(), writeSequence(t, 1)},
+		{"matrix", "--target", toyTargetYAML, "--sequences", bugSequences(t, 0), "--out", matrixFile(t)},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			session := &fakeSession{refused: refused}
+
+			code, _, stderr := invoke(t, session, args...)
+
+			if code != exitError {
+				t.Errorf("botbox %s exited %d, want %d.", args[0], code, exitError)
+			}
+			if !strings.Contains(stderr, refused.Error()) {
+				t.Errorf("botbox %s reported %q, want %q.", args[0], stderr, refused)
+			}
+			if len(session.sequences) != 0 {
+				t.Errorf("botbox %s ran %d sequences against a target the cluster refused.", args[0], len(session.sequences))
+			}
+			if !session.closed {
+				t.Errorf("botbox %s left the session open.", args[0])
+			}
+		})
 	}
 }
 

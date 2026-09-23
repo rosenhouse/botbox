@@ -156,6 +156,11 @@ window sits inside the settle budget, so the controller has `settle - stable` to
 writing. A `stable` at least as wide as `settle` leaves it none, so botbox refuses to load
 that target rather than reporting G4 against your controller.
 
+botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
+fixture before the first run, and it refuses a fixture that sets `metadata.namespace`. It
+watches only the run namespace, so it does not see a child your controller creates in
+another namespace.
+
 Each run creates its own namespace, and the kubeconfig botbox hands your controller names
 that namespace. `launch.env` sets variables for your controller. In its values and in
 `launch.args`, botbox replaces the text `$NAMESPACE` with the run namespace and

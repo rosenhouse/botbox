@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -114,6 +115,45 @@ type Target struct {
 	Launch      LaunchSpec
 	Timeouts    Timeouts
 	Thresholds  Thresholds
+}
+
+// CheckScopes refuses every kind of the target's that the mapper serves at
+// cluster scope. It leaves a kind the mapper does not know to the run.
+func (t *Target) CheckScopes(mapper meta.RESTMapper) error {
+	return t.refuseClusterScoped(func(gvk schema.GroupVersionKind) bool {
+		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+		return err == nil && mapping.Scope.Name() == meta.RESTScopeNameRoot
+	})
+}
+
+// refuseClusterScoped names every cluster-scoped kind the target declares.
+func (t *Target) refuseClusterScoped(clusterScoped func(schema.GroupVersionKind) bool) error {
+	var found []string
+	if clusterScoped(t.Primary) {
+		found = append(found, "the primary "+kindName(t.Primary))
+	}
+	for _, gvk := range t.Manages {
+		if clusterScoped(gvk) {
+			found = append(found, "the managed "+kindName(gvk))
+		}
+	}
+	for _, fixture := range t.Fixtures {
+		if gvk := fixture.GroupVersionKind(); clusterScoped(gvk) {
+			found = append(found, fmt.Sprintf("the fixture %s %s", kindName(gvk), fixture.GetName()))
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return fmt.Errorf("a run owns one namespace, so botbox cannot test these cluster-scoped kinds: %s", strings.Join(found, ", "))
+}
+
+// kindName writes a kind as target.yaml declares it.
+func kindName(gvk schema.GroupVersionKind) string {
+	if gvk.Group == "" {
+		return gvk.Version + "/" + gvk.Kind
+	}
+	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
 }
 
 // WatchedKinds are the kinds botbox watches: the primary CR and every managed

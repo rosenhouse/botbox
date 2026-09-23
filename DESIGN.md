@@ -546,6 +546,13 @@ dotted schema property names, which the CRD schema validates. A Go hook may repl
 equality predicate as `equal: go:<name>` (§8.4). A hook takes no `equalIgnore`, since
 nothing would read it.
 
+The primary, every managed kind and every fixture must be namespaced, because a run owns
+one namespace (§5.5, D13). botbox refuses the cluster-scoped ones in one error that names
+them all: when it loads the target, for the kinds its `crds` define, and once the control
+plane is up and before the first run, for the rest. botbox observes only the run namespace,
+so it does not see a child the target creates in another. A fixture sets no
+`metadata.namespace`, since botbox creates it in the run namespace.
+
 `equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
 holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
 and `[*]` names every item of a list or value of a map:

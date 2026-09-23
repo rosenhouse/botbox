@@ -85,6 +85,8 @@ type cli struct {
 // session executes sequences against one test cluster. Runs share it, because
 // starting a control plane costs seconds (DESIGN.md §5.5).
 type session interface {
+	// vet refuses a target the cluster cannot run, before any run starts.
+	vet(t *target.Target) error
 	execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error)
 	close() error
 }
@@ -144,6 +146,9 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		return c.fail(err)
 	}
 	defer func() { c.warn(s.close()) }()
+	if err := s.vet(exercised); err != nil {
+		return c.fail(err)
+	}
 	out, err := run.OpenOutput(opts.out, opts.invocationSeed(runs[0].sequence), time.Now())
 	if err != nil {
 		return c.fail(err)
@@ -586,6 +591,16 @@ func openSession(opts options, t *target.Target) (session, error) {
 		return nil, err
 	}
 	return &clusterSession{config: started.Config(), stop: started.Stop}, nil
+}
+
+// vet refuses the kinds the cluster serves at cluster scope, which the target's
+// CRDs cannot show for a built-in kind.
+func (s *clusterSession) vet(t *target.Target) error {
+	mapper, err := cluster.NewRESTMapper(s.config)
+	if err != nil {
+		return err
+	}
+	return t.CheckScopes(mapper)
 }
 
 func (s *clusterSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {

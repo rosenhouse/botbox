@@ -1,22 +1,14 @@
 package generate
 
 import (
-	"bufio"
-	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io"
 	"maps"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"pgregory.net/rapid"
-	"sigs.k8s.io/yaml"
 
 	"github.com/rosenhouse/botbox/pkg/target"
 )
@@ -102,76 +94,16 @@ func openAPISchema(t *target.Target) (map[string]any, error) {
 		t.Primary.Group, t.Primary.Version, t.Primary.Kind)
 }
 
-// crdDocuments reads every CRD manifest the paths name. A path is a file or a
-// directory of them, as the cluster reads them (DESIGN.md §8.1).
+// crdDocuments reads every CRD manifest the paths name.
 func crdDocuments(paths []string) ([]map[string]any, error) {
-	var documents []map[string]any
-	for _, path := range paths {
-		files, err := manifests(path)
-		if err != nil {
-			return nil, err
-		}
-		for _, file := range files {
-			read, err := readDocuments(file)
-			if err != nil {
-				return nil, err
-			}
-			documents = append(documents, read...)
-		}
+	documents, err := target.ReadCRDs(paths)
+	if err != nil {
+		return nil, err
 	}
 	if len(documents) == 0 {
 		return nil, fmt.Errorf("the paths %v hold no CRD", paths)
 	}
 	return documents, nil
-}
-
-// manifestExtensions are the files a CRD directory holds.
-var manifestExtensions = []string{".yaml", ".yml", ".json"}
-
-func manifests(path string) ([]string, error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading the CRDs: %w", err)
-	}
-	if !info.IsDir() {
-		return []string{path}, nil
-	}
-	entries, err := os.ReadDir(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading the CRDs: %w", err)
-	}
-	var files []string
-	for _, entry := range entries {
-		if !entry.IsDir() && slices.Contains(manifestExtensions, filepath.Ext(entry.Name())) {
-			files = append(files, filepath.Join(path, entry.Name()))
-		}
-	}
-	return files, nil
-}
-
-func readDocuments(path string) ([]map[string]any, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, fmt.Errorf("reading the CRDs: %w", err)
-	}
-	reader := utilyaml.NewYAMLReader(bufio.NewReader(bytes.NewReader(data)))
-	var documents []map[string]any
-	for {
-		document, err := reader.Read()
-		if errors.Is(err, io.EOF) {
-			return documents, nil
-		}
-		if err != nil {
-			return nil, fmt.Errorf("reading the CRDs in %s: %w", path, err)
-		}
-		var decoded map[string]any
-		if err := yaml.Unmarshal(document, &decoded); err != nil {
-			return nil, fmt.Errorf("reading the CRDs in %s: %w", path, err)
-		}
-		if decoded != nil {
-			documents = append(documents, decoded)
-		}
-	}
 }
 
 // schemaNode walks a dotted path into a schema's properties (DESIGN.md §8.1).

@@ -273,7 +273,7 @@ func (h *Harness) applyFixtures(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("creating the fixture %s %s: %w", gvk.Kind, fixture.GetName(), err)
 		}
-		h.Observer.MarkBotboxCreated(gvk, created.GetName())
+		h.Observer.Exclude(gvk, created.GetName())
 	}
 	return nil
 }

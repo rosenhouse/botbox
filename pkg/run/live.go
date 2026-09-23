@@ -95,7 +95,7 @@ func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) 
 	if err != nil {
 		return "", fmt.Errorf("creating the CR: %w", err)
 	}
-	l.h.Observer.MarkBotboxCreated(l.target.Primary, created.GetName())
+	l.h.Observer.Exclude(l.target.Primary, created.GetName())
 	return created.GetName(), nil
 }
 

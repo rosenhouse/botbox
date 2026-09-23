@@ -47,7 +47,7 @@ func history() *observe.Store {
 		Namespace: fakeNamespace,
 		Manages:   []schema.GroupVersionKind{configMapKind},
 	})
-	store.MarkBotboxCreated(widgetKind, "widget") // botbox creates the CR, so it is never managed.
+	store.Exclude(widgetKind, "widget") // botbox creates the CR, so it is never managed.
 	return store
 }
 

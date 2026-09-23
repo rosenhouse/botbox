@@ -286,7 +286,7 @@ func createCollectedConfigMap(t *testing.T, ctx context.Context, h *run.Harness,
 	if _, err := configMaps(t, h).Create(ctx, owned, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("Creating the owned ConfigMap failed: %v", err)
 	}
-	h.Observer.MarkBotboxCreated(configMapKind, collectedName)
+	h.Observer.Exclude(configMapKind, collectedName)
 }
 
 // requireReconcileRecorded asserts that the target's traffic reached the API

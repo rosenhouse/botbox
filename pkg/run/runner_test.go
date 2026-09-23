@@ -360,6 +360,30 @@ func TestRunAppliesTheOpsInOrder(t *testing.T) {
 	}
 }
 
+func TestRunNamesTheCREachCROpWrote(t *testing.T) {
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("a")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+		Op{Type: OpSettle},
+		Op{Type: OpRestart},
+		Op{Type: OpRecreate, Obj: widget("b")},
+		Op{Type: OpDelete},
+	)
+
+	result, err := runFake(t, newFakeHarness(), nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	var got []string
+	for _, op := range result.Timeline.Ops {
+		got = append(got, op.CR)
+	}
+	if want := []string{"a", "a", "", "", "b", "b"}; !slices.Equal(got, want) {
+		t.Errorf("The ops name the CRs %q, want %q.", got, want)
+	}
+}
+
 func TestRunSkipsTheSettleAfterANoSettleOp(t *testing.T) {
 	h := newFakeHarness()
 	sequence := sequenceOf(

@@ -1203,9 +1203,11 @@ built from source and run as a black-box binary.
   over the CR's versions in the wait. The Runner calls the engine's function for it, so
   the two agree, and a checkpoint sits where its wait ended, where the engine stamps the
   verdict. A wait can begin before the Observer sees the op's write, so the walk counts a
-  missing CR as not holding, and `Ready` holding on a CR recorded before the op was
-  applied does not count as having held. Where several CRs are live, the verdict quotes
-  the one `Ready` failed on. The report quotes the CR's status, which D35 left to
+  missing CR as not holding. It says `Ready` held and then stopped only where `Ready`
+  held once the op's CR had a version recorded after the op was applied. The walk tells
+  the op's write by time, so a write the controller makes during the op's own request can
+  still count as the op's. Where several CRs are live, the verdict quotes the one `Ready`
+  failed on. The report quotes the CR's status, which D35 left to
   `objects.jsonl`, because a reason such as "0/10 replicas available" lives there. A
   controller can copy anything into its status, so the quote is bounded. The verdict
   quotes the CEL error, and a non-bool ends the run at its first evaluation. The same

@@ -48,6 +48,8 @@ type Op struct {
 	// the zero Key, and so does a DeleteManaged op whose index resolved to
 	// nothing (DESIGN.md §5.4).
 	Deleted observe.Key
+	// CR is the primary CR a CR op wrote. Every other op carries the zero Key.
+	CR observe.Key
 }
 
 // changesRun reports whether the op changed the CR or a managed object.

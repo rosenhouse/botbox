@@ -17,11 +17,8 @@ import (
 // after, so the two cannot disagree. Its error is a configuration error.
 func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 	began, at := checkpoint.Began, checkpoint.Time
-	var wrote time.Time
-	if op, found := in.op(checkpoint.Op); found && op.Type.touchesCR() {
-		wrote = op.Time
-	}
-	walk, err := in.walkReady(began, at, wrote)
+	op, _ := in.op(checkpoint.Op)
+	walk, err := in.walkReady(began, at, op)
 	if err != nil {
 		return Violation{}, err
 	}
@@ -65,26 +62,28 @@ type readyWalk struct {
 
 // walkReady evaluates Ready on the CRs as the wait found them and on every
 // version the Observer recorded after, up to the end. The wait can begin
-// before the Observer sees the write of an op applied at wrote, so a CR
-// recorded by then cannot show that Ready held after the write.
-func (in Input) walkReady(began, end, wrote time.Time) (readyWalk, error) {
+// before the Observer records the op's write, so Ready counts as having held
+// after it only once the op's CR has a version recorded after the op.
+func (in Input) walkReady(began, end time.Time, op Op) (readyWalk, error) {
 	var walk readyWalk
 	versions := slices.DeleteFunc(in.versionsIn(time.Time{}, end), func(v observe.Version) bool {
 		return v.GVK != in.Target.Primary
 	})
 	latest := map[observe.Key]observe.Version{}
+	written := func() bool {
+		v, found := latest[op.CR]
+		return op.CR == (observe.Key{}) || found && v.Time.After(op.Time)
+	}
 	next := 0
 	for ; next < len(versions) && !versions[next].Time.After(began); next++ {
 		latest[versions[next].Key] = versions[next]
 	}
-	found := live(latest)
-	if err := walk.step(in, began, found); err != nil {
+	if err := walk.step(in, began, live(latest), written()); err != nil {
 		return walk, err
 	}
-	walk.ever = walk.ever && !slices.ContainsFunc(found, func(v observe.Version) bool { return !v.Time.After(wrote) })
 	for _, v := range versions[next:] {
 		latest[v.Key] = v
-		if err := walk.step(in, v.Time, live(latest)); err != nil {
+		if err := walk.step(in, v.Time, live(latest), written()); err != nil {
 			return walk, err
 		}
 	}
@@ -93,7 +92,7 @@ func (in Input) walkReady(began, end, wrote time.Time) (readyWalk, error) {
 
 // step evaluates Ready at one instant, stopping at the first CR it fails on,
 // as the wait does.
-func (w *readyWalk) step(in Input, at time.Time, crs []observe.Version) error {
+func (w *readyWalk) step(in Input, at time.Time, crs []observe.Version, written bool) error {
 	held, err := len(crs) > 0, error(nil)
 	if held {
 		w.cr = crs[0]
@@ -112,7 +111,7 @@ func (w *readyWalk) step(in Input, at time.Time, crs []observe.Version) error {
 		w.turned = at
 	}
 	w.crs, w.held, w.err = len(crs), held, err
-	w.ever = w.ever || held
+	w.ever = w.ever || held && written
 	return nil
 }
 

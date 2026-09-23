@@ -203,6 +203,45 @@ func TestAnExpiredWaitJudgesTheWriteWhereverTheWaitBegan(t *testing.T) {
 	}
 }
 
+// Only a version of the CR the op wrote shows the write, whatever the other
+// CRs' versions show.
+func TestAnExpiredWaitReadsTheWriteOnTheOpsCR(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		run  *run
+		want string
+	}{
+		{
+			"another CR recorded before the op",
+			newRun().
+				record(500*time.Millisecond, object(widgetGVK, "v", "9", generation(1), spec(3), status(3, 1))).
+				op(invariant.OpCreate, time.Second).
+				record(1100*time.Millisecond, widget("10", spec(3), status(3, 1))).
+				record(3*time.Second, widget("11", spec(3), status(2, 1))).
+				checkpoint(6*time.Second, invariant.Expired).
+				waitBegan(1200 * time.Millisecond),
+			"in 4.8s, ready held until 1.8s: it evaluated to false",
+		},
+		{
+			"another CR changed before the op's write was recorded",
+			newRun().
+				record(500*time.Millisecond, object(widgetGVK, "v", "9", generation(1), spec(3), status(3, 1))).
+				record(time.Second, widget("10", spec(3), status(3, 1))).
+				op(invariant.OpUpdate, 2*time.Second).
+				record(2001*time.Millisecond, object(widgetGVK, "v", "11", generation(1), spec(3), labelled("x"), status(3, 1))).
+				record(2003*time.Millisecond, widget("12", spec(4), generation(2), status(3, 1))).
+				checkpoint(7*time.Second, invariant.Expired),
+			"in 5s, ready never held: it evaluated to false",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			violation := expiredWait(t, c.run.through(9*time.Second))
+
+			requireStatement(t, violation, c.want)
+		})
+	}
+}
+
 // A restart writes no CR, so the CR the wait found is the target's.
 func TestAnExpiredWaitSaysReadyStoppedHoldingAfterARestart(t *testing.T) {
 	in := newRun().

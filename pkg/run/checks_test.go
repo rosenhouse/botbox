@@ -259,6 +259,25 @@ func TestTheChecksCarryNoObjectForAnOpThatResolvedToNothing(t *testing.T) {
 	}
 }
 
+func TestTheChecksNameTheCRAnOpWrote(t *testing.T) {
+	timeline := Timeline{
+		Namespace: fakeNamespace,
+		Ops: []AppliedOp{
+			{Op: Op{Index: 0, Type: OpUpdate}, At: at(1), CR: "widget"},
+			{Op: Op{Index: 1, Type: OpSettle}, At: at(2)},
+		},
+	}
+
+	ops := engineOps(checkTarget(), timeline)
+
+	if want := (observe.Key{GVK: widgetKind, Namespace: fakeNamespace, Name: "widget"}); ops[0].CR != want {
+		t.Errorf("The update names the CR %+v, want %+v.", ops[0].CR, want)
+	}
+	if got := ops[1].CR; got != (observe.Key{}) {
+		t.Errorf("The settle names the CR %+v, and it wrote none.", got)
+	}
+}
+
 // The Runner sees the checks through one Checker, so the engine hands it the
 // notes alongside the violations.
 func TestTheEngineCarriesTheNotesOut(t *testing.T) {

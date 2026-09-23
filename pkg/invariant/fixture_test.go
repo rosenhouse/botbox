@@ -2,6 +2,7 @@ package invariant_test
 
 import (
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -106,8 +107,13 @@ func (r *run) fixture(obj *unstructured.Unstructured) *run {
 	return r
 }
 
+// op is an op of the type given, which writes the CR w if it is a CR op.
 func (r *run) op(opType invariant.OpType, when time.Duration) *run {
-	r.in.Ops = append(r.in.Ops, invariant.Op{Index: len(r.in.Ops), Type: opType, Time: at(when)})
+	op := invariant.Op{Index: len(r.in.Ops), Type: opType, Time: at(when)}
+	if slices.Contains([]invariant.OpType{invariant.OpCreate, invariant.OpUpdate, invariant.OpDelete, invariant.OpRecreate}, opType) {
+		op.CR = observe.Key{GVK: widgetGVK, Namespace: namespace, Name: widgetName}
+	}
+	r.in.Ops = append(r.in.Ops, op)
 	return r
 }
 

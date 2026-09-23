@@ -153,6 +153,8 @@ type Timeline struct {
 type AppliedOp struct {
 	Op Op
 	At time.Time
+	// CR is the primary CR a CR op wrote.
+	CR string
 	// Resolved is the object a deleteManaged op chose (DESIGN.md §7).
 	Resolved string
 	// Settled is the settle wait that followed the op, or nil if none did.
@@ -346,6 +348,9 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 	}
 	r.expireFaults(op.Index)
 	applied, err := r.apply(ctx, op)
+	if op.Type.OnCR() {
+		applied.CR = r.cr
+	}
 	r.timeline.Ops = append(r.timeline.Ops, applied)
 	if err != nil {
 		return err

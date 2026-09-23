@@ -222,7 +222,8 @@ func TestWithoutMutateEverySpecPathTheSchemaDescribesMoves(t *testing.T) {
 
 func TestNewReportsTheSpecPathsItLeavesAlone(t *testing.T) {
 	loaded := loadTarget(t, rulesTarget)
-	leftAlone := newGenerator(t, loaded, Options{}).LeftAlone()
+	g := newGenerator(t, loaded, Options{})
+	leftAlone := g.LeftAlone()
 	want := [][]string{
 		{"spec.right", "the CRD refuses every value botbox drew for it in the sample", "exactly one of left and right"},
 		{"spec.surge", "x-kubernetes-int-or-string"},
@@ -235,6 +236,9 @@ func TestNewReportsTheSpecPathsItLeavesAlone(t *testing.T) {
 			if !strings.Contains(leftAlone[i], part) {
 				t.Errorf("New reports %q, which does not say %q.", leftAlone[i], part)
 			}
+		}
+		if slices.ContainsFunc(g.fields, func(f field) bool { return f.dotted == says[0] }) {
+			t.Errorf("New leaves %s alone and still draws it.", says[0])
 		}
 	}
 

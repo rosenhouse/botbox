@@ -16,7 +16,9 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	toyv1 "github.com/rosenhouse/botbox/targets/toy-widget/api/v1"
 )
@@ -64,6 +66,10 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Bug != B8 {
 		builder = builder.Owns(&corev1.ConfigMap{}) // B8 (§9.1): without this watch, a deleted child goes unnoticed.
 	}
+	if r.Bug == B12 {
+		recoverPanic := false // B12 (§9.1): a panic ends the process.
+		builder = builder.WithOptions(controller.Options{RecoverPanic: &recoverPanic})
+	}
 	return builder.Complete(r)
 }
 
@@ -75,6 +81,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if !widget.DeletionTimestamp.IsZero() {
 		return ctrl.Result{}, r.cleanUp(ctx, widget)
+	}
+
+	if r.Bug == B12 {
+		// B12 (§9.1): a count of 0 divides by zero.
+		log.FromContext(ctx).Info("reconciling", "percentReady", 100*widget.Status.Ready/widget.Spec.Count)
 	}
 
 	// Patches throughout, so a cached Widget that predates the last write cannot conflict.

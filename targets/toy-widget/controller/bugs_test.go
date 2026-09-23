@@ -3,7 +3,9 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -336,6 +338,53 @@ func TestB11NeverRetriesAChildCreateTheAPIServerRefused(t *testing.T) {
 				t.Errorf("status.ready is %d, want the %d the API server holds.", ready, want)
 			}
 		})
+	}
+}
+
+func TestB12DividesByACountOfZeroBeforeItChangesAnything(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		bug      Bug
+		panics   bool
+		children []string
+	}{
+		{"the correct controller scales 2 down to 0", 0, false, nil},
+		{"B12 panics and leaves both children", B12, true, []string{"w-0", "w-1"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			widget := newWidget(2)
+			r := fixture(t, testCase.bug, interceptor.Funcs{}, widget)
+			mustReconcile(t, r, widget)
+			setCount(t, r, widget, 0)
+
+			func() {
+				defer func() {
+					recovered := recover()
+					if panicked := strings.Contains(fmt.Sprint(recovered), "integer divide by zero"); panicked != testCase.panics {
+						t.Errorf("Reconcile panicked with %v; want it to divide by zero: %t.", recovered, testCase.panics)
+					}
+				}()
+				mustReconcile(t, r, widget)
+			}()
+
+			if names := childNames(t, r, widget); !slices.Equal(names, testCase.children) {
+				t.Errorf("The reconcile at count 0 left the ConfigMaps %v, want %v.", names, testCase.children)
+			}
+		})
+	}
+}
+
+func TestB12PanicsOnANewWidgetBeforeItAddsTheFinalizer(t *testing.T) {
+	widget := newWidget(0)
+	r := fixture(t, B12, interceptor.Funcs{}, widget)
+
+	func() {
+		defer func() { _ = recover() }()
+		_ = reconcile(t, r, widget)
+	}()
+
+	if controllerutil.ContainsFinalizer(readWidget(t, r, widget), Finalizer) {
+		t.Error("B12 added its finalizer to a Widget of count 0 before it panicked.")
 	}
 }
 

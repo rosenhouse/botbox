@@ -97,8 +97,9 @@ type Launcher interface {
     Start(ctx context.Context, kubeconfig string) error // kubeconfig points at the proxy
     Stop(ctx context.Context) error                     // graceful: SIGTERM, then SIGKILL after a grace period
     Restart(ctx context.Context) error                  // crash: SIGKILL, then Start
+    Supervise(onExit func(error))                       // from now on, restart the target whenever it exits
     Status() Status                    // is the target still running, and why it stopped if not
-    Exited() <-chan struct{}           // closed once the running target has stopped
+    Exited() <-chan struct{}           // closed once the target has stopped and will not start again
 }
 ```
 
@@ -111,7 +112,10 @@ Implementations:
   `launch.env` sets variables over the environment the target inherits from botbox, and
   may not set `KUBECONFIG`. The target's stdout and stderr go to `target.log` in the run
   directory. `Restart` sends SIGKILL, waits for the process to be reaped, then execs
-  again, so fixed ports and lock files are released.
+  again, so fixed ports and lock files are released. `Supervise` restarts the target
+  whenever it exits on its own, as a kubelet restarts a container: at once the first time,
+  then after 10 s, doubling up to 5 min. `Stop` and `Restart` are not exits, and `Stop`
+  ends supervision.
   botbox does not probe the target for health; the settle wait after the first op absorbs
   startup.
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
@@ -200,13 +204,21 @@ The Runner executes one sequence:
    `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
    that expires while no fault excuses it records a G4 violation. A fault excuses it while
    active, which is once the proxy has applied it and until the proxy stops (D36), and
-   while the target is still owed time to recover from it (§6). A wait also ends
-   where the target's process exits, and the Runner checks the target is running before it
-   applies each op. A target that stopped ends the run as a harness error naming the op it
-   was at (§11), because the ops behind it would run against nothing. The error quotes the
-   line in `target.log` that says why: the line the last Go panic opens with, or else the
-   last line above any stack trace, since a logger's trace ends in a frame. The log holds
-   every process a `restart` started, and the last one is the one that stopped.
+   while the target is still owed time to recover from it (§6). Until a settle wait has
+   converged, normally op 0's, a wait also ends where the target's process exits, and the
+   Runner checks the target is running before it applies each op. A target that stopped
+   then ends the run as a harness error naming the op it was at (§11): a bad flag or a
+   taken port reads the same way, and the ops behind it would run against nothing. The
+   error quotes the line in `target.log` that says why: the line the last Go panic opens
+   with, or else the last line above any stack trace, since a logger's trace ends in a
+   frame. The log holds every process a `restart` started, and the last one is the one
+   that stopped. Once a wait has converged, the target has shown it runs, and the Launcher
+   supervises it (§5.1). The run notes each exit and the line the target wrote as it
+   stopped. A target that keeps exiting never converges, so its wait expires as a G4 whose
+   evidence counts the exits since the target last converged and quotes the last. A
+   target that converges after an exit passes, though the restart gives it no more time,
+   and its startup requests count toward G1 where they land in a quiet window (§6). A
+   restart that fails ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
@@ -385,7 +397,8 @@ reads like one that passed. G5 also notes an `equalIgnore` path it could not fol
 (§8.1), since it then compares a field the target meant it to skip. The Runner also notes
 each ownerReference the collector could not resolve (§5.8), since the object that carries
 it stays, and G3 would report it without saying why. It notes each fault op whose fault
-the proxy applied to no request, since that fault tested nothing (D36).
+the proxy applied to no request, since that fault tested nothing (D36). It notes each
+exit of the target it restarted (§5.5), since a run that passes shows no other sign of it.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
@@ -711,6 +724,7 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 | B9 | Removes the finalizer on the first deletion reconcile, before deleting children, and omits ownerReferences on every child, so no path cleans up | cleanup-ordering | G3 |
 | B10 | Writes status only from an in-memory flag set when it created children. After a `Restart` the flag is gone, so a later scale-down converges the children but leaves `status` stale (a scale-up creates a child and re-arms the flag) | intermediate-state | G4 |
 | B11 | Believes a child is present from the moment it asks the API server to create it, and never asks again. The belief outlives whatever removed the child, so a refused create, a scale-down or a `DeleteManaged` leaves the toy one child short for good, with no error and no requeue | unconfirmed-write | G4 |
+| B12 | Logs what percentage of its children are ready, dividing by `count`, and runs without controller-runtime's panic recovery, so a `count` of 0 ends the process. Every restart reconciles the same spec and exits again | crash loop | G4 |
 
 Three of the classes are Sieve's bug patterns (§13): intermediate-state, stale-state,
 and unobserved-state. The other classes are this repo's own.
@@ -721,9 +735,11 @@ B11's row scales down and back up: the belief outlives the child the toy itself 
 The unconfirmed write needs a fault, and §10 M6's acceptance test runs `b11-fault.json`
 for it. B11 is the deterministic form of §5.6's "a transient state is made permanent by a
 `Fault`", so that settle wait expires whatever the windows are. A `Restart` heals B11,
-because the belief lives in the process. `fault.json`, the README's fault example, holds a
-fault that outlasts the sequence. The envtest tier runs it, not the matrix: the toy with
-no bug recovers once the teardown clears the fault, and B11 fails G4 there.
+because the belief lives in the process. B12's row creates the Widget at a count of 2
+and then sets 0, because an exit before a settle wait has converged is a harness error
+(§5.5). `fault.json`, the README's fault example, holds a fault that outlasts the
+sequence. The envtest tier runs it, not the matrix: the toy with no bug recovers once the
+teardown clears the fault, and B11 fails G4 there.
 
 Acceptance for M3: a matrix in `docs/bug-matrix.md` showing which invariant or property
 catches each bug, generated by CI, with no empty rows and no check firing on any sequence
@@ -1278,3 +1294,14 @@ built from source and run as a black-box binary.
   working directory as its base, because `launch.args` and the target's own relative paths
   resolve from there. The Runner checks a fault's resource when it applies the fault op,
   not when the run starts, because a target may install its CRDs itself.
+- **D@50 botbox restarts a target that exits once it has converged, and a crash loop is a
+  G4.** An operator that crashed on a spec value read as a broken target, with no report
+  and no shrink. A seventh invariant, "the target keeps running", was rejected, because
+  controller-runtime exits on purpose when it loses leader election, which a fault can
+  cause. A kubelet restarts such a target, so botbox does too, with a kubelet's backoff. A
+  crash loop never converges, so G4 reports it, and a drawn sequence that finds one
+  shrinks. An exit before any wait converged stays a harness error, since a bad flag, a
+  taken port and a crash on op 0's CR look alike there. A restart gives the target no more
+  time, and its startup requests count toward G1 in a quiet window. Excusing them would
+  need a recovery window of their own, and a correct controller rarely exits with no
+  fault active.

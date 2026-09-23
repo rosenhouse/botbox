@@ -121,8 +121,8 @@ verify-generate: generate
 		exit 1; \
 	fi
 
-# One run per seeded bug of DESIGN.md §9.1, under envtest. The deadline covers
-# every run of the invocation.
+# Each seeded bug of DESIGN.md §9.1 runs its sequence under envtest twice: under
+# the bug and without it. The deadline covers every run of the invocation.
 .PHONY: bug-matrix
 bug-matrix: build setup
 	KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox matrix \

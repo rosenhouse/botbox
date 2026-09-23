@@ -264,7 +264,7 @@ Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generi
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
 
-[docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs.
+[docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs. Each bug's sequence also runs against the toy with no bug, and CI fails if a check fires there.
 
 ## Development and internals
 

@@ -376,10 +376,11 @@ object a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (
 converged, often a write that changes nothing. `N_quiet` is how many of those one quiet
 window may hold, per target (§8.1). A tick every `interval` puts at most
 `floor(T_stable / interval) + 1` ticks in one window, so `N_quiet` is that times the
-requests one tick makes. A write that changes something still moves a resourceVersion,
-which G2 reports whatever `N_quiet` is. Any `N_quiet` above zero also lets a slow loop
-of that many requests per window through G1. G6 counts a loop only while it fails more
-than `N_errloop` times within `T_settle`, so a slow failing loop can pass both.
+requests one tick makes, summed over every timer the target runs, such as one per CR. A
+write that changes something still moves a resourceVersion, which G2 reports whatever
+`N_quiet` is. Any `N_quiet` above zero also lets a slow loop of that many requests per
+window through G1. G6 counts a loop only while it fails more than `N_errloop` times
+within `T_settle`, so a slow failing loop can pass both.
 
 **What the proxy cannot see.** G1 and G6 observe only requests that leave the target
 process. Reads served from a client-side cache are invisible, so a reconcile loop that

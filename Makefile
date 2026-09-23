@@ -95,6 +95,8 @@ help:
 	@echo "  test-example-nightly                   Run the cert-manager example on seeds botbox draws."
 	@echo "  test-example-external-secrets-nightly  Run the external-secrets example on seeds botbox draws."
 	@echo "  test-kind                              Run the toy through --kubeconfig against a throwaway kind cluster."
+	@echo "  kind-cluster                           Create the kind cluster test-kind runs against."
+	@echo "  test-kind-runs                         Run the toy against the cluster kind-cluster created."
 	@echo "  fmt                                    Fail if any file needs gofmt."
 	@echo "  vet                                    Run go vet over both tiers."
 
@@ -347,20 +349,23 @@ $(KIND):
 
 KIND_BOTBOX = ./bin/botbox run --target targets/toy-widget/target.yaml --kubeconfig $(KIND_KUBECONFIG) --deadline $(KIND_DEADLINE)
 
+.PHONY: kind-cluster
+kind-cluster: $(KIND)
+	$(KIND) create cluster --name $(KIND_CLUSTER) --image $(KIND_NODE_IMAGE) \
+		--config targets/toy-widget/kind.yaml --kubeconfig $(KIND_KUBECONFIG) --wait 3m
+
 # The kind tier of DESIGN.md §11. botbox installs the toy's CRD, and the
 # cluster's own controller manager collects garbage and populates each
 # namespace. The toy runs on the host, so no image is loaded. The trap deletes
-# the cluster however the tier ends.
+# the cluster however the runs end. A failed create sets no trap, so a cluster
+# that already had the name survives.
 .PHONY: test-kind
-test-kind: $(KIND) build
+test-kind: kind-cluster
 	@trap '$(KIND) delete cluster --name $(KIND_CLUSTER) --kubeconfig $(KIND_KUBECONFIG)' EXIT INT TERM; \
-	$(KIND) create cluster --name $(KIND_CLUSTER) --image $(KIND_NODE_IMAGE) \
-		--config targets/toy-widget/kind.yaml --kubeconfig $(KIND_KUBECONFIG) --wait 3m \
-		&& $(MAKE) --no-print-directory test-kind-runs
+	$(MAKE) --no-print-directory test-kind-runs
 
-# The runs of test-kind, against the cluster it created.
 .PHONY: test-kind-runs
-test-kind-runs:
+test-kind-runs: build
 	@echo "==> the toy with no bug, which must pass"
 	@$(KIND_BOTBOX) targets/toy-widget/sequences/b0.json \
 		|| { echo "test-kind: b0.json failed."; exit 1; }

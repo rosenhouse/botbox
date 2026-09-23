@@ -109,8 +109,8 @@ jobs:
             gh issue create --title "$TITLE" --label "$LABEL" --body "$body"
           fi
 
-  # The kind tier of DESIGN.md §11: the toy through --kubeconfig against a real
-  # cluster, whose controller manager envtest lacks.
+  # The kind tier of DESIGN.md §11 runs the toy against a cluster with the
+  # controller manager that envtest lacks.
   kind:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -120,9 +120,13 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      # Only the runs failing is a find. Creating the cluster pulls from Docker
+      # Hub, which can fail on its own.
+      - name: Create the kind cluster
+        run: make kind-cluster build
       - name: The toy against kind
         id: kind
-        run: make test-kind
+        run: make test-kind-runs
       - name: Keep the failing run's evidence
         if: failure()
         uses: actions/upload-artifact@v4
@@ -142,7 +146,7 @@ jobs:
           body=$(cat <<EOF
           🤖 Created by Claude 🤖
 
-          The nightly run of \`make test-kind\` failed on $(date -u +%Y-%m-%d).
+          The toy failed the nightly kind tier on $(date -u +%Y-%m-%d).
           Its seeds are fixed, so the run log names the sequence and the seed, and
           \`botbox replay\` reproduces it against a kind cluster.
 

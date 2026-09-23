@@ -712,9 +712,9 @@ func (r *runner) teardown(ctx context.Context) error {
 // unresolvedNote says why the collector kept an object: it counts an owner it
 // cannot resolve as live.
 func unresolvedNote(u cluster.Unresolved) string {
-	why := "the API server does not serve " + kindName(u.OwnerKind)
-	if u.Served {
-		why = "it does not watch " + kindName(u.OwnerKind)
+	why := "it does not watch " + kindName(u.OwnerKind)
+	if u.Watched {
+		why = "the API server does not serve " + kindName(u.OwnerKind)
 	}
 	return fmt.Sprintf("botbox's garbage collector never deletes %s %s, because %s, the kind of its owner %s",
 		kindName(u.DependentKind), u.DependentName, why, u.OwnerName)

@@ -87,9 +87,10 @@ func TestCollector(t *testing.T) {
 		collector.Stop()
 		want := []cluster.Unresolved{
 			{DependentKind: configMapKind, DependentName: unservedVersion.Name,
-				OwnerKind: schema.GroupVersionKind{Group: gadgetKind.Group, Version: "v1beta9", Kind: gadgetKind.Kind}, OwnerName: gadget.GetName()},
+				OwnerKind: schema.GroupVersionKind{Group: gadgetKind.Group, Version: "v1beta9", Kind: gadgetKind.Kind}, OwnerName: gadget.GetName(),
+				Watched: true},
 			{DependentKind: configMapKind, DependentName: unwatchedOwner.Name,
-				OwnerKind: schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, OwnerName: "absent", Served: true},
+				OwnerKind: schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, OwnerName: "absent"},
 		}
 		if got := collector.Unresolved(); !slices.Equal(got, want) {
 			t.Errorf("Unresolved returned %+v, want %+v.", got, want)

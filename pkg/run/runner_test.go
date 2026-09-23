@@ -1009,10 +1009,11 @@ func TestRunNotesEachOwnerTheCollectorCouldNotResolve(t *testing.T) {
 		{
 			DependentKind: configMapKind, DependentName: "widget-cfg",
 			OwnerKind: schema.GroupVersionKind{Group: "toy.botbox", Version: "v1alpha9", Kind: "Widget"}, OwnerName: "widget",
+			Watched: true,
 		},
 		{
 			DependentKind: configMapKind, DependentName: "widget-tls",
-			OwnerKind: schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, OwnerName: "tls", Served: true,
+			OwnerKind: schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, OwnerName: "tls",
 		},
 	}
 	check := &fakeChecker{notes: [][]string{nil, {"G3 is not evaluated for the deletion of widget"}}}

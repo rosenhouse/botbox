@@ -94,9 +94,10 @@ type Unresolved struct {
 	// OwnerKind is the kind at the version the reference names.
 	OwnerKind schema.GroupVersionKind
 	OwnerName string
-	// Served says the API server serves OwnerKind and the collector does not
-	// watch it. Otherwise the API server does not serve OwnerKind.
-	Served bool
+	// Watched says the collector watches the owner's group and kind, and the
+	// API server does not serve OwnerKind. Otherwise the collector does not
+	// watch the owner's kind.
+	Watched bool
 }
 
 // StartCollector runs the collector over opts.Namespace until Stop.
@@ -279,9 +280,9 @@ func (c *Collector) liveOwners(ctx context.Context, objects []object) owners {
 	for _, obj := range objects {
 		for _, ref := range obj.meta.OwnerReferences {
 			key := keyOf(ref)
-			kind, watched, _ := live.kindOf(ref)
+			kind, resolved, _ := live.resolve(ref)
 			_, alreadyRead := live.resolved[key]
-			if !watched || alreadyRead {
+			if !resolved || alreadyRead {
 				continue
 			}
 			found, err := c.client.Resource(kind.resource).Namespace(c.namespace).
@@ -355,16 +356,17 @@ type owners struct {
 	resolved map[ownerKey]owner
 }
 
-// kindOf finds the watched kind a reference names, as the garbage collector
-// does: through the version the reference names, which the API server must
-// serve.
-func (o owners) kindOf(ref metav1.OwnerReference) (kind watchedKind, watched, served bool) {
+// resolve finds the watched kind a reference names. Like the garbage
+// collector, it resolves a reference only at a version the API server serves.
+func (o owners) resolve(ref metav1.OwnerReference) (kind watchedKind, resolved, watched bool) {
 	gvk := schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind)
-	if _, err := o.mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
+	if kind, watched = o.watched[gvk.GroupKind()]; !watched {
 		return watchedKind{}, false, false
 	}
-	kind, watched = o.watched[gvk.GroupKind()]
-	return kind, watched, true
+	if _, err := o.mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
+		return watchedKind{}, false, true
+	}
+	return kind, true, true
 }
 
 // collectible reports whether obj must be deleted: it has at least one
@@ -377,13 +379,13 @@ func (o owners) collectible(obj object) (bool, []Unresolved) {
 	collect := len(refs) > 0
 	var unresolved []Unresolved
 	for _, ref := range refs {
-		if _, watched, served := o.kindOf(ref); !watched {
+		if _, resolved, watched := o.resolve(ref); !resolved {
 			unresolved = append(unresolved, Unresolved{
 				DependentKind: obj.kind,
 				DependentName: obj.meta.Name,
 				OwnerKind:     schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind),
 				OwnerName:     ref.Name,
-				Served:        served,
+				Watched:       watched,
 			})
 			collect = false
 			continue

@@ -39,10 +39,11 @@ const runNamespace = "run-1"
 // knowsNothing resolves no kind at all.
 func knowsNothing() apimeta.RESTMapper { return apimeta.NewDefaultRESTMapper(nil) }
 
-// serves resolves ConfigMaps, Secrets, and Widgets at v1 and v1alpha1.
+// serves resolves ConfigMaps, and Widgets at v1 and v1alpha1. It knows no
+// Secret, which the collector does not watch either.
 func serves() apimeta.RESTMapper {
 	mapper := apimeta.NewDefaultRESTMapper(nil)
-	for _, kind := range []schema.GroupVersionKind{configMapKind, secretKind, widgetKind, widgetV1alpha1} {
+	for _, kind := range []schema.GroupVersionKind{configMapKind, widgetKind, widgetV1alpha1} {
 		mapper.Add(kind, apimeta.RESTScopeNamespace)
 	}
 	return mapper
@@ -143,7 +144,7 @@ func TestCollectibleReportsOwnersOfUnwatchedKinds(t *testing.T) {
 	if collect {
 		t.Error("collectible chose to delete an object although one of its owners is of an unwatched kind.")
 	}
-	want := []Unresolved{{DependentKind: configMapKind, DependentName: "child", OwnerKind: secretKind, OwnerName: secret.Name, Served: true}}
+	want := []Unresolved{{DependentKind: configMapKind, DependentName: "child", OwnerKind: secretKind, OwnerName: secret.Name}}
 	if !slices.Equal(unresolved, want) {
 		t.Errorf("collectible reported %+v as unresolved, want %+v.", unresolved, want)
 	}
@@ -183,7 +184,7 @@ func TestCollectibleKeepsAnObjectWhoseOwnerNamesAVersionNotServed(t *testing.T) 
 	if collect {
 		t.Error("collectible chose to delete an object whose owner names a version the API server does not serve.")
 	}
-	want := []Unresolved{{DependentKind: configMapKind, DependentName: "child", OwnerKind: unserved, OwnerName: parent.Name}}
+	want := []Unresolved{{DependentKind: configMapKind, DependentName: "child", OwnerKind: unserved, OwnerName: parent.Name, Watched: true}}
 	if !slices.Equal(unresolved, want) {
 		t.Errorf("collectible reported %+v as unresolved, want %+v.", unresolved, want)
 	}
@@ -255,15 +256,26 @@ func TestSweepDeletesOnlyTheObjectItRead(t *testing.T) {
 }
 
 func TestSweepKeepsAChildOfAnOwnerItCannotResolve(t *testing.T) {
-	c, client, logged := fakeCollector(t)
+	unserved := schema.GroupVersionKind{Group: widgetKind.Group, Version: "v1beta9", Kind: widgetKind.Kind}
+	for _, tc := range []struct {
+		name  string
+		owner metav1.OwnerReference
+	}{
+		{"the collector does not watch the kind", secretOwner("tls")},
+		{"the API server does not serve the version", widgetOwner(unserved, "parent", "uid-parent")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, client, logged := fakeCollector(t)
 
-	c.sweep(context.Background(), []object{configMapObject("child", "uid-child", secretOwner("tls"))})
+			c.sweep(context.Background(), []object{configMapObject("child", "uid-child", tc.owner)})
 
-	if deleted := deletions(t, client); len(deleted) != 0 {
-		t.Errorf("The collector deleted %v although it cannot resolve the owner.", deleted)
-	}
-	if logged.Len() != 0 {
-		t.Errorf("The collector logged %q; the run notes an unresolved owner instead.", logged.String())
+			if len(client.Actions()) != 0 {
+				t.Errorf("The collector made the calls %v, want none for an owner it cannot resolve.", client.Actions())
+			}
+			if logged.Len() != 0 {
+				t.Errorf("The collector logged %q; the run notes an unresolved owner instead.", logged.String())
+			}
+		})
 	}
 }
 
@@ -470,7 +482,7 @@ func TestUnresolvedNamesEachDependentAndOwnerOnce(t *testing.T) {
 	c.sweep(context.Background(), objects)
 
 	owned := func(dependent string) Unresolved {
-		return Unresolved{DependentKind: configMapKind, DependentName: dependent, OwnerKind: secretKind, OwnerName: secret.Name, Served: true}
+		return Unresolved{DependentKind: configMapKind, DependentName: dependent, OwnerKind: secretKind, OwnerName: secret.Name}
 	}
 	if got, want := c.Unresolved(), []Unresolved{owned("first"), owned("second")}; !slices.Equal(got, want) {
 		t.Errorf("Unresolved returned %+v, want %+v.", got, want)

@@ -236,8 +236,10 @@ harness, not the target; tune windows, don't retry.
 A failing run emits `report.json` and `report.md` containing: the minimized sequence and
 how many of its ops the run reached, the violated invariant or property with the concrete
 evidence (request log excerpt, object version timeline), the target and versions, the
-seed, and a one-line replay command. The run directory also holds recordings of the run
-(§11), so a report can be re-examined without re-running. A readiness verdict and a
+seed, and a one-line replay command. That command repeats the target, the kubeconfig and
+every launch argument the run had, quoted so that `sh` reads each word as written. The run
+directory also holds recordings of the run (§11), so a report can be re-examined without
+re-running. A readiness verdict and a
 property violation also quote the state of the objects the target managed where it failed,
 in a table of its own, bounded on its own, and say how many there were: a child the
 target never created has no version to quote, and the count is what a report about a

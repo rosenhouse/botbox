@@ -10,6 +10,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -311,7 +312,22 @@ func (o options) replayCommand(sequence string) string {
 	for _, arg := range o.launchArgs {
 		command = append(command, "--launch-arg", arg)
 	}
-	return strings.Join(append(command, sequence), " ")
+	command = append(command, sequence)
+	for i, word := range command {
+		command[i] = shellQuote(word)
+	}
+	return strings.Join(command, " ")
+}
+
+var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_./=:@%+,-]+$`)
+
+// shellQuote leaves a word sh reads literally as it is, and single-quotes any
+// other.
+func shellQuote(word string) string {
+	if shellSafe.MatchString(word) {
+		return word
+	}
+	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
 }
 
 // writeReport leaves §5.7's report beside the recordings it describes. replay

@@ -12,7 +12,8 @@ import (
 // field for, and says where it is. It is nil where it finds none.
 func unknownKey(data []byte) error {
 	var document yamlv3.Node
-	if err := yamlv3.Unmarshal(data, &document); err != nil || len(document.Content) == 0 {
+	_ = yamlv3.Unmarshal(data, &document) // It leaves YAML it cannot parse empty.
+	if len(document.Content) == 0 {
 		return nil
 	}
 	return keyIn(document.Content[0], reflect.TypeFor[declaration](), "")

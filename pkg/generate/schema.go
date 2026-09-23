@@ -65,7 +65,7 @@ func primarySchema(t *target.Target) (*schema, error) {
 
 // openAPISchema finds the primary CR's openAPIV3Schema among the target's CRDs.
 func openAPISchema(t *target.Target) (map[string]any, error) {
-	documents, err := crdDocuments(t.CRDs)
+	documents, err := target.ReadCRDs(t.CRDs)
 	if err != nil {
 		return nil, err
 	}
@@ -92,18 +92,6 @@ func openAPISchema(t *target.Target) (map[string]any, error) {
 	}
 	return nil, fmt.Errorf("the target's CRDs describe no %s/%s %s",
 		t.Primary.Group, t.Primary.Version, t.Primary.Kind)
-}
-
-// crdDocuments reads every CRD manifest the paths name.
-func crdDocuments(paths []string) ([]map[string]any, error) {
-	documents, err := target.ReadCRDs(paths)
-	if err != nil {
-		return nil, err
-	}
-	if len(documents) == 0 {
-		return nil, fmt.Errorf("the paths %v hold no CRD", paths)
-	}
-	return documents, nil
 }
 
 // schemaNode walks a dotted path into a schema's properties (DESIGN.md §8.1).

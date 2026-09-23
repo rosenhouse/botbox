@@ -204,8 +204,9 @@ The Runner executes one sequence:
    where the target's process exits, and the Runner checks the target is running before it
    applies each op. A target that stopped ends the run as a harness error naming the op it
    was at (§11), because the ops behind it would run against nothing. The error quotes the
-   line in `target.log` that says why: the line a Go panic opens with, or else the last
-   line above any stack trace, since a logger's trace ends in a frame.
+   line in `target.log` that says why: the line the last Go panic opens with, or else the
+   last line above any stack trace, since a logger's trace ends in a frame. The log holds
+   every process a `restart` started, and the last one is the one that stopped.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.

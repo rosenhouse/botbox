@@ -563,12 +563,12 @@ var (
 	goroutineHeader = regexp.MustCompile(`^goroutine \d+ .*:$`)
 )
 
-// whyItStopped is what the target said as it stopped: the line a panic opens
-// with, or else the last whole line above any stack trace. It is empty where
-// the log holds neither, which leaves the reader the file itself.
+// whyItStopped is what the target said as it stopped: the line the last panic
+// opens with, or else the last whole line above any stack trace. It is empty
+// where the log holds neither, which leaves the reader the file itself.
 func whyItStopped(path string) string {
 	said := tailLines(path)
-	for _, line := range said {
+	for _, line := range slices.Backward(said) {
 		if slices.ContainsFunc(panicked, func(opener string) bool { return strings.HasPrefix(line, opener) }) {
 			return line
 		}

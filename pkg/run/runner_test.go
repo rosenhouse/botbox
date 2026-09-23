@@ -1759,6 +1759,12 @@ func TestWhatTheTargetSaidOnTheWayOut(t *testing.T) {
 		{"a panic before its stack",
 			"starting\npanic: runtime error: index out of range\n\ngoroutine 1 [running]:\nmain.main()\n\t/src/main.go:57 +0x1d5\n",
 			"panic: runtime error: index out of range"},
+		// The log holds every process a restart started.
+		{"a panic after an earlier one",
+			"panic: the first\n\ngoroutine 1 [running]:\nmain.main()\n\t/src/main.go:10 +0x1d\nstarting\npanic: the second\n\ngoroutine 1 [running]:\nmain.main()\n\t/src/main.go:57 +0x1d5\n",
+			"panic: the second"},
+		{"a last line that ends in a port", "starting\nE0923 16:05:39.116650    7054 main.go:30] cannot reach 10.96.0.1:443\n",
+			"E0923 16:05:39.116650    7054 main.go:30] cannot reach 10.96.0.1:443"},
 		{"several lines and no panic", "starting\nlistening on :8080\nE0921 fatal: reconcile failed\n",
 			"E0921 fatal: reconcile failed"},
 		{"a tail that begins mid-line", strings.Repeat("y", pastTheTail) + "\nE0921 fatal: reconcile failed\n",

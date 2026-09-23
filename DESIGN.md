@@ -362,7 +362,10 @@ keyed by kind and name.
 `metadata.creationTimestamp`, `metadata.generation`, `metadata.managedFields`,
 `status.conditions[*].lastTransitionTime`, and any ownerReference whose owner no longer
 exists. It compares everything else, including labels, annotations, finalizers and the
-remaining ownerReferences. A target excludes further paths with `equalIgnore` (§8.1).
+remaining ownerReferences. A target excludes further paths with `equalIgnore`, written in
+the form of the paths above (§8.1). Along an ignored path, a map or a list left empty
+counts as absent, so an annotation on one side only compares equal. An item that `[*]`
+names stays even when left empty, so the items still count.
 
 ## 7. Sequence format
 
@@ -462,9 +465,29 @@ that writes then expires. Loading such a target is a configuration error rather 
 that reports G4 against a target that did nothing wrong.
 
 `manages` names kinds as `group/version/Kind`, with `v1/Kind` for the core group. An
-optional `selector` (label selector) refines attribution (§6). Paths under `generate` and
-in `equalIgnore` are dotted paths into the object. A Go hook may replace the equality
-predicate as `equal: go:<name>` (§8.4).
+optional `selector` (label selector) refines attribution (§6). Paths under `generate` are
+dotted schema property names, which the CRD schema validates. A Go hook may replace the
+equality predicate as `equal: go:<name>` (§8.4). A hook takes no `equalIgnore`, since
+nothing would read it.
+
+`equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
+holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
+and `[*]` names every item of a list or value of a map:
+
+```yaml
+equalIgnore:
+  - status.lastSyncTime
+  - metadata.annotations["probe.example.com/started-at"]
+  - status.conditions[*].lastHeartbeatTime
+```
+
+YAML gives `[`, `]`, `: ` and ` #` meanings of their own, so the list is written in block
+style, and a path that starts with `[` or holds `: ` or ` #` goes in single quotes. The
+loader refuses a malformed path, naming the offset. It refuses a list index such as `[0]`,
+since a restart can reorder a list. It refuses a key that the dots split where it can
+tell: a key outside brackets that holds `/`, such as the `io/name` of
+`app.kubernetes.io/name`, and a path that goes more than one step below the `labels` or
+`annotations` of any `metadata`, which map keys to strings.
 
 A property's `when` says where it is evaluated: `always` on every Observer event before
 the teardown boundary (§6), `checkpoint` at each checkpoint (§4), `end` at the last
@@ -1060,3 +1083,9 @@ built from source and run as a black-box binary.
   nothing to resolve, and G3 names the Secret. `deletionPolicy` is not a second control:
   its default `Retain` leaves a Secret that still carries an ownerReference, which the
   collector removes.
+- **D@42 `equalIgnore` paths have a grammar that the loader checks.** A dotted path
+  cannot name an annotation key, which holds dots, and the loader accepted a path that
+  named nothing. `["key"]` quotes a key as a CEL map index does, and `[*]` follows §6 and
+  kubectl's JSONPath. A child created after the operator started carries no annotation
+  until a restart stamps one, so an empty map or list along an ignored path counts as
+  absent. `generate` keeps dotted schema property names, which the schema already checks.

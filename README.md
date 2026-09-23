@@ -189,6 +189,21 @@ lists the only paths a sequence changes and `generate.overlay` tightens one path
 `examples/cert-manager/target.yaml` does. Naming a path botbox cannot draw from is a
 configuration error, not a silent skip ([DESIGN.md §8.3](DESIGN.md#83-generation-constraints-and-admission-webhooks)).
 
+G5 compares what your controller manages before and after a restart. It already skips what
+every restart moves, such as `metadata.resourceVersion`. If your controller stamps a field of
+its own at startup, name it in `equalIgnore`. Quote a key that holds a dot or a slash, and write
+`[*]` for every item of a list:
+
+```yaml
+equalIgnore:
+  - metadata.annotations["example.com/started-at"]
+  - status.conditions[*].lastHeartbeatTime
+```
+
+Keep the list in block style, because YAML claims the brackets inside a one-line `[...]` list.
+botbox refuses a list index such as `[0]`, and a label or annotation key that the dots split,
+when it loads the target ([DESIGN.md §8.1](DESIGN.md#81-targetyaml)).
+
 A sequence file runs as written and is never minimized. This is
 `examples/cert-manager/sequences/issue.json`, reflowed ([DESIGN.md §7](DESIGN.md#7-sequence-format)):
 

@@ -137,6 +137,52 @@ func TestG4MeasuresAFaultFromTheLastConvergence(t *testing.T) {
 	}
 }
 
+// A settle wait that converged shows the target recovered, so a spec change
+// made while it was recovering is judged no later than that.
+func TestG4StopsGivingTheTargetTimeOnceItConverged(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		fault(500*time.Millisecond, 10*time.Second).
+		record(time.Second, widget("10", spec(2), status(0, 1))).
+		op(invariant.OpUpdate, 11*time.Second).
+		record(11500*time.Millisecond, widget("11", spec(3), generation(2), status(3, 2))).
+		checkpoint(12*time.Second, invariant.Converged).
+		op(invariant.OpRestart, 20*time.Second).
+		record(20100*time.Millisecond, widget("12", spec(3), generation(2), status(1, 2))).
+		record(26*time.Second, widget("13", spec(3), generation(2), status(3, 2))).
+		checkpoint(27*time.Second, invariant.Converged).
+		through(28 * time.Second)
+
+	silent(t, invariant.Convergence, in)
+}
+
+// A target that converged only after the time the fault left it is late.
+func TestG4GivesNoMoreTimeForAConvergenceThatCameLate(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		fault(time.Second, 4*time.Second).
+		record(time.Second, widget("10", spec(3), status(0, 1))).
+		record(12500*time.Millisecond, widget("11", spec(3), status(3, 1))).
+		checkpoint(14500*time.Millisecond, invariant.Converged).
+		through(15 * time.Second)
+
+	fired(t, invariant.Convergence, in)
+}
+
+func TestG4SaysHowLongItGaveTheTargetToTheMillisecond(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		fault(time.Second, 4*time.Second+400*time.Microsecond).
+		record(time.Second, widget("10", spec(3), status(0, 1))).
+		through(13 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if !strings.Contains(violation.Statement, "not ready 8s after the fault stopped") {
+		t.Errorf("The statement is %q, want the 8s it gave the target, rounded.", violation.Statement)
+	}
+}
+
 // The target still owes nothing for a spec change made while it was
 // recovering from a fault, until it has had the time the fault leaves it.
 func TestG4GivesASpecChangeAfterAFaultTheTimeTheFaultLeaves(t *testing.T) {

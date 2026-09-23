@@ -33,7 +33,7 @@ func Convergence(in Input) (Result, error) {
 		}
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the CR %s was not ready %s after %s%s",
-				cr.Name, deadline.Sub(from.at), from.what, quoted(err)),
+				cr.Name, deadline.Sub(from.at).Round(time.Millisecond), from.what, quoted(err)),
 			At: deadline,
 		}.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), deadline))).
 			quotingManaged(Sample(seen.managed(in))))
@@ -52,17 +52,27 @@ func (in Input) convergeAnchors() []anchor {
 	var anchors []anchor
 	for _, op := range in.Ops {
 		if op.Type.changesSpec() {
-			deadline := later(op.Time.Add(in.timeouts().Settle), in.Owed(op.Time))
-			anchors = append(anchors, anchor{at: op.Time, deadline: deadline, what: describe(op)})
+			anchors = append(anchors, anchor{at: op.Time, deadline: in.readyBy(op.Time), what: describe(op)})
 		}
 	}
 	for _, fault := range in.Faults {
 		if !fault.End.IsZero() {
-			anchors = append(anchors, anchor{at: fault.End, deadline: in.Owed(fault.End), what: "the fault stopped"})
+			anchors = append(anchors, anchor{at: fault.End, deadline: in.readyBy(fault.End), what: "the fault stopped"})
 		}
 	}
 	slices.SortFunc(anchors, func(a, b anchor) int { return a.at.Compare(b.at) })
 	return anchors
+}
+
+// readyBy is when the target must be ready after at: T_settle later, or when
+// Owed says if that is later. A settle wait that converged before then shows
+// the target had recovered.
+func (in Input) readyBy(at time.Time) time.Time {
+	owed := in.Owed(at)
+	if converged := in.nextConverged(at); !converged.IsZero() && converged.Before(owed) {
+		owed = converged
+	}
+	return later(at.Add(in.timeouts().Settle), owed)
 }
 
 // respecified reports whether a later op changed the spec inside the window,

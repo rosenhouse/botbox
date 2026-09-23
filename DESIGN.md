@@ -796,10 +796,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   runs are not persisted. `objects.jsonl` writes each value of a Secret's `data` and
   annotations as a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The
   HMAC key is drawn per invocation and never written, so equal values share a marker
-  within one invocation and a marker reveals nothing else. The Observer's history keeps
-  the values, so G5 compares them exactly. Nothing else is redacted: every other object,
-  `target.log`, `sequence.json`, and a report's sequence and replay command hold what the
-  target, the sample and the command line gave them (D@64).
+  within one invocation and a marker reveals only the value's length. The Observer's
+  history keeps the values, so G5 compares them exactly. Nothing else is redacted: every
+  other object, `target.log`, `sequence.json`, and a report's sequence and replay command
+  hold what the target, the sample and the command line gave them (D@64).
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -1192,9 +1192,8 @@ built from source and run as a black-box binary.
 - **D@64 A Secret's values are written as keyed markers.** CI uploads `botbox-out/` when a
   tier fails, and `objects.jsonl` held the external-secrets control's token and the
   cert-manager control's private keys. A marker still shows a reader which value changed.
-  An unkeyed hash would let anyone confirm a guessed value, so the key is never written.
-  external-secrets annotates its Secret with exactly such a hash, and kubectl with a copy
-  of the data, so every annotation value is marked too. Only core Secrets are redacted,
-  because botbox cannot tell a credential inline in a CR, a ConfigMap, the sample, a
-  `--launch-arg` or a log from other data. No flag writes the raw values. Each example
+  An unkeyed hash would let anyone confirm a guessed value. external-secrets annotates its
+  Secret with exactly such a hash, and kubectl with a copy of the data, so every annotation
+  value is marked too. Only core Secrets are redacted, because botbox cannot tell a
+  credential anywhere else from other data. No flag writes the raw values. Each example
   tier fails if its control's evidence holds its Secret's value.

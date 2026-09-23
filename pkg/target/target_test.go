@@ -33,9 +33,11 @@ func TestCheckScopesNamesEveryClusterScopedKind(t *testing.T) {
 	clusterRole := schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"}
 	webhook := schema.GroupVersionKind{Group: "admissionregistration.k8s.io", Version: "v1", Kind: "ValidatingWebhookConfiguration"}
 	unserved := schema.GroupVersionKind{Group: "example.com", Version: "v1", Kind: "Unserved"}
+	namespace := schema.GroupVersionKind{Version: "v1", Kind: "Namespace"}
 	mapper := meta.NewDefaultRESTMapper(nil)
 	mapper.Add(widget, meta.RESTScopeNamespace)
 	mapper.Add(clusterRole, meta.RESTScopeRoot)
+	mapper.Add(namespace, meta.RESTScopeRoot)
 	mapper.Add(webhook, meta.RESTScopeRoot)
 	fixture := &unstructured.Unstructured{}
 	fixture.SetGroupVersionKind(webhook)
@@ -43,14 +45,14 @@ func TestCheckScopesNamesEveryClusterScopedKind(t *testing.T) {
 
 	err := (&target.Target{
 		Primary:  widget,
-		Manages:  []schema.GroupVersionKind{clusterRole, unserved},
+		Manages:  []schema.GroupVersionKind{clusterRole, unserved, namespace},
 		Fixtures: []*unstructured.Unstructured{fixture},
 	}).CheckScopes(mapper)
 
 	if err == nil {
 		t.Fatal("CheckScopes accepted cluster-scoped kinds.")
 	}
-	for _, want := range []string{"managed rbac.authorization.k8s.io/v1/ClusterRole",
+	for _, want := range []string{"managed rbac.authorization.k8s.io/v1/ClusterRole", "managed v1/Namespace",
 		"fixture admissionregistration.k8s.io/v1/ValidatingWebhookConfiguration widget-validator"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("CheckScopes returned %q, which does not name %q.", err, want)

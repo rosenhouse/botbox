@@ -187,7 +187,7 @@ type Wait struct {
 // Checkpoint is where the checks ran (DESIGN.md §4).
 type Checkpoint struct {
 	At time.Time
-	// Op is the op whose settle wait ended here, or Teardown.
+	// Op is the op whose settle wait ended here, Recovery, or Teardown.
 	Op int
 	// Converged is whether that wait converged. At the teardown's checkpoint
 	// it is whether the namespace came clean within the deletion window.

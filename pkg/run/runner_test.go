@@ -61,8 +61,10 @@ type fakeHarness struct {
 	stopsAfter string
 	targetExit error
 
-	// owed is what each settle wait was told the target owed.
-	owed []time.Time
+	// owed is what each settle wait was told the target owed, and
+	// applyingInWait replaces applying once a wait begins.
+	owed           []time.Time
+	applyingInWait []proxy.FaultWindow
 	// cancel ends the run's context at the call cancelsAfter names.
 	cancel       context.CancelFunc
 	cancelsAfter string
@@ -95,6 +97,9 @@ const fakeNamespace = "botbox-run-test"
 func (f *fakeHarness) namespace() string { return fakeNamespace }
 
 func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time) (bool, error) {
+	if f.applyingInWait != nil {
+		f.applying = f.applyingInWait
+	}
 	f.owed = append(f.owed, owed())
 	if err := errors.Join(f.record("settle"), ctx.Err()); err != nil {
 		return false, err
@@ -611,11 +616,13 @@ func TestRunRecordsG4OnceTheFaultHasExpired(t *testing.T) {
 }
 
 // A settle wait runs until the target has had as long as the faults lasted,
-// and T_settle more, to recover from them.
+// and T_settle more, to recover from them. The fault here stops during the
+// wait.
 func TestRunTellsTheSettleWaitWhatRecoveryTheFaultsAreOwed(t *testing.T) {
 	h := newFakeHarness()
 	applied, retired := time.Now().Add(-3*time.Second), time.Now().Add(-time.Second)
-	h.applying = []proxy.FaultWindow{{First: applied, Retired: retired}}
+	h.applying = []proxy.FaultWindow{{First: applied}}
+	h.applyingInWait = []proxy.FaultWindow{{First: applied, Retired: retired}}
 	sequence := sequenceOf(
 		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 1}}},
 		Op{Type: OpCreate, Obj: widget("widget")},

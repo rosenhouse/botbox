@@ -20,8 +20,10 @@ func TestOwedIsAsLongAfterTheFaultsAsTheyLastedAndTSettleMore(t *testing.T) {
 		{name: "a fault that stopped", run: newRun().fault(time.Second, 4*time.Second), at: 5 * time.Second,
 			want: 12 * time.Second},
 		{name: "a fault that had not stopped by then", run: newRun().fault(time.Second, 4*time.Second), at: 3 * time.Second},
-		{name: "overlapping faults", run: newRun().fault(2*time.Second, 4*time.Second).fault(time.Second, 3*time.Second),
-			at: 5 * time.Second, want: 12 * time.Second},
+		{name: "overlapping faults",
+			run: newRun().fault(2*time.Second, 4*time.Second).fault(time.Second, 3*time.Second).
+				fault(3*time.Second, 4500*time.Millisecond).fault(2500*time.Millisecond, 3500*time.Millisecond),
+			at: 5 * time.Second, want: 13 * time.Second},
 		{name: "faults either side of a convergence",
 			run: newRun().op(invariant.OpCreate, 0).fault(time.Second, 4*time.Second).
 				checkpoint(6*time.Second, invariant.Converged).fault(8*time.Second, 9*time.Second),

@@ -54,6 +54,7 @@ func Evaluate(in Input) ([]invariant.Result, error) {
 		Ops:         engineOps(in.Target, in.Timeline),
 		Checkpoints: engineCheckpoints(in.Timeline.Checkpoints),
 		Faults:      engineFaults(in.Timeline.Faults),
+		Exits:       engineExits(in.Timeline.Exits),
 		Teardown:    in.Timeline.Deletion.Start,
 		Quiet:       in.Timeline.Quiet.Start,
 		Cleaned:     in.Timeline.Cleaned,
@@ -117,6 +118,14 @@ func engineFaults(windows []Window) []invariant.FaultWindow {
 		faults = append(faults, invariant.FaultWindow{Start: window.Start, End: window.End})
 	}
 	return faults
+}
+
+func engineExits(exits []Exit) []invariant.Exit {
+	engine := make([]invariant.Exit, len(exits))
+	for i, exit := range exits {
+		engine[i] = invariant.Exit{At: exit.At, Restart: exit.Restart}
+	}
+	return engine
 }
 
 // part writes how much of the evidence the line quotes, which is less than the

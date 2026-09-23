@@ -76,7 +76,7 @@ func TestSuperviseRestartsATargetThatAlreadyExited(t *testing.T) {
 	}
 	heard := make(chan error, 2)
 
-	binary.Supervise(func(exit error) { heard <- exit })
+	binary.Supervise(func(exit error, _ time.Time) { heard <- exit })
 
 	// The restarted target exits too, so a second exit shows the restart.
 	for _, which := range []string{"the exit that came before it", "an exit of the restarted target"} {
@@ -103,7 +103,7 @@ func TestAStopThatGivesUpEndsSupervision(t *testing.T) {
 	unreaped := &process{cmd: cmd, done: make(chan struct{})}
 	binary.running = unreaped
 	var heard atomic.Bool
-	binary.Supervise(func(error) { heard.Store(true) })
+	binary.Supervise(func(error, time.Time) { heard.Store(true) })
 	if err := binary.Stop(t.Context()); err == nil {
 		t.Fatal("Stop reaped a process whose done never closes.")
 	}

@@ -161,6 +161,13 @@ func (r *run) fault(from, to time.Duration) *run {
 	return r
 }
 
+// exit is the target stopping on its own at when, and botbox starting it again
+// at restart.
+func (r *run) exit(when, restart time.Duration) *run {
+	r.in.Exits = append(r.in.Exits, invariant.Exit{At: at(when), Restart: at(restart)})
+	return r
+}
+
 func (r *run) request(when time.Duration, req proxy.Request) *run {
 	req.Start = at(when)
 	r.in.Requests = append(r.in.Requests, req)

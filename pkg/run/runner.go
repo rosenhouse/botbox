@@ -178,6 +178,8 @@ type Exit struct {
 	Err error
 	// Said is what the target wrote as it stopped, or empty.
 	Said string
+	// Restart is when the launcher starts the target again.
+	Restart time.Time
 }
 
 func (e Exit) String() string {
@@ -365,7 +367,7 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 	failure := r.applyOps(ctx)
 	r.failed = failure != nil
 	teardown := r.teardown(ctx)
-	r.timeline.Exits = h.exits()
+	r.readExits()
 	// The run's own notes come before the last checkpoint's.
 	notes := slices.Concat(r.exitNotes(), r.skipped, r.notes)
 	result := Result{Timeline: r.timeline, Violation: r.violation, Notes: notes, Recorded: r.input()}
@@ -523,15 +525,20 @@ func (r *runner) wait(ctx context.Context) (Wait, error) {
 // checks judge it.
 func (r *runner) owed() time.Time { return r.faultsAndWaits().Owed(r.now()) }
 
-// faultsAndWaits is what the checks read of the run's faults and settle waits.
+// faultsAndWaits is what the checks read of the run's faults, exits and settle
+// waits.
 func (r *runner) faultsAndWaits() invariant.Input {
 	r.readFaultWindows()
+	r.readExits()
 	return invariant.Input{
 		Target:      r.target,
 		Checkpoints: engineCheckpoints(r.timeline.Checkpoints),
 		Faults:      engineFaults(r.timeline.Faults),
+		Exits:       engineExits(r.timeline.Exits),
 	}
 }
+
+func (r *runner) readExits() { r.timeline.Exits = r.h.exits() }
 
 // judge checkpoints where a settle wait ended. A wait that expired where the
 // faults did not excuse it is a G4 violation, which ends the run.
@@ -666,6 +673,7 @@ func (r *runner) checkpoint(op int, converged bool) error {
 		return fmt.Errorf("the run namespace holds %d managed objects, over the harness limit of %d", count, r.limit)
 	}
 	r.timeline.Checkpoints = append(r.timeline.Checkpoints, Checkpoint{At: r.now(), Op: op, Converged: converged})
+	r.readExits()
 	found, err := r.check.Check(r.input())
 	if err != nil {
 		return fmt.Errorf("evaluating the checks: %w", err)

@@ -317,13 +317,19 @@ func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
 	if len(exits) != 2 {
 		t.Fatalf("The harness recorded the exits %+v, want the first and the one after its restart.", exits)
 	}
-	for i, want := range []struct{ status, said string }{
-		{"exit status 2", "panic: first"},
-		{"exit status 1", "E0923 lost the lease"},
+	for i, want := range []struct {
+		status, said string
+		backoff      time.Duration
+	}{
+		{"exit status 2", "panic: first", 0},
+		{"exit status 1", "E0923 lost the lease", launch.MaxBackoff},
 	} {
 		exit := exits[i]
 		if exit.Said != want.said || exit.Err == nil || exit.Err.Error() != want.status || exit.At.IsZero() {
 			t.Errorf("Exit %d is %+v, want %s after the target wrote %q.", i+1, exit, want.status, want.said)
+		}
+		if down := exit.Restart.Sub(exit.At); down > want.backoff || down < want.backoff-time.Second {
+			t.Errorf("Exit %d restarts %v after it, want %v.", i+1, down, want.backoff)
 		}
 	}
 }

@@ -579,20 +579,28 @@ func TestExitedWhileTheTargetRestarts(t *testing.T) {
 
 // exits records what a supervised target's exits reported, in order.
 type exits struct {
-	mu   sync.Mutex
-	seen []error
+	mu       sync.Mutex
+	seen     []error
+	restarts []time.Time
 }
 
-func (e *exits) record(exit error) {
+func (e *exits) record(exit error, restart time.Time) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.seen = append(e.seen, exit)
+	e.restarts = append(e.restarts, restart)
 }
 
 func (e *exits) all() []error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return slices.Clone(e.seen)
+}
+
+func (e *exits) restartsAt() []time.Time {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.restarts)
 }
 
 // newSupervised is newBinary with a restart backoff, and a record of what
@@ -650,11 +658,12 @@ func TestASupervisedTargetThatExitsStartsAgain(t *testing.T) {
 }
 
 // Every restart after the first waits, so a target that keeps exiting does not
-// spin.
+// spin. The caller hears when each restart comes.
 func TestASupervisedTargetWaitsBeforeItsSecondRestart(t *testing.T) {
 	binary, log, heard := newSupervised(t, launch.MaxBackoff, "echo started; sleep 0.1; exit 3")
 	mustStart(t, binary)
 	waitForLog(t, log, "started")
+	supervised := time.Now()
 	binary.Supervise(heard.record)
 
 	waitForLogCount(t, log, "started", 2)
@@ -662,6 +671,7 @@ func TestASupervisedTargetWaitsBeforeItsSecondRestart(t *testing.T) {
 	for len(heard.all()) < 2 && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
+	heardBoth := time.Now()
 	time.Sleep(300 * time.Millisecond)
 
 	if got := strings.Count(log.String(), "started"); got != 2 {
@@ -669,6 +679,16 @@ func TestASupervisedTargetWaitsBeforeItsSecondRestart(t *testing.T) {
 	}
 	if status := binary.Status(); !status.Running || !status.Restarting {
 		t.Errorf("Status reported %+v for a target that is waiting to restart.", status)
+	}
+	restarts := heard.restartsAt()
+	if len(restarts) != 2 {
+		t.Fatalf("The supervisor reported %d restarts, want 2.", len(restarts))
+	}
+	if first := restarts[0]; first.Before(supervised) || first.After(heardBoth) {
+		t.Errorf("The first restart is at %v, want it at once, between %v and %v.", first, supervised, heardBoth)
+	}
+	if second := restarts[1]; second.Before(supervised.Add(launch.MaxBackoff)) || second.After(heardBoth.Add(launch.MaxBackoff)) {
+		t.Errorf("The second restart is at %v, want it %v after the exit.", second, launch.MaxBackoff)
 	}
 }
 
@@ -726,9 +746,9 @@ func TestStopReturnsOnceTheExitIsHeard(t *testing.T) {
 	binary, log, heard := newSupervised(t, launch.MaxBackoff, script, quit)
 	mustStart(t, binary)
 	waitForLog(t, log, "started")
-	binary.Supervise(func(exit error) {
+	binary.Supervise(func(exit error, restart time.Time) {
 		time.Sleep(300 * time.Millisecond)
-		heard.record(exit)
+		heard.record(exit, restart)
 	})
 	touch(t, quit)
 	for deadline := time.Now().Add(10 * time.Second); fileExists(quit); time.Sleep(time.Millisecond) {

@@ -69,14 +69,15 @@ type fakeHarness struct {
 	// targetGone makes the harness report a target that has stopped, and
 	// stopsAfter is the call it exits at. exitsInWait is the settle wait it
 	// exits during, counting from 1. Once supervised, an exit is recorded
-	// with the next of says as its last words and the target runs on, unless
-	// restartFails.
+	// with the next of says as its last words and the target runs on,
+	// restarting restartsIn later, unless restartFails.
 	targetGone   bool
 	stopsAfter   string
 	exitsInWait  int
 	targetExit   error
 	says         []string
 	supervised   bool
+	restartsIn   time.Duration
 	restartFails bool
 	exited       []Exit
 	// settles are the outcomes of the settle waits in turn. Later waits
@@ -155,7 +156,8 @@ func (f *fakeHarness) exit() {
 		if n := len(f.exited); n < len(f.says) {
 			said = f.says[n]
 		}
-		f.exited = append(f.exited, Exit{At: time.Now(), Err: f.targetExit, Said: said})
+		now := time.Now()
+		f.exited = append(f.exited, Exit{At: now, Err: f.targetExit, Said: said, Restart: now.Add(f.restartsIn)})
 		return
 	}
 	f.targetGone = true
@@ -2161,6 +2163,36 @@ func TestAnExitBeforeTheTargetLastConvergedIsNotEvidence(t *testing.T) {
 	}
 }
 
+// A target that exits on a fault's error waits out the restart's backoff,
+// which is not its to answer for. The wait and the checks give it T_settle
+// past the restart.
+func TestAnExitAFaultExcusedIsOwedTSettlePastItsRestart(t *testing.T) {
+	h := crashLoop()
+	h.faulting, h.exitsInWait, h.restartsIn = true, 0, time.Hour
+	h.stopsAfter = "patchCR widget map[spec:map[count:5]]"
+	check := &fakeChecker{}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+	)
+
+	_, err := runFake(t, h, check, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if len(h.exited) != 1 {
+		t.Fatalf("The target exited %d times, want once.", len(h.exited))
+	}
+	if want := h.exited[0].Restart.Add(toyTarget.Timeouts.Settle); len(h.owed) < 2 || !h.owed[1].Equal(want) {
+		t.Errorf("The waits were told the target owed recovery until %v, want the wait after op 2 told %v.", h.owed, want)
+	}
+	if exits := check.inputs[1].Timeline.Exits; len(exits) != 1 {
+		t.Errorf("The checks after op 2 read the exits %+v, want the one in its wait.", exits)
+	}
+}
+
 // The wait for recovery from a fault is the teardown's too.
 func TestAnExitWhileTheTeardownAwaitsRecoveryIsTheTeardowns(t *testing.T) {
 	h := crashLoop()
@@ -2187,10 +2219,18 @@ func TestAnExitWhileTheTeardownAwaitsRecoveryIsTheTeardowns(t *testing.T) {
 // The teardown judges the deletion of a target that exited during it, and the
 // note says where the exit came. The teardown begins as it clears the faults.
 func TestAnExitDuringTheTeardownIsNotedAsSuch(t *testing.T) {
-	for _, call := range []string{"clearFaults", "deleteCR widget"} {
-		t.Run(call, func(t *testing.T) {
+	for _, exit := range []struct {
+		call string
+		// judged is whether the teardown's checks read the exit.
+		judged bool
+	}{
+		{"clearFaults", true},
+		{"deleteCR widget", true},
+		{"forceFinalizers", false},
+	} {
+		t.Run(exit.call, func(t *testing.T) {
 			h := crashLoop()
-			h.exitsInWait, h.stopsAfter, h.says = 0, call, nil
+			h.exitsInWait, h.stopsAfter, h.says = 0, exit.call, nil
 			check := &fakeChecker{}
 
 			result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
@@ -2203,6 +2243,9 @@ func TestAnExitDuringTheTeardownIsNotedAsSuch(t *testing.T) {
 			}
 			if got := checkpointsAt(result.Timeline); !slices.Equal(got, []int{0, Teardown}) {
 				t.Errorf("The run checkpointed at %v, want the deletion judged too.", got)
+			}
+			if read := len(check.inputs[1].Timeline.Exits) == 1; read != exit.judged {
+				t.Errorf("The teardown's checks read the exits %+v; want the exit read: %t.", check.inputs[1].Timeline.Exits, exit.judged)
 			}
 		})
 	}

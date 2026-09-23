@@ -49,17 +49,54 @@ func TestOwedIsAsLongAfterTheFaultsAsTheyLastedAndTSettleMore(t *testing.T) {
 			at: 5 * time.Second, want: 12 * time.Second},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			in := test.run.through(30 * time.Second)
-
-			got := in.Owed(at(test.at))
-
-			if test.want == 0 && !got.IsZero() {
-				t.Errorf("The target owes recovery until %v, want nothing.", got.Sub(epoch))
-			}
-			if test.want != 0 && !got.Equal(at(test.want)) {
-				t.Errorf("The target owes recovery until %v, want %v.", got.Sub(epoch), test.want)
-			}
+			owes(t, test.run.through(30*time.Second), test.at, test.want)
 		})
+	}
+}
+
+// An exit a fault excused owes the target T_settle past its restart. An exit
+// that only another exit could excuse owes nothing.
+func TestOwedRunsPastTheRestartOfAnExitAFaultExcused(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  *run
+		at   time.Duration
+		// want is zero where the target owes nothing.
+		want time.Duration
+	}{
+		{name: "an exit while a fault was active", run: newRun().fault(time.Second, 4*time.Second).exit(3*time.Second, 13*time.Second),
+			at: 14 * time.Second, want: 18 * time.Second},
+		{name: "an exit while recovery was owed", run: newRun().fault(time.Second, time.Second).exit(1100*time.Millisecond, 11100*time.Millisecond),
+			at: 12 * time.Second, want: 16100 * time.Millisecond},
+		{name: "an exit after the recovery", run: newRun().fault(time.Second, 4*time.Second).exit(20*time.Second, 30*time.Second),
+			at: 31 * time.Second, want: 12 * time.Second},
+		{name: "an exit with no fault", run: newRun().exit(3*time.Second, 4*time.Second), at: 5 * time.Second},
+		{name: "an exit after the instant asked about", run: newRun().fault(time.Second, time.Second).exit(1100*time.Millisecond, 11100*time.Millisecond),
+			at: 1050 * time.Millisecond, want: 6 * time.Second},
+		{name: "an exit the target converged after",
+			run: newRun().op(invariant.OpCreate, 0).fault(time.Second, time.Second).exit(1100*time.Millisecond, 2*time.Second).
+				checkpoint(5*time.Second, invariant.Converged),
+			at: 6 * time.Second},
+		{name: "an exit during an excused one's recovery",
+			run: newRun().fault(time.Second, time.Second).exit(1100*time.Millisecond, 11100*time.Millisecond).exit(12*time.Second, 22*time.Second),
+			at:  23 * time.Second, want: 16100 * time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			owes(t, test.run.through(30*time.Second), test.at, test.want)
+		})
+	}
+}
+
+// owes fails the test unless the target owes recovery until want, where a
+// zero want owes nothing.
+func owes(t *testing.T, in invariant.Input, asked, want time.Duration) {
+	t.Helper()
+	got := in.Owed(at(asked))
+	if want == 0 && !got.IsZero() {
+		t.Errorf("The target owes recovery until %v, want nothing.", got.Sub(epoch))
+	}
+	if want != 0 && !got.Equal(at(want)) {
+		t.Errorf("The target owes recovery until %v, want %v.", got.Sub(epoch), want)
 	}
 }
 

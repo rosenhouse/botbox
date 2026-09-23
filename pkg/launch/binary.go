@@ -31,8 +31,9 @@ type Launcher interface {
 	// so that a caller waiting on the target ends where it does.
 	Exited() <-chan struct{}
 	// Supervise restarts the target from now on whenever it exits on its own,
-	// as a kubelet restarts a container, and tells onExit why it stopped.
-	Supervise(onExit func(error))
+	// as a kubelet restarts a container, and tells onExit why it stopped and
+	// when it starts again.
+	Supervise(onExit func(exit error, restart time.Time))
 }
 
 // Status is what the launcher knows of the target process. It is the process's
@@ -96,7 +97,7 @@ type Binary struct {
 	kubeconfig string
 	// onExit hears each exit of a supervised target. It is nil until
 	// Supervise.
-	onExit   func(error)
+	onExit   func(error, time.Time)
 	restarts int
 	// gone closes once a supervised target failed to start again, and failed
 	// says why.
@@ -224,7 +225,7 @@ func (b *Binary) Exited() <-chan struct{} {
 // Supervise restarts the target whenever it exits on its own: at once the
 // first time, and after the backoff every later time. A target that exited
 // before the call restarts now.
-func (b *Binary) Supervise(onExit func(error)) {
+func (b *Binary) Supervise(onExit func(exit error, restart time.Time)) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.onExit, b.gone = onExit, make(chan struct{})
@@ -244,13 +245,13 @@ func (b *Binary) reap(exited *process) {
 	}
 }
 
-// restartLater tells the supervisor why the target stopped, then starts it
-// again once the backoff has passed. The caller holds b.mu, so that Stop and
+// restartLater tells the supervisor why the target stopped and when it starts
+// again, then starts it once the backoff has passed. The caller holds b.mu, so that Stop and
 // Restart wait until the exit is heard.
 func (b *Binary) restartLater(exited *process) {
-	b.onExit(exited.exit)
 	delay := b.backoff(b.restarts)
 	b.restarts++
+	b.onExit(exited.exit, time.Now().Add(delay))
 	time.AfterFunc(delay, func() { b.restart(exited) })
 }
 

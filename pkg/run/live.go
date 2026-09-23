@@ -237,12 +237,12 @@ func (l *liveRun) targetStatus() launch.Status { return l.h.Launcher.Status() }
 // Each process writes to one log, so an exit is quoted from what the log
 // gained since the exit before it.
 func (l *liveRun) supervise() {
-	l.h.Launcher.Supervise(func(exit error) {
+	l.h.Launcher.Supervise(func(exit error, restart time.Time) {
 		l.h.mu.Lock()
 		defer l.h.mu.Unlock()
 		said, end := whyItStopped(filepath.Join(l.h.dir, targetLogFile), l.h.logQuoted)
 		l.h.logQuoted = end
-		l.h.exited = append(l.h.exited, Exit{At: time.Now(), Err: exit, Said: said})
+		l.h.exited = append(l.h.exited, Exit{At: time.Now(), Err: exit, Said: said, Restart: restart})
 	})
 }
 

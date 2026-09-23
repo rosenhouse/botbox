@@ -97,7 +97,7 @@ type Launcher interface {
     Start(ctx context.Context, kubeconfig string) error // kubeconfig points at the proxy
     Stop(ctx context.Context) error                     // graceful: SIGTERM, then SIGKILL after a grace period
     Restart(ctx context.Context) error                  // crash: SIGKILL, then Start
-    Supervise(onExit func(error))                       // from now on, restart the target whenever it exits
+    Supervise(onExit func(exit error, restart time.Time)) // from now on, restart the target whenever it exits
     Status() Status                    // is the target still running, and why it stopped if not
     Exited() <-chan struct{}           // closed once the target has stopped and will not start again
 }
@@ -114,9 +114,10 @@ Implementations:
   directory. `Restart` sends SIGKILL, waits for the process to be reaped, then execs
   again, so fixed ports and lock files are released. `Supervise` restarts the target
   whenever it exits on its own, as a kubelet restarts a container: at once the first time,
-  then after 10 s, doubling up to 5 min. `Stop` and `Restart` are not exits, and `Stop`
-  ends supervision. `Status` says whether a supervised target is waiting to restart, and
-  when the process now running started.
+  then after 10 s, doubling up to 5 min. It tells the Runner why the target stopped and
+  when it starts again. `Stop` and `Restart` are not exits, and `Stop` ends supervision.
+  `Status` says whether a supervised target is waiting to restart, and when the process
+  now running started.
   botbox does not probe the target for health; the settle wait after the first op absorbs
   startup.
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
@@ -223,10 +224,10 @@ The Runner executes one sequence:
    restart therefore never converges, even where it wrote its converged state first, and
    its wait expires as a G4 whose evidence counts the exits since the target last
    converged and quotes the last. A target that runs longer between exits can converge in
-   between, until a backoff outlasts a wait. A target that converges after an exit passes,
-   though the restart gives it no more time, and its startup requests count toward G1
-   where they land in a quiet window (§6). A restart that fails ends the run as the
-   harness error above.
+   between, until a backoff outlasts a wait. A target that converges after an exit passes.
+   An exit a fault excuses owes the target `T_settle` past its restart (§6). Any other
+   restart gives it no more time, and its startup requests count toward G1 where they land
+   in a quiet window (§6). A restart that fails ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
@@ -362,7 +363,11 @@ from that convergence if it came later, to the instant the last of them stopped.
 wait does not give up before that time has passed, and one that expired is excused only
 while a fault is active or that time is still owed. A spec change made within that time is
 judged at the later of the two deadlines. A settle wait that converged sooner ends that
-time early.
+time early. A target that exits while a fault excuses it, as controller-runtime does when
+it loses leader election, then waits out the restart's backoff (§5.1), which botbox chose.
+G4 gives it `T_settle` past that restart too, and does not judge a window the exit falls
+in, as it does not judge one a fault reaches into. Only a fault excuses an exit, so a
+crash loop that a fault set off still fails G4.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -1313,7 +1318,9 @@ built from source and run as a black-box binary.
   converged, and a restart counts as a change, so a target that exits again soon after
   each restart fails G4, even where it writes the converged state first. A drawn sequence
   that finds one shrinks. An exit before any wait converged stays a harness error, since a
-  bad flag, a taken port and a crash on op 0's CR look alike there. A restart gives the
-  target no more time, and its startup requests count toward G1 in a quiet window.
-  Excusing them would need a recovery window of their own, and a correct controller
-  rarely exits with no fault active.
+  bad flag, a taken port and a crash on op 0's CR look alike there. An exit a fault excuses
+  owes the target `T_settle` past its restart. Otherwise a correct controller that exits
+  once under each of two faults fails G4, because the second restart waits 10 s. Any other
+  restart gives the target no more time, and its startup requests count toward G1 in a
+  quiet window. Excusing them would need a recovery window of their own, and a correct
+  controller rarely exits with no fault active.

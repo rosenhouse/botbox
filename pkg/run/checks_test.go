@@ -140,6 +140,20 @@ func TestTheChecksReadTheRecoveryCheckpointAsASettleWait(t *testing.T) {
 	}
 }
 
+// A target that exited on a fault's error is owed T_settle past its restart.
+func TestTheChecksExcuseAWaitThatEndedBeforeAnExcusedRestart(t *testing.T) {
+	in := convergedRun()
+	in.Timeline.Faults = []Window{{Start: at(3), End: at(3)}}
+	in.Timeline.Exits = []Exit{{At: at(3.1), Restart: at(13.1)}}
+	in.Timeline.Checkpoints = append(in.Timeline.Checkpoints, Checkpoint{At: at(10), Op: Recovery, Converged: false})
+
+	violations := checked(t, in)
+
+	if len(violations) != 0 {
+		t.Errorf("The checks reported %v, want none: the target was owed recovery until 18.1s.", violations)
+	}
+}
+
 // A namespace that came clean settles G3 where the teardown stopped watching,
 // which is before T_delete is up whenever the target cleans up promptly
 // (DESIGN.md §6). The timeline carries that instant, not a teardown

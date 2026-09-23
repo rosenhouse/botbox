@@ -224,9 +224,10 @@ func TestSequenceAcceptsTheOpsTheRunnerExecutes(t *testing.T) {
 	}
 }
 
-// DESIGN.md §6: the teardown does not wait for convergence before it opens
-// its quiet window, so a sequence that ends while the target is still working
-// is judged on that work. Every sequence ends with an op that settles.
+// DESIGN.md §6: the teardown waits for convergence before it opens its quiet
+// window only after a fault, so a sequence that ends while the target is
+// still working is judged on that work. Every sequence ends with an op that
+// settles.
 func TestSequenceRequiresALastOpThatSettles(t *testing.T) {
 	create := `{"i": 0, "t": "create", "obj": {"kind": "Widget"}}`
 	for _, test := range []struct {

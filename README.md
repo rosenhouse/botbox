@@ -175,51 +175,12 @@ proxy refuse, delay or drop the requests it matches. This is
 
 <!-- embed: targets/toy-widget/sequences/fault.json -->
 ```json
-{
-  "seed": 20260920,
-  "target": "toy-widget",
-  "ops": [
-    {
-      "i": 0,
-      "t": "create",
-      "obj": {
-        "apiVersion": "toy.botbox/v1",
-        "kind": "Widget",
-        "metadata": {
-          "name": "widget"
-        },
-        "spec": {
-          "count": 1
-        }
-      }
-    },
-    {
-      "i": 1,
-      "t": "fault",
-      "spec": {
-        "match": {
-          "verb": "create",
-          "resource": "configmaps"
-        },
-        "action": {
-          "error": 500
-        },
-        "until": {
-          "count": 30
-        }
-      }
-    },
-    {
-      "i": 2,
-      "t": "update",
-      "patch": {
-        "spec": {
-          "count": 3
-        }
-      }
-    }
-  ]
-}
+{"seed": 20260920, "target": "toy-widget", "ops": [
+  {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
+    "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+  {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"},
+    "action": {"error": 500}, "until": {"count": 30}}},
+  {"i": 2, "t": "update", "patch": {"spec": {"count": 3}}}]}
 ```
 
 An invariant ignores any window the proxy applied a fault in, so what a fault tests is how

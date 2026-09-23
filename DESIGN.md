@@ -195,10 +195,9 @@ The Runner executes one sequence:
    still owed time to recover from a fault that stopped (§6). The wait ends once the
    `Ready` predicate holds and neither the CR nor a managed object has changed for
    `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
-   that expires while no fault is active records a G4 violation, where a fault counts as
-   active once the proxy has applied it and until the proxy stops (D36). A fault that
-   stopped as the wait ended leaves the wait to the next one, or to the teardown's
-   recovery wait, because the target is still owed time. A wait also ends
+   that expires while no fault excuses it records a G4 violation. A fault excuses it while
+   active, which is once the proxy has applied it and until the proxy stops (D36), and
+   while the target is still owed time to recover from it (§6). A wait also ends
    where the target's process exits, and the Runner checks the target is running before it
    applies each op. A target that stopped ends the run as a harness error naming the op it
    was at (§11), because the ops behind it would run against nothing.

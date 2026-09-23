@@ -611,10 +611,10 @@ func openSession(opts options, t *target.Target) (session, error) {
 
 func (s *clusterSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
 	return run.Run(ctx, t, sequence, run.Options{
-		Dir:              dir,
-		Config:           s.config,
-		GarbageCollected: s.collected,
-		Check:            check,
+		Dir:               dir,
+		Config:            s.config,
+		ControllerManager: s.collected,
+		Check:             check,
 	})
 }
 

@@ -10,7 +10,7 @@ import (
 
 // G1 ignores a watch whether it hung or failed; G6 counts the one that failed.
 // Leader election reads its lease as well as writing it, and renews a lease
-// candidate. §6 excludes all of these.
+// candidate. G1 excludes all of these.
 func TestG1PassesWhenOnlyWatchesAndLeaseTrafficRemain(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).

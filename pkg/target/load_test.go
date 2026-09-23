@@ -419,6 +419,11 @@ func TestLoadPointsAtAMisspelledKey(t *testing.T) {
 			[]string{"line 6: timeouts.setxxx is not a key; timeouts takes settle, stable and delete"}},
 		{"as near to delete as to settle", minimalTarget + "timeouts:\n  detele: 5s\n",
 			[]string{"did you mean settle?"}},
+		// A swap of two adjacent letters is one edit.
+		{"with two letters swapped", minimalTarget + "timeouts:\n  satble: 5s\n",
+			[]string{"line 6: timeouts.satble is not a key; did you mean stable?"}},
+		{"with the two letters of a short key swapped", minimalTarget + "properties:\n  - di: P1\n",
+			[]string{"line 6: properties[0].di is not a key; did you mean id?"}},
 		{"too short to be near", minimalTarget + "properties:\n  - xy: P1\n",
 			[]string{"line 6: properties[0].xy is not a key; properties[0] takes id, description, cel and when"}},
 		// The decoder matches a key whatever its case.

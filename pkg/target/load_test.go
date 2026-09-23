@@ -216,6 +216,15 @@ sample: widget.yaml
 launch: {binary: bin/min}
 `
 
+// minimalTargetWithEnv needs the variables it sets.
+const minimalTargetWithEnv = `name: min
+primary: toy.botbox/v1/Widget
+sample: widget.yaml
+launch:
+  binary: bin/min
+  env:
+`
+
 func TestLoadRejects(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -263,6 +272,9 @@ func TestLoadRejects(t *testing.T) {
 		{"timeout of zero", minimalTarget + "timeouts:\n  stable: 0s\n", "", []string{"stable", "positive"}},
 		{"negative timeout", minimalTarget + "timeouts:\n  delete: -1s\n", "", []string{"delete", "positive"}},
 		{"errloop of zero", minimalTarget + "thresholds:\n  errloop: 0\n", "", []string{"errloop", "positive"}},
+		{"a launch env that sets the kubeconfig", minimalTargetWithEnv + "    KUBECONFIG: /elsewhere\n", "", []string{"launch.env", "KUBECONFIG"}},
+		{"a launch env name holding an equals sign", minimalTargetWithEnv + "    A=B: x\n", "", []string{"launch.env", `"A=B"`}},
+		{"an empty launch env name", minimalTargetWithEnv + "    '': x\n", "", []string{"launch.env", `""`}},
 		// A settle wait carves T_stable of quiet out of T_settle, so these
 		// leave the target no time to react and every op expires. The wants
 		// carry the durations: the temp directory's path holds the case name,
@@ -361,6 +373,19 @@ launch:
 	}
 	if loaded.Launch.Binary != "bin/min" {
 		t.Errorf("Load resolved launch.binary to %q; it is relative to the repository root.", loaded.Launch.Binary)
+	}
+}
+
+func TestLoadLaunchEnv(t *testing.T) {
+	path := writeTarget(t, minimalTargetWithEnv+"    WATCH_NAMESPACE: $NAMESPACE\n    EMPTY: ''\n",
+		map[string]string{"widget.yaml": sampleWidget})
+
+	loaded, err := target.Load(path)
+	if err != nil {
+		t.Fatalf("Load rejected launch.env: %v", err)
+	}
+	if want := map[string]string{"WATCH_NAMESPACE": "$NAMESPACE", "EMPTY": ""}; !reflect.DeepEqual(loaded.Launch.Env, want) {
+		t.Errorf("Load read launch.env %v, want %v.", loaded.Launch.Env, want)
 	}
 }
 

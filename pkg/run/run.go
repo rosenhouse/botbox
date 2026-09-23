@@ -159,7 +159,7 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 	}
 	h.down.push("stopping the proxy", func(context.Context) error { return h.Proxy.Stop() })
 	kubeconfig := filepath.Join(opts.Dir, kubeconfigFile)
-	if err := h.Proxy.Kubeconfig(kubeconfig); err != nil {
+	if err := h.Proxy.Kubeconfig(kubeconfig, h.Namespace); err != nil {
 		return err
 	}
 
@@ -192,9 +192,11 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 	}
 
 	h.Launcher = launch.NewBinary(launch.Options{
-		Path: h.target.Launch.Binary,
-		Args: h.target.Launch.Args,
-		Log:  targetLog,
+		Path:      h.target.Launch.Binary,
+		Args:      h.target.Launch.Args,
+		Namespace: h.Namespace,
+		Env:       h.target.Launch.Env,
+		Log:       targetLog,
 	})
 	if err := h.Launcher.Start(ctx, kubeconfig); err != nil {
 		return err

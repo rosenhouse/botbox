@@ -138,6 +138,41 @@ func TestStartSubstitutesKubeconfig(t *testing.T) {
 	waitForLog(t, log, "env="+kubeconfig)
 }
 
+func newBinaryInNamespace(t *testing.T, script string, env map[string]string, args ...string) (*launch.Binary, *safeBuffer) {
+	t.Helper()
+	log := &safeBuffer{}
+	binary := launch.NewBinary(launch.Options{
+		Path:      "/bin/sh",
+		Args:      append([]string{"-c", script, "sh"}, args...),
+		Namespace: "botbox-run-x",
+		Env:       env,
+		Log:       log,
+	})
+	t.Cleanup(func() { _ = binary.Stop(context.Background()) })
+	return binary, log
+}
+
+func TestStartSubstitutesNamespace(t *testing.T) {
+	binary, log := newBinaryInNamespace(t, `echo "arg=$1"; echo "env=${WATCH_NAMESPACE} ${K}"; `+forever,
+		map[string]string{"WATCH_NAMESPACE": "$NAMESPACE", "K": "$KUBECONFIG"}, "--namespace=$NAMESPACE")
+
+	kubeconfig := mustStart(t, binary)
+
+	waitForLog(t, log, "arg=--namespace=botbox-run-x\n")
+	waitForLog(t, log, "env=botbox-run-x "+kubeconfig+"\n")
+}
+
+func TestEnvOverridesAnInheritedVariable(t *testing.T) {
+	t.Setenv("WATCH_NAMESPACE", "default")
+	t.Setenv("BOTBOX_INHERITED", "kept")
+	binary, log := newBinaryInNamespace(t, `echo "env=${WATCH_NAMESPACE} ${BOTBOX_INHERITED}"; `+forever,
+		map[string]string{"WATCH_NAMESPACE": "$NAMESPACE"})
+
+	mustStart(t, binary)
+
+	waitForLog(t, log, "env=botbox-run-x kept\n")
+}
+
 func TestStopTerminatesGracefully(t *testing.T) {
 	binary, log := newBinary(t, 5*time.Second, `trap 'echo caught SIGTERM; exit 0' TERM; echo pid=$$; `+forever)
 	mustStart(t, binary)

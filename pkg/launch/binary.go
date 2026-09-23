@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -48,15 +50,17 @@ var ErrExitedZero = errors.New("exit status 0")
 // DefaultGracePeriod is how long Stop waits after SIGTERM before it escalates.
 const DefaultGracePeriod = 5 * time.Second
 
-// kubeconfigVar is the placeholder the launcher substitutes in launch.args.
-const kubeconfigVar = "$KUBECONFIG"
-
 // Options configure a Binary.
 type Options struct {
 	// Path is the binary to exec, relative to the repository root.
 	Path string
-	// Args are its arguments, with $KUBECONFIG substituted at Start.
+	// Args are its arguments. Start substitutes $KUBECONFIG and $NAMESPACE in
+	// them and in the values of Env.
 	Args []string
+	// Namespace is the run namespace.
+	Namespace string
+	// Env overrides variables the target inherits.
+	Env map[string]string
 	// Log receives the target's stdout and stderr, as target.log.
 	Log io.Writer
 	// GracePeriod is how long Stop waits after SIGTERM. Zero means
@@ -100,8 +104,13 @@ func (b *Binary) Start(ctx context.Context, kubeconfig string) error {
 }
 
 func (b *Binary) start(kubeconfig string) error {
-	cmd := exec.Command(b.options.Path, substitute(b.options.Args, kubeconfig)...)
-	cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfig)
+	placeholders := strings.NewReplacer("$KUBECONFIG", kubeconfig, "$NAMESPACE", b.options.Namespace)
+	args := make([]string, len(b.options.Args))
+	for i, arg := range b.options.Args {
+		args[i] = placeholders.Replace(arg)
+	}
+	cmd := exec.Command(b.options.Path, args...)
+	cmd.Env = b.environment(placeholders, kubeconfig)
 	log := b.options.Log
 	if log == nil {
 		log = io.Discard
@@ -124,6 +133,16 @@ func (b *Binary) start(kubeconfig string) error {
 	b.running = running
 	b.kubeconfig = kubeconfig
 	return nil
+}
+
+// environment is botbox's own, with Env and then KUBECONFIG over it. os/exec
+// keeps the last value of a repeated name.
+func (b *Binary) environment(placeholders *strings.Replacer, kubeconfig string) []string {
+	env := os.Environ()
+	for _, name := range slices.Sorted(maps.Keys(b.options.Env)) {
+		env = append(env, name+"="+placeholders.Replace(b.options.Env[name]))
+	}
+	return append(env, "KUBECONFIG="+kubeconfig)
 }
 
 // Status reports whether the target is still running, and why it stopped if it
@@ -241,12 +260,4 @@ func signal(running *process, sig syscall.Signal) error {
 		return nil
 	}
 	return fmt.Errorf("sending %s to %s: %w", sig, running.cmd.Path, err)
-}
-
-func substitute(args []string, kubeconfig string) []string {
-	substituted := make([]string, len(args))
-	for i, arg := range args {
-		substituted[i] = strings.ReplaceAll(arg, kubeconfigVar, kubeconfig)
-	}
-	return substituted
 }

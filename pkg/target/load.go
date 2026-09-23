@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -181,6 +183,9 @@ func load(path string) (*Target, error) {
 	if loaded.Launch.Binary == "" {
 		return nil, errors.New("launch.binary is required")
 	}
+	if err := checkEnv(loaded.Launch.Env); err != nil {
+		return nil, fmt.Errorf("launch.env: %w", err)
+	}
 
 	if loaded.Timeouts, err = timeouts(declared.Timeouts); err != nil {
 		return nil, err
@@ -222,6 +227,18 @@ func loadProperty(declared propertyDeclaration) (Property, error) {
 		return Property{}, fmt.Errorf("property %s: %w", declared.ID, err)
 	}
 	return Property{ID: declared.ID, Description: declared.Description, Eval: eval, When: when}, nil
+}
+
+func checkEnv(env map[string]string) error {
+	for _, name := range slices.Sorted(maps.Keys(env)) {
+		switch {
+		case name == "KUBECONFIG":
+			return errors.New("botbox sets KUBECONFIG itself, to the kubeconfig it writes")
+		case name == "" || strings.Contains(name, "="):
+			return fmt.Errorf("%q is not a variable name", name)
+		}
+	}
+	return nil
 }
 
 func timeouts(declared timeoutsDeclaration) (Timeouts, error) {

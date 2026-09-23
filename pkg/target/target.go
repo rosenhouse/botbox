@@ -54,9 +54,10 @@ type GenerateSpec struct {
 type LaunchSpec struct {
 	// Binary is relative to the repository root, which is the working directory.
 	Binary string `json:"binary"`
-	// Args carry $KUBECONFIG wherever the launcher must substitute the
-	// kubeconfig path.
-	Args []string `json:"args"`
+	// Args and the values of Env carry $KUBECONFIG and $NAMESPACE wherever the
+	// launcher must substitute the kubeconfig path and the run namespace.
+	Args []string          `json:"args"`
+	Env  map[string]string `json:"env"`
 }
 
 // Timeouts are the run's waits (DESIGN.md §6).

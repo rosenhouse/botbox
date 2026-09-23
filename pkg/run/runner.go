@@ -312,9 +312,8 @@ type activeFault struct {
 	until *int
 	// window is the fault's place in Timeline.Faults.
 	window int
-	// applied is whether the proxy has faulted a request with it, and retired
-	// is whether the proxy has stopped applying it.
-	applied, retired bool
+	// retired is whether the proxy has stopped applying it.
+	retired bool
 }
 
 func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts Options, h harness) (Result, error) {
@@ -634,22 +633,17 @@ func (r *runner) inject(op Op) {
 	})
 }
 
-// expireFaults drops the faults whose until trigger names this op or an
-// earlier one, and the ones the proxy has finished with (DESIGN.md §5.2).
+// expireFaults removes the faults whose until trigger names this op or an
+// earlier one, and drops the ones the proxy has retired. It reads the windows
+// after the removal, so that none loses a request.
 func (r *runner) expireFaults(op int) {
-	r.readFaultWindows()
-	kept := make([]activeFault, 0, len(r.faults))
 	for _, fault := range r.faults {
-		switch {
-		case fault.retired: // The proxy is done with it, and its window is closed.
-		case fault.until != nil && *fault.until <= op:
-			r.timeline.Faults[fault.window].End = r.now()
+		if fault.until != nil && *fault.until <= op {
 			r.h.removeFault(fault.id)
-		default:
-			kept = append(kept, fault)
 		}
 	}
-	r.faults = kept
+	r.readFaultWindows()
+	r.faults = slices.DeleteFunc(r.faults, func(fault activeFault) bool { return fault.retired })
 }
 
 // readFaultWindows writes what the proxy has done with each fault into the
@@ -662,7 +656,7 @@ func (r *runner) readFaultWindows() {
 		fault := &r.faults[i]
 		proxied, window := r.h.faultWindow(fault.id), &r.timeline.Faults[fault.window]
 		if !proxied.First.IsZero() {
-			fault.applied, window.Start = true, proxied.First
+			window.Start = proxied.First
 		}
 		if !proxied.Retired.IsZero() {
 			fault.retired, window.End = true, proxied.Retired
@@ -670,17 +664,12 @@ func (r *runner) readFaultWindows() {
 	}
 }
 
-// clearFaults takes every fault off the proxy and closes its window, which the
-// teardown does before it measures anything (DESIGN.md §5.5).
+// clearFaults takes every fault off the proxy, which closes its window. The
+// teardown does it before it measures anything.
 func (r *runner) clearFaults() {
-	r.readFaultWindows()
-	for _, fault := range r.faults {
-		if fault.applied && !fault.retired {
-			r.timeline.Faults[fault.window].End = r.now()
-		}
-	}
-	r.faults = nil
 	r.h.clearFaults()
+	r.readFaultWindows()
+	r.faults = nil
 }
 
 // awaitRecovery waits for a target still owed time to recover from the faults.

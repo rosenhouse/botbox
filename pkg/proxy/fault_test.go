@@ -289,15 +289,49 @@ func TestClearFaultsRestoresTheUpstream(t *testing.T) {
 	}
 }
 
-func TestRemoveFaultRestoresTheUpstream(t *testing.T) {
+func TestRemoveFaultStopsOnlyTheFaultItNames(t *testing.T) {
+	spec := proxy.FaultSpec{Action: proxy.Error{Code: http.StatusInternalServerError}}
 	p := faultedProxy(t, 0)
-	id := p.AddFault(proxy.FaultSpec{Action: proxy.Error{Code: http.StatusInternalServerError}})
+	first, second := p.AddFault(spec), p.AddFault(spec)
 
-	p.RemoveFault(id)
-	resp := do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil)
+	p.RemoveFault(second)
+	faulted := do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil)
+	p.RemoveFault(first)
+	restored := do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil)
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("A request after RemoveFault got %d, want 200.", resp.StatusCode)
+	if faulted.StatusCode != http.StatusInternalServerError || p.Window(first).First.IsZero() {
+		t.Errorf("A request after removing the second fault got %d, and the first fault ran %+v, want the first fault applied.",
+			faulted.StatusCode, p.Window(first))
+	}
+	if restored.StatusCode != http.StatusOK {
+		t.Errorf("A request after removing both faults got %d, want 200.", restored.StatusCode)
+	}
+}
+
+// A request the proxy faulted before a removal stays in the fault's window, so
+// the Runner removes a fault first and reads its window after.
+func TestRemovingAFaultClosesItsWindow(t *testing.T) {
+	error500 := func(resource string) proxy.FaultSpec {
+		return proxy.FaultSpec{Match: proxy.RequestMatcher{Resource: resource}, Action: proxy.Error{Code: http.StatusInternalServerError}}
+	}
+	p := faultedProxy(t, 0)
+	removed, cleared := p.AddFault(error500("configmaps")), p.AddFault(error500("secrets"))
+	do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil)
+	do(t, p, "GET", "/api/v1/namespaces/ns1/secrets", nil)
+
+	before := time.Now()
+	p.RemoveFault(removed)
+	atRemoval := p.Window(removed)
+	p.ClearFaults()
+
+	if atRemoval.First.IsZero() || atRemoval.Retired.Before(before) {
+		t.Errorf("The removed fault ran %+v, want the request it faulted and an end where it was removed, after %v.", atRemoval, before)
+	}
+	if got := p.Window(removed); got != atRemoval {
+		t.Errorf("ClearFaults moved the window of a removed fault from %+v to %+v.", atRemoval, got)
+	}
+	if got := p.Window(cleared); got.First.IsZero() || got.Retired.Before(atRemoval.Retired) {
+		t.Errorf("The cleared fault ran %+v, want the request it faulted and an end where it was cleared.", got)
 	}
 }
 
@@ -363,6 +397,15 @@ func TestWindowNamesWhatTheProxyDidWithEachFault(t *testing.T) {
 	}
 	if window := p.Window(endless); !window.First.IsZero() || !window.Retired.IsZero() {
 		t.Errorf("The fault with no trigger ran %+v, and no request matched it.", window)
+	}
+
+	spentAt, timedOut := p.Window(counted).Retired, p.Window(timed).Retired
+	p.ClearFaults()
+	if got := p.Window(counted).Retired; !got.Equal(spentAt) {
+		t.Errorf("Clearing a spent fault moved its end from %v to %v.", spentAt, got)
+	}
+	if got := p.Window(timed).Retired; !got.Equal(timedOut) {
+		t.Errorf("Clearing a fault whose time ran out moved its end from %v to %v.", timedOut, got)
 	}
 }
 

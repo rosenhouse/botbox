@@ -7,7 +7,6 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"path"
-	"slices"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -84,7 +83,7 @@ type Trigger struct {
 	For   time.Duration
 }
 
-// FaultID names a fault the proxy holds. Two faults can have equal specs.
+// FaultID names a fault the proxy was given. Two faults can have equal specs.
 type FaultID int
 
 // AddFault has the proxy apply the fault after those it already holds. The
@@ -92,10 +91,8 @@ type FaultID int
 func (p *Proxy) AddFault(spec FaultSpec) FaultID {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	id := p.nextFault
-	p.nextFault++
+	id := FaultID(len(p.faults))
 	p.faults = append(p.faults, &activeFault{
-		id:     id,
 		spec:   spec,
 		since:  time.Now(),
 		random: rand.New(rand.NewPCG(uint64(p.seed), uint64(id))),
@@ -103,18 +100,22 @@ func (p *Proxy) AddFault(spec FaultSpec) FaultID {
 	return id
 }
 
-// RemoveFault stops the proxy applying the fault.
+// RemoveFault retires the fault at once.
 func (p *Proxy) RemoveFault(id FaultID) {
+	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.faults = slices.DeleteFunc(p.faults, func(f *activeFault) bool { return f.id == id })
+	p.faults[id].remove(now)
 }
 
-// ClearFaults removes every fault.
+// ClearFaults retires every fault at once.
 func (p *Proxy) ClearFaults() {
+	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.faults = nil
+	for _, fault := range p.faults {
+		fault.remove(now)
+	}
 }
 
 // FaultWindow is what the proxy has done with one fault (DESIGN.md §5.2).
@@ -127,39 +128,36 @@ type FaultWindow struct {
 	Retired time.Time
 }
 
-// Window reports what the proxy has done with a fault it holds. The Runner
-// reads it into the run's timeline: a fault excuses the target over the window
-// the proxy applied it in, and a fault it never applied excuses nothing
+// Window reports what the proxy has done with the fault, removed or not. The
+// Runner reads it into the run's timeline: a fault excuses the target over the
+// window the proxy applied it in, and a fault it never applied excuses nothing
 // (DESIGN.md §6).
 func (p *Proxy) Window(id FaultID) FaultWindow {
 	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	for _, fault := range p.faults {
-		if fault.id == id {
-			return FaultWindow{First: fault.first, Retired: fault.retiredBy(now)}
-		}
-	}
-	return FaultWindow{}
+	fault := p.faults[id]
+	return FaultWindow{First: fault.first, Retired: fault.retiredBy(now)}
 }
 
 type activeFault struct {
-	id      FaultID
 	spec    FaultSpec
 	since   time.Time
 	random  *rand.Rand
 	applied int
-	// first is when the fault was applied to a request, and spent is when the
-	// request that used up Until.Count arrived.
-	first, spent time.Time
+	// first is when the fault was applied to a request, spent is when the
+	// request that used up Until.Count arrived, and removed is when the
+	// caller retired it.
+	first, spent, removed time.Time
 }
 
-func (f *activeFault) expired(now time.Time) bool {
-	if f.spec.Until.Count > 0 && f.applied >= f.spec.Until.Count {
-		return true
+func (f *activeFault) remove(now time.Time) {
+	if f.removed.IsZero() {
+		f.removed = now
 	}
-	return f.spec.Until.For > 0 && now.Sub(f.since) >= f.spec.Until.For
 }
+
+func (f *activeFault) expired(now time.Time) bool { return !f.retiredBy(now).IsZero() }
 
 func (f *activeFault) applies(r Request, now time.Time) bool {
 	if !f.spec.Match.Matches(r) {
@@ -179,13 +177,18 @@ func (f *activeFault) applies(r Request, now time.Time) bool {
 }
 
 // retiredBy is when the proxy stopped applying the fault, or the zero time
-// while it still applies. A count runs out on the request that spends it, and
-// a window runs out on the clock, whether or not a request came.
+// while it still applies. A count runs out on the request that spends it, a
+// window runs out on the clock, whether or not a request came, and a removal
+// retires the fault at once. The earliest of them is when it stopped.
 func (f *activeFault) retiredBy(now time.Time) time.Time {
-	retired := f.spent
-	if f.spec.Until.For > 0 {
-		if ends := f.since.Add(f.spec.Until.For); !ends.After(now) && (retired.IsZero() || ends.Before(retired)) {
-			retired = ends
+	ends := []time.Time{f.spent, f.removed}
+	if windowEnd := f.since.Add(f.spec.Until.For); f.spec.Until.For > 0 && !windowEnd.After(now) {
+		ends = append(ends, windowEnd)
+	}
+	var retired time.Time
+	for _, end := range ends {
+		if !end.IsZero() && (retired.IsZero() || end.Before(retired)) {
+			retired = end
 		}
 	}
 	return retired

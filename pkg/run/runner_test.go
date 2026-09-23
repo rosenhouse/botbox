@@ -30,16 +30,19 @@ type fakeHarness struct {
 
 	converged bool
 	clean     bool
-	// held are the faults the proxy holds. added counts the faults it was
-	// given, which is the ID of the next.
-	held  []proxy.FaultID
-	added int
+	// added counts the faults the proxy was given, which is the ID of the
+	// next, and removed is when the Runner took each off.
+	added   int
+	removed map[proxy.FaultID]time.Time
 	// faulting makes the harness answer as a proxy that applies every fault
 	// the moment it is given it, and retires none. faultingInWait has it
 	// first apply them once a wait begins, as the target's requests do.
-	faulting       bool
-	faultingInWait bool
-	applied        map[proxy.FaultID]time.Time
+	// faultingAsRemoved has it apply a fault just as it is removed, as a
+	// request that raced the removal would.
+	faulting          bool
+	faultingInWait    bool
+	faultingAsRemoved bool
+	applied           map[proxy.FaultID]time.Time
 	// store is the version history the checks and the report read.
 	store *observe.Store
 	// logged are the requests the harness answers with before the run's own,
@@ -87,6 +90,7 @@ func newFakeHarness() *fakeHarness {
 		managed:   map[schema.GroupVersionKind][]string{configMapKind: {"widget-0", "widget-1"}},
 		fail:      map[string]error{},
 		applied:   map[proxy.FaultID]time.Time{},
+		removed:   map[proxy.FaultID]time.Time{},
 	}
 }
 
@@ -133,7 +137,6 @@ func (f *fakeHarness) restart(context.Context) error { return f.record("restart"
 func (f *fakeHarness) addFault(proxy.FaultSpec) proxy.FaultID {
 	id := proxy.FaultID(f.added)
 	f.added++
-	f.held = append(f.held, id)
 	if f.faulting {
 		f.apply()
 	}
@@ -142,19 +145,33 @@ func (f *fakeHarness) addFault(proxy.FaultSpec) proxy.FaultID {
 }
 
 func (f *fakeHarness) removeFault(id proxy.FaultID) {
-	f.held = slices.DeleteFunc(f.held, func(held proxy.FaultID) bool { return held == id })
+	f.remove(id)
 	_ = f.record(fmt.Sprintf("removeFault %d", id))
 }
 
 func (f *fakeHarness) clearFaults() {
-	f.held = nil
+	for id := range proxy.FaultID(f.added) {
+		f.remove(id)
+	}
 	_ = f.record("clearFaults")
+}
+
+// remove retires the fault, as the proxy does, unless it is retired already.
+func (f *fakeHarness) remove(id proxy.FaultID) {
+	if _, removed := f.removed[id]; removed {
+		return
+	}
+	if _, applied := f.applied[id]; f.faultingAsRemoved && !applied {
+		f.applied[id] = time.Now()
+	}
+	f.removed[id] = time.Now()
 }
 
 // apply has the proxy apply each fault it holds, from now if it has not yet.
 func (f *fakeHarness) apply() {
-	for _, id := range f.held {
-		if _, applied := f.applied[id]; !applied {
+	for id := range proxy.FaultID(f.added) {
+		_, removed := f.removed[id]
+		if _, applied := f.applied[id]; !applied && !removed {
 			f.applied[id] = time.Now()
 		}
 	}
@@ -164,14 +181,14 @@ func (f *fakeHarness) apply() {
 // did with each fault, or has it apply every fault as it is given.
 func (f *fakeHarness) faultWindow(id proxy.FaultID) proxy.FaultWindow {
 	var window proxy.FaultWindow
-	if !slices.Contains(f.held, id) {
-		return window
-	}
 	if int(id) < len(f.applying) {
 		window = f.applying[id]
 	}
 	if first, applied := f.applied[id]; applied && window.First.IsZero() {
 		window.First = first
+	}
+	if removed, ok := f.removed[id]; ok && (window.Retired.IsZero() || removed.Before(window.Retired)) {
+		window.Retired = removed
 	}
 	return window
 }
@@ -612,9 +629,9 @@ func TestRunStopsExcusingTheTargetWhereTheProxyRetiredTheFault(t *testing.T) {
 	}
 }
 
-// Two fault ops can inject equal specs, and dropping the one that ran out
-// leaves the other active with its own window.
-func TestRunKeepsTheFaultEqualToOneThatRanOut(t *testing.T) {
+// Dropping a fault that ran out leaves the next fault its own window, as when
+// two fault ops inject equal specs.
+func TestRunKeepsTheWindowOfTheFaultAfterOneThatRanOut(t *testing.T) {
 	h := newFakeHarness()
 	h.converged = false
 	first, retired, second := time.Now().Add(-10*time.Second), time.Now().Add(-9*time.Second), time.Now().Add(-8*time.Second)
@@ -638,6 +655,32 @@ func TestRunKeepsTheFaultEqualToOneThatRanOut(t *testing.T) {
 	}
 	if result.Violation == nil || !strings.Contains(result.Violation.Statement, "after the last fault stopped") {
 		t.Errorf("The run reported %v, want only the G4 of the wait after the last fault stopped.", result.Violation)
+	}
+}
+
+// A request can meet a fault just as the Runner takes it off, whether its op
+// trigger ran out or the teardown cleared it. The target then owes recovery.
+func TestRunKeepsARequestFaultedAsTheFaultWasRemoved(t *testing.T) {
+	h := newFakeHarness()
+	h.faultingAsRemoved = true
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}},
+		Op{Type: OpCreate, Obj: widget("widget")},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	for i, window := range result.Timeline.Faults {
+		if window.Start.IsZero() || window.End.Before(window.Start) {
+			t.Errorf("Fault %d ran %+v, want the request it faulted as it was removed.", i, window)
+		}
+	}
+	if result.Timeline.Recovery == nil {
+		t.Error("The teardown gave the target no recovery from the fault it cleared.")
 	}
 }
 
@@ -1207,8 +1250,9 @@ func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 	h := newFakeHarness()
 	h.faulting = true
 	sequence := sequenceOf(
-		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
 		Op{Type: OpFault, Fault: &Fault{Action: Action{Drop: true}}},
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
+		Op{Type: OpSettle},
 		Op{Type: OpSettle},
 	)
 
@@ -1222,11 +1266,20 @@ func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 		t.Fatalf("The run recorded %d fault windows, want one per fault op.", len(faults))
 	}
 	ops := result.Timeline.Ops
-	if !between(faults[0].Start, ops[0].At, ops[1].At) || !between(faults[0].End, ops[1].At, ops[2].At) {
-		t.Errorf("The first fault was active %+v, want from op 0 until op 2 cleared it.", faults[0])
+	if !between(faults[0].Start, ops[0].At, ops[1].At) || !faults[0].End.After(ops[2].At) {
+		t.Errorf("The first fault was active %+v, want from op 0 until the teardown cleared it.", faults[0])
 	}
-	if !between(faults[1].Start, ops[1].At, ops[2].At) || !faults[1].End.After(ops[2].At) {
-		t.Errorf("The second fault was active %+v, want from op 1 until the teardown cleared it.", faults[1])
+	if !between(faults[1].Start, ops[1].At, ops[2].At) || !between(faults[1].End, ops[1].At, ops[2].At) {
+		t.Errorf("The second fault was active %+v, want from op 1 until op 2 cleared it.", faults[1])
+	}
+	var removals []string
+	for _, call := range h.calls {
+		if strings.HasPrefix(call, "removeFault") {
+			removals = append(removals, call)
+		}
+	}
+	if !slices.Equal(removals, []string{"removeFault 1"}) {
+		t.Errorf("The run did %v, want the second fault removed once.", removals)
 	}
 }
 

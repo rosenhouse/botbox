@@ -17,8 +17,7 @@ import (
 // defaultMatrix is the bug matrix of DESIGN.md §9.1.
 const defaultMatrix = "docs/bug-matrix.md"
 
-// control is the run without a seeded bug, whose row proves the matrix is not
-// vacuous.
+// control is B0, the row that seeds no bug. It proves the matrix is not vacuous.
 const control = 0
 
 // bugSequence names the sequence of one seeded bug.
@@ -160,12 +159,7 @@ func (c *cli) unexpected(opts options, row bugRow, found checked, bugArgs []stri
 
 func (r bugRow) name() string { return "B" + strconv.Itoa(r.bug) }
 
-func (r bugRow) bugArgs() []string {
-	if r.bug == control {
-		return nil
-	}
-	return []string{fmt.Sprintf("--bug=%d", r.bug)}
-}
+func (r bugRow) bugArgs() []string { return []string{fmt.Sprintf("--bug=%d", r.bug)} }
 
 func underBug(bugArgs []string) string {
 	if len(bugArgs) == 0 {

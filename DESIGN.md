@@ -59,7 +59,7 @@ external-secrets, upstream open-source projects, unmodified and pinned by versio
 | **Test cluster** | The API server a run executes against: an envtest control plane that botbox starts (default), or an existing cluster given by kubeconfig (§5.8). |
 | **Primary CR** | The one custom resource that a sequence's CR ops act on. Declared by the target. |
 | **Fixture** | An object botbox applies to the run namespace before op 0, such as an Issuer. Never mutated; not a managed object. |
-| **Managed object** | An object of a kind the target declares it manages, in the run namespace, that is neither a fixture nor created by botbox (§6). |
+| **Managed object** | An object of a kind the target declares it manages, in the run namespace, that neither botbox nor the cluster created (§6). |
 | **Op** | One step in a test sequence. The ops on the primary CR are `Create`, `Update`, `Delete` and `Recreate`; the control ops are `Restart`, `Fault`, `Settle` and `DeleteManaged` (§5.4). A CR op may set `noSettle` to skip the Runner's implicit settle wait (§5.5). |
 | **Sequence** | An ordered list of ops plus a seed. The unit of generation, replay, and shrinking. |
 | **Invariant** | A generic check that applies to every target. IDs `G1..Gn`. |
@@ -207,8 +207,9 @@ what the seeds the repository runs by number draw, so a change to a draw is deli
 
 The Runner executes one sequence:
 
-1. Create a fresh namespace. Apply the target's fixtures. Start the target via the
-   Launcher.
+1. Create a fresh namespace. On a kubeconfig cluster, wait for what its controller
+   manager adds to the namespace (§5.8). Exclude what the namespace holds from the
+   managed objects (§6). Apply the target's fixtures. Start the target via the Launcher.
 2. Apply ops in order. After each op that mutates the CR or a managed object, wait up to
    `T_settle` for convergence unless the op sets `noSettle`, and longer while the target is
    still owed time to recover from a fault that stopped (§6). The wait ends once the
@@ -286,8 +287,15 @@ botbox owns the API server a run executes against.
   `KUBEBUILDER_ASSETS` (installed by `setup-envtest`) using
   `sigs.k8s.io/controller-runtime/pkg/envtest` inside `pkg/cluster`. This is the one
   harness package allowed to import controller-runtime (§11).
-- **kubeconfig**. An existing cluster, normally kind. Used by the nightly tier and, in
-  phase 2, by `Image` targets.
+- **kubeconfig**. An existing cluster, normally kind. Used by `make test-kind` and, in
+  phase 2, by `Image` targets. botbox installs the target's CRDs there, creating or
+  replacing each one, and leaves them installed. The cluster runs
+  `kube-controller-manager`, whose garbage collector replaces the emulation below. It also
+  adds the `default` ServiceAccount and the `kube-root-ca.crt` ConfigMap to every
+  namespace. A run waits up to 30 s for those of a kind it watches, and a missing one is a
+  harness error.
+
+envtest mode starts its own control plane even where `USE_EXISTING_CLUSTER` is set.
 
 envtest runs only the API server and etcd. There is no `kube-controller-manager`, so
 nothing garbage-collects owned objects, namespaces never finish terminating, no default
@@ -359,9 +367,13 @@ checkpoint still evaluates properties. A primary CR with a deletionTimestamp nee
 satisfy `Ready`: it is being deleted, so G3 judges it, not G4.
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
-namespace that is neither a fixture nor created by botbox. The namespace is private to one
-run, so everything else in it came from the target. ownerReferences and the optional
-selector refine attribution to a particular CR; they are not required for it.
+namespace that neither botbox nor the cluster created. Fixtures and the primary CR are
+botbox's. The cluster's are what the namespace holds before the fixtures and the target,
+once §5.8's wait is over. Both are excluded by name, so an object the cluster recreates
+stays excluded. The namespace is private to one run, so everything else in it came from
+the target, except what a cluster adds later: the optional selector leaves that out.
+ownerReferences and the selector refine attribution to a particular CR; they are not
+required for it.
 
 **Deletion.** Owned children are removed by the cluster's garbage collector (real on kind,
 emulated on envtest, §5.8). G3 therefore fails on orphans, meaning children with no
@@ -787,7 +799,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   `sigs.k8s.io/controller-runtime` v0.25.x, `pgregory.net/rapid` v1.3.x,
   `github.com/google/cel-go` v0.30.x. Tool and target pins live in one Makefile variable
   each: `ENVTEST_K8S_VERSION`, `SETUP_ENVTEST_VERSION`, `CONTROLLER_GEN_VERSION` (which
-  also pins the envtest release index), and one trio per adopted example:
+  also pins the envtest release index), `KIND_VERSION`, `KIND_NODE_IMAGE` (by digest),
+  and one trio per adopted example:
   `CERT_MANAGER_VERSION` and `EXTERNAL_SECRETS_VERSION`, each with the `_COMMIT` the tag
   must name and the `_CRDS_SHA256` of its checked-in CRDs, so a moved tag or an edited
   asset fails rather than passing quietly. Values live in the Makefile only. Bumps are
@@ -807,8 +820,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   says how many to draw. `--deadline` defaults to 4m, and the shrinker stops there and
   reports the smallest failing sequence it found. `--launch-arg` appends to `launch.args`
   (repeatable; a later flag wins), which is how the bug matrix selects `--bug=N`.
-  `--kubeconfig` selects an existing cluster instead of envtest; `KUBEBUILDER_ASSETS`
-  locates the envtest binaries. Exit codes: 0, all runs
+  `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
+  CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
   harness error, or a deadline that stopped the invocation before its last run.
 - **Output.** `--out` defaults to `botbox-out/`. Each invocation writes
@@ -822,8 +835,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
   binary (cached). All four run on every PR. The `-nightly` target beside each example
-  runs it on seeds botbox draws, with the negative control. `make test-kind` = kind,
-  nightly or on demand.
+  runs it on seeds botbox draws, with the negative control. `make test-kind` = the toy
+  through `--kubeconfig` against a kind cluster it creates and deletes, nightly or on
+  demand. It passes `b0.json` and fixed seeds, and fails B3 on G3 and B8 on P1 as its
+  negative controls. It installs the pinned kind into `bin/` and needs Docker.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
@@ -943,7 +958,8 @@ built from source and run as a black-box binary.
   Certificate was deleted, its Secret and CertificateRequest were still present despite
   ownerReferences, and the namespace stayed `Terminating`.
 - **D6 Attribution by namespace.** Everything in the run namespace that botbox or a
-  fixture did not create is the target's.
+  fixture did not create is the target's. Amended by D@36 for a cluster with a controller
+  manager.
 - **D7 G2 covers the set of managed objects; G5 is measured within one run.** G2 as
   first written missed new objects appearing (B2). G5 as first written compared two runs,
   which random `generateName` suffixes make incomparable.
@@ -1247,3 +1263,18 @@ built from source and run as a black-box binary.
   alone, so New also reports a field that only another field's change makes valid. A
   sample that accepts the field fixes that. No sample accepts both of two exclusive
   fields, so `generate.mutate` names only one of them.
+- **D@36 A kubeconfig cluster gets the CRDs, and a run excludes what the cluster put in its
+  namespace.** On kind, `--kubeconfig` installed no CRDs, so the first run failed to
+  resolve the primary kind. With the CRD applied by hand, the toy with no bug failed G3 on
+  `kube-root-ca.crt`: `deleteManaged` took that ConfigMap as the oldest, and
+  kube-controller-manager recreated it. D6 assumed that only botbox and the target write
+  to the namespace. Kubernetes' e2e framework waits for the `default` ServiceAccount and
+  `kube-root-ca.crt` in each test namespace, so a run waits for those of a kind it
+  watches. It then excludes, by name, everything the namespace holds, before fixtures and
+  the target. Without the wait, a root CA published late counts as the target's. Objects
+  a cluster adds later stay attributed to the target, and `selector` leaves them out.
+  botbox installs the CRDs with envtest's `InstallCRDs`, which creates or replaces each
+  one and waits until it is served. It leaves them, since the next invocation needs them.
+  envtest also read `USE_EXISTING_CLUSTER`, which pointed botbox's default mode, collector
+  emulation and all, at whatever `KUBECONFIG` named. `cluster.Start` now turns that off.
+  `make test-kind` runs on kind v0.33.0 and its default node image, Kubernetes 1.37.0.

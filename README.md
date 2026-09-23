@@ -14,6 +14,34 @@ index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0
 export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 ```
 
+### Against kind
+
+botbox starts its own API server by default. It has no controller manager, so nothing
+collects garbage there but botbox's own emulation. To test against a real one, point botbox at
+a throwaway cluster:
+
+```sh
+kind create cluster --kubeconfig kind.kubeconfig
+botbox run --target target.yaml --kubeconfig kind.kubeconfig
+```
+
+- botbox installs the target's `crds`, replacing any CRD of the same name, and leaves them
+  installed.
+- Each run creates a namespace and deletes it at the end.
+- Your controller still runs on your machine, behind botbox's proxy.
+- The cluster puts the `default` ServiceAccount and the `kube-root-ca.crt` ConfigMap in every
+  namespace. botbox waits for them and never counts them, or anything else there before your
+  controller starts, as your controller's.
+- The cluster may add more objects later. If they are of a kind your target manages, label
+  your own objects and declare a `selector` in `target.yaml`, so that botbox counts only
+  those:
+
+  ```yaml
+  selector: app.kubernetes.io/managed-by=my-controller
+  ```
+
+`make test-kind` runs the toy controller this way ([DESIGN.md §5.8](DESIGN.md#58-test-cluster)).
+
 ## Quickstart: cert-manager
 
 `examples/cert-manager/` drives [cert-manager](https://github.com/cert-manager/cert-manager)
@@ -310,6 +338,7 @@ Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generi
 
 - `make setup` installs the envtest control plane, and `make help` lists every target.
 - `make test`, `make test-envtest`, `make test-example` and `make test-example-external-secrets` are the tiers CI runs on every PR.
+- `make test-kind` runs the toy through `--kubeconfig` against a kind cluster that it creates and deletes. It needs Docker, and the nightly workflow runs it.
 - A block after `<!-- embed: path -->` holds that file byte for byte, and `make test` enforces it.
 - [DESIGN.md](DESIGN.md) is the governing design. Code and docs must not contradict it.
 - [docs/journal.md](docs/journal.md) and [docs/spikes/](docs/spikes/) hold the milestone journal and the experiments behind DESIGN.md §15.

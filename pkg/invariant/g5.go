@@ -55,7 +55,7 @@ func (in Input) convergedAround(op Op) (before, after state, missing string) {
 
 // compare reports every object that the Restart added, dropped or changed.
 func (out *Result) compare(in Input, op Op, before, after state) {
-	equal := in.equality(before, after)
+	equal := in.equality(before, after, out)
 	indexed := func(s state) map[objectKey]observe.Version {
 		objects := map[objectKey]observe.Version{}
 		for _, v := range s.live {

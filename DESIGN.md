@@ -342,9 +342,10 @@ while a watch that fails returns at once and repeating it is a loop.
 
 **Notes.** A check that could not judge something records a note naming it: G3 for a
 deletion whose deadline the run did not reach, that a fault reached into, or that botbox
-took an object inside, G5 for a `Restart` missing a snapshot. The Runner carries the last
-checkpoint's notes out and `botbox` prints them at the end of the run, because a check
-that was skipped otherwise reads like one that passed.
+took an object inside, G5 for a `Restart` missing a snapshot and for an `equalIgnore` key
+that meets a list (§8.1). The Runner carries the last checkpoint's notes out and `botbox`
+prints them at the end of the run, because a check that was skipped otherwise reads like
+one that passed.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
@@ -487,7 +488,9 @@ loader refuses a malformed path, naming the offset. It refuses a list index such
 since a restart can reorder a list. It refuses a key that the dots split where it can
 tell: a key outside brackets that holds `/`, such as the `io/name` of
 `app.kubernetes.io/name`, and a path that goes more than one step below the `labels` or
-`annotations` of any `metadata`, which map keys to strings.
+`annotations` of any `metadata`, which map keys to strings. A key names nothing inside a
+list, and only an object shows where a list is. G5 therefore notes a key that meets a list
+and names the path with `[*]` in its place (§6).
 
 A property's `when` says where it is evaluated: `always` on every Observer event before
 the teardown boundary (§6), `checkpoint` at each checkpoint (§4), `end` at the last
@@ -1089,3 +1092,5 @@ built from source and run as a black-box binary.
   kubectl's JSONPath. A child created after the operator started carries no annotation
   until a restart stamps one, so an empty map or list along an ignored path counts as
   absent. `generate` keeps dotted schema property names, which the schema already checks.
+  A key that meets a list is a note and not a configuration error, because `equalIgnore`
+  applies to every managed kind, and one kind's list can be another kind's map.

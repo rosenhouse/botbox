@@ -202,7 +202,9 @@ equalIgnore:
 
 Keep the list in block style, because YAML claims the brackets inside a one-line `[...]` list.
 botbox refuses a list index such as `[0]`, and a label or annotation key that the dots split,
-when it loads the target ([DESIGN.md §8.1](DESIGN.md#81-targetyaml)).
+when it loads the target ([DESIGN.md §8.1](DESIGN.md#81-targetyaml)). A key names nothing
+inside a list, so a run notes a path such as `status.conditions.lastHeartbeatTime` and says
+where the `[*]` goes.
 
 A sequence file runs as written and is never minimized. This is
 `examples/cert-manager/sequences/issue.json`, reflowed ([DESIGN.md §7](DESIGN.md#7-sequence-format)):

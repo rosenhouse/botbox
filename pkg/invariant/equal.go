@@ -1,6 +1,7 @@
 package invariant
 
 import (
+	"fmt"
 	"reflect"
 	"slices"
 
@@ -28,7 +29,7 @@ var ignoredByDefault = []target.Path{
 // a hook replaces the whole predicate (DESIGN.md §8.4); otherwise this is the
 // §6 default, which needs both snapshots to tell a live owner from a dangling
 // reference.
-func (in Input) equality(before, after state) func(a, b observe.Version) bool {
+func (in Input) equality(before, after state, out *Result) func(a, b observe.Version) bool {
 	if in.Target.Equal != nil {
 		return func(a, b observe.Version) bool {
 			return in.Target.Equal(snapshot(a), snapshot(b))
@@ -37,8 +38,8 @@ func (in Input) equality(before, after state) func(a, b observe.Version) bool {
 	liveBefore, liveAfter := in.owners(before), in.owners(after)
 	return func(a, b observe.Version) bool {
 		return reflect.DeepEqual(
-			in.comparable(a.Object, liveBefore),
-			in.comparable(b.Object, liveAfter),
+			in.comparable(a.Object, liveBefore, out),
+			in.comparable(b.Object, liveAfter, out),
 		)
 	}
 }
@@ -48,7 +49,7 @@ func snapshot(v observe.Version) observe.Snapshot {
 }
 
 // comparable reduces an object to what §6 compares.
-func (in Input) comparable(obj *unstructured.Unstructured, live ownerSet) map[string]any {
+func (in Input) comparable(obj *unstructured.Unstructured, live ownerSet, out *Result) map[string]any {
 	content := obj.DeepCopy().Object
 	for _, path := range ignoredByDefault {
 		path.Remove(content)
@@ -56,9 +57,17 @@ func (in Input) comparable(obj *unstructured.Unstructured, live ownerSet) map[st
 	metadata, _ := content["metadata"].(map[string]any)
 	live.pruneDangling(metadata)
 	for _, path := range in.Target.EqualIgnore {
-		path.Remove(content)
+		if err := path.Remove(content); err != nil {
+			out.noteOnce(fmt.Sprintf("%s could not follow equalIgnore %s: %v", out.ID, path, err))
+		}
 	}
 	return content
+}
+
+func (out *Result) noteOnce(note string) {
+	if !slices.Contains(out.Notes, note) {
+		out.Notes = append(out.Notes, note)
+	}
 }
 
 // ownerSet holds the owners a snapshot can resolve, the way the collector

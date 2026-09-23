@@ -196,7 +196,9 @@ func TestG5IgnoresAFieldOfEveryCondition(t *testing.T) {
 		in := restarted(child("w-0", "11", conditions(0, "ok")), child("w-0", "21", conditions(12*time.Second, "ok")))
 		in.Target.EqualIgnore = heartbeats
 
-		silent(t, invariant.RestartStable, in)
+		if notes := silent(t, invariant.RestartStable, in).Notes; len(notes) > 0 {
+			t.Errorf("G5 noted %v, want nothing.", notes)
+		}
 	})
 	t.Run("another field", func(t *testing.T) {
 		in := restarted(child("w-0", "11", conditions(0, "ok")), child("w-0", "21", conditions(12*time.Second, "retrying")))
@@ -204,6 +206,21 @@ func TestG5IgnoresAFieldOfEveryCondition(t *testing.T) {
 
 		fired(t, invariant.RestartStable, in)
 	})
+}
+
+func TestG5NotesAnIgnoredKeyThatMeetsAList(t *testing.T) {
+	in := restarted(child("w-0", "11", conditions(0, "ok")), child("w-0", "21", conditions(12*time.Second, "ok")))
+	in.Target.EqualIgnore = []target.Path{target.MustParsePath("status.conditions.lastHeartbeatTime")}
+
+	result := evaluate(t, invariant.RestartStable, in)
+
+	if len(result.Violations) != 1 {
+		t.Errorf("G5 reported %v, want the heartbeat it could not ignore.", statements(result))
+	}
+	want := "G5 could not follow equalIgnore status.conditions.lastHeartbeatTime: status.conditions is a list; write status.conditions[*].lastHeartbeatTime"
+	if len(result.Notes) != 1 || result.Notes[0] != want {
+		t.Errorf("G5 noted %q, want only %q.", result.Notes, want)
+	}
 }
 
 func TestG5UsesTheTargetsOwnEquality(t *testing.T) {

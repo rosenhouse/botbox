@@ -166,7 +166,9 @@ func belowAStringKey(path target.Path) bool {
 func TestAnEmptyPathRemovesNothing(t *testing.T) {
 	object := decode(t, `{"metadata": {"name": "w"}}`)
 
-	target.Path{}.Remove(object)
+	if err := (target.Path{}).Remove(object); err != nil {
+		t.Errorf("Removing an empty path reported %v.", err)
+	}
 
 	if want := decode(t, `{"metadata": {"name": "w"}}`); !reflect.DeepEqual(object, want) {
 		t.Errorf("Removing an empty path left %v, want %v.", object, want)
@@ -201,12 +203,6 @@ func TestPathRemove(t *testing.T) {
 		{"an empty list along the path", "status.conditions[*].lastHeartbeatTime",
 			`{"status": {"conditions": [], "ready": 1}}`,
 			`{"status": {"ready": 1}}`},
-		{"an empty list where a key meets it", "status.conditions.type",
-			`{"status": {"conditions": [], "ready": 1}}`,
-			`{"status": {"ready": 1}}`},
-		{"nothing where a key meets a list", "status.conditions.type",
-			`{"status": {"conditions": [{"type": "A"}]}}`,
-			`{"status": {"conditions": [{"type": "A"}]}}`},
 		{"every value of a map", "metadata.labels[*]",
 			`{"metadata": {"name": "w", "labels": {"a": "1", "b": "2"}}}`,
 			`{"metadata": {"name": "w"}}`},
@@ -238,8 +234,44 @@ func TestPathRemove(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			object, want := decode(t, tc.object), decode(t, tc.want)
 
-			target.MustParsePath(tc.path).Remove(object)
+			if err := target.MustParsePath(tc.path).Remove(object); err != nil {
+				t.Errorf("Removing %s reported %v.", tc.path, err)
+			}
 
+			if !reflect.DeepEqual(object, want) {
+				t.Errorf("Removing %s left %v, want %v.", tc.path, object, want)
+			}
+		})
+	}
+}
+
+// A key names nothing in a list, so Remove says where [*] belongs, and
+// removes whatever else the path names.
+func TestPathRemoveReportsAKeyThatMeetsAList(t *testing.T) {
+	for _, tc := range []struct {
+		name, path, object, want, err string
+	}{
+		{"a list of maps", "status.conditions.lastHeartbeatTime",
+			`{"status": {"conditions": [{"type": "A", "lastHeartbeatTime": "1"}]}}`,
+			`{"status": {"conditions": [{"type": "A", "lastHeartbeatTime": "1"}]}}`,
+			"status.conditions is a list; write status.conditions[*].lastHeartbeatTime"},
+		{"an empty list, which counts as absent", "status.conditions.type",
+			`{"status": {"conditions": [], "ready": 1}}`,
+			`{"status": {"ready": 1}}`,
+			"status.conditions is a list; write status.conditions[*].type"},
+		{"a list in one item of several", "spec.groups[*].members.name",
+			`{"spec": {"groups": [{"members": [{"name": "a"}]}, {"members": {"name": "b"}}]}}`,
+			`{"spec": {"groups": [{"members": [{"name": "a"}]}, {}]}}`,
+			"spec.groups[*].members is a list; write spec.groups[*].members[*].name"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			object, want := decode(t, tc.object), decode(t, tc.want)
+
+			err := target.MustParsePath(tc.path).Remove(object)
+
+			if err == nil || err.Error() != tc.err {
+				t.Errorf("Removing %s reported %v, want %q.", tc.path, err, tc.err)
+			}
 			if !reflect.DeepEqual(object, want) {
 				t.Errorf("Removing %s left %v, want %v.", tc.path, object, want)
 			}

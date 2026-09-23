@@ -3,6 +3,7 @@ package target
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -175,15 +176,23 @@ func quote(key string) string {
 
 // Remove deletes the fields p names from object. A map or a list along p that
 // is left empty counts as absent, so Remove deletes it too, unless [*] names it.
-func (p Path) Remove(object map[string]any) {
+// A key names nothing in a list, so Remove reports a list that a key of p meets.
+func (p Path) Remove(object map[string]any) error {
+	r := removal{path: p}
 	if len(p) > 0 {
-		remove(object, p)
+		r.remove(object, p)
 	}
+	return r.err
 }
 
-// remove reports whether node is left empty. A list cannot empty in place, so
-// the caller empties it.
-func remove(node any, p Path) bool {
+type removal struct {
+	path Path
+	err  error
+}
+
+// remove removes p, the end of r.path, from node and reports whether node is
+// left empty. A list cannot empty in place, so the caller empties it.
+func (r *removal) remove(node any, p Path) bool {
 	step, rest := p[0], p[1:]
 	switch node := node.(type) {
 	case map[string]any:
@@ -192,9 +201,9 @@ func remove(node any, p Path) bool {
 			clear(node)
 		case step.Each:
 			for key, value := range node {
-				node[key] = removeFromItem(value, rest)
+				node[key] = r.removeFromItem(value, rest)
 			}
-		case len(rest) == 0 || remove(node[step.Key], rest):
+		case len(rest) == 0 || r.remove(node[step.Key], rest):
 			delete(node, step.Key)
 		}
 		return len(node) == 0
@@ -204,8 +213,11 @@ func remove(node any, p Path) bool {
 			return true
 		case step.Each:
 			for i, item := range node {
-				node[i] = removeFromItem(item, rest)
+				node[i] = r.removeFromItem(item, rest)
 			}
+		default:
+			list := r.path[:len(r.path)-len(p)]
+			r.err = fmt.Errorf("%s is a list; write %s", list, slices.Concat(list, Path{{Each: true}}, p))
 		}
 		return len(node) == 0
 	}
@@ -214,8 +226,8 @@ func remove(node any, p Path) bool {
 
 // removeFromItem removes rest from one item of a list or value of a map. The
 // item stays even when left empty, so that the items still count.
-func removeFromItem(item any, rest Path) any {
-	if _, isList := item.([]any); remove(item, rest) && isList {
+func (r *removal) removeFromItem(item any, rest Path) any {
+	if _, isList := item.([]any); r.remove(item, rest) && isList {
 		return []any{}
 	}
 	return item

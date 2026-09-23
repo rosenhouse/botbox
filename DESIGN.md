@@ -517,6 +517,11 @@ window has to open. A `stable` at least as wide as `settle` leaves it none, and 
 that writes then expires. Loading such a target is a configuration error rather than a run
 that reports G4 against a target that did nothing wrong.
 
+`crds`, `sample` and `fixtures` are relative to the directory holding target.yaml.
+`launch.binary` is relative to the directory botbox runs in, or a name on `PATH`, because
+`launch.args` and any relative path the target opens itself resolve from there too. botbox
+checks that it can execute `launch.binary` before it starts a control plane.
+
 `launch.env` sets environment variables for the target, over those it inherits from botbox.
 Its values and `launch.args` take two placeholders: `$KUBECONFIG`, the path of the
 kubeconfig botbox writes, and `$NAMESPACE`, the run namespace, which that kubeconfig also

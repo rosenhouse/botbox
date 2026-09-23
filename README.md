@@ -284,6 +284,8 @@ Exit 2 means botbox could not test your controller, and the message says what to
 
 - `KUBEBUILDER_ASSETS` names the directory holding `etcd` and `kube-apiserver`. Install them
   as [Install](#install) shows, or point `--kubeconfig` at a cluster.
+- `launch.binary` is relative to the directory you run botbox from. `crds`, `sample` and
+  `fixtures` are relative to target.yaml.
 - A controller that stops during a run ends the invocation. botbox quotes the line it wrote
   as it stopped, above any stack trace, and `target.log` in the run directory holds the rest.
   A controller that binds a fixed port, such as a health probe on `:8081`, collides with a

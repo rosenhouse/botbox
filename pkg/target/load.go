@@ -66,8 +66,8 @@ type thresholdsDeclaration struct {
 }
 
 // Load reads target.yaml at path. Paths inside it resolve against the file's
-// own directory, except launch.binary, which resolves against the repository
-// root (DESIGN.md §8.1).
+// own directory, except launch.binary, which resolves against the working
+// directory (DESIGN.md §8.1).
 func Load(path string) (*Target, error) {
 	loaded, err := load(path)
 	if err != nil {

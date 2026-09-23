@@ -344,7 +344,7 @@ func TestLoadRejectsAMissingFile(t *testing.T) {
 }
 
 // TestLoadReportsTheResolvedPath covers the mistake of writing a path relative
-// to the repository root where target.yaml's own directory is the base.
+// to the working directory where target.yaml's own directory is the base.
 func TestLoadReportsTheResolvedPath(t *testing.T) {
 	path := writeTarget(t, "name: min\nprimary: toy.botbox/v1/Widget\nsample: targets/toy-widget/widget.yaml\n", nil)
 
@@ -358,8 +358,8 @@ func TestLoadReportsTheResolvedPath(t *testing.T) {
 }
 
 // TestLoadResolvesPathsAgainstTheTargetDirectory pins the two different bases
-// of DESIGN.md §8.1: files sit beside target.yaml, the binary sits under the
-// repository root.
+// of DESIGN.md §8.1: files sit beside target.yaml, and the binary is relative
+// to the working directory.
 func TestLoadResolvesPathsAgainstTheTargetDirectory(t *testing.T) {
 	path := writeTarget(t, `name: min
 primary: toy.botbox/v1/Widget
@@ -388,7 +388,7 @@ launch:
 		t.Errorf("Load read %d fixtures, want 2.", len(loaded.Fixtures))
 	}
 	if loaded.Launch.Binary != "bin/min" {
-		t.Errorf("Load resolved launch.binary to %q; it is relative to the repository root.", loaded.Launch.Binary)
+		t.Errorf("Load resolved launch.binary to %q; it is relative to the working directory.", loaded.Launch.Binary)
 	}
 }
 

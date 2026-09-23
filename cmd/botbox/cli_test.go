@@ -810,6 +810,23 @@ func TestAHarnessErrorExitsTwo(t *testing.T) {
 	}
 }
 
+// The empty assets directory fails a control plane that starts first.
+func TestOpeningASessionChecksTheLaunchBinaryFirst(t *testing.T) {
+	t.Setenv("KUBEBUILDER_ASSETS", t.TempDir())
+	unbuilt := &target.Target{Launch: target.LaunchSpec{Binary: "bin/no-such-operator"}}
+	for _, opts := range []options{{}, {kubeconfig: filepath.Join(t.TempDir(), "no-such-kubeconfig")}} {
+		s, err := openSession(opts, unbuilt)
+
+		if err == nil {
+			_ = s.close()
+			t.Fatalf("openSession(%+v) accepted a launch.binary that does not exist.", opts)
+		}
+		if !strings.Contains(err.Error(), "launch.binary") {
+			t.Errorf("openSession(%+v) returned %q, want the launch.binary error before anything starts.", opts, err)
+		}
+	}
+}
+
 func TestRunStopsAtTheFirstFailingSequence(t *testing.T) {
 	violation := run.Violation{ID: "G1"}
 	session := &fakeSession{results: []run.Result{{}, {Violation: &violation}}}

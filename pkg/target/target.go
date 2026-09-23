@@ -4,7 +4,12 @@
 package target
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -52,12 +57,26 @@ type GenerateSpec struct {
 
 // LaunchSpec says how to run the target (DESIGN.md §5.1).
 type LaunchSpec struct {
-	// Binary is relative to the repository root, which is the working directory.
+	// Binary is relative to the working directory, or a name on PATH.
 	Binary string `json:"binary"`
 	// Args and the values of Env carry $KUBECONFIG and $NAMESPACE wherever the
 	// launcher must substitute the kubeconfig path and the run namespace.
 	Args []string          `json:"args"`
 	Env  map[string]string `json:"env"`
+}
+
+// Check reports a binary that botbox could not exec.
+func (l LaunchSpec) Check() error {
+	_, err := exec.LookPath(l.Binary)
+	switch {
+	case err == nil:
+		return nil
+	case strings.Contains(l.Binary, "/") && !filepath.IsAbs(l.Binary):
+		wd, _ := os.Getwd()
+		return fmt.Errorf("launch.binary: %w, in the working directory %s; the path is relative to where botbox runs, not to target.yaml", err, wd)
+	default:
+		return fmt.Errorf("launch.binary: %w", err)
+	}
 }
 
 // Timeouts are the run's waits (DESIGN.md §6).

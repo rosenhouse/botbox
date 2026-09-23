@@ -52,7 +52,7 @@ const DefaultGracePeriod = 5 * time.Second
 
 // Options configure a Binary.
 type Options struct {
-	// Path is the binary to exec, relative to the repository root.
+	// Path is the binary to exec, relative to the working directory.
 	Path string
 	// Args are its arguments. Start substitutes $KUBECONFIG and $NAMESPACE in
 	// them and in the values of Env.

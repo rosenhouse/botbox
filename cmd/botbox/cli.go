@@ -571,6 +571,9 @@ type clusterSession struct {
 }
 
 func openSession(opts options, t *target.Target) (session, error) {
+	if err := t.Launch.Check(); err != nil {
+		return nil, err
+	}
 	if opts.kubeconfig != "" {
 		config, err := clientcmd.BuildConfigFromFlags("", opts.kubeconfig)
 		if err != nil {

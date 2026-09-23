@@ -1,6 +1,7 @@
 package invariant_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,7 @@ func TestG7PassesWhenTheTargetRecreatesTheObject(t *testing.T) {
 func TestG7FiresOnAnObjectThatNeverCameBack(t *testing.T) {
 	in := childDeleted().
 		checkpoint(12100*time.Millisecond, invariant.Converged).
+		waitBegan(10100 * time.Millisecond).
 		through(12100 * time.Millisecond)
 
 	violation := fired(t, invariant.SelfHealing, in)
@@ -39,10 +41,16 @@ func TestG7FiresOnAnObjectThatNeverCameBack(t *testing.T) {
 	if violation.ID != "G7" {
 		t.Errorf("The violation is %q, want G7.", violation.ID)
 	}
-	for _, want := range []string{"v1/ConfigMap w-0", "op 1 (deleteManaged)", "never came back", "2.1s"} {
+	for _, want := range []string{
+		"v1/ConfigMap w-0", "op 1 (deleteManaged)", "never came back within the 2s the run waited",
+		"does not list v1/ConfigMap under notRecreated",
+	} {
 		if !strings.Contains(violation.Statement, want) {
 			t.Errorf("The statement is %q, want it to say %q.", violation.Statement, want)
 		}
+	}
+	if got := state(violation); managed(violation) != "1" || !slices.Equal(got, []string{"w-1"}) {
+		t.Errorf("The violation quotes %s managed objects %v, want w-1 alone.", managed(violation), got)
 	}
 	if !violation.At.Equal(at(12100 * time.Millisecond)) {
 		t.Errorf("G7 judged at %v, want where the wait after the op ended.", violation.At)

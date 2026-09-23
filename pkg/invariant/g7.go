@@ -45,10 +45,11 @@ func SelfHealing(in Input) (Result, error) {
 			continue
 		}
 		out.violate(Violation{
-			Statement: fmt.Sprintf("the %s that %s deleted never came back within the %s the run waited after it",
-				object, describe(op), end.Sub(op.Time).Round(time.Millisecond)),
+			Statement: fmt.Sprintf("the %s that %s deleted never came back within the %s the run waited after it, and the target does not list %s under notRecreated",
+				object, describe(op), end.Sub(checkpoint.Began).Round(time.Millisecond), kindName(deleted.GVK)),
 			At: end,
-		}.quotingVersions(RecentHistory(deleted, upTo(in.History.History(deleted), end))))
+		}.quotingVersions(RecentHistory(deleted, upTo(in.History.History(deleted), end))).
+			quotingManaged(Sample(seen.managed(in))))
 	}
 	return out, nil
 }

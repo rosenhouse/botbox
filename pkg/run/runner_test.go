@@ -1115,6 +1115,30 @@ func TestTheTeardownJudgesNoDeletionWithATargetThatStopped(t *testing.T) {
 	}
 }
 
+// A run a harness error ended did not run all its ops, so the deletion is not
+// the target's to answer for.
+func TestTheTeardownJudgesNoDeletionAfterAHarnessError(t *testing.T) {
+	h := newFakeHarness()
+	h.fail["restart"] = errors.New("the target will not die")
+	g3 := Violation{ID: "G3", Statement: "the CR widget still carried its finalizers"}
+	check := &fakeChecker{violations: [][]Violation{nil, {g3}}}
+
+	result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}, Op{Type: OpRestart}))
+
+	if err == nil || !strings.Contains(err.Error(), "op 1 (restart)") {
+		t.Errorf("The run returned %v, want the failure of op 1.", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %+v; a run that failed answers for no deletion.", result.Violation)
+	}
+	if got := checkpointsAt(result.Timeline); !slices.Equal(got, []int{0}) {
+		t.Errorf("The run checkpointed at %v, want the ops it judged before the failure.", got)
+	}
+	if len(check.inputs) != 1 {
+		t.Errorf("The checks ran %d times, want once: the teardown judges nothing after a failure.", len(check.inputs))
+	}
+}
+
 // TestASettleExpiryWithADeadTargetIsAHarnessError pins the difference between
 // the target failing and the harness failing. A target that is gone cannot
 // converge, so reporting G4 would accuse a controller of a fault that is ours:

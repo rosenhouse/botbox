@@ -205,7 +205,8 @@ The Runner executes one sequence:
 4. Tear down. Clear every active fault and wait `T_stable`, which is the last quiet
    window (§6). Delete the primary CR if it still exists and wait for the G3 window. A
    target that stopped cleaned nothing up, so the run ends as that harness error rather
-   than at a verdict on the deletion. Then
+   than at a verdict on the deletion. A run that ended at a harness error judges no
+   deletion either, because its ops did not all run. Then
    force-remove any finalizer still present in the run namespace; the report notes each one
    (D37). G3 judged the deletion window, which closed before this. Delete every remaining
    object

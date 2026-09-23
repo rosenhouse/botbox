@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -348,6 +349,56 @@ func TestRemovingAFaultClosesItsWindow(t *testing.T) {
 	}
 	if got := p.Window(cleared); got.First.IsZero() || got.Retired.Before(atRemoval.Retired) {
 		t.Errorf("The cleared fault ran %+v, want the request it faulted and an end where it was cleared.", got)
+	}
+}
+
+// Requests race the removal, and the fault's window still holds every request
+// the proxy faulted with it.
+func TestAFaultsWindowHoldsTheRequestsThatRaceItsRemoval(t *testing.T) {
+	for name, remove := range map[string]func(*proxy.Proxy, proxy.FaultID){
+		"RemoveFault": (*proxy.Proxy).RemoveFault,
+		"ClearFaults": func(p *proxy.Proxy, _ proxy.FaultID) { p.ClearFaults() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := faultedProxy(t, 0)
+			id := p.AddFault(proxy.FaultSpec{Action: proxy.Error{Code: http.StatusInternalServerError}})
+			answered, removed := make(chan struct{}, 1), make(chan struct{})
+			var clients sync.WaitGroup
+			for range 4 {
+				clients.Go(func() {
+					for {
+						resp, err := http.Get(p.URL() + "/api/v1/namespaces/ns1/configmaps")
+						if err != nil {
+							t.Error(err)
+						} else {
+							io.Copy(io.Discard, resp.Body)
+							resp.Body.Close()
+						}
+						select {
+						case answered <- struct{}{}:
+						default:
+						}
+						select {
+						case <-removed:
+							return
+						default:
+						}
+					}
+				})
+			}
+
+			<-answered
+			remove(p, id)
+			close(removed)
+			clients.Wait()
+
+			retired := p.Window(id).Retired
+			for _, r := range p.Log() {
+				if r.Fault != "" && r.Start.After(retired) {
+					t.Fatalf("The proxy faulted a request that arrived at %v, after the fault retired at %v.", r.Start, retired)
+				}
+			}
+		})
 	}
 }
 

@@ -35,6 +35,7 @@ func TestTheSeededBugsTripTheChecksTheCatalogNames(t *testing.T) {
 		{bug: "B8", catalog: []string{"G5", "G7", "P1"}, fires: []string{"G5", "G7", "P1"}, in: b8()},
 		{bug: "B9", catalog: []string{"G3"}, fires: []string{"G3", "G4"}, in: b9()},
 		{bug: "B10", catalog: []string{"G4"}, fires: []string{"G4", "P1"}, in: b10()},
+		{bug: "B12", catalog: []string{"G3"}, fires: []string{"G3"}, in: b12()},
 	} {
 		t.Run(seeded.bug, func(t *testing.T) {
 			results, err := invariant.Evaluate(seeded.in)
@@ -225,6 +226,17 @@ func b9() invariant.Input {
 		through(22 * time.Second)
 }
 
+// b12 never runs its cleanup. The delete's settle wait gives the Widget until
+// T_stable past its deletion deadline, and expires with the Widget still there.
+func b12() invariant.Input {
+	return converged().
+		op(invariant.OpDelete, 10*time.Second).
+		record(10100*time.Millisecond, deletedWidget("15", finalizers(cleanup))).
+		checkpoint(22100*time.Millisecond, invariant.Expired).
+		checkpoint(35*time.Second, invariant.NoSettle).
+		through(35 * time.Second)
+}
+
 // restartedAndScaledDown is b10.json up to its scale-down: three children, a
 // restart at 10s and an update of spec.count to 1 before anything settles.
 func restartedAndScaledDown() *run {
@@ -281,6 +293,7 @@ func TestEveryViolationSaysHowMuchEvidenceItChoseFrom(t *testing.T) {
 	}{
 		{"B1", b1()}, {"B2", b2()}, {"B3", b3()}, {"B4", b4()}, {"B5", b5()},
 		{"B6", b6()}, {"B7", b7()}, {"B8", b8()}, {"B9", b9()}, {"B10", b10()},
+		{"B12", b12()},
 	} {
 		t.Run(seeded.bug, func(t *testing.T) {
 			results, err := invariant.Evaluate(seeded.in)

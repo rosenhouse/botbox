@@ -45,6 +45,15 @@ const oneCreate = `{
   ]
 }`
 
+const createThenDelete = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "delete"}
+  ]
+}`
+
 // checkpointState is what a check saw when it ran.
 type checkpointState struct {
 	op          int
@@ -266,6 +275,49 @@ func TestRunner(t *testing.T) {
 		}
 		if want := "the state converged after op 1 (deleteManaged) and the one after op 3 (settle)"; result.Violation.Compared != want {
 			t.Errorf("G5 says it compared %q, want %q.", result.Violation.Compared, want)
+		}
+	})
+
+	// The toy's T_settle is 5s and its T_delete 10s. A deletionTimestamp holds
+	// whole seconds, so a 7s delay holds the finalizer 6s to 7s past the delete.
+	t.Run("passes a delete whose cleanup outlasts T_settle", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		toy.Launch.Args = append(toy.Launch.Args, "--cleanup-delay=7s")
+
+		result, err := run.Run(ctx, toy, readSequence(t, createThenDelete), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy cleaned up within T_delete.", result.Violation)
+		}
+		if wait := result.Timeline.Ops[1].Settled; wait == nil || !wait.Converged || wait.Window.End.Sub(wait.Window.Start) <= toy.Timeouts.Settle {
+			t.Errorf("The delete's settle wait was %+v, want one that converged after T_settle of %v.", wait, toy.Timeouts.Settle)
+		}
+	})
+
+	t.Run("fails G3, not G4, on a finalizer that never clears", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		toy.Launch.Args = append(toy.Launch.Args, "--bug=12")
+
+		result, err := run.Run(ctx, toy, readSequence(t, createThenDelete), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation == nil || result.Violation.ID != "G3" {
+			t.Fatalf("The run reported %v, want G3.", result.Violation)
+		}
+		if want := "the CR widget still carried the finalizers [widget.botbox/cleanup] 10s after its deletion"; result.Violation.Statement != want {
+			t.Errorf("G3 says %q, want %q.", result.Violation.Statement, want)
+		}
+		if want := "toy.botbox/v1/Widget widget"; result.Violation.VersionsOf != want || len(result.Violation.Versions) == 0 {
+			t.Errorf("G3 quotes %d versions of %q, want the history of %s.", len(result.Violation.Versions), result.Violation.VersionsOf, want)
 		}
 	})
 

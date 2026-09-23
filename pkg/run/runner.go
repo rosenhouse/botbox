@@ -458,12 +458,12 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		return err
 	}
 	r.timeline.Ops[len(r.timeline.Ops)-1].Settled = &wait
-	excused := r.faultsAndWaits().Recovering(wait.Window.End)
+	excused := r.asOf(wait.Window.End).Recovering(wait.Window.End)
 	return r.judge(op.Index, wait, excused)
 }
 
 // wait waits up to T_settle for the target to converge, or longer while it is
-// owed time to recover from the faults.
+// owed time to recover from the faults or to finish a deletion.
 func (r *runner) wait(ctx context.Context) (Wait, error) {
 	wait := Wait{Window: Window{Start: r.now()}}
 	converged, err := r.h.settle(ctx, r.owed)
@@ -471,22 +471,28 @@ func (r *runner) wait(ctx context.Context) (Wait, error) {
 	return wait, err
 }
 
-// owed is when the target must have recovered from the faults by, as the
-// checks judge it.
-func (r *runner) owed() time.Time { return r.faultsAndWaits().Owed(r.now()) }
+// owed is when a settle wait may give up, as the checks judge it.
+func (r *runner) owed() time.Time {
+	now := r.now()
+	in := r.asOf(now)
+	return later(in.Owed(now), in.DeletionOwed(now))
+}
 
-// faultsAndWaits is what the checks read of the run's faults and settle waits.
-func (r *runner) faultsAndWaits() invariant.Input {
+// asOf is what the checks read of the run at t.
+func (r *runner) asOf(t time.Time) invariant.Input {
 	r.readFaultWindows()
 	return invariant.Input{
 		Target:      r.target,
+		History:     r.h.objects(),
 		Checkpoints: engineCheckpoints(r.timeline.Checkpoints),
 		Faults:      engineFaults(r.timeline.Faults),
+		End:         t,
 	}
 }
 
 // judge checkpoints where a settle wait ended. A wait that expired where the
-// faults did not excuse it is a G4 violation, which ends the run.
+// faults did not excuse it, and no overdue deletion left it to G3, is a G4
+// violation, which ends the run.
 func (r *runner) judge(op int, wait Wait, excused bool) error {
 	if !wait.Converged {
 		// A target that is gone cannot converge, so that is the harness's
@@ -495,8 +501,16 @@ func (r *runner) judge(op int, wait Wait, excused bool) error {
 			return r.targetStopped(status)
 		}
 	}
-	return r.checkpoint(Checkpoint{At: wait.Window.End, Began: wait.Window.Start, Op: op, Converged: wait.Converged},
-		!wait.Converged && !excused)
+	checkpoint := Checkpoint{At: wait.Window.End, Began: wait.Window.Start, Op: op, Converged: wait.Converged}
+	expired := !wait.Converged && !excused && !r.asOf(checkpoint.At).DeletionOverdue(engineCheckpoint(checkpoint))
+	return r.checkpoint(checkpoint, expired)
+}
+
+func later(a, b time.Time) time.Time {
+	if b.After(a) {
+		return b
+	}
+	return a
 }
 
 // targetStopped is the harness error for a target that is no longer running.
@@ -654,7 +668,7 @@ func (r *runner) clearFaults() {
 
 // awaitRecovery waits for a target still owed time to recover from the faults.
 func (r *runner) awaitRecovery(ctx context.Context) error {
-	if r.violation != nil || r.failed || !r.faultsAndWaits().Recovering(r.now()) {
+	if now := r.now(); r.violation != nil || r.failed || !r.asOf(now).Recovering(now) {
 		return nil
 	}
 	wait, err := r.wait(ctx)

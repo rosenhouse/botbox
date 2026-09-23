@@ -85,10 +85,12 @@ type deletion struct {
 	at  time.Time
 }
 
-func (in Input) crDeletions() []deletion {
+func (in Input) crDeletions() []deletion { return in.crDeletionsBy(in.end()) }
+
+func (in Input) crDeletionsBy(t time.Time) []deletion {
 	var deletions []deletion
 	seen := map[types.UID]bool{}
-	for _, v := range in.versions() {
+	for _, v := range in.versionsIn(time.Time{}, t) {
 		if v.GVK != in.Target.Primary || seen[v.UID] || (v.DeletionTimestamp == nil && !v.Deleted) {
 			continue
 		}

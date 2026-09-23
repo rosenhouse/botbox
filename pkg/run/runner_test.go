@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -267,6 +268,17 @@ func (f *fakeHarness) recordCR(name, resourceVersion string) {
 	object.SetNamespace(fakeNamespace)
 	object.SetResourceVersion(resourceVersion)
 	f.store.Record(widgetKind, object, time.Now())
+}
+
+// recordDeletingCR records the CR under deletion at the instant given, still
+// held by a finalizer.
+func (f *fakeHarness) recordDeletingCR(name, resourceVersion string, at time.Time) {
+	object := widget(name)
+	object.SetNamespace(fakeNamespace)
+	object.SetResourceVersion(resourceVersion)
+	object.SetFinalizers([]string{"example.com/stuck"})
+	object.SetDeletionTimestamp(&metav1.Time{Time: at})
+	f.store.Record(widgetKind, object, at)
 }
 
 // recordChild records a managed object of the CR, as the Observer would.
@@ -855,6 +867,57 @@ func TestRunTellsTheSettleWaitWhatRecoveryTheFaultsAreOwed(t *testing.T) {
 	want := retired.Add(retired.Sub(applied) + testTimeouts.Settle)
 	if len(h.owed) == 0 || !h.owed[0].Equal(want) {
 		t.Errorf("The settle wait was told the target owed %v, want %v.", h.owed, want)
+	}
+}
+
+func TestRunGivesADeletionUntilTStablePastItsDeadline(t *testing.T) {
+	h := newFakeHarness()
+	deleted := time.Now()
+	h.recordDeletingCR("widget", "11", deleted)
+
+	_, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}, Op{Type: OpDelete}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	want := deleted.Add(testTimeouts.Delete + testTimeouts.Stable)
+	if len(h.owed) != 2 || !h.owed[1].Equal(want) {
+		t.Errorf("The settle waits were told the run owed %v, want the delete's to run to %v.", h.owed, want)
+	}
+}
+
+// A CR past its deletion deadline is G3's to judge, whichever wait ends on it.
+func TestRunLeavesToG3AWaitThatEndedOnACRPastItsDeletionDeadline(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		faulting bool
+		sequence Sequence
+		want     []int
+	}{
+		{name: "an op's wait", sequence: sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}, Op{Type: OpDelete}),
+			want: []int{0, 1, Teardown}},
+		{name: "the recovery", faulting: true,
+			sequence: sequenceOf(Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}}, Op{Type: OpCreate, Obj: widget("widget")}),
+			want:     []int{1, Recovery, Teardown}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newFakeHarness()
+			h.converged = false
+			h.faulting = test.faulting
+			h.recordDeletingCR("widget", "11", time.Now().Add(-testTimeouts.Delete-time.Second))
+
+			result, err := runFake(t, h, nil, test.sequence)
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if result.Violation != nil {
+				t.Errorf("The run reported %v, want no G4: the CR had outlived its deletion deadline.", result.Violation)
+			}
+			if got := checkpointsAt(result.Timeline); !slices.Equal(got, test.want) {
+				t.Errorf("The run checkpointed at %v, want %v.", got, test.want)
+			}
+		})
 	}
 }
 

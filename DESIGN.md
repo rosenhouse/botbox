@@ -195,9 +195,12 @@ The Runner executes one sequence:
    Launcher.
 2. Apply ops in order. After each op that mutates the CR or a managed object, wait up to
    `T_settle` for convergence unless the op sets `noSettle`, and longer while the target is
-   still owed time to recover from a fault that stopped (§6). The wait ends once the
-   `Ready` predicate holds and neither the CR nor a managed object has changed for
-   `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
+   still owed time to recover from a fault that stopped (§6) or to delete a primary CR. The
+   wait ends once the `Ready` predicate holds, no primary CR is being deleted, and neither
+   the CR nor a managed object has changed for `T_stable`, so a checkpoint lands after the
+   target's reaction, not before it. The wait runs until `T_stable` past a deleted CR's G3
+   deadline, or past the instant the CR went if that came first. A wait in which a CR outlived
+   its G3 deadline is G3's to judge (§6). Any other wait
    that expires while no fault excuses it records a G4 violation, which says why from the
    Observer's history of the wait: `Ready` never held, held and then stopped, or held while
    the namespace kept changing within `T_stable`; or no CR was left to be ready. Where
@@ -359,9 +362,9 @@ is not judged, rather than judged early: judging early would hold the target to 
 window than §6 gives it, and where the boundary falls would depend on harness timing. G3
 is the exception, since §5.5 step 4 opens its window deliberately, and §4's teardown
 checkpoint still evaluates properties. A primary CR with a deletionTimestamp need not
-satisfy `Ready`: it is being deleted, so G3 judges it, not G4. A settle wait still waits
-for `Ready`, so a wait can expire on such a CR, and its G4 then blames the CR's
-finalizers, not `Ready`.
+satisfy `Ready`: it is being deleted, so G3 judges it, not G4. A settle wait waits for such
+a CR to go, past its G3 deadline (§5.5), so a wait in which it outlived that deadline ends
+where G3 can judge it, and G4 leaves that wait to G3.
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
 namespace that is neither a fixture nor created by botbox. The namespace is private to one
@@ -371,7 +374,9 @@ selector refine attribution to a particular CR; they are not required for it.
 **Deletion.** Owned children are removed by the cluster's garbage collector (real on kind,
 emulated on envtest, §5.8). G3 therefore fails on orphans, meaning children with no
 ownerReference to the CR, and on finalizers that never clear. The teardown watches the
-namespace until it is clean or `T_delete` expires (§5.5 step 4). A namespace that came
+namespace until it is clean or `T_delete` expires (§5.5 step 4). The settle wait after a
+`delete` op waits for the CR to go (§5.5 step 2), so G3 judges that deletion where the
+wait ends if the CR outlived `T_delete`. A namespace that came
 clean satisfies G3 at that instant, which is how a target that cleans up promptly is
 judged rather than left unjudged: the run stops watching long before `T_delete` is up. An
 object a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (D38).
@@ -1332,3 +1337,15 @@ built from source and run as a black-box binary.
   election creates and renews its LeaseCandidate whether or not it leads. G1 ignores those
   requests as it ignores lease requests, and G7 does not take one as a sign that a
   restarted target is back.
+- **D@70 A settle wait gives a CR under deletion its `T_delete`, and G3 judges a CR that
+  outlives it.** The wait after a `delete` op gave the CR `T_settle` to go. The toy with a
+  7 s cleanup, under a `T_settle` of 5 s and a `T_delete` of 10 s, failed G4 on a
+  `create` and a `delete`, and G3 noted that the run ended before its deadline. B12, whose
+  finalizer never clears, failed G4 too, where G3 names the finalizer with its evidence. The
+  wait now waits for the CR to go, until `T_stable` past its G3 deadline, or past the
+  instant it went if that came first, so the namespace can hold still after a cleanup that
+  ends near the deadline. G3's window stays `T_delete`. A wait in which a CR outlived that deadline is
+  G3's, so G4 does not report it, whichever wait it is. A CR under deletion is not ready,
+  whatever `Ready` says, because a wait that converged mid-cleanup would put the rest of
+  the cleanup in the quiet window. The toy proves both: `--cleanup-delay=7s` passes a
+  `create` and a `delete`, and B12 fails G3 alone.

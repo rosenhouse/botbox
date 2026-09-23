@@ -87,6 +87,12 @@ func TestManagerOptionsKeepTheSchemeAndMetricsAddress(t *testing.T) {
 	}
 }
 
+func TestManagerOptionsElectNoLeader(t *testing.T) {
+	if managerOptions(nil, "0").LeaderElection {
+		t.Error("The manager runs leader election, which a single replica does not need.")
+	}
+}
+
 func TestManagerOptionsWatchEveryNamespaceWithoutWatchNamespace(t *testing.T) {
 	t.Setenv("WATCH_NAMESPACE", "")
 

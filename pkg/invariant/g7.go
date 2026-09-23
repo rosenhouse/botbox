@@ -40,7 +40,7 @@ func SelfHealing(in Input) (Result, error) {
 			continue
 		}
 		if restart, starting := in.stillStarting(op); starting {
-			out.note("for %s: the target had requested no resource other than a lease since %s, so it may not yet have been running to recreate the %s",
+			out.note("for %s: the target had requested no resource other than a lease between %s and it, so it may not yet have been running to recreate the %s",
 				describe(op), describe(restart), object)
 			continue
 		}

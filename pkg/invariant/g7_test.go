@@ -166,7 +166,7 @@ func TestG7PassesAnObjectThatCameBack(t *testing.T) {
 // botbox cannot tell when a restarted target is back. One still starting, or
 // waiting out its predecessor's lease, recreates nothing.
 func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
-	const noted1 = "G7 is not evaluated for op 2 (deleteManaged): the target had requested no resource other than a lease since op 1 (restart)"
+	const noted1 = "G7 is not evaluated for op 2 (deleteManaged): the target had requested no resource other than a lease between op 1 (restart) and it"
 	deletedAfter := func(r *run) invariant.Input {
 		return r.
 			deletedManaged(10*time.Second, "w-0").
@@ -189,7 +189,7 @@ func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 			op(invariant.OpRestart, 8*time.Second).
 			request(8500*time.Millisecond, get("w-1")).
 			op(invariant.OpRestart, 9*time.Second)),
-			"G7 is not evaluated for op 3 (deleteManaged): the target had requested no resource other than a lease since op 2 (restart)"},
+			"G7 is not evaluated for op 3 (deleteManaged): the target had requested no resource other than a lease between op 2 (restart) and it"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			noted(t, invariant.SelfHealing, c.in, c.want)

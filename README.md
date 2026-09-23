@@ -24,6 +24,9 @@ clean checkout, this script is the whole run.
 <!-- embed: examples/cert-manager/quickstart.sh -->
 ```sh
 #!/bin/sh
+# Exercise cert-manager against the generic invariants of DESIGN.md §6. It
+# builds what it needs, so a clean checkout is enough. Arguments go to botbox:
+# --seed picks the sequences it draws, and a later --runs wins over the one here.
 set -eu
 cd "$(dirname "$0")/../.."
 

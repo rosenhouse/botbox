@@ -1237,7 +1237,8 @@ built from source and run as a black-box binary.
   controller, the API server judges an update with the stored status copied in, which the
   generator never sees. A CRD rule that reads status can therefore still refuse a draw. A
   refusal still exits 2, since a rule botbox cannot keep belongs in the target declaration
-  (§8.3), and it names the run, its `sequence.json` and status rules as a cause. Undoing a refused field biases draws away from a rule's boundary: a
+  (§8.3). The message names the run and its `sequence.json`, and names a status rule as a
+  possible cause. Undoing a refused field biases draws away from a rule's boundary: a
   sample that sets one of two exclusive fields never switches to the other. When the CRD
   refuses all 100 values drawn for a field into the sample, the field would never move, so
   New reports it instead of skipping it silently. Each value is judged against the sample

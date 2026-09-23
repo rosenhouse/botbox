@@ -141,11 +141,12 @@ func TestMatrixWritesBugAgainstCheck(t *testing.T) {
 	written := readMatrix(t, out)
 	want := []string{
 		"| Bug | G1 | G2 | G3 | G4 | G5 | G6 | P1 | No bug |",
+		"|---|---|---|---|---|---|---|---|---|",
 		"| B0 |  |  |  |  |  |  |  |  |",
 		"| B1 |  |  |  | ✓ |  | ✓ |  |  |",
 	}
 	for _, line := range want {
-		if !strings.Contains(written, line) {
+		if !slices.Contains(strings.Split(written, "\n"), line) {
 			t.Errorf("The matrix is\n%s\nwant the line %q.", written, line)
 		}
 	}
@@ -179,6 +180,14 @@ func TestMatrixMarksACheckThatLeftSomethingUnjudged(t *testing.T) {
 	}
 	if !strings.Contains(stdout, "G5 is not evaluated") {
 		t.Errorf("botbox matrix printed %q, want the note G5 left.", stdout)
+	}
+}
+
+func TestACheckThatFiredIsMarkedCaughtWhateverItLeftUnjudged(t *testing.T) {
+	found := checked{fired: []string{"G5"}, skipped: []string{"G5"}}
+
+	if mark := found.mark("G5"); mark != "✓" {
+		t.Errorf("A check that fired and left a note is marked %q, want ✓.", mark)
 	}
 }
 

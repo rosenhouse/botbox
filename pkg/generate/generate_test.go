@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -178,17 +179,21 @@ func TestAnUpdateTheCRDAlwaysRefusesBecomesASettle(t *testing.T) {
 	g := newGenerator(t, loaded, Options{})
 	draws := 0
 	g.fields = []field{countField(0, &draws)}
+	refused := 0
 	rapid.Check(t, func(rt *rapid.T) {
-		sequence := g.sequence(rt)
-		if err := sequence.Validate(); err != nil {
-			rt.Fatalf("The Runner rejects the sequence: %v.", err)
+		before := draws
+		op := g.op(rt, 1, &state{cr: loaded.Sample.Object})
+		if draws-before != updateDraws {
+			return
 		}
-		for _, op := range sequence.Ops {
-			if op.Type == run.OpUpdate {
-				rt.Fatalf("Op %d updates the gadget with %v, which its CRD refuses.", op.Index, op.Patch)
-			}
+		refused++
+		if want := (run.Op{Index: 1, Type: run.OpSettle}); !reflect.DeepEqual(op, want) {
+			rt.Fatalf("An update the CRD refused became %+v, want %+v.", op, want)
 		}
 	})
+	if refused == 0 {
+		t.Error("No update was drawn.")
+	}
 }
 
 func TestTheStateFollowsTheCRBotboxLastWrote(t *testing.T) {

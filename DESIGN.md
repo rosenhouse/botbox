@@ -515,15 +515,20 @@ that reports G4 against a target that did nothing wrong.
 `launch.env` sets environment variables for the target, over those it inherits from botbox.
 Its values and `launch.args` take two placeholders: `$KUBECONFIG`, the path of the
 kubeconfig botbox writes, and `$NAMESPACE`, the run namespace, which that kubeconfig also
-names (§5.1). botbox sets no namespace variable of its own, because frameworks name it
-differently. An operator-sdk operator declares:
+names (§5.1). botbox replaces each occurrence of either text and expands no other spelling,
+such as `$(NAMESPACE)`. botbox sets no namespace variable of its own, because frameworks
+name it differently. An operator-sdk operator declares:
 
 ```yaml
 launch:
   binary: bin/manager
   env:
     WATCH_NAMESPACE: $NAMESPACE
+    POD_NAMESPACE: $NAMESPACE
 ```
+
+YAML 1.1 reads an unquoted `0022` as 18 and `ON` as true. A `launch.env` name or value that
+decoding would change is a configuration error, as is one that holds NUL.
 
 `manages` names kinds as `group/version/Kind`, with `v1/Kind` for the core group. An
 optional `selector` (label selector) refines attribution (§6). Paths under `generate` are
@@ -655,8 +660,8 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   present. In CEL, `!has(status.ready) || status.ready <= managed.filter(o, o.kind ==
   "ConfigMap").size()`.
 - `timeouts: {settle: 5s, stable: 2s, delete: 10s}`. The toy converges in milliseconds.
-- The toy watches only `WATCH_NAMESPACE` where it is set, and its target sets it to
-  `$NAMESPACE` (§8.1).
+- The toy watches only the namespace `WATCH_NAMESPACE` names, where it is set, and its
+  target sets it to `$NAMESPACE` (§8.1).
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 
@@ -1209,14 +1214,17 @@ built from source and run as a black-box binary.
   G4. Each fault has an ID, and a removed fault keeps its window. The Runner drops a fault
   once its window is closed, so a request faulted just before a removal stays in it.
 - **D@37 A target learns the run namespace from botbox.** Each run takes a fresh
-  namespace (§5.5), and an operator-sdk operator watches only `WATCH_NAMESPACE`. botbox
-  substituted only `$KUBECONFIG`, and its kubeconfig named no namespace, so such an
-  operator watched the wrong one and every run failed G4 with 0 managed objects. The
-  placeholder `$NAMESPACE` and the key `launch.env` now carry the run namespace. The
-  kubeconfig's context names it too, and kube-rs, clientcmd and kubectl read it there with
-  no configuration. botbox exports no `WATCH_NAMESPACE` of its own, because the name
-  differs by framework and operator-sdk reads an empty one as every namespace. The target
-  still inherits botbox's environment, since it may need `PATH`, `HOME` or proxy settings,
-  but the replay command does not record it. `launch.env` is in the target file, which
-  the replay reads. The toy reads `WATCH_NAMESPACE`, so every toy run depends on the
-  substitution.
+  namespace (§5.5), and an operator-sdk operator watches only the namespace
+  `WATCH_NAMESPACE` names. botbox substituted only `$KUBECONFIG`, and its kubeconfig named
+  no namespace, so such an operator watched the wrong one and every run failed G4 with 0
+  managed objects. The placeholder `$NAMESPACE` and the key `launch.env` now carry the run
+  namespace. The kubeconfig's context names it too, and kube-rs, clientcmd and kubectl read
+  it there with no configuration. botbox exports no `WATCH_NAMESPACE` of its own, because
+  the name differs by framework and operator-sdk reads an empty one as every namespace. The
+  target still inherits botbox's environment, since it may need `PATH`, `HOME` or proxy
+  settings, but the replay command does not record it. `launch.env` is in the target file,
+  which the replay reads. The toy reads `WATCH_NAMESPACE`, so every toy run depends on the
+  substitution. Only the bare spellings expand. Refusing `${...}` would break a `sh -c`
+  script that reads `${KUBECONFIG}`. The loader refuses a `launch.env` name or value that
+  YAML 1.1 decoding would change, such as `0022` or `ON`, and accepts one that decodes to
+  its own text, such as `8080`.

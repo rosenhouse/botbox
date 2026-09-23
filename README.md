@@ -157,16 +157,22 @@ writing. A `stable` at least as wide as `settle` leaves it none, so botbox refus
 that target rather than reporting G4 against your controller.
 
 Each run creates its own namespace, and the kubeconfig botbox hands your controller names
-it. botbox also substitutes it for `$NAMESPACE` in `launch.args` and in `launch.env`, which
-sets variables for your controller. An operator-sdk operator watches the namespace that
-`WATCH_NAMESPACE` names:
+that namespace. `launch.env` sets variables for your controller. In its values and in
+`launch.args`, botbox replaces the text `$NAMESPACE` with the run namespace and
+`$KUBECONFIG` with the kubeconfig's path. It expands no other spelling, such as
+`$(NAMESPACE)` or `${NAMESPACE}`. An operator-sdk operator watches the namespace that
+`WATCH_NAMESPACE` names, and it may read `POD_NAMESPACE` for leader election:
 
 ```yaml
 launch:
   binary: bin/manager
   env:
     WATCH_NAMESPACE: $NAMESPACE
+    POD_NAMESPACE: $NAMESPACE
 ```
+
+YAML reads an unquoted `0022` as 18 and `yes` as true, so botbox refuses a name or value
+that YAML would change. Quote such a name or value.
 
 Your controller also inherits botbox's environment, but a report's replay command does not
 record it. Declare what your controller needs in `launch.env`, so that a replay reproduces
@@ -263,7 +269,8 @@ target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `requests.jsonl` — every request the target made, as the proxy saw it.
 - `objects.jsonl` — every version of every object the Observer saw.
 - `target.log` — the target's own output.
-- `kubeconfig` — what the target was pointed at: the proxy, not the cluster, and the run namespace.
+- `kubeconfig` — the kubeconfig the target was given. It points at the proxy rather than the
+  cluster, and names the run namespace.
 
 The report quotes the last twenty requests and the last twenty object versions the check
 chose from, says how many that was, and names the file holding the rest. A G4 or a

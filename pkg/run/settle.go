@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -37,8 +38,8 @@ type settle struct {
 	now      func() time.Time
 	sleep    func(context.Context, time.Duration) error
 	// state reports whether the target is ready, and when the run namespace
-	// last changed, which is never before since.
-	state func(since time.Time) (ready bool, changed time.Time)
+	// last changed, which is never before since. Its error ends the wait.
+	state func(since time.Time) (ready bool, changed time.Time, err error)
 	// stopped is closed once the target's process has stopped.
 	stopped <-chan struct{}
 	// owed is when the target must have recovered from the faults by, which
@@ -49,7 +50,10 @@ type settle struct {
 func (s settle) wait(ctx context.Context) (bool, error) {
 	start := s.now()
 	for {
-		ready, changed := s.state(start)
+		ready, changed, err := s.state(start)
+		if err != nil {
+			return false, err
+		}
 		now := s.now()
 		if ready && !now.Before(changed.Add(s.timeouts.Stable)) {
 			return true, nil
@@ -82,25 +86,30 @@ func closed(c <-chan struct{}) bool {
 // state reads the Observer. Readiness is read first, so that a change arriving
 // during the read counts against stability rather than for it. The op that
 // opened the wait changed the CR, which is why stability runs from since.
-func (h *Harness) state(since time.Time) (bool, time.Time) {
-	ready := ready(h.target.Ready, h.Observer.Current(h.target.Primary))
+func (h *Harness) state(since time.Time) (bool, time.Time, error) {
+	ready, err := ready(h.target.Ready, h.Observer.Current(h.target.Primary))
 	changed := since
 	if window := h.Observer.Window(since, time.Now()); len(window) > 0 {
 		changed = window[len(window)-1].Time
 	}
-	return ready, changed
+	return ready, changed, err
 }
 
 // ready reports whether the predicate holds on every primary CR observed. An
-// evaluation error means "not ready" (DESIGN.md §8.4). A run whose CR is gone
-// has nothing left to be ready.
-func ready(predicate target.ReadyFunc, observed []observe.Version) bool {
+// evaluation error means "not ready", and a result that is not a bool is a
+// configuration error (DESIGN.md §8.4). A run whose CR is gone has nothing
+// left to be ready.
+func ready(predicate target.ReadyFunc, observed []observe.Version) (bool, error) {
 	for _, cr := range observed {
-		if ready, err := predicate(cr.Object); err != nil || !ready {
-			return false
+		ready, err := predicate(cr.Object)
+		if errors.Is(err, target.ErrNotBool) {
+			return false, err
+		}
+		if err != nil || !ready {
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 func sleep(ctx context.Context, d time.Duration) error {

@@ -272,10 +272,38 @@ define negative-control
 	fi
 endef
 
-CERT_MANAGER_CONTROL = examples/cert-manager/quickstart.sh --seed $(EXAMPLE_SEED) --runs 1 --deadline $(EXAMPLE_DEADLINE) --launch-arg --enable-certificate-owner-ref=false
+# Each control orphans a Secret: (tier name, the control's output directory,
+# the Secret's key, a pattern its value matches). objects.jsonl must mark the
+# value, and no file may hold it.
+define hides-the-secret
+	@grep -rqF '"$(3)":"[redacted' $(2) \
+		|| { echo "$(1): the control's objects.jsonl does not mark the Secret's $(3)."; exit 1; }
+	@! grep -rlE '$(4)' $(2) \
+		|| { echo "$(1): the files above hold the Secret's $(3)."; exit 1; }
+endef
+
+CERT_MANAGER_CONTROL_OUT = botbox-out/cert-manager-control
+CERT_MANAGER_CONTROL = examples/cert-manager/quickstart.sh --seed $(EXAMPLE_SEED) --runs 1 --deadline $(EXAMPLE_DEADLINE) --out $(CERT_MANAGER_CONTROL_OUT) --launch-arg --enable-certificate-owner-ref=false
 CERT_MANAGER_CONTROL_CLAUSE = G3 the v1/Secret example-tls was still there
-EXTERNAL_SECRETS_CONTROL = KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox run --target examples/external-secrets/target.yaml --deadline $(EXAMPLE_DEADLINE) $(EXTERNAL_SECRETS_CONTROL_SEQUENCE)
+EXTERNAL_SECRETS_CONTROL_OUT = botbox-out/external-secrets-control
+EXTERNAL_SECRETS_CONTROL = KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox run --target examples/external-secrets/target.yaml --deadline $(EXAMPLE_DEADLINE) --out $(EXTERNAL_SECRETS_CONTROL_OUT) $(EXTERNAL_SECRETS_CONTROL_SEQUENCE)
 EXTERNAL_SECRETS_CONTROL_CLAUSE = G3 the v1/Secret example-secret was still there
+
+# Each example's control: (tier name). tls.key holds a PEM private key, and the
+# three patterns after PRIVATE KEY are its base64 at each alignment. The fake
+# provider serves s3cr3t, whose base64 is czNjcjN0, and external-secrets
+# annotates the Secret with an unkeyed hash of it.
+define cert-manager-control
+	@rm -rf $(CERT_MANAGER_CONTROL_OUT)
+	$(call negative-control,$(1),$(CERT_MANAGER_CONTROL),$(CERT_MANAGER_CONTROL_CLAUSE))
+	$(call hides-the-secret,$(1),$(CERT_MANAGER_CONTROL_OUT),tls.key,PRIVATE KEY|UFJJVkFURSBL|BSSVZBVEUgS0|QUklWQVRFIEt)
+endef
+
+define external-secrets-control
+	@rm -rf $(EXTERNAL_SECRETS_CONTROL_OUT)
+	$(call negative-control,$(1),$(EXTERNAL_SECRETS_CONTROL),$(EXTERNAL_SECRETS_CONTROL_CLAUSE))
+	$(call hides-the-secret,$(1),$(EXTERNAL_SECRETS_CONTROL_OUT),token,s3cr3t|czNjcjN0|56e1b3f734a3d8e2c7932736ca6ff7fb9a9b5a14378c70c27c5e0adf)
+endef
 
 # The example tier of DESIGN.md §11. The pinned sequences are the worked example
 # of the format §7 states, so the tier runs them rather than letting them rot.
@@ -291,7 +319,7 @@ test-example: verify-cert-manager-pin setup build
 		--target examples/cert-manager/target.yaml --deadline $(EXAMPLE_DEADLINE) \
 		examples/cert-manager/sequences/*.json \
 		|| { echo "test-example: a pinned sequence failed."; exit 1; }
-	$(call negative-control,test-example,$(CERT_MANAGER_CONTROL),$(CERT_MANAGER_CONTROL_CLAUSE))
+	$(call cert-manager-control,test-example)
 
 # The nightly tier of DESIGN.md §10 (M5). botbox draws the seeds, so a find here
 # is a new one rather than the fixed seeds again, and every run prints its seed,
@@ -303,7 +331,7 @@ test-example-nightly: verify-cert-manager-pin
 	@echo "==> drawn seeds, which must pass"
 	@examples/cert-manager/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE) \
 		|| { echo "test-example-nightly: a drawn seed failed."; exit 1; }
-	$(call negative-control,test-example-nightly,$(CERT_MANAGER_CONTROL),$(CERT_MANAGER_CONTROL_CLAUSE))
+	$(call cert-manager-control,test-example-nightly)
 
 # The external-secrets example tier, in the shape of test-example. Its negative
 # control is a sequence rather than a --launch-arg, because no flag makes the
@@ -321,14 +349,14 @@ test-example-external-secrets: verify-external-secrets-pin setup build
 		--target examples/external-secrets/target.yaml --deadline $(EXAMPLE_DEADLINE) \
 		$(EXTERNAL_SECRETS_SEQUENCES) \
 		|| { echo "test-example-external-secrets: a pinned sequence failed."; exit 1; }
-	$(call negative-control,test-example-external-secrets,$(EXTERNAL_SECRETS_CONTROL),$(EXTERNAL_SECRETS_CONTROL_CLAUSE))
+	$(call external-secrets-control,test-example-external-secrets)
 
 .PHONY: test-example-external-secrets-nightly
 test-example-external-secrets-nightly: verify-external-secrets-pin setup build
 	@echo "==> drawn seeds, which must pass"
 	@examples/external-secrets/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE) \
 		|| { echo "test-example-external-secrets-nightly: a drawn seed failed."; exit 1; }
-	$(call negative-control,test-example-external-secrets-nightly,$(EXTERNAL_SECRETS_CONTROL),$(EXTERNAL_SECRETS_CONTROL_CLAUSE))
+	$(call external-secrets-control,test-example-external-secrets-nightly)
 
 .PHONY: fmt
 fmt:

@@ -93,6 +93,11 @@ type Violation struct {
 	ManagedTotal *int
 	// Ready is what a readiness verdict read of the predicate and the CR.
 	Ready *invariant.Readiness
+	// Differences are what G5 found changed across a restart, DifferencesTotal
+	// how many there were, and Compared names the two states.
+	Differences      []invariant.Difference
+	DifferencesTotal int
+	Compared         string
 }
 
 // String is the violation in one line. A message that prints one wants the

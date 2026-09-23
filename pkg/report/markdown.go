@@ -2,12 +2,14 @@ package report
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 )
@@ -31,6 +33,11 @@ func (d document) markdown() []byte {
 		for _, note := range d.Notes {
 			fmt.Fprintf(&md, "- %s\n", note)
 		}
+	}
+	if len(d.Differences) > 0 {
+		md.WriteString("\n## What changed across the restart\n\n")
+		md.WriteString(differencesLine(d.Differences, d.DifferencesTotal, d.Compared))
+		table(&md, []string{"object", "resourceVersion", "path", "before", "after"}, differenceRows(d.Differences))
 	}
 	fmt.Fprintf(&md, "\n## Sequence\n\n```json\n%s\n```\n", strings.TrimRight(string(d.Sequence), "\n"))
 	if d.Ready != nil {
@@ -90,6 +97,26 @@ func managedLine(total, shown int) string {
 	return managed + "the violation quotes them all." + held
 }
 
+// differencesLine says what the violation quotes of the differences, and
+// between which states.
+func differencesLine(differences []invariant.Difference, total int, compared string) string {
+	shown := len(differences)
+	quoted := count(shown, "difference")
+	if shown < total {
+		quoted = fmt.Sprintf("%d of %s", shown, count(total, "difference"))
+	}
+	if compared != "" {
+		quoted += " between " + compared
+	}
+	held := "`objects.jsonl` holds every version the Observer saw.\n\n"
+	if slices.ContainsFunc(differences, namesAField) {
+		held = "`equalIgnore` takes each path as written, and " + held
+	}
+	return "The violation quotes " + quoted + ". " + held
+}
+
+func namesAField(d invariant.Difference) bool { return d.Path != "" }
+
 // count writes a number of things, in the singular where there is one.
 func count(n int, noun string) string {
 	if n == 1 {
@@ -121,6 +148,40 @@ func versionRows(versions []observe.Version) [][]string {
 		}
 	}
 	return rows
+}
+
+func differenceRows(differences []invariant.Difference) [][]string {
+	rows := make([][]string, len(differences))
+	for i, d := range differences {
+		path := "(whole object)"
+		if namesAField(d) {
+			path = code(d.Path)
+		}
+		rows[i] = []string{
+			d.Object, resourceVersion(d.ResourceVersions[0]) + " → " + resourceVersion(d.ResourceVersions[1]),
+			path, code(d.Before), code(d.After),
+		}
+	}
+	return rows
+}
+
+func resourceVersion(version string) string {
+	if version == "" {
+		return "(absent)"
+	}
+	return version
+}
+
+// code writes text as a code span that a table cell can hold.
+func code(text string) string {
+	fence := "`"
+	for strings.Contains(text, fence) {
+		fence += "`"
+	}
+	if fence != "`" {
+		text = " " + text + " "
+	}
+	return fence + strings.ReplaceAll(text, "|", `\|`) + fence
 }
 
 // observed writes the observedGeneration a version carried, and nothing for

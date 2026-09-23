@@ -312,6 +312,9 @@ func (o options) replayCommand(sequence string) string {
 	for _, arg := range o.launchArgs {
 		command = append(command, "--launch-arg", arg)
 	}
+	if strings.HasPrefix(sequence, "-") {
+		sequence = "./" + sequence
+	}
 	command = append(command, sequence)
 	for i, word := range command {
 		command[i] = shellQuote(word)
@@ -319,10 +322,10 @@ func (o options) replayCommand(sequence string) string {
 	return strings.Join(command, " ")
 }
 
-var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_./=:@%+,-]+$`)
+var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_./:@%+,-][A-Za-z0-9_./=:@%+,-]*$`)
 
-// shellQuote leaves a word sh reads literally as it is, and single-quotes any
-// other.
+// shellQuote leaves a word sh and zsh read literally as it is, and
+// single-quotes any other.
 func shellQuote(word string) string {
 	if shellSafe.MatchString(word) {
 		return word

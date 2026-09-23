@@ -940,6 +940,7 @@ func TestTheReplayCommandParsesBackToWhatRan(t *testing.T) {
 		{name: "a path with a space", ran: options{target: "my target.yaml"}, path: "botbox-out/run 1/sequence.json"},
 		{name: "what a shell would expand", ran: options{target: "$HOME/t.yaml", launchArgs: []string{"--name=it's", "*"}}, path: "`s`.json"},
 		{name: "an empty launch arg", ran: options{target: "t.yaml", launchArgs: []string{""}}, path: "s.json"},
+		{name: "a path that reads as a flag", ran: options{target: "t.yaml"}, path: "-seqs/b1.json"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			line := test.ran.replayCommand(test.path)
@@ -954,12 +955,21 @@ func TestTheReplayCommandParsesBackToWhatRan(t *testing.T) {
 				t.Fatalf("botbox cannot parse the replay command %q: %v", line, err)
 			}
 			if replay.command != "replay" || replay.target != test.ran.target || replay.kubeconfig != test.ran.kubeconfig ||
-				!slices.Equal(replay.launchArgs, test.ran.launchArgs) || !slices.Equal(sequences, []string{test.path}) {
+				!slices.Equal(replay.launchArgs, test.ran.launchArgs) || len(sequences) != 1 || filepath.Clean(sequences[0]) != test.path {
 				t.Errorf("The replay command %q parses to %s %q, kubeconfig %q, launch args %q, sequences %q; want replay %q, %q, %q, [%q].",
 					line, replay.command, replay.target, replay.kubeconfig, replay.launchArgs, sequences,
 					test.ran.target, test.ran.kubeconfig, test.ran.launchArgs, test.path)
 			}
 		})
+	}
+}
+
+// zsh expands a word that begins with =, and sh does not.
+func TestTheReplayCommandQuotesAWordZshWouldExpand(t *testing.T) {
+	line := options{target: "t.yaml", launchArgs: []string{"=x"}}.replayCommand("s.json")
+
+	if !strings.Contains(line, "'=x'") {
+		t.Errorf("The replay command is %q, want =x quoted.", line)
 	}
 }
 

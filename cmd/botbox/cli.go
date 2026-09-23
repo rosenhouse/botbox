@@ -40,9 +40,9 @@ const (
 
 const usage = `botbox exercises a controller against the generic invariants of DESIGN.md §6.
 
-  botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]... [<sequence.json>...]
-  botbox replay --target <yaml> [--out DIR] [--deadline D] [--launch-arg ARG]... <sequence.json>
-  botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D]
+  botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]
+  botbox replay --target <yaml> [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>
+  botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...
   botbox version
 `
 

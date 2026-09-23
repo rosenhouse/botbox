@@ -719,8 +719,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`, `docs/`,
   and `bin/` for git-ignored build output.
-- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]... [<sequence.json>...]`;
-  `botbox replay --target <yaml> [--deadline D] <sequence.json>`; `botbox version`.
+- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]`;
+  `botbox replay --target <yaml> [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>`;
+  `botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...`;
+  `botbox version`.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. `--deadline` defaults to 4m, and the shrinker stops there and
   reports the smallest failing sequence it found. `--launch-arg` appends to `launch.args`

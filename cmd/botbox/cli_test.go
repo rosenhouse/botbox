@@ -158,6 +158,22 @@ func TestHelpPrintsTheUsage(t *testing.T) {
 	}
 }
 
+func TestTheUsageNamesEveryFlag(t *testing.T) {
+	for _, command := range []string{"run", "replay", "matrix"} {
+		var synopsis string
+		for _, line := range strings.Split(usage, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "botbox "+command+" ") {
+				synopsis = line
+			}
+		}
+		(&options{command: command}).flags().VisitAll(func(f *flag.Flag) {
+			if !strings.Contains(synopsis, "--"+f.Name+" ") {
+				t.Errorf("The usage of botbox %s is %q, want it to name --%s.", command, synopsis, f.Name)
+			}
+		})
+	}
+}
+
 func TestConfigurationErrorsExitTwo(t *testing.T) {
 	sequence := writeSequence(t, 1)
 	for _, test := range []struct {

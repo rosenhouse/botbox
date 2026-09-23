@@ -136,14 +136,14 @@ func TestEveryDrawnOpIsFollowedByTheSettleThatJudgesIt(t *testing.T) {
 					if op.Type != run.OpRestart {
 						continue
 					}
-					// G5 compares the converged state either side of the
-					// restart, so a change on either side is blamed on it.
+					// G5 judges a restart only if no other op changed the run
+					// between the converged states either side of it.
 					if before := ops[i-1]; !before.Settles() {
-						rt.Fatalf("Op %d restarts the target after a %s that waits for nothing, so G5 has no state to compare.",
+						rt.Fatalf("Op %d restarts the target after a %s that waits for nothing, so G5 has nothing to judge.",
 							i, before.Type)
 					}
 					if after := ops[i+1]; after.Type != run.OpSettle {
-						rt.Fatalf("Op %d restarts the target and op %d is a %s, so G5 blames the restart for it.",
+						rt.Fatalf("Op %d restarts the target and op %d is a %s, so G5 has nothing to judge.",
 							i, i+1, after.Type)
 					}
 				}

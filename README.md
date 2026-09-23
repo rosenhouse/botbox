@@ -255,15 +255,15 @@ target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `sequence.json` — the sequence the rest of the directory is evidence of.
 - `sequence.shrunk.json` — a smaller sequence the deadline left unrun. Present only then.
 - `requests.jsonl` — every request the target made, as the proxy saw it.
-- `objects.jsonl` — every version of every object the Observer saw, with each Secret value
-  replaced by a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`.
+- `objects.jsonl` — every version of every object the Observer saw. Each value of a Secret's
+  `data` and annotations is a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`.
 - `target.log` — the target's own output.
 - `kubeconfig` — what the target was pointed at, which is the proxy and not the cluster.
 
 Equal Secret values share a marker within one invocation, so you can see which value changed
-without learning it. botbox hides only Secret values. It writes everything else as it found
-it, including your sample, your CRs, the `--launch-arg` values and your controller's log, so
-keep credentials out of them before you share `botbox-out/`.
+without learning it. botbox hides nothing else. Your sample, your CRs and other objects, the
+`--launch-arg` values and your controller's log are written as they are, so keep credentials
+out of them before you share `botbox-out/`.
 
 The report quotes the last twenty requests and the last twenty object versions the check
 chose from, says how many that was, and names the file holding the rest. A G4 or a

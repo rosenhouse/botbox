@@ -255,8 +255,7 @@ counted only what it was handed would claim every bounded excerpt was whole. It 
 the instant it judged, which aligns the two tables, and whose history a one-object
 timeline is.
 
-A report never quotes a value `objects.jsonl` hides: it renders a Secret through the same
-redaction (§11).
+A report quotes no value `objects.jsonl` hides (§11).
 
 A report is a snapshot taken where the check failed, and the recordings beside it are
 finalized when the run ends. A request still open at the snapshot, which a watch usually
@@ -795,13 +794,12 @@ the proxy; the `Image` launcher. Separate design addendum.
   `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
   where the deadline ended the shrink pass before its result could be run there. Passing
   runs are not persisted. `objects.jsonl` writes each value of a Secret's `data` and
-  `stringData`, and its `kubectl.kubernetes.io/last-applied-configuration` annotation, as
-  a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is
-  drawn per invocation and never written, so equal values share a marker within one
-  invocation and a marker reveals nothing else. The Observer's history keeps the values,
-  so G5 compares them exactly. Every other file is written as the target, the sample and
-  the command line gave it: `target.log`, `sequence.json`, and a report's sequence and
-  replay command are not redacted (D@64).
+  annotations as a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The
+  HMAC key is drawn per invocation and never written, so equal values share a marker
+  within one invocation and a marker reveals nothing else. The Observer's history keeps
+  the values, so G5 compares them exactly. Nothing else is redacted: every other object,
+  `target.log`, `sequence.json`, and a report's sequence and replay command hold what the
+  target, the sample and the command line gave them (D@64).
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -1191,13 +1189,12 @@ built from source and run as a black-box binary.
   resolve it either. G5 has no mapper, so it ignores the version. Each unresolved reference
   is a run note that names the object it keeps, because G3 reports that object and the
   report is what a reader acts on.
-- **D@64 A Secret's values are written as keyed markers.** `objects.jsonl` held whole
-  objects, so the external-secrets control recorded its token and the cert-manager control
-  its private keys, and CI uploads `botbox-out/` when a tier fails. A marker keeps the key
-  and replaces the value with its length and an HMAC. An unkeyed hash would let anyone
-  confirm a guessed value, so the key is random per invocation and never written. A reader
-  still sees which value changed. Only what is written is redacted, so G5 compares real
-  values. Only core Secrets are redacted: a credential inline in a CR or a ConfigMap, in the
-  sample, in a `--launch-arg` or in the target's log is written as given, because botbox
-  cannot tell it from other data. No flag writes the raw values. Each example tier checks
-  that its control's evidence marks the Secret and holds none of its values.
+- **D@64 A Secret's values are written as keyed markers.** CI uploads `botbox-out/` when a
+  tier fails, and `objects.jsonl` held the external-secrets control's token and the
+  cert-manager control's private keys. A marker still shows a reader which value changed.
+  An unkeyed hash would let anyone confirm a guessed value, so the key is never written.
+  external-secrets annotates its Secret with exactly such a hash, and kubectl with a copy
+  of the data, so every annotation value is marked too. Only core Secrets are redacted,
+  because botbox cannot tell a credential inline in a CR, a ConfigMap, the sample, a
+  `--launch-arg` or a log from other data. No flag writes the raw values. Each example
+  tier fails if its control's evidence holds its Secret's value.

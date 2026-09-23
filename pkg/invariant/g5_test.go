@@ -59,8 +59,8 @@ func TestG5FiresOnAnObjectOnlyTheRestartBroughtBack(t *testing.T) {
 	if violation.ID != "G5" {
 		t.Errorf("The violation is %q, want G5.", violation.ID)
 	}
-	if !strings.Contains(violation.Statement, "w-0") {
-		t.Errorf("The statement is %q, want it to name the ConfigMap the restart brought back.", violation.Statement)
+	if want := "the v1/ConfigMap w-0 appeared only after the Restart at op 1 (restart)"; violation.Statement != want {
+		t.Errorf("The statement is %q, want %q.", violation.Statement, want)
 	}
 	if want := timelineOf(configMapGVK, "w-0"); violation.VersionsOf != want {
 		t.Errorf("The timeline is of %q, want %q.", violation.VersionsOf, want)
@@ -85,8 +85,8 @@ func TestG5FiresOnAnObjectTheRestartDropped(t *testing.T) {
 
 	violation := fired(t, invariant.RestartStable, in)
 
-	if !strings.Contains(violation.Statement, "w-0") {
-		t.Errorf("The statement is %q, want it to name the ConfigMap that went.", violation.Statement)
+	if want := "the v1/ConfigMap w-0 is gone after the Restart at op 1 (restart)"; violation.Statement != want {
+		t.Errorf("The statement is %q, want %q.", violation.Statement, want)
 	}
 	want := []invariant.Difference{{
 		Object: "v1/ConfigMap w-0", ResourceVersions: [2]string{"11", ""},
@@ -111,6 +111,9 @@ func TestG5NamesTheFieldThatChanged(t *testing.T) {
 
 			violation := fired(t, invariant.RestartStable, in)
 
+			if want := "the v1/ConfigMap w-0 changed across the Restart at op 1 (restart)"; violation.Statement != want {
+				t.Errorf("The statement is %q, want %q.", violation.Statement, want)
+			}
 			want := []invariant.Difference{{
 				Object: "v1/ConfigMap w-0", ResourceVersions: [2]string{"11", "21"},
 				Path: c.path, Before: c.was, After: c.becomes,
@@ -375,6 +378,7 @@ func TestG5QuotesAValueAsCompactJSON(t *testing.T) {
 		want  string
 	}{
 		{"a list", []any{map[string]any{"b": int64(1), "a": "<&>"}}, `[{"a":"<&>","b":1}]`},
+		{"a string of 80 runes", strings.Repeat("é", 78), `"` + strings.Repeat("é", 78) + `"`},
 		{"a long string", strings.Repeat("é", 100), `"` + strings.Repeat("é", 79) + "…"},
 		{"null", nil, "null"},
 	} {
@@ -557,6 +561,26 @@ func TestG5ComparesALiveOwnerReferenceThatNamesAnotherVersion(t *testing.T) {
 	in := restarted(child("w-0", "11", ownedBy(live)), child("w-0", "21", orphaned))
 
 	fired(t, invariant.RestartStable, in)
+}
+
+// An owner the restart recreated is live on each side, under a new UID.
+func TestG5ComparesAnOwnerReferenceThatFollowedARecreatedOwner(t *testing.T) {
+	was := metav1.OwnerReference{APIVersion: "v1", Kind: "ConfigMap", Name: "p", UID: "uid-p-1"}
+	is := metav1.OwnerReference{APIVersion: "v1", Kind: "ConfigMap", Name: "p", UID: "uid-p-2"}
+	in := restartRun(
+		[]*unstructured.Unstructured{child("c", "11", ownedBy(was)), child("p", "12", uid("uid-p-1"))},
+		[]*unstructured.Unstructured{child("c", "21", ownedBy(is)), child("p", "22", uid("uid-p-2"))}).
+		through(20 * time.Second)
+
+	violation := fired(t, invariant.RestartStable, in)
+
+	want := []invariant.Difference{{
+		Object: "v1/ConfigMap c", ResourceVersions: [2]string{"11", "21"},
+		Path: "metadata.ownerReferences[*].uid", Before: `"uid-p-1"`, After: `"uid-p-2"`,
+	}}
+	if !reflect.DeepEqual(violation.Differences, want) {
+		t.Errorf("G5 quoted %+v, want %+v.", violation.Differences, want)
+	}
 }
 
 // botbox cannot tell that an owner of a kind the target does not declare is

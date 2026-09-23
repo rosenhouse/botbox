@@ -798,9 +798,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   annotations as a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The
   HMAC key is drawn per invocation and never written, so equal values share a marker
   within one invocation and a marker reveals only the value's length. The Observer's
-  history keeps the values, so G5 compares them exactly. Nothing else is redacted: every
-  other object, `target.log`, `sequence.json`, and a report's sequence and replay command
-  hold what the target, the sample and the command line gave them (D@64).
+  history keeps the values, so G5 compares them exactly. Nothing else is redacted: a
+  Secret's labels, every other object, `target.log`, `sequence.json`, and a report's
+  sequence and replay command hold what the target, the sample and the command line gave
+  them (D@64).
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -1195,6 +1196,7 @@ built from source and run as a black-box binary.
   cert-manager control's private keys. A marker still shows a reader which value changed.
   An unkeyed hash would let anyone confirm a guessed value. external-secrets annotates its
   Secret with exactly such a hash, and kubectl with a copy of the data, so every annotation
-  value is marked too. Only core Secrets are redacted, because botbox cannot tell a
-  credential anywhere else from other data. No flag writes the raw values. Each example
-  tier fails if its control's evidence holds its Secret's value.
+  value is marked too. Labels are not, because a reader checks a `selector`'s attribution
+  against them. Only core Secrets are redacted, because botbox cannot tell a credential
+  anywhere else from other data. No flag writes the raw values. Each example tier fails if
+  its control's evidence holds its Secret's value.

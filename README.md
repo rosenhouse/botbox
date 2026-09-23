@@ -261,9 +261,9 @@ target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `kubeconfig` — what the target was pointed at, which is the proxy and not the cluster.
 
 Equal Secret values share a marker within one invocation, so you can see which value changed
-without learning it. botbox hides nothing else. Your sample, your CRs and other objects, the
-`--launch-arg` values and your controller's log are written as they are, so keep credentials
-out of them before you share `botbox-out/`.
+without learning it. botbox hides nothing else. A Secret's labels, your sample, your CRs and
+other objects, the `--launch-arg` values and your controller's log are written as they are, so
+keep credentials out of them before you share `botbox-out/`.
 
 The report quotes the last twenty requests and the last twenty object versions the check
 chose from, says how many that was, and names the file holding the rest. A G4 or a

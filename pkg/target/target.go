@@ -4,7 +4,9 @@
 package target
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -72,7 +74,7 @@ func (l LaunchSpec) Check() error {
 	switch {
 	case err == nil:
 		return nil
-	case strings.Contains(l.Binary, "/") && !filepath.IsAbs(l.Binary):
+	case errors.Is(err, fs.ErrNotExist) && strings.Contains(l.Binary, "/") && !filepath.IsAbs(l.Binary):
 		wd, _ := os.Getwd()
 		return fmt.Errorf("launch.binary: %w; the path is relative to the working directory %s, not to target.yaml", err, wd)
 	default:

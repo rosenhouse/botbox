@@ -33,9 +33,11 @@ type fakeHarness struct {
 	// them, so that its windows line up with the Runner's own bookkeeping.
 	specs []proxy.FaultSpec
 	// faulting makes the harness answer as a proxy that applies every fault
-	// the moment it is given it, and retires none.
-	faulting bool
-	applied  map[proxy.FaultSpec]time.Time
+	// the moment it is given it, and retires none. faultingInWait has it
+	// first apply them once a wait begins, as the target's requests do.
+	faulting       bool
+	faultingInWait bool
+	applied        map[proxy.FaultSpec]time.Time
 	// store is the version history the checks and the report read.
 	store *observe.Store
 	// logged are the requests the harness answers with before the run's own,
@@ -101,6 +103,9 @@ func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time) (bool, 
 		f.applying = f.applyingInWait
 	}
 	f.owed = append(f.owed, owed())
+	if f.faultingInWait {
+		f.apply()
+	}
 	if err := errors.Join(f.record("settle"), ctx.Err()); err != nil {
 		return false, err
 	}
@@ -116,13 +121,18 @@ func (f *fakeHarness) restart(context.Context) error { return f.record("restart"
 func (f *fakeHarness) setFaults(specs []proxy.FaultSpec) {
 	f.specs = specs
 	if f.faulting {
-		for _, spec := range specs {
-			if _, held := f.applied[spec]; !held {
-				f.applied[spec] = time.Now()
-			}
-		}
+		f.apply()
 	}
 	_ = f.record(fmt.Sprintf("setFaults %d", len(specs)))
+}
+
+// apply has the proxy apply each fault it holds, from now if it has not yet.
+func (f *fakeHarness) apply() {
+	for _, spec := range f.specs {
+		if _, held := f.applied[spec]; !held {
+			f.applied[spec] = time.Now()
+		}
+	}
 }
 
 // faultWindows answers as the proxy does, one window per spec it was last
@@ -586,6 +596,30 @@ func TestRunExcusesAWaitThatEndedWhileTheTargetWasOwedRecovery(t *testing.T) {
 
 	if err != nil {
 		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || !strings.Contains(result.Violation.Statement, "after the last fault stopped") {
+		t.Errorf("The run reported %v, want only the G4 of the wait after the last fault stopped.", result.Violation)
+	}
+}
+
+// The proxy first applies a fault when the target makes a request it matches,
+// which may be after the wait began.
+func TestRunExcusesAWaitAFaultFirstReachedPartWayThrough(t *testing.T) {
+	h := newFakeHarness()
+	h.converged = false
+	h.faultingInWait = true
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 30}}},
+		Op{Type: OpCreate, Obj: widget("widget")},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if applied, wait := result.Timeline.Faults[0].Start, result.Timeline.Ops[1].Settled.Window; !applied.After(wait.Start) {
+		t.Fatalf("The proxy first applied the fault at %v, want it after the wait began at %v.", applied, wait.Start)
 	}
 	if result.Violation == nil || !strings.Contains(result.Violation.Statement, "after the last fault stopped") {
 		t.Errorf("The run reported %v, want only the G4 of the wait after the last fault stopped.", result.Violation)

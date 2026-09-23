@@ -263,14 +263,14 @@ func TestTheChecksNameTheCRAnOpWrote(t *testing.T) {
 	timeline := Timeline{
 		Namespace: fakeNamespace,
 		Ops: []AppliedOp{
-			{Op: Op{Index: 0, Type: OpUpdate}, At: at(1), CR: "widget"},
+			{Op: Op{Index: 0, Type: OpUpdate}, At: at(1), CR: "widget-b"},
 			{Op: Op{Index: 1, Type: OpSettle}, At: at(2)},
 		},
 	}
 
 	ops := engineOps(checkTarget(), timeline)
 
-	if want := (observe.Key{GVK: widgetKind, Namespace: fakeNamespace, Name: "widget"}); ops[0].CR != want {
+	if want := (observe.Key{GVK: widgetKind, Namespace: fakeNamespace, Name: "widget-b"}); ops[0].CR != want {
 		t.Errorf("The update names the CR %+v, want %+v.", ops[0].CR, want)
 	}
 	if got := ops[1].CR; got != (observe.Key{}) {

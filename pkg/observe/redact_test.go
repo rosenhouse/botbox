@@ -2,6 +2,7 @@ package observe_test
 
 import (
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -89,6 +90,33 @@ func TestAMarkerCountsTheBytesTheSecretHolds(t *testing.T) {
 			t.Errorf("data.%s is %v, want a marker of %s bytes: the value, not its base64.", key, data[key], want)
 		}
 	}
+}
+
+// The value is longer than the digest, so a digest drawn from it would show
+// some of it.
+func TestAHistoryLineHoldsNoPartOfASecretsValue(t *testing.T) {
+	const value = "correct horse battery staple"
+	written := fmt.Sprint(writtenObjects(t, secret("creds", "10", map[string]string{"token": value}))[0])
+
+	for _, form := range recognisable(value) {
+		if strings.Contains(written, form) {
+			t.Errorf("objects.jsonl holds %q, which is part of the Secret's value: %s", form, written)
+		}
+	}
+}
+
+// recognisable are the forms a reader would know part of a value in: each
+// 4-byte window as it is and in hex, and each base64 group at every alignment.
+func recognisable(value string) []string {
+	var forms []string
+	for i := range len(value) - 2 {
+		forms = append(forms, base64.StdEncoding.EncodeToString([]byte(value[i:i+3])))
+		if i+4 <= len(value) {
+			window := value[i : i+4]
+			forms = append(forms, window, hex.EncodeToString([]byte(window)))
+		}
+	}
+	return forms
 }
 
 func TestAValueThatIsNoStringIsMarkedToo(t *testing.T) {

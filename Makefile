@@ -289,20 +289,21 @@ EXTERNAL_SECRETS_CONTROL_OUT = botbox-out/external-secrets-control
 EXTERNAL_SECRETS_CONTROL = KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox run --target examples/external-secrets/target.yaml --deadline $(EXAMPLE_DEADLINE) --out $(EXTERNAL_SECRETS_CONTROL_OUT) $(EXTERNAL_SECRETS_CONTROL_SEQUENCE)
 EXTERNAL_SECRETS_CONTROL_CLAUSE = G3 the v1/Secret example-secret was still there
 
-# Each example's control: (tier name). tls.key holds a PEM private key, and the
-# three patterns after PRIVATE KEY are its base64 at each alignment. The fake
-# provider serves s3cr3t, whose base64 is czNjcjN0, and external-secrets
-# annotates the Secret with an unkeyed hash of it.
+# Each example's control: (tier name). tls.key holds a PEM private key. The
+# three patterns after PRIVATE KEY are its base64 at each alignment, and the
+# last is the hex of -----BEG, which opens every PEM block. The fake provider
+# serves s3cr3t, whose base64 is czNjcjN0 and whose hex is 733363723374, and
+# external-secrets annotates the Secret with an unkeyed hash of it.
 define cert-manager-control
 	@rm -rf $(CERT_MANAGER_CONTROL_OUT)
 	$(call negative-control,$(1),$(CERT_MANAGER_CONTROL),$(CERT_MANAGER_CONTROL_CLAUSE))
-	$(call hides-the-secret,$(1),$(CERT_MANAGER_CONTROL_OUT),tls.key,PRIVATE KEY|UFJJVkFURSBL|BSSVZBVEUgS0|QUklWQVRFIEt)
+	$(call hides-the-secret,$(1),$(CERT_MANAGER_CONTROL_OUT),tls.key,PRIVATE KEY|UFJJVkFURSBL|BSSVZBVEUgS0|QUklWQVRFIEt|2d2d2d2d2d424547)
 endef
 
 define external-secrets-control
 	@rm -rf $(EXTERNAL_SECRETS_CONTROL_OUT)
 	$(call negative-control,$(1),$(EXTERNAL_SECRETS_CONTROL),$(EXTERNAL_SECRETS_CONTROL_CLAUSE))
-	$(call hides-the-secret,$(1),$(EXTERNAL_SECRETS_CONTROL_OUT),token,s3cr3t|czNjcjN0|56e1b3f734a3d8e2c7932736ca6ff7fb9a9b5a14378c70c27c5e0adf)
+	$(call hides-the-secret,$(1),$(EXTERNAL_SECRETS_CONTROL_OUT),token,s3cr3t|czNjcjN0|733363723374|56e1b3f734a3d8e2c7932736ca6ff7fb9a9b5a14378c70c27c5e0adf)
 endef
 
 # The example tier of DESIGN.md §11. The pinned sequences are the worked example

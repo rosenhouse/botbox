@@ -279,6 +279,14 @@ func TestLoadRejects(t *testing.T) {
 		{"a launch env that sets the kubeconfig", minimalTargetWithEnv + "    KUBECONFIG: /elsewhere\n", "", []string{"launch.env", "KUBECONFIG"}},
 		{"a launch env name holding an equals sign", minimalTargetWithEnv + "    A=B: x\n", "", []string{"launch.env", `"A=B"`}},
 		{"an empty launch env name", minimalTargetWithEnv + "    '': x\n", "", []string{"launch.env", `""`}},
+		{"a launch env that sets the kubeconfig after another name", minimalTargetWithEnv + "    A: x\n    KUBECONFIG: /elsewhere\n", "", []string{"launch.env", "KUBECONFIG"}},
+		{"a zero byte in a launch env name", minimalTargetWithEnv + "    \"A\\0B\": x\n", "", []string{"launch.env", `"A\x00B"`}},
+		{"a zero byte in a launch env value", minimalTargetWithEnv + "    A: \"x\\0y\"\n", "", []string{"launch.env", "value of A", "NUL"}},
+		{"an octal launch env value", minimalTargetWithEnv + "    UMASK: 0022\n", "", []string{"launch.env", "UMASK: 0022 as 18;", "quote"}},
+		{"a decimal launch env value", minimalTargetWithEnv + "    VERSION: 1.10\n", "", []string{"launch.env", "VERSION: 1.10 as 1.1;", "quote"}},
+		{"a yes launch env value", minimalTargetWithEnv + "    VERBOSE: yes\n", "", []string{"launch.env", "VERBOSE: yes as true;", "quote"}},
+		{"an ON launch env name", minimalTargetWithEnv + "    ON: x\n", "", []string{"launch.env", "name ON", "quote"}},
+		{"an octal launch env value merged in", minimalTargetWithEnv + "    <<: {UMASK: 0022}\n", "", []string{"launch.env", "UMASK: 0022 as 18;"}},
 		// A settle wait carves T_stable of quiet out of T_settle, so these
 		// leave the target no time to react and every op expires. The wants
 		// carry the durations: the temp directory's path holds the case name,
@@ -381,14 +389,15 @@ launch:
 }
 
 func TestLoadLaunchEnv(t *testing.T) {
-	path := writeTarget(t, minimalTargetWithEnv+"    WATCH_NAMESPACE: $NAMESPACE\n    EMPTY: ''\n",
+	path := writeTarget(t, minimalTargetWithEnv+"    WATCH_NAMESPACE: $NAMESPACE\n    EMPTY: ''\n    UNSET:\n    UMASK: '0022'\n    PORT: 8080\n",
 		map[string]string{"widget.yaml": sampleWidget})
 
 	loaded, err := target.Load(path)
 	if err != nil {
 		t.Fatalf("Load rejected launch.env: %v", err)
 	}
-	if want := map[string]string{"WATCH_NAMESPACE": "$NAMESPACE", "EMPTY": ""}; !reflect.DeepEqual(loaded.Launch.Env, want) {
+	want := map[string]string{"WATCH_NAMESPACE": "$NAMESPACE", "EMPTY": "", "UNSET": "", "UMASK": "0022", "PORT": "8080"}
+	if !reflect.DeepEqual(loaded.Launch.Env, want) {
 		t.Errorf("Load read launch.env %v, want %v.", loaded.Launch.Env, want)
 	}
 }

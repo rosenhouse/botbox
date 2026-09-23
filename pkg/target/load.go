@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	yamlv2 "go.yaml.in/yaml/v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -183,7 +184,7 @@ func load(path string) (*Target, error) {
 	if loaded.Launch.Binary == "" {
 		return nil, errors.New("launch.binary is required")
 	}
-	if err := checkEnv(loaded.Launch.Env); err != nil {
+	if err := checkEnv(data, loaded.Launch.Env); err != nil {
 		return nil, fmt.Errorf("launch.env: %w", err)
 	}
 
@@ -229,13 +230,30 @@ func loadProperty(declared propertyDeclaration) (Property, error) {
 	return Property{ID: declared.ID, Description: declared.Description, Eval: eval, When: when}, nil
 }
 
-func checkEnv(env map[string]string) error {
-	for _, name := range slices.Sorted(maps.Keys(env)) {
+// checkEnv compares env, as decoded, with the text of target.yaml. Decoding
+// reads an unquoted 0022 as the number 18 and ON as true.
+func checkEnv(data []byte, env map[string]string) error {
+	var written struct {
+		Launch struct {
+			Env map[string]string `yaml:"env"`
+		} `yaml:"launch"`
+	}
+	if err := yamlv2.Unmarshal(data, &written); err != nil {
+		return err
+	}
+	for _, name := range slices.Sorted(maps.Keys(written.Launch.Env)) {
+		value, decoded := env[name]
 		switch {
+		case !decoded:
+			return fmt.Errorf("YAML reads the name %s as something else; quote it", name)
+		case value != written.Launch.Env[name]:
+			return fmt.Errorf("YAML reads %s: %s as %s; quote the value", name, written.Launch.Env[name], value)
 		case name == "KUBECONFIG":
 			return errors.New("botbox sets KUBECONFIG itself, to the kubeconfig it writes")
-		case name == "" || strings.Contains(name, "="):
+		case name == "" || strings.ContainsAny(name, "=\x00"):
 			return fmt.Errorf("%q is not a variable name", name)
+		case strings.Contains(value, "\x00"):
+			return fmt.Errorf("the value of %s holds a NUL", name)
 		}
 	}
 	return nil

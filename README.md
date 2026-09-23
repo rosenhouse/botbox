@@ -46,6 +46,10 @@ kind delete cluster --kubeconfig kind.kubeconfig
   ```yaml
   selector: app.kubernetes.io/managed-by=my-controller
   ```
+- botbox counts a change the cluster makes to an object your target manages as your
+  controller's. The garbage collector can delete a child seconds after its owner, especially
+  just after botbox installs the owner's CRD. If that delete comes after `stable` of quiet,
+  G2 fails. A wider `stable` avoids that.
 
 `make test-kind` runs the toy controller this way ([DESIGN.md §5.8](DESIGN.md#58-test-cluster)).
 

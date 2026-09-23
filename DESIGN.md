@@ -391,7 +391,9 @@ botbox's. The cluster's are what the namespace holds before the fixtures and the
 once §5.8's wait is over. Both are excluded by name, so an object the cluster recreates
 stays excluded. The namespace is private to one run, since a kubeconfig cluster serves one
 invocation at a time (§5.8). Everything else in it came from the target, except what a
-cluster adds later: the optional selector leaves that out.
+cluster adds later: the optional selector leaves that out. A change a cluster makes to a
+managed object still counts as the target's. On a kubeconfig cluster G2 therefore fails
+where the garbage collector deletes a child after `T_stable` of quiet (§14, question 5).
 ownerReferences and the selector refine attribution to a particular CR; they are not
 required for it.
 
@@ -959,6 +961,10 @@ the proxy; the `Image` launcher. Separate design addendum.
 3. Should a later phase run the target's admission webhook in envtest, so that generation
    can widen beyond `generate.mutate`?
 4. Is `InProcess` worth reviving for speed once envtest run time is measured?
+5. Should G2 leave out a change to a managed object that no request of the target's
+   explains? On kind, just after the owner's CRD was installed, the garbage collector
+   deleted an owned Deployment 2.3 s after its owner. With a `T_stable` of 2 s, that delete
+   landed in the quiet window, and G2 counted it as the target's.
 
 ## 15. Decision log
 

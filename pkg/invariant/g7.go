@@ -40,7 +40,7 @@ func SelfHealing(in Input) (Result, error) {
 			continue
 		}
 		if restart, starting := in.stillStarting(op); starting {
-			out.note("for %s: the target had requested no resource other than a lease between %s and it, so it may not yet have been running to recreate the %s",
+			out.note("for %s: the target had requested no resource outside leader election between %s and it, so it may not yet have been running to recreate the %s",
 				describe(op), describe(restart), object)
 			continue
 		}
@@ -74,8 +74,6 @@ func (in Input) stillStarting(op Op) (Op, bool) {
 }
 
 // showsRunning reports whether a request shows the target past starting up. A
-// process waiting to lead requests only its lease and paths that name no
+// process waiting to lead requests only leader election and paths that name no
 // resource, such as discovery.
-func showsRunning(r proxy.Request) bool {
-	return r.Resource != "" && !(r.Group == leaseGroup && r.Resource == leaseResource)
-}
+func showsRunning(r proxy.Request) bool { return r.Resource != "" && !leaderElection(r) }

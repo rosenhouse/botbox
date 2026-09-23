@@ -243,8 +243,8 @@ a failure, and `make test-example` runs every pinned sequence so none can rot.
 In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
 before it settles. G5 compares the states the controller settled in on either side, and leaves a
 note instead of a verdict when another op changed something in between. G7 likewise notes a
-`deleteManaged` that follows a `restart` before your controller has requested a resource other
-than its lease, since botbox cannot otherwise tell that it is back.
+`deleteManaged` that follows a `restart` before your controller has requested a resource outside
+leader election, since botbox cannot otherwise tell that it is back.
 
 ## Reading a report
 

@@ -319,7 +319,7 @@ real targets; the toy target sets much shorter ones (§9).
 
 | ID | Name | Statement | Signal |
 |---|---|---|---|
-| **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault (§5.5), the target makes no further API request for `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io` leases, since leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
+| **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault (§5.5), the target makes no further API request for `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io`, whose leases and lease candidates leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
 | **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). This is ESR as a test. | Observer + target predicate |
@@ -440,10 +440,11 @@ deleted, when the wait ends: nothing asks for the object back. It notes an op wh
 changed the CR or a managed object after the last settle wait that converged, since the
 target may then have meant to delete the object itself, and one whose wait a fault's
 window reaches into. It also notes an op that follows a `Restart` where the target
-requested nothing between the two but its lease and paths that name no resource. botbox
-has no other sign that the target is back (§5.1), and a process starting up or waiting to
-lead requests only those. A violation quotes the object's history and the managed objects
-where the wait ended, which show an object recreated under a new name.
+requested nothing between the two but leader election's leases and lease candidates, and
+paths that name no resource. botbox has no other sign that the target is back (§5.1), and
+a process starting up or waiting to lead requests only those. A violation quotes the
+object's history and the managed objects where the wait ended, which show an object
+recreated under a new name.
 
 ## 7. Sequence format
 
@@ -473,7 +474,7 @@ Details the example does not show:
   `deleteManaged` that deleted something and no fault's window between them (§6). Put a
   `settle` op after a `restart`, and one before it unless the op before it settles. G7
   judges a `deleteManaged` after a `restart` only once the target has requested a
-  resource other than its lease, which a `settle` op between them gives it time to do.
+  resource outside leader election, which a `settle` op between them gives it time to do.
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
 - Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
@@ -1319,6 +1320,11 @@ built from source and run as a black-box binary.
   converge while the target was still starting, or waiting out the lease its killed
   predecessor held. G7 then failed the correct toy behind a wrapper that delayed each
   restart by 3 s. G7 judges an op after a `Restart` only where the target requested a
-  resource other than a lease between the two. A request anywhere in the op's wait was
-  rejected as the bar, because a target first heard from late in the wait has had no time
-  to act.
+  resource outside leader election between the two. A request anywhere in the op's wait
+  was rejected as the bar, because a target first heard from late in the wait has had no
+  time to act.
+- **D@44 G1 and G7 treat every `coordination.k8s.io` request as leader election.** The
+  group holds only leases and lease candidates. A candidate under coordinated leader
+  election creates and renews its LeaseCandidate whether or not it leads. G1 ignores those
+  requests as it ignores lease requests, and G7 does not take one as a sign that a
+  restarted target is back.

@@ -396,6 +396,23 @@ func lease(verb string) proxy.Request {
 	}
 }
 
+// leaseCandidate is a request that coordinated leader election makes before the
+// target leads, as well as after.
+func leaseCandidate(verb string) proxy.Request {
+	return proxy.Request{
+		Verb: verb, Group: "coordination.k8s.io", Version: "v1beta1", Resource: "leasecandidates",
+		Namespace: namespace, Name: "toy-widget", Status: 200,
+	}
+}
+
+// leasesElsewhere reads a resource that shares the name of leader election's
+// leases but not their group.
+func leasesElsewhere() proxy.Request {
+	elsewhere := lease("get")
+	elsewhere.Group = "example.com"
+	return elsewhere
+}
+
 // nonResource is a request to a path that names no resource: a health probe,
 // a discovery read or the OpenAPI schema.
 func nonResource(path string) proxy.Request {

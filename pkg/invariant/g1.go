@@ -6,10 +6,6 @@ import (
 	"github.com/rosenhouse/botbox/pkg/proxy"
 )
 
-// leases are the objects a leader-electing target keeps reading and writing
-// however quiet it is (DESIGN.md §6, G1).
-const leaseGroup, leaseResource = "coordination.k8s.io", "leases"
-
 // BoundedReconciliation is G1: once the settle wait has ended, the target
 // makes no further API request for T_stable (DESIGN.md §6).
 func BoundedReconciliation(in Input) (Result, error) {
@@ -42,12 +38,16 @@ func (in Input) requestsIn(window quiet, keep func(proxy.Request) bool) []proxy.
 }
 
 // reconciles reports whether a request counts towards the rate G1 bounds. A
-// watch is the target waiting, lease traffic is it holding leadership, and a
-// request that names no resource is a health probe or a discovery read
-// (DESIGN.md §6).
+// watch is the target waiting, leader election is it holding or awaiting
+// leadership, and a request that names no resource is a health probe or a
+// discovery read.
 func reconciles(r proxy.Request) bool {
 	if r.Watch || r.Verb == "watch" || r.Resource == "" {
 		return false
 	}
-	return !(r.Group == leaseGroup && r.Resource == leaseResource)
+	return !leaderElection(r)
 }
+
+// leaderElection reports whether a request is to the group of leases and lease
+// candidates, which a target reads and writes however quiet it is.
+func leaderElection(r proxy.Request) bool { return r.Group == "coordination.k8s.io" }

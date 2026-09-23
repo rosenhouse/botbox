@@ -9,6 +9,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
+	"github.com/rosenhouse/botbox/pkg/proxy"
 )
 
 // childDeleted is the toy converged with two children, and botbox deleting
@@ -166,7 +167,7 @@ func TestG7PassesAnObjectThatCameBack(t *testing.T) {
 // botbox cannot tell when a restarted target is back. One still starting, or
 // waiting out its predecessor's lease, recreates nothing.
 func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
-	const wantNote = "G7 is not evaluated for op 2 (deleteManaged): the target had requested no resource other than a lease between op 1 (restart) and it"
+	const wantNote = "G7 is not evaluated for op 2 (deleteManaged): the target had requested no resource outside leader election between op 1 (restart) and it"
 	deletedAfter := func(r *run) invariant.Input {
 		return r.
 			deletedManaged(10*time.Second, "w-0").
@@ -182,6 +183,9 @@ func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 	}{
 		{"with no request", deletedAfter(restarted()), wantNote},
 		{"with lease requests alone", deletedAfter(restarted().requests(9100*time.Millisecond, 500*time.Millisecond, 4, lease("update"))), wantNote},
+		{"with lease candidate requests alone", deletedAfter(restarted().
+			request(9100*time.Millisecond, leaseCandidate("list")).
+			request(9200*time.Millisecond, leaseCandidate("create"))), wantNote},
 		{"with discovery reads alone", deletedAfter(restarted().request(9100*time.Millisecond, nonResource("/api"))), wantNote},
 		{"with a request before the restart alone", deletedAfter(restarted().request(8500*time.Millisecond, get("w-1"))), wantNote},
 		{"with a request in the wait alone", deletedAfter(restarted().request(10500*time.Millisecond, watch())), wantNote},
@@ -189,7 +193,7 @@ func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 			op(invariant.OpRestart, 8*time.Second).
 			request(8500*time.Millisecond, get("w-1")).
 			op(invariant.OpRestart, 9*time.Second)),
-			"G7 is not evaluated for op 3 (deleteManaged): the target had requested no resource other than a lease between op 2 (restart) and it"},
+			"G7 is not evaluated for op 3 (deleteManaged): the target had requested no resource outside leader election between op 2 (restart) and it"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			noted(t, invariant.SelfHealing, c.in, c.want)
@@ -198,15 +202,25 @@ func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 }
 
 func TestG7JudgesAnObjectDeletedOnceARestartedTargetWasBack(t *testing.T) {
-	in := converged().
-		op(invariant.OpRestart, 9*time.Second).
-		request(9500*time.Millisecond, watch()).
-		deletedManaged(10*time.Second, "w-0").
-		remove(10100*time.Millisecond, child("w-0", "15")).
-		checkpoint(12100*time.Millisecond, invariant.Converged).
-		through(12100 * time.Millisecond)
+	for _, c := range []struct {
+		name    string
+		request proxy.Request
+	}{
+		{"with a watch", watch()},
+		{"with a resource named leases in another group", leasesElsewhere()},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := converged().
+				op(invariant.OpRestart, 9*time.Second).
+				request(9500*time.Millisecond, c.request).
+				deletedManaged(10*time.Second, "w-0").
+				remove(10100*time.Millisecond, child("w-0", "15")).
+				checkpoint(12100*time.Millisecond, invariant.Converged).
+				through(12100 * time.Millisecond)
 
-	fired(t, invariant.SelfHealing, in)
+			fired(t, invariant.SelfHealing, in)
+		})
+	}
 }
 
 // An index that resolved to nothing deleted nothing, which the Runner notes.

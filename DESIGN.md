@@ -237,9 +237,9 @@ A failing run emits `report.json` and `report.md` containing: the minimized sequ
 how many of its ops the run reached, the violated invariant or property with the concrete
 evidence (request log excerpt, object version timeline), the target and versions, the
 seed, and a one-line replay command. That command repeats the target, the kubeconfig and
-every launch argument the run had, quoted so that `sh` reads each word as written. The run
-directory also holds recordings of the run (§11), so a report can be re-examined without
-re-running. A readiness verdict and a
+every launch argument the run had, quoted so that `sh` and `zsh` read each word as
+written. The run directory also holds recordings of the run (§11), so a report can be
+re-examined without re-running. A readiness verdict and a
 property violation also quote the state of the objects the target managed where it failed,
 in a table of its own, bounded on its own, and say how many there were: a child the
 target never created has no version to quote, and the count is what a report about a
@@ -1090,8 +1090,7 @@ built from source and run as a black-box binary.
   caused. `b0.json` settles after its restart, so the control row judges G5.
 - **D@66 The matrix runs every sequence against the toy with no bug too.** Only `b0.json`
   ran against the correct toy, so a sequence that fails a correct controller showed up
-  nowhere: `b10.json` failed G5 that way until D@41. Each sequence now runs a second time
-  without its bug, and a check that fires there fails the matrix. B0's one run is both.
-  A `?` there does not fail it, because the check found nothing: G5 leaves the restart
-  of `b10.json` unjudged. The second pass adds a minute to the matrix, which takes about
-  four of its eight-minute deadline.
+  nowhere. Each sequence now runs a second time without its bug, and a check that fires
+  there fails the matrix. B0's one run is both. A `?` there does not fail it, because the
+  check found nothing: G5 leaves the restart of `b10.json` unjudged. The cost is a second
+  run per sequence.

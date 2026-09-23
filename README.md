@@ -192,7 +192,7 @@ order, the first that applies to a request wins, and each runs out on its own `u
 that matches no request changes nothing and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
 
 Field values come from the CRD's own schema: its numeric ranges, enums, patterns, list
-lengths and maps. Every CR botbox writes also passes the CRD's validation rules, CEL
+lengths and maps. Every CR botbox draws also passes the CRD's validation rules, CEL
 `x-kubernetes-validations` included, because botbox checks each draw with the API server's
 own code. A schema that says only `type: string` yields a random word, so the schema is not a
 safety net. Where it allows more than your controller does, `generate.mutate`

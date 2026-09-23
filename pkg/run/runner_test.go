@@ -1223,9 +1223,32 @@ func TestAWriteTheAPIServerRefusesIsARefusalOfItsOp(t *testing.T) {
 				t.Errorf("The run returned %v, want a refusal of op %d.", err, test.refusedOp)
 			case isRefused && refused.Op.Index != test.refusedOp:
 				t.Errorf("The run blamed op %d, want op %d.", refused.Op.Index, test.refusedOp)
+			case isRefused && !strings.HasPrefix(err.Error(), refused.Error()):
+				t.Errorf("The run returned %q, which does not open with the refusal.", err)
 			}
 			if err == nil || !strings.Contains(err.Error(), test.err.Error()) {
 				t.Errorf("The run returned %v, want the API server's %v.", err, test.err)
+			}
+		})
+	}
+}
+
+func TestADeleteAWebhookForbidsIsNoRefusedWrite(t *testing.T) {
+	protected := apierrors.NewForbidden(schema.GroupResource{Group: "toy.botbox", Resource: "widgets"}, "widget",
+		errors.New(`admission webhook "protect.toy.botbox" denied the request: deletion is protected`))
+	for _, deleting := range []Op{{Type: OpDelete}, {Type: OpRecreate, Obj: widget("widget")}} {
+		t.Run(string(deleting.Type), func(t *testing.T) {
+			h := newFakeHarness()
+			h.fail["deleteCR widget"] = protected
+
+			_, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}, deleting))
+
+			var refused *Refused
+			if errors.As(err, &refused) {
+				t.Errorf("The run returned %v, a refusal of what op %d wrote.", err, refused.Op.Index)
+			}
+			if err == nil || !strings.Contains(err.Error(), "deletion is protected") {
+				t.Errorf("The run returned %v, want the API server's %v.", err, protected)
 			}
 		})
 	}

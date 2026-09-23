@@ -27,15 +27,19 @@ type Launcher interface {
 	Restart(ctx context.Context) error
 	// Status reports whether the target is still running.
 	Status() Status
-	// Exited is closed once the running target has stopped, so that a caller
-	// waiting on the target ends where it does.
+	// Exited is closed once the target has stopped and will not start again,
+	// so that a caller waiting on the target ends where it does.
 	Exited() <-chan struct{}
+	// Supervise restarts the target from now on whenever it exits on its own,
+	// as a kubelet restarts a container, and tells onExit why it stopped.
+	Supervise(onExit func(error))
 }
 
 // Status is what the launcher knows of the target process. It is the process's
 // status, not a health probe (DESIGN.md §5.1).
 type Status struct {
-	// Running is whether the target process is alive.
+	// Running is whether the target process is alive, or will be once the
+	// supervisor has restarted it.
 	Running bool
 	// Exit is why a target that ran stopped: an *exec.ExitError naming its exit
 	// status or signal, or ErrExitedZero. It is nil while the target runs, and
@@ -49,6 +53,13 @@ var ErrExitedZero = errors.New("exit status 0")
 
 // DefaultGracePeriod is how long Stop waits after SIGTERM before it escalates.
 const DefaultGracePeriod = 5 * time.Second
+
+// A supervised target restarts at once the first time. Each later restart
+// waits twice as long as the one before, from DefaultBackoff up to MaxBackoff.
+const (
+	DefaultBackoff = 10 * time.Second
+	MaxBackoff     = 5 * time.Minute
+)
 
 // Options configure a Binary.
 type Options struct {
@@ -66,6 +77,9 @@ type Options struct {
 	// GracePeriod is how long Stop waits after SIGTERM. Zero means
 	// DefaultGracePeriod.
 	GracePeriod time.Duration
+	// Backoff is how long a supervised target waits for its second restart.
+	// Zero means DefaultBackoff.
+	Backoff time.Duration
 }
 
 // Binary runs a target as a local process.
@@ -75,6 +89,14 @@ type Binary struct {
 	mu         sync.Mutex
 	running    *process
 	kubeconfig string
+	// onExit hears each exit of a supervised target. It is nil until
+	// Supervise.
+	onExit   func(error)
+	restarts int
+	// gone closes once a supervised target failed to start again, and failed
+	// says why.
+	gone   chan struct{}
+	failed error
 }
 
 type process struct {
@@ -83,6 +105,9 @@ type process struct {
 	// set.
 	done chan struct{}
 	exit error
+	// reaped is set once the launcher has seen the exit, restarting the
+	// process if it was supervised.
+	reaped bool
 }
 
 var _ Launcher = (*Binary)(nil)
@@ -129,6 +154,7 @@ func (b *Binary) start(kubeconfig string) error {
 			running.exit = ErrExitedZero
 		}
 		close(running.done)
+		b.reap(running)
 	}()
 	b.running = running
 	b.kubeconfig = kubeconfig
@@ -146,13 +172,17 @@ func (b *Binary) environment(placeholders *strings.Replacer, kubeconfig string) 
 }
 
 // Status reports whether the target is still running, and why it stopped if it
-// is not. A target that stopped on its own took the run with it, which is a
-// harness error rather than a finding against the target (DESIGN.md §11).
+// is not.
 func (b *Binary) Status() Status {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.running == nil {
+	switch {
+	case b.running == nil:
 		return Status{}
+	case b.failed != nil:
+		return Status{Exit: b.failed}
+	case b.onExit != nil:
+		return Status{Running: true}
 	}
 	select {
 	case <-b.running.done:
@@ -174,17 +204,88 @@ var noTarget = func() chan struct{} {
 func (b *Binary) Exited() <-chan struct{} {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.running == nil {
+	switch {
+	case b.running == nil:
 		return noTarget
+	case b.onExit != nil:
+		return b.gone
 	}
 	return b.running.done
 }
 
+// Supervise restarts the target whenever it exits on its own: at once the
+// first time, and after the backoff every later time. A target that exited
+// before the call restarts now.
+func (b *Binary) Supervise(onExit func(error)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.onExit, b.gone = onExit, make(chan struct{})
+	if b.running != nil && b.running.reaped {
+		b.restartLater(b.running)
+	}
+}
+
+// reap sees a process that has exited. Stop and Restart replace the process
+// they end, so only an exit of the target's own restarts it.
+func (b *Binary) reap(exited *process) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	exited.reaped = true
+	if b.onExit != nil && b.running == exited {
+		b.restartLater(exited)
+	}
+}
+
+// restartLater tells the supervisor why the target stopped, then starts it
+// again once the backoff has passed. The caller holds b.mu, so that Stop and
+// Restart wait until the exit is heard.
+func (b *Binary) restartLater(exited *process) {
+	b.onExit(exited.exit)
+	delay := b.backoff(b.restarts)
+	b.restarts++
+	time.AfterFunc(delay, func() { b.restart(exited) })
+}
+
+// restart starts the target again, unless Stop or Restart already replaced the
+// process that exited.
+func (b *Binary) restart(exited *process) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.running != exited {
+		return
+	}
+	if err := b.start(b.kubeconfig); err != nil {
+		b.failed = fmt.Errorf("%w, and restarting it failed: %w", exited.exit, err)
+		close(b.gone)
+	}
+}
+
+// backoff is how long the restart that follows the given number of restarts
+// waits.
+func (b *Binary) backoff(restarts int) time.Duration {
+	if restarts == 0 {
+		return 0
+	}
+	delay := b.options.Backoff
+	if delay <= 0 {
+		delay = DefaultBackoff
+	}
+	for range restarts - 1 {
+		if delay >= MaxBackoff {
+			break
+		}
+		delay *= 2
+	}
+	return min(delay, MaxBackoff)
+}
+
 // Stop sends SIGTERM and escalates to SIGKILL once the grace period or ctx
-// expires. Stopping a target that is not running does nothing.
+// expires. Stopping a target that is not running does nothing. A stopped
+// target is supervised no longer.
 func (b *Binary) Stop(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.onExit = nil
 	if b.running == nil {
 		return nil
 	}

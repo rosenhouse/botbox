@@ -14,7 +14,7 @@ import (
 // thresholds.quiet bounds.
 func NoChurn(in Input) (Result, error) {
 	out := Result{ID: "G2"}
-	allowed := in.Target.Thresholds.Quiet
+	allowed := in.quiet()
 	for _, window := range in.quietWindows() {
 		if moved := in.changesIn(window); len(moved) > 0 {
 			out.violate(Violation{
@@ -27,7 +27,7 @@ func NoChurn(in Input) (Result, error) {
 			out.violate(Violation{
 				Statement: fmt.Sprintf("the target made %d status writes in %s, where thresholds.quiet allows %d",
 					len(written), window, allowed),
-				At: written[0].Start,
+				At: written[allowed].Start,
 			}.quotingRequests(Recent(written)))
 		}
 	}

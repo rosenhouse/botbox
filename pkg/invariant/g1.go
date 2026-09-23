@@ -15,7 +15,7 @@ const leaseGroup, leaseResource = "coordination.k8s.io", "leases"
 // (DESIGN.md §6).
 func BoundedReconciliation(in Input) (Result, error) {
 	out := Result{ID: "G1"}
-	allowed := in.Target.Thresholds.Quiet
+	allowed := in.quiet()
 	for _, window := range in.quietWindows() {
 		noisy := in.requestsIn(window, reconciles)
 		if len(noisy) <= allowed {
@@ -24,7 +24,7 @@ func BoundedReconciliation(in Input) (Result, error) {
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the target made %d API requests in %s, where thresholds.quiet allows %d%s",
 				len(noisy), window, allowed, in.repeated(window.start, window.end)),
-			At: noisy[0].Start,
+			At: noisy[allowed].Start,
 		}.quotingRequests(Recent(noisy)))
 	}
 	return out, nil

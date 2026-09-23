@@ -88,6 +88,21 @@ func TestG1FiresPastTheQuietThreshold(t *testing.T) {
 	if want := "thresholds.quiet allows 2"; !strings.Contains(violation.Statement, want) {
 		t.Errorf("The statement is %q, want it to name the threshold: %q.", violation.Statement, want)
 	}
+	if want := at(3500 * time.Millisecond); !violation.At.Equal(want) {
+		t.Errorf("The violation is at %v, want the request that went past the threshold, at %v.", violation.At, want)
+	}
+}
+
+// Only the loader refuses a negative quiet, so a target built in code can
+// carry one.
+func TestG1ReadsANegativeQuietAsZero(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		settled(2*time.Second, invariant.Converged).
+		through(14 * time.Second)
+	in.Target.Thresholds.Quiet = -1
+
+	silent(t, invariant.BoundedReconciliation, in)
 }
 
 // The threshold bounds one window, not the run.

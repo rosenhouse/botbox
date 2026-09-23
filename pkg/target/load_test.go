@@ -220,7 +220,7 @@ sample: widget.yaml
 launch: {binary: bin/min}
 `
 
-// minimalTargetWithEnv needs the variables it sets.
+// minimalTargetWithEnv ends in an open launch.env block.
 const minimalTargetWithEnv = `name: min
 primary: toy.botbox/v1/Widget
 sample: widget.yaml

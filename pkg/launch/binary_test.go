@@ -138,13 +138,15 @@ func TestStartSubstitutesKubeconfig(t *testing.T) {
 	waitForLog(t, log, "env="+kubeconfig)
 }
 
+const runNamespace = "botbox-run-x"
+
 func newBinaryInNamespace(t *testing.T, script string, env map[string]string, args ...string) (*launch.Binary, *safeBuffer) {
 	t.Helper()
 	log := &safeBuffer{}
 	binary := launch.NewBinary(launch.Options{
 		Path:      "/bin/sh",
 		Args:      append([]string{"-c", script, "sh"}, args...),
-		Namespace: "botbox-run-x",
+		Namespace: runNamespace,
 		Env:       env,
 		Log:       log,
 	})
@@ -158,8 +160,8 @@ func TestStartSubstitutesNamespace(t *testing.T) {
 
 	kubeconfig := mustStart(t, binary)
 
-	waitForLog(t, log, "arg=--namespace=botbox-run-x\n")
-	waitForLog(t, log, "env=botbox-run-x "+kubeconfig+"\n")
+	waitForLog(t, log, "arg=--namespace="+runNamespace+"\n")
+	waitForLog(t, log, "env="+runNamespace+" "+kubeconfig+"\n")
 }
 
 func TestEnvOverridesAnInheritedVariable(t *testing.T) {
@@ -170,7 +172,7 @@ func TestEnvOverridesAnInheritedVariable(t *testing.T) {
 
 	mustStart(t, binary)
 
-	waitForLog(t, log, "env=botbox-run-x kept\n")
+	waitForLog(t, log, "env="+runNamespace+" kept\n")
 }
 
 func TestStopTerminatesGracefully(t *testing.T) {

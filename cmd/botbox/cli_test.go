@@ -40,12 +40,15 @@ type fakeSession struct {
 	fails func(sequence run.Sequence, dir string) *run.Violation
 	// after runs once a sequence has executed, which is where a test expires
 	// the deadline.
-	after     func()
-	sequences []run.Sequence
-	checks    []run.Checker
-	dirs      []string
-	args      [][]string
-	closed    bool
+	after func()
+	// writesNothing leaves the run directory unmade, as a run that fails
+	// before it starts does.
+	writesNothing bool
+	sequences     []run.Sequence
+	checks        []run.Checker
+	dirs          []string
+	args          [][]string
+	closed        bool
 }
 
 func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
@@ -53,8 +56,10 @@ func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.
 	s.dirs = append(s.dirs, dir)
 	s.args = append(s.args, t.Launch.Args)
 	s.checks = append(s.checks, check)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return run.Result{}, err
+	if !s.writesNothing {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return run.Result{}, err
+		}
 	}
 	if s.after != nil {
 		s.after()
@@ -838,6 +843,19 @@ func TestAHarnessErrorNamesItsRunAndDirectory(t *testing.T) {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("botbox run reported %q, which does not mention %q.", stderr, want)
 		}
+	}
+}
+
+func TestAHarnessErrorBeforeTheRunWroteAnythingNamesNoDirectory(t *testing.T) {
+	session := &fakeSession{failures: []error{errors.New("the sequence is for another target")}, writesNothing: true}
+
+	code, _, stderr := invoke(t, session, "replay", "--target", toyTargetYAML, "--out", t.TempDir(), writeSequence(t, 1))
+
+	if code != exitError {
+		t.Errorf("A run that failed exited %d, want %d.", code, exitError)
+	}
+	if strings.Contains(stderr, session.dirs[0]) {
+		t.Errorf("botbox replay reported %q, which points at a directory the run never made.", stderr)
 	}
 }
 

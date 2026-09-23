@@ -420,7 +420,9 @@ func (c *cli) failRun(number int, failed planned, dir string, err error) int {
 	var refused *run.Refused
 	switch {
 	case !errors.As(err, &refused):
-		fmt.Fprintf(c.stderr, "  the run's files are in %s\n", dir)
+		if _, statErr := os.Stat(dir); statErr == nil {
+			fmt.Fprintf(c.stderr, "  the run's files are in %s\n", dir)
+		}
 	case failed.generated():
 		fmt.Fprintf(c.stderr, "  the op is in %s\n", filepath.Join(dir, sequenceFile))
 		fmt.Fprintln(c.stderr, "  botbox drew it to pass the CRD's schema and validation rules, so a rule botbox cannot see"+

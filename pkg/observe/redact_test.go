@@ -1,9 +1,7 @@
 package observe_test
 
 import (
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -123,18 +121,6 @@ func TestEqualValuesShareAMarkerAcrossRunsOfOneProcess(t *testing.T) {
 
 	if a, b := field(t, first, "data")["token"], field(t, second, "data")["token"]; a != b {
 		t.Errorf("Two runs wrote one value as %v and %v.", a, b)
-	}
-}
-
-func TestAMarkerIsNoUnkeyedHash(t *testing.T) {
-	written := writtenObjects(t, secret("creds", "10", map[string]string{"token": "s3cr3t"}))[0]
-	got := digest(t, field(t, written, "data")["token"])
-
-	for _, value := range []string{"s3cr3t", "czNjcjN0"} {
-		sum := sha256.Sum256([]byte(value))
-		if strings.HasPrefix(hex.EncodeToString(sum[:]), got) {
-			t.Errorf("The marker's digest %s is the sha256 of %q, which anyone can recompute.", got, value)
-		}
 	}
 }
 

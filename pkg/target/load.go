@@ -256,6 +256,9 @@ func checkEnv(data []byte, env map[string]string) error {
 			return fmt.Errorf("the value of %s holds a NUL", name)
 		}
 	}
+	if len(env) != len(written.Launch.Env) {
+		return errors.New("botbox checks names and values only under the lower-case keys launch and env")
+	}
 	return nil
 }
 

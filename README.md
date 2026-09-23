@@ -96,8 +96,9 @@ run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was delete
 
 Seed 23 draws a single op, so there is nothing to minimize. A longer sequence is cut to the ops
 the failure needs before it is reported, which costs a replay each: give `--deadline` room for
-that. `make test-example` runs this same control, and fails unless the default configuration
-passes and the control fails on G3 naming that Secret. A nightly workflow draws its own seeds.
+that. `make test-example` runs this same control. It fails unless the default configuration
+passes, the control fails on G3 naming that Secret, and the control's evidence hides the
+Secret's private key. A nightly workflow draws its own seeds.
 
 ## A second example: external-secrets
 
@@ -119,13 +120,13 @@ It shows three things cert-manager does not.
   the Secret it manages. `spec.target.creationPolicy: Orphan` in the CR does.
 
 `make test-example-external-secrets` runs the drawn sequences, then the pinned ones, then
-that control, and fails unless the control reports G3:
+that control. It fails unless the control reports G3 and its evidence hides the Secret's value:
 
 ```
 run 1: seed 20260922, sequence examples/external-secrets/sequences/orphan.json
 run 1: G3 the v1/Secret example-secret was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-22T16:43:05.836050746Z; 1 version, the first v1/Secret example-secret
-  the evidence is in botbox-out/20260922T164150Z-20260922/run-1
+  the evidence is in botbox-out/external-secrets-control/20260922T164150Z-20260922/run-1
 ```
 
 ## Your own controller

@@ -77,7 +77,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	if !widget.DeletionTimestamp.IsZero() {
-		if wait := time.Until(widget.DeletionTimestamp.Add(r.CleanupDelay)); wait > 0 {
+		if wait := time.Until(widget.DeletionTimestamp.Add(r.CleanupDelay)); r.CleanupDelay > 0 && wait > 0 {
 			return ctrl.Result{RequeueAfter: wait}, nil
 		}
 		return ctrl.Result{}, r.cleanUp(ctx, widget)

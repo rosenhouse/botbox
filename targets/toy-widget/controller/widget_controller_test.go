@@ -115,12 +115,14 @@ func TestCleanUpFindsChildrenTheCacheHasMissed(t *testing.T) {
 func TestCleanUpWaitsOutTheCleanupDelay(t *testing.T) {
 	for _, testCase := range []struct {
 		name        string
+		delay       time.Duration
 		deletedAgo  time.Duration
 		wantRequeue time.Duration
 		wantConfigs []string
 	}{
-		{"within the delay", time.Minute, 59 * time.Minute, []string{"w-0"}},
-		{"past the delay", 2 * time.Hour, 0, []string{}},
+		{"within the delay", time.Hour, time.Minute, 59 * time.Minute, []string{"w-0"}},
+		{"past the delay", time.Hour, 2 * time.Hour, 0, []string{}},
+		{"no delay, and an API server clock ahead of the controller's", 0, -time.Minute, 0, []string{}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			scheme, err := NewScheme()
@@ -134,7 +136,7 @@ func TestCleanUpWaitsOutTheCleanupDelay(t *testing.T) {
 				t.Fatal(err)
 			}
 			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(widget, configMap).Build()
-			r := &Reconciler{Client: c, APIReader: c, Scheme: scheme, CleanupDelay: time.Hour}
+			r := &Reconciler{Client: c, APIReader: c, Scheme: scheme, CleanupDelay: testCase.delay}
 
 			result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(widget)})
 

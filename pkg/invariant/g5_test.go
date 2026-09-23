@@ -200,6 +200,21 @@ func TestG5LeavesARestartUnjudgedWhenBotboxChangedTheRunAfterTheStateBeforeIt(t 
 	noted(t, invariant.RestartStable, in, "op 0 (update)")
 }
 
+// An op stamped at the instant the state before the restart converged came
+// after that state.
+func TestG5LeavesARestartUnjudgedWhenBotboxChangedTheRunAsTheStateBeforeItConverged(t *testing.T) {
+	in := newRun().
+		record(time.Second, widget("10", spec(1), status(1, 1)), child("w-0", "11", data("0"))).
+		checkpoint(5*time.Second, invariant.Converged).
+		op(invariant.OpUpdate, 5*time.Second).
+		op(invariant.OpRestart, 10*time.Second).
+		record(13*time.Second, widget("20", spec(1), status(1, 1)), child("w-0", "21", data("1"))).
+		checkpoint(15*time.Second, invariant.Converged).
+		through(20 * time.Second)
+
+	noted(t, invariant.RestartStable, in, "op 0 (update)")
+}
+
 func TestG5LeavesARestartUnjudgedOnlyForAnOpThatChangesTheRun(t *testing.T) {
 	for _, between := range []struct {
 		name     string
@@ -248,6 +263,11 @@ func TestG5JudgesARestartWhateverBotboxDidOutsideTheStatesItCompares(t *testing.
 			[]*unstructured.Unstructured{child("w-0", "11", data("0"))},
 			[]*unstructured.Unstructured{child("w-0", "21", data("1"))}).
 			op(invariant.OpDelete, 16*time.Second).
+			through(20 * time.Second)},
+		{"an op at the instant the state after the restart converged", restartRun(
+			[]*unstructured.Unstructured{child("w-0", "11", data("0"))},
+			[]*unstructured.Unstructured{child("w-0", "21", data("1"))}).
+			op(invariant.OpDelete, 15*time.Second).
 			through(20 * time.Second)},
 	} {
 		t.Run(outside.name, func(t *testing.T) {

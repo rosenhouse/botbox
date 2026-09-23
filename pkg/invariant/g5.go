@@ -37,10 +37,10 @@ func RestartStable(in Input) (Result, error) {
 }
 
 // changedBetween returns the first op that changed the CR or a managed object
-// strictly between from and to.
+// in [from, to).
 func (in Input) changedBetween(from, to time.Time) (Op, bool) {
 	for _, op := range in.Ops {
-		if op.changesRun() && op.Time.After(from) && op.Time.Before(to) {
+		if op.changesRun() && !op.Time.Before(from) && op.Time.Before(to) {
 			return op, true
 		}
 	}

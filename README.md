@@ -137,6 +137,8 @@ fixtures:
 manages:                                      # group/version/Kind, or v1/Kind for the core group
   - v1/Secret
   - cert-manager.io/v1/CertificateRequest
+notRecreated:                                 # managed kinds your controller leaves deleted
+  - cert-manager.io/v1/CertificateRequest
 ready: >-                                     # CEL over metadata, spec, status; must yield bool
   has(status.conditions) && status.conditions.exists(c,
     c.type == "Ready" && c.status == "True"
@@ -170,9 +172,13 @@ every kind.
 
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the
-controller's back. A sequence you write yourself can also carry a `fault`, which makes the
-proxy refuse, delay or drop the requests it matches. This is
-`targets/toy-widget/sequences/fault.json`:
+controller's back. G7 then requires your controller to recreate an object of that kind and
+name before the run settles. If your controller leaves a kind deleted by design, or recreates
+it under a new name, list the kind under `notRecreated`. cert-manager lists CertificateRequest,
+because a Ready Certificate does not replace a deleted request.
+
+A sequence you write yourself can also carry a `fault`, which makes the proxy refuse, delay or
+drop the requests it matches. This is `targets/toy-widget/sequences/fault.json`:
 
 <!-- embed: targets/toy-widget/sequences/fault.json -->
 ```json
@@ -229,7 +235,7 @@ A sequence file runs as written and is never minimized. This is
 ```
 
 `botbox replay --target target.yaml sequence.json` re-executes one, which is how you re-examine
-a failure, and `make test-example` runs both pinned sequences so they cannot rot.
+a failure, and `make test-example` runs every pinned sequence so none can rot.
 
 In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
 before it settles. G5 compares the states the controller settled in on either side, and leaves a
@@ -321,7 +327,7 @@ a failure is the change under review and not a new draw, and draw fresh seeds on
 
 ## Invariants
 
-Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.
+Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.
 
 | ID | Checks |
 |---|---|
@@ -331,6 +337,7 @@ Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generi
 | G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
+| G7 | Self-healing. An object `deleteManaged` deletes exists again, by kind and name, once the run settles. |
 
 [docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs. Each bug's sequence also runs against the toy with no bug, and CI fails if a check fires there.
 

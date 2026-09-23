@@ -151,7 +151,8 @@ Two details that matter for any client-go based target:
 Watch-event dropping requires parsing the watch stream (chunked JSON, or length-delimited
 protobuf frames for typed clients) and filtering events. This is the hardest fault and
 lands in phase 2 (§10, M8). Until then, `DeleteManaged` ops simulate a missed event by
-deleting an object behind the target's back.
+deleting an object behind the target's back, and G7 requires the target to recreate it
+(§6).
 
 ### 5.3 Observer
 
@@ -322,6 +323,7 @@ real targets; the toy target sets much shorter ones (§9).
 | **G4** | Convergence | Within `T_settle` after any spec change, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
 | **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
+| **G7** | Self-healing | An object a `DeleteManaged` op deleted exists again, by kind and name, when the settle wait after the op ends: on convergence, or at `T_settle` or later after a fault (§5.5). Its content may differ. A kind the target lists in `notRecreated` is exempt (§8.1). | Observer |
 
 **The quiet window.** G1 and G2 judge the `T_stable` that follows a settle wait, which
 ends where the run converged or where the wait gave up (§5.5). Measuring
@@ -387,16 +389,17 @@ while a watch that fails returns at once and repeating it is a loop.
 **Notes.** A check that could not judge something records a note naming it: G3 for a
 deletion whose deadline the run did not reach, that a fault reached into, or that botbox
 took an object inside, G5 for a `Restart` missing a snapshot or with a change of botbox's
-or a fault between its snapshots. The Runner carries the last checkpoint's notes out and
-`botbox` prints them at the end of the run, because a check that was skipped otherwise
-reads like one that passed. G5 also notes an `equalIgnore` path it could not follow
+or a fault between its snapshots, G7 for a `DeleteManaged` that followed such a change
+before the run converged or whose wait a fault reached into. The Runner carries the last
+checkpoint's notes out and `botbox` prints them at the end of the run, because a check
+that was skipped otherwise reads like one that passed. G5 also notes an `equalIgnore` path it could not follow
 (§8.1), since it then compares a field the target meant it to skip. The Runner also notes
 each ownerReference the collector could not resolve (§5.8), since the object that carries
 it stays, and G3 would report it without saying why.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
-manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
-the settle wait, which the predicate ends. The default is
+manages. G4 needs a `Ready` predicate. G1, G2, G5 and G7 need none of their own, but they
+read the settle wait, which the predicate ends. The default is
 `has(status.observedGeneration) && status.observedGeneration == metadata.generation`, and
 a target whose primary CR lacks that field must declare `ready` (§8.4).
 
@@ -421,6 +424,16 @@ and the remaining ownerReferences. A target excludes further paths with `equalIg
 written in the form of the paths above (§8.1). Along an ignored path, a map or a list
 left empty counts as absent, so an ignored annotation that only one side carries compares
 equal. An item that `[*]` names stays even when left empty, so the items still count.
+
+**G7 evaluation.** G7 is evaluated once per `DeleteManaged` op that deleted something,
+where the settle wait after it ends, which is always before the teardown boundary. Its
+window is that wait: up to `T_settle`, closing once `Ready` holds with `T_stable` of quiet
+behind it (§5.5). An object of the deleted one's kind and name satisfies it, whatever its
+UID and content, since a recreated object carries a new UID. G7 does not judge an op where
+no primary CR is live, or where the CR is being deleted, when the wait ends: nothing asks
+for the object back. It notes an op where botbox changed the CR or a managed object after
+the last settle wait that converged, since the target may then have meant to delete the
+object itself, and one whose wait a fault's window reaches into.
 
 ## 7. Sequence format
 
@@ -460,7 +473,9 @@ Details the example does not show:
   then name. The index is resolved at execution time and the chosen object is recorded by
   name in the report. An index that resolves to nothing is skipped and reported as a note,
   since a target that manages fewer objects than the sequence expected is behaving, not
-  failing. A kind the target does not declare in `manages` is a configuration error.
+  failing. A kind the target does not declare in `manages` is a configuration error. G7
+  judges a `deleteManaged` only once the run has converged since botbox last changed
+  something (§6), so put a `settle` op between a `noSettle` op and a `deleteManaged`.
 
 `botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
 embed the minimized sequence in this format.
@@ -485,6 +500,8 @@ fixtures:
   - issuer.yaml                               # applied to the run namespace before op 0
 manages:
   - v1/Secret
+  - cert-manager.io/v1/CertificateRequest
+notRecreated:                                 # managed kinds G7 does not require back
   - cert-manager.io/v1/CertificateRequest
 ready: >-                                     # CEL over metadata, spec, status; must yield bool
   has(status.conditions) && status.conditions.exists(c,
@@ -534,6 +551,11 @@ dotted schema property names, which the CRD schema validates. A Go hook may repl
 equality predicate as `equal: go:<name>` (§8.4). A hook takes no `equalIgnore`, since
 nothing would read it.
 
+`notRecreated` lists managed kinds the target leaves deleted by design, or recreates under
+a new name, which G7 does not require back (§6). Each must appear in `manages`. cert-manager lists CertificateRequest:
+a request records one issuance, and a Ready Certificate whose request is deleted issues no
+new one.
+
 `equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
 holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
 and `[*]` names every item of a list or value of a map:
@@ -575,6 +597,7 @@ type Target struct {
     Sample        *unstructured.Unstructured
     Fixtures      []*unstructured.Unstructured
     Manages       []schema.GroupVersionKind
+    NotRecreated  []schema.GroupVersionKind             // managed kinds G7 exempts
     Selector      labels.Selector
     Ready         func(*unstructured.Unstructured) bool // compiled from `ready`, or a hook
     ReadyExpr     string                                // `ready` as declared, the default, or go:<name>
@@ -673,7 +696,7 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 | B5 | Treats NotFound on child Get as an error and requeues forever. The Get is an uncached read (`mgr.GetAPIReader()`), so the failing request reaches the proxy | error loop | G6, G1 |
 | B6 | Writes a fresh `status.lastSyncTime` (microsecond precision, so consecutive writes differ) on every reconcile, so every write re-triggers the controller | churn | G1, G2 |
 | B7 | Does not delete children on `count` decrease | scale-down | G4 |
-| B8 | Does not `Own()` ConfigMaps, so a deleted child is never recreated. The toy's `ready` does not depend on the children, so G4 stays true | unobserved-state | P1 (at the checkpoint after a `DeleteManaged` op), G5 (after a `Restart` recreates the child) |
+| B8 | Does not `Own()` ConfigMaps, so a deleted child is never recreated. The toy's `ready` does not depend on the children, so G4 stays true | unobserved-state | G7 and P1 (at the checkpoint after a `DeleteManaged` op), G5 (after a `Restart` recreates the child) |
 | B9 | Removes the finalizer on the first deletion reconcile, before deleting children, and omits ownerReferences on every child, so no path cleans up | cleanup-ordering | G3 |
 | B10 | Writes status only from an in-memory flag set when it created children. After a `Restart` the flag is gone, so a later scale-down converges the children but leaves `status` stale (a scale-up creates a child and re-arms the flag) | intermediate-state | G4 |
 | B11 | Believes a child is present from the moment it asks the API server to create it, and never asks again. The belief outlives whatever removed the child, so a refused create, a scale-down or a `DeleteManaged` leaves the toy one child short for good, with no error and no requeue | unconfirmed-write | G4 |
@@ -1263,3 +1286,19 @@ built from source and run as a black-box binary.
   hook compared. A row of a whole object names no path, because `equalIgnore` cannot ignore
   an object. The line botbox prints quotes the first row with a path, since that is what an
   adopter pastes, and names its object where the statement names another.
+- **D@44 G7 requires an object `DeleteManaged` deleted to come back.** The op simulates a
+  missed event, and no check asked whether the target recovered from one. Under B8 with
+  the toy's P1 removed, `create` then `deleteManaged v1/ConfigMap` passed every invariant,
+  and G5 saw the missing child only when a `restart` followed. G7 judges each such op where
+  its settle wait ends and asks for an object of the same kind and name, because a
+  recreated object has a new UID and may differ in content. Comparing the converged states
+  on either side, as G5 does, was rejected: cert-manager answers a deleted Secret with a new
+  key and a newly named CertificateRequest. A target lists the kinds it leaves deleted by
+  design in `notRecreated`, a list of its own, so that `manages` stays a list of strings.
+  cert-manager lists CertificateRequest: after `create` and `deleteManaged` of its request,
+  the settle wait converged on 10 s of quiet with the request still gone. Its Secret came
+  back, also after a re-issue, and so did external-secrets' Secret, also after a rename, so
+  neither lists Secret. G7 notes an op that follows a change of botbox's before the run
+  converged, because the target may have meant to delete that object itself, as the toy
+  does on a scale-down. It notes one whose wait a fault reached into, as every check
+  ignores a fault's window, and it does not judge an op while no CR is live.

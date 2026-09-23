@@ -65,8 +65,8 @@ const (
 
 // Checkpoint is a point at which the engine evaluates (DESIGN.md §4).
 type Checkpoint struct {
-	// Op is the Index of the op the checkpoint follows, and -1 after the
-	// teardown window.
+	// Op is the Index of the op the checkpoint follows, -1 after the teardown
+	// window, or Recovery.
 	Op     int
 	Time   time.Time
 	Settle SettleResult
@@ -79,7 +79,7 @@ type FaultWindow struct{ Start, End time.Time }
 
 // overlaps reports whether the fault was active anywhere in [from, to]. A
 // fault that stopped at from did not reach into the window, which is what
-// makes "within T_settle after faults stop" measurable (§6, G4).
+// lets G4 measure from the instant a fault stopped.
 func (f FaultWindow) overlaps(from, to time.Time) bool {
 	return !f.Start.After(to) && (f.End.IsZero() || f.End.After(from))
 }

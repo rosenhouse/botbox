@@ -50,6 +50,9 @@ type Op struct {
 	Deleted observe.Key
 }
 
+// changesRun reports whether the op changed the CR or a managed object.
+func (op Op) changesRun() bool { return op.Type.touchesCR() || op.Deleted != (observe.Key{}) }
+
 // SettleResult is how the settle wait a checkpoint follows ended (DESIGN.md §5.5).
 type SettleResult string
 

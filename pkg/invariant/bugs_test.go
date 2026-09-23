@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -197,7 +198,7 @@ func b7() invariant.Input {
 // restart.
 func b8() invariant.Input {
 	return converged().
-		op(invariant.OpDeleteManaged, 10*time.Second).
+		deletedManaged(10*time.Second, "w-0").
 		remove(10100*time.Millisecond, child("w-0", "15")).
 		checkpoint(12200*time.Millisecond, invariant.Converged).
 		op(invariant.OpRestart, 16*time.Second).
@@ -224,9 +225,9 @@ func b9() invariant.Input {
 		through(22 * time.Second)
 }
 
-// b10 writes the status from a flag the restart lost, so the scale-down
-// leaves it stale.
-func b10() invariant.Input {
+// restartedAndScaledDown is b10.json up to its scale-down: three children, a
+// restart at 10s and an update to one child before anything settles.
+func restartedAndScaledDown() *run {
 	return newRun().
 		op(invariant.OpCreate, 0).
 		record(100*time.Millisecond, widget("11", spec(3), finalizers(cleanup))).
@@ -234,12 +235,41 @@ func b10() invariant.Input {
 		record(500*time.Millisecond, widget("15", spec(3), status(3, 1), finalizers(cleanup))).
 		checkpoint(2500*time.Millisecond, invariant.Converged).
 		op(invariant.OpRestart, 10*time.Second).
-		checkpoint(12200*time.Millisecond, invariant.Converged).
-		op(invariant.OpUpdate, 16*time.Second).
-		record(16050*time.Millisecond, widget("20", spec(1), generation(2), status(3, 1), finalizers(cleanup))).
-		remove(16300*time.Millisecond, child("w-1", "21"), child("w-2", "22")).
-		checkpoint(21*time.Second, invariant.Expired).
-		through(21 * time.Second)
+		op(invariant.OpUpdate, 10100*time.Millisecond).
+		record(10150*time.Millisecond, widget("20", spec(1), generation(2), status(3, 1), finalizers(cleanup))).
+		remove(10300*time.Millisecond, child("w-1", "21"), child("w-2", "22"))
+}
+
+// b10 writes the status from a flag the restart lost, so the scale-down
+// leaves it stale.
+func b10() invariant.Input {
+	return restartedAndScaledDown().
+		checkpoint(15100*time.Millisecond, invariant.Expired).
+		through(15100 * time.Millisecond)
+}
+
+// The correct toy passes b10.json. Its update runs before the state after the
+// restart settles, so G5 cannot tell which of the two changed the Widget.
+func TestTheCorrectToyPassesTheSequenceOfB10(t *testing.T) {
+	in := restartedAndScaledDown().
+		record(10400*time.Millisecond, widget("23", spec(1), generation(2), status(1, 2), finalizers(cleanup))).
+		checkpoint(12400*time.Millisecond, invariant.Converged).
+		through(15 * time.Second)
+
+	results, err := invariant.Evaluate(in)
+	if err != nil {
+		t.Fatalf("The checks failed to evaluate: %v", err)
+	}
+	if fired := firingIDs(results); len(fired) > 0 {
+		t.Fatalf("The correct toy tripped %v, want nothing.", fired)
+	}
+	var notes []string
+	for _, result := range results {
+		notes = append(notes, result.Notes...)
+	}
+	if len(notes) != 1 || !strings.HasPrefix(notes[0], "G5") || !strings.Contains(notes[0], "op 2 (update)") {
+		t.Fatalf("The checks noted %v, want one G5 note naming op 2 (update).", notes)
+	}
 }
 
 // Every violation the checks raise says how much evidence it chose from, or a

@@ -168,6 +168,94 @@ func TestG5RunsOncePerRestart(t *testing.T) {
 	}
 }
 
+// changedAround restarts at 10s between states converged at 5s and 15s that
+// differ, and applies between whatever ops botbox runs at 11s.
+func changedAround(between func(*run) *run) invariant.Input {
+	r := newRun().
+		record(time.Second, widget("10", spec(1), status(1, 1)), child("w-0", "11", data("0"))).
+		checkpoint(5*time.Second, invariant.Converged).
+		op(invariant.OpRestart, 10*time.Second)
+	return between(r).
+		record(13*time.Second, widget("20", spec(1), status(1, 1)), child("w-0", "21", data("1"))).
+		checkpoint(15*time.Second, invariant.Converged).
+		through(20 * time.Second)
+}
+
+func TestG5LeavesARestartUnjudgedWhenBotboxChangedTheRunBeforeTheStateAfterIt(t *testing.T) {
+	in := changedAround(func(r *run) *run { return r.op(invariant.OpUpdate, 11*time.Second) })
+
+	noted(t, invariant.RestartStable, in, "op 1 (update)")
+}
+
+func TestG5LeavesARestartUnjudgedWhenBotboxChangedTheRunAfterTheStateBeforeIt(t *testing.T) {
+	in := newRun().
+		record(time.Second, widget("10", spec(1), status(1, 1)), child("w-0", "11", data("0"))).
+		checkpoint(5*time.Second, invariant.Converged).
+		op(invariant.OpUpdate, 7*time.Second).
+		op(invariant.OpRestart, 10*time.Second).
+		record(13*time.Second, widget("20", spec(1), status(1, 1)), child("w-0", "21", data("1"))).
+		checkpoint(15*time.Second, invariant.Converged).
+		through(20 * time.Second)
+
+	noted(t, invariant.RestartStable, in, "op 0 (update)")
+}
+
+func TestG5LeavesARestartUnjudgedOnlyForAnOpThatChangesTheRun(t *testing.T) {
+	for _, between := range []struct {
+		name     string
+		apply    func(*run) *run
+		confound bool
+	}{
+		{"create", func(r *run) *run { return r.op(invariant.OpCreate, 11*time.Second) }, true},
+		{"update", func(r *run) *run { return r.op(invariant.OpUpdate, 11*time.Second) }, true},
+		{"delete", func(r *run) *run { return r.op(invariant.OpDelete, 11*time.Second) }, true},
+		{"recreate", func(r *run) *run { return r.op(invariant.OpRecreate, 11*time.Second) }, true},
+		{"deleteManaged of w-0", func(r *run) *run { return r.deletedManaged(11*time.Second, "w-0") }, true},
+		{"deleteManaged of nothing", func(r *run) *run { return r.op(invariant.OpDeleteManaged, 11*time.Second) }, false},
+		{"fault", func(r *run) *run { return r.op(invariant.OpFault, 11*time.Second) }, false},
+		{"settle", func(r *run) *run { return r.op(invariant.OpSettle, 11*time.Second) }, false},
+		{"restart", func(r *run) *run { return r.op(invariant.OpRestart, 11*time.Second) }, false},
+	} {
+		t.Run(between.name, func(t *testing.T) {
+			in := changedAround(between.apply)
+
+			if between.confound {
+				noted(t, invariant.RestartStable, in, "op 1 ("+string(in.Ops[1].Type)+")")
+				return
+			}
+			result := evaluate(t, invariant.RestartStable, in)
+			if len(result.Violations) == 0 || len(result.Notes) > 0 {
+				t.Fatalf("G5 reported %v and noted %v, want the restart judged.", statements(result), result.Notes)
+			}
+		})
+	}
+}
+
+func TestG5JudgesARestartWhateverBotboxDidOutsideTheStatesItCompares(t *testing.T) {
+	for _, outside := range []struct {
+		name string
+		in   invariant.Input
+	}{
+		{"the op the state before the restart settled", newRun().
+			op(invariant.OpUpdate, 0).
+			record(time.Second, widget("10", spec(1), status(1, 1)), child("w-0", "11", data("0"))).
+			checkpoint(5*time.Second, invariant.Converged).
+			op(invariant.OpRestart, 10*time.Second).
+			record(13*time.Second, widget("20", spec(1), status(1, 1)), child("w-0", "21", data("1"))).
+			checkpoint(15*time.Second, invariant.Converged).
+			through(20 * time.Second)},
+		{"an op after the state after the restart", restartRun(
+			[]*unstructured.Unstructured{child("w-0", "11", data("0"))},
+			[]*unstructured.Unstructured{child("w-0", "21", data("1"))}).
+			op(invariant.OpDelete, 16*time.Second).
+			through(20 * time.Second)},
+	} {
+		t.Run(outside.name, func(t *testing.T) {
+			fired(t, invariant.RestartStable, outside.in)
+		})
+	}
+}
+
 func TestG5ComparesTheMetadataSection6DoesNotIgnore(t *testing.T) {
 	in := restarted(child("w-0", "11", data("0")), child("w-0", "21", data("0"), deleting(12*time.Second)))
 

@@ -177,6 +177,16 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 			want: "action",
 		},
 		{
+			name: "a fault on a verb the proxy never records",
+			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"verb": "post"}, "action": {"drop": true}}}`,
+			want: `match.verb "post" is not one of get, list, watch, create, update, patch, delete and deletecollection`,
+		},
+		{
+			name: "a fault on a verb in capitals",
+			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"verb": "Create"}, "action": {"drop": true}}}`,
+			want: `"Create"`,
+		},
+		{
 			name: "a restart that skips its settle",
 			ops:  `{"i": 0, "t": "restart", "noSettle": true}`,
 			want: "noSettle",
@@ -213,6 +223,14 @@ func TestSequenceAcceptsTheOpsTheRunnerExecutes(t *testing.T) {
 		`{"i": 0, "t": "recreate", "obj": {"kind": "Widget"}}`,
 		`{"i": 0, "t": "fault", "spec": {"action": {"delay": "250ms"}, "until": {"for": "5s"}}}`,
 		`{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 3}}}`,
+		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "get"}, "action": {"drop": true}}}`,
+		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "list"}, "action": {"drop": true}}}`,
+		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "watch"}, "action": {"drop": true}}}`,
+		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "create"}, "action": {"drop": true}}}`,
+		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "update"}, "action": {"drop": true}}}`,
+		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "patch"}, "action": {"drop": true}}}`,
+		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "delete"}, "action": {"drop": true}}}`,
+		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "deletecollection"}, "action": {"drop": true}}}`,
 	} {
 		t.Run(ops, func(t *testing.T) {
 			// The trailing settle is what the sequence needs, not the op under test.

@@ -75,6 +75,9 @@ func (r *Request) parsePath(segments []string) {
 	}
 }
 
+// Verbs are the verbs verb records for a resource request.
+var Verbs = []string{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"}
+
 // verb is the Kubernetes verb the method and the path imply. A path that
 // names no resource takes the lowercased method, as non-resource URLs do.
 func verb(method string, r Request) string {

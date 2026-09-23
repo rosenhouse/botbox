@@ -41,6 +41,11 @@ type Status struct {
 	// Running is whether the target process is alive, or will be once the
 	// supervisor has restarted it.
 	Running bool
+	// Restarting is whether a supervised target has exited and waits to start
+	// again.
+	Restarting bool
+	// Started is when the process botbox holds started.
+	Started time.Time
 	// Exit is why a target that ran stopped: an *exec.ExitError naming its exit
 	// status or signal, or ErrExitedZero. It is nil while the target runs, and
 	// before Start and after Stop, when botbox is running no target.
@@ -100,7 +105,8 @@ type Binary struct {
 }
 
 type process struct {
-	cmd *exec.Cmd
+	cmd     *exec.Cmd
+	started time.Time
 	// done closes once the process has exited and been reaped, after exit is
 	// set.
 	done chan struct{}
@@ -148,7 +154,7 @@ func (b *Binary) start(kubeconfig string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting %s: %w", b.options.Path, err)
 	}
-	running := &process{cmd: cmd, done: make(chan struct{})}
+	running := &process{cmd: cmd, started: time.Now(), done: make(chan struct{})}
 	go func() {
 		if running.exit = cmd.Wait(); running.exit == nil {
 			running.exit = ErrExitedZero
@@ -181,14 +187,20 @@ func (b *Binary) Status() Status {
 		return Status{}
 	case b.failed != nil:
 		return Status{Exit: b.failed}
-	case b.onExit != nil:
-		return Status{Running: true}
 	}
-	select {
-	case <-b.running.done:
+	exited := closed(b.running.done)
+	if exited && b.onExit == nil {
 		return Status{Exit: b.running.exit}
+	}
+	return Status{Running: true, Restarting: exited, Started: b.running.started}
+}
+
+func closed(c <-chan struct{}) bool {
+	select {
+	case <-c:
+		return true
 	default:
-		return Status{Running: true}
+		return false
 	}
 }
 

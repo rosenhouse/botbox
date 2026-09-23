@@ -435,13 +435,14 @@ func TestStatusAfterAnExitOfZero(t *testing.T) {
 
 func TestStatusWhileTheTargetRuns(t *testing.T) {
 	binary, log := newBinary(t, 0, "echo started; "+forever)
+	beforeStart := time.Now()
 	mustStart(t, binary)
 	waitForLog(t, log, "started")
 
 	status := binary.Status()
 
-	if !status.Running || status.Exit != nil {
-		t.Errorf("Status reported %+v for a target that is still running.", status)
+	if !status.Running || status.Restarting || status.Exit != nil || status.Started.Before(beforeStart) || status.Started.After(time.Now()) {
+		t.Errorf("Status reported %+v for a target that is still running since after %v.", status, beforeStart)
 	}
 }
 
@@ -633,6 +634,7 @@ func TestASupervisedTargetThatExitsStartsAgain(t *testing.T) {
 	waitForLog(t, log, "started")
 	binary.Supervise(heard.record)
 	exited := binary.Exited()
+	beforeExit := time.Now()
 
 	touch(t, quit)
 
@@ -642,8 +644,8 @@ func TestASupervisedTargetThatExitsStartsAgain(t *testing.T) {
 		t.Errorf("The supervisor reported the exits %v, want the one exit status 3.", seen)
 	}
 	requireOpen(t, exited, "the target was restarted")
-	if status := binary.Status(); !status.Running || status.Exit != nil {
-		t.Errorf("Status reported %+v for a target that was restarted.", status)
+	if status := binary.Status(); !status.Running || status.Restarting || status.Exit != nil || status.Started.Before(beforeExit) {
+		t.Errorf("Status reported %+v for a target that was restarted after %v.", status, beforeExit)
 	}
 }
 
@@ -665,7 +667,7 @@ func TestASupervisedTargetWaitsBeforeItsSecondRestart(t *testing.T) {
 	if got := strings.Count(log.String(), "started"); got != 2 {
 		t.Errorf("The target started %d times, want 2: the second restart waits minutes.", got)
 	}
-	if status := binary.Status(); !status.Running {
+	if status := binary.Status(); !status.Running || !status.Restarting {
 		t.Errorf("Status reported %+v for a target that is waiting to restart.", status)
 	}
 }

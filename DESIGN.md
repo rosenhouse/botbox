@@ -393,12 +393,12 @@ deletion whose deadline the run did not reach, that a fault reached into, or tha
 took an object inside, G5 for a `Restart` missing a snapshot or with a change of botbox's
 or a fault between its snapshots, and G7 for an object a `DeleteManaged` deleted that did
 not come back, where the op followed such a change before the run converged or followed a
-`Restart` the target had not yet answered, or where a fault reached into its wait. The
-Runner carries the last checkpoint's notes out and `botbox` prints them at the end of the
-run, because a check that was skipped otherwise reads like one that passed. G5 also notes
-an `equalIgnore` path it could not follow (§8.1), since it then compares a field the
-target meant it to skip. The Runner also notes each ownerReference the collector could
-not resolve (§5.8), since the object that carries it stays, and G3 would report it
+`Restart` the target had not yet answered, or where a fault reached into the op or its
+wait. The Runner carries the last checkpoint's notes out and `botbox` prints them at the
+end of the run, because a check that was skipped otherwise reads like one that passed. G5
+also notes an `equalIgnore` path it could not follow (§8.1), since it then compares a
+field the target meant it to skip. The Runner also notes each ownerReference the collector
+could not resolve (§5.8), since the object that carries it stays, and G3 would report it
 without saying why.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
@@ -438,8 +438,8 @@ whatever its UID and content, since a recreated object carries a new UID. Where 
 exists, G7 does not judge an op where no primary CR is live, or where the CR is being
 deleted, when the wait ends: nothing asks for the object back. It notes an op where botbox
 changed the CR or a managed object after the last settle wait that converged, since the
-target may then have meant to delete the object itself, and one whose wait a fault's
-window reaches into. It also notes an op that follows a `Restart` where the target
+target may then have meant to delete the object itself, and one where a fault was active
+during the op or its wait. It also notes an op that follows a `Restart` where the target
 requested nothing between the two but leader election's leases and lease candidates, and
 paths that name no resource. botbox has no other sign that the target is back (§5.1), and
 a process starting up or waiting to lead requests only those. A violation quotes the
@@ -1302,27 +1302,27 @@ built from source and run as a black-box binary.
 - **D@44 G7 requires an object `DeleteManaged` deleted to come back.** The op simulates a
   missed event, and no check asked whether the target recovered from one. Under B8 with
   the toy's P1 removed, `create` then `deleteManaged v1/ConfigMap` passed every invariant,
-  and G5 saw the missing child only when a `restart` followed. G7 judges each such op where
-  its settle wait ends and asks for an object of the same kind and name, because a
+  and G5 saw the missing child only when a `restart` followed. G7 judges each such op
+  where its settle wait ends and asks for an object of the same kind and name, because a
   recreated object has a new UID and may differ in content. Comparing the converged states
-  on either side, as G5 does, was rejected: cert-manager answers a deleted Secret with a new
-  key and a newly named CertificateRequest. A target lists the kinds it leaves deleted by
-  design in `notRecreated`, a list of its own, so that `manages` stays a list of strings.
-  cert-manager lists CertificateRequest: after `create` and `deleteManaged` of its request,
-  the settle wait converged on 10 s of quiet with the request still gone. Its Secret came
-  back, also after a re-issue, and so did external-secrets' Secret, also after a rename, so
-  neither lists Secret. G7 notes an op that follows a change of botbox's before the run
-  converged, because the target may have meant to delete that object itself, as the toy
-  does on a scale-down. It notes one whose wait a fault reached into, as every check
-  ignores a fault's window, and it does not judge an op while no CR is live. An object that
-  is back satisfies G7 before any of these, whatever the fault or the change did. A
-  `Restart` gives botbox no sign that the target is back, so a settle wait after one could
-  converge while the target was still starting, or waiting out the lease its killed
-  predecessor held. G7 then failed the correct toy behind a wrapper that delayed each
-  restart by 3 s. G7 judges an op after a `Restart` only where the target requested a
-  resource outside leader election between the two. A request anywhere in the op's wait
-  was rejected as the bar, because a target first heard from late in the wait has had no
-  time to act.
+  on either side, as G5 does, was rejected: cert-manager answers a deleted Secret with a
+  new key and a newly named CertificateRequest. A target lists the kinds it leaves deleted
+  by design in `notRecreated`, a list of its own, so that `manages` stays a list of
+  strings. cert-manager lists CertificateRequest: after `create` and `deleteManaged` of
+  its request, the settle wait converged on 10 s of quiet with the request still gone. Its
+  Secret came back, also after a re-issue, and so did external-secrets' Secret, also after
+  a rename, so neither lists Secret. G7 notes an op that follows a change of botbox's
+  before the run converged, because the target may have meant to delete that object
+  itself, as the toy does on a scale-down. It notes one where a fault was active during
+  the op or its wait, as every check ignores a fault's window, and it does not judge an op
+  while no CR is live. An object that is back satisfies G7 before any of these, whatever
+  the fault or the change did. A `Restart` gives botbox no sign that the target is back,
+  so a settle wait after one could converge while the target was still starting, or
+  waiting out the lease its killed predecessor held. G7 then failed the correct toy behind
+  a wrapper that delayed each restart by 3 s. G7 judges an op after a `Restart` only where
+  the target requested a resource outside leader election between the two. A request
+  anywhere in the op's wait was rejected as the bar, because a target first heard from
+  late in the wait has had no time to act.
 - **D@44 G1 and G7 treat every `coordination.k8s.io` request as leader election.** The
   group holds only leases and lease candidates. A candidate under coordinated leader
   election creates and renews its LeaseCandidate whether or not it leads. G1 ignores those

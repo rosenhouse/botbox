@@ -35,7 +35,7 @@ func SelfHealing(in Input) (Result, error) {
 			continue
 		}
 		if in.faulted(op.Time, end) {
-			out.note("for %s: a fault was active in the wait after it, so the target may have been unable to recreate the %s",
+			out.note("for %s: a fault was active during it or the wait after it, so the target may have been unable to recreate the %s",
 				describe(op), object)
 			continue
 		}

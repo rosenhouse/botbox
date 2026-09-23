@@ -242,13 +242,28 @@ func TestG7IgnoresAnOpWhoseWaitNeverEnded(t *testing.T) {
 	silent(t, invariant.SelfHealing, in)
 }
 
+// A fault that ends while botbox deletes the object can still hide the deletion
+// from the target.
 func TestG7NotesAnObjectAFaultMayHaveKeptAway(t *testing.T) {
-	in := childDeleted().
-		fault(10050*time.Millisecond, 11*time.Second).
-		checkpoint(16*time.Second, invariant.Expired).
-		through(16 * time.Second)
-
-	noted(t, invariant.SelfHealing, in, "G7 is not evaluated for op 1 (deleteManaged): a fault was active")
+	const wantNote = "G7 is not evaluated for op 1 (deleteManaged): a fault was active during it or the wait after it"
+	for _, c := range []struct {
+		name string
+		in   invariant.Input
+	}{
+		{"in the wait", childDeleted().
+			fault(10050*time.Millisecond, 11*time.Second).
+			checkpoint(16*time.Second, invariant.Expired).
+			through(16 * time.Second)},
+		{"during the op alone", childDeleted().
+			fault(9*time.Second, 10050*time.Millisecond).
+			checkpoint(12100*time.Millisecond, invariant.Converged).
+			waitBegan(10100 * time.Millisecond).
+			through(12100 * time.Millisecond)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			noted(t, invariant.SelfHealing, c.in, wantNote)
+		})
+	}
 }
 
 // The update scales the toy down to one child before it settles, so the

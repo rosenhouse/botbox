@@ -24,8 +24,8 @@ const control = 0
 var bugSequence = regexp.MustCompile(`^b(\d+)\.json$`)
 
 // bugRow is one bug, the sequence that exposes it, and what the checks found
-// over that sequence under the bug and against the toy with no bug. B0 has one
-// run, which is both.
+// over that sequence under the bug and without it. B0 has one run, which is
+// both.
 type bugRow struct {
 	bug             int
 	file            string
@@ -84,8 +84,7 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	return c.judge(opts, rows)
 }
 
-// exerciseRow runs the row's sequence under its bug, and then against the toy
-// with no bug.
+// exerciseRow runs the row's sequence under its bug, and then without it.
 func (c *cli) exerciseRow(ctx context.Context, s session, t *target.Target, row *bugRow, dir string) error {
 	var err error
 	if row.bug != control {
@@ -105,14 +104,14 @@ func (c *cli) exerciseRow(ctx context.Context, s session, t *target.Target, row 
 func (c *cli) exerciseUnder(ctx context.Context, s session, t *target.Target, row *bugRow, bugArgs []string, dir string) (checked, error) {
 	exercised := *t
 	exercised.Launch.Args = slices.Concat(t.Launch.Args, bugArgs)
-	under := underBug(bugArgs)
+	ran := row.describe(bugArgs)
 	result, err := s.execute(ctx, &exercised, row.sequence, dir, observing{})
 	if err != nil {
-		return checked{}, fmt.Errorf("%s %s: %w", row.file, under, err)
+		return checked{}, fmt.Errorf("%s: %w", ran, err)
 	}
 	results, err := run.Evaluate(result.Recorded)
 	if err != nil {
-		return checked{}, fmt.Errorf("%s %s: %w", row.file, under, err)
+		return checked{}, fmt.Errorf("%s: %w", ran, err)
 	}
 	var found checked
 	var notes []string
@@ -125,7 +124,7 @@ func (c *cli) exerciseUnder(ctx context.Context, s session, t *target.Target, ro
 		}
 		notes = append(notes, check.Notes...)
 	}
-	fmt.Fprintf(c.stdout, "%s: %s %s fired %s\n", row.name(), row.file, under, found.summary())
+	fmt.Fprintf(c.stdout, "%s: %s fired %s\n", row.name(), ran, found.summary())
 	for _, note := range notes {
 		fmt.Fprintf(c.stdout, "  %s\n", note)
 	}
@@ -153,19 +152,24 @@ func (c *cli) judge(opts options, rows []bugRow) int {
 func (c *cli) unexpected(opts options, row bugRow, found checked, bugArgs []string) {
 	replay := opts
 	replay.launchArgs = slices.Concat(opts.launchArgs, bugArgs)
-	fmt.Fprintf(c.stderr, "botbox: %s (%s) %s fired %s; reproduce it with\n  %s\n",
-		row.name(), row.file, underBug(bugArgs), found.summary(), replay.replayCommand(filepath.Join(opts.sequences, row.file)))
+	fmt.Fprintf(c.stderr, "botbox: %s: %s fired %s; reproduce it with\n  %s\n",
+		row.name(), row.describe(bugArgs), found.summary(), replay.replayCommand(filepath.Join(opts.sequences, row.file)))
 }
 
 func (r bugRow) name() string { return "B" + strconv.Itoa(r.bug) }
 
 func (r bugRow) bugArgs() []string { return []string{fmt.Sprintf("--bug=%d", r.bug)} }
 
-func underBug(bugArgs []string) string {
-	if len(bugArgs) == 0 {
-		return "with no bug"
+// describe names the row's sequence and the bug the matrix added to its launch
+// args or withheld from them.
+func (r bugRow) describe(bugArgs []string) string {
+	switch {
+	case len(bugArgs) > 0:
+		return r.file + " under " + strings.Join(bugArgs, " ")
+	case r.bug == control:
+		return r.file
 	}
-	return "under " + strings.Join(bugArgs, " ")
+	return r.file + " without " + strings.Join(r.bugArgs(), " ")
 }
 
 func (c checked) summary() string {

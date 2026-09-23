@@ -118,7 +118,9 @@ func TestMatrixRunsEachSequenceUnderItsBugAndWithout(t *testing.T) {
 	if dirs := slices.Compact(slices.Sorted(slices.Values(session.dirs))); len(dirs) != len(want) {
 		t.Errorf("The runs wrote to %v, want a directory each.", session.dirs)
 	}
-	for _, line := range []string{"B1: b1.json under --bug=1 fired G4, G6", "B1: b1.json with no bug fired nothing"} {
+	for _, line := range []string{
+		"B0: b0.json fired nothing", "B1: b1.json under --bug=1 fired G4, G6", "B1: b1.json without --bug=1 fired nothing",
+	} {
 		if !strings.Contains(stdout, line) {
 			t.Errorf("botbox matrix printed\n%s\nwant the line %q.", stdout, line)
 		}
@@ -224,22 +226,22 @@ func TestMatrixFailsOnARowThatBreaksTheAcceptance(t *testing.T) {
 		{
 			name:    "a bug nothing caught",
 			results: []run.Result{recorded(t, true), recorded(t, true), recorded(t, true)},
-			want:    []string{"B1 (b1.json) under --bug=1 fired nothing"},
+			want:    []string{"B1: b1.json under --bug=1 fired nothing"},
 		},
 		{
 			name:    "a control something caught",
 			results: []run.Result{recorded(t, false), recorded(t, false), recorded(t, true)},
-			want:    []string{"B0 (b0.json) with no bug fired G4, G6"},
+			want:    []string{"B0: b0.json fired G4, G6"},
 		},
 		{
 			name:    "a sequence something caught against the toy with no bug",
 			results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, false)},
-			want:    []string{"B1 (b1.json) with no bug fired G4, G6"},
+			want:    []string{"B1: b1.json without --bug=1 fired G4, G6"},
 		},
 		{
 			name:    "both runs of one sequence",
 			results: []run.Result{recorded(t, true), recorded(t, true), recorded(t, false)},
-			want:    []string{"B1 (b1.json) under --bug=1 fired nothing", "B1 (b1.json) with no bug fired G4, G6"},
+			want:    []string{"B1: b1.json under --bug=1 fired nothing", "B1: b1.json without --bug=1 fired G4, G6"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -294,8 +296,8 @@ func TestMatrixFailsWhereASequenceFiresAgainstTheToyWithNoBug(t *testing.T) {
 	if code != exitViolation {
 		t.Errorf("botbox matrix exited %d, want %d.", code, exitViolation)
 	}
-	if !strings.Contains(stderr, "B1") || !strings.Contains(stderr, "no bug") {
-		t.Errorf("botbox matrix reported %q, want it to name B1's run with no bug.", stderr)
+	if !strings.Contains(stderr, "B1: b1.json without --bug=1 fired G4, G6") {
+		t.Errorf("botbox matrix reported %q, want it to name B1's run without its bug.", stderr)
 	}
 	commands := replayed(t, stderr)
 	if len(commands) != 1 || commands[0].kubeconfig != "kind.kubeconfig" || !slices.Equal(commands[0].launchArgs, []string{"--x=1"}) {
@@ -353,15 +355,21 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 			want:     "b1.json under --bug=1: the target stopped",
 		},
 		{
-			name:     "with no bug",
+			name:     "without the bug",
 			results:  []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)},
 			failures: []error{nil, nil, stopped},
-			want:     "b1.json with no bug: the target stopped",
+			want:     "b1.json without --bug=1: the target stopped",
+		},
+		{
+			name:     "in the control",
+			results:  []run.Result{recorded(t, true)},
+			failures: []error{stopped},
+			want:     "b0.json: the target stopped",
 		},
 		{
 			name:    "in the checks",
 			results: []run.Result{recorded(t, true), recorded(t, false), recordedWithABrokenProperty(t)},
-			want:    "b1.json with no bug: evaluating property P1: the predicate broke",
+			want:    "b1.json without --bug=1: evaluating property P1: the predicate broke",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

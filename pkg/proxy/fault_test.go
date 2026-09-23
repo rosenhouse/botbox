@@ -275,8 +275,25 @@ func TestUntilDurationEndsTheFault(t *testing.T) {
 	}
 }
 
+func TestACountSpentBeforeTheDurationEndsTheFault(t *testing.T) {
+	p := faultedProxy(t, 0)
+	id := p.AddFault(proxy.FaultSpec{
+		Action: proxy.Error{Code: http.StatusInternalServerError},
+		Until:  proxy.Trigger{Count: 1, For: 50 * time.Millisecond},
+	})
+
+	do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil)
+	spent := p.Window(id).Retired
+	time.Sleep(60 * time.Millisecond)
+
+	if got := p.Window(id).Retired; spent.IsZero() || !got.Equal(spent) {
+		t.Errorf("The fault retired at %v once spent and at %v once its duration passed, want the moment it was spent.", spent, got)
+	}
+}
+
 func TestClearFaultsRestoresTheUpstream(t *testing.T) {
-	p := faultedProxy(t, 0, proxy.FaultSpec{Action: proxy.Error{Code: http.StatusInternalServerError}})
+	spec := proxy.FaultSpec{Action: proxy.Error{Code: http.StatusInternalServerError}}
+	p := faultedProxy(t, 0, spec, spec)
 
 	p.ClearFaults()
 	resp := do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil)

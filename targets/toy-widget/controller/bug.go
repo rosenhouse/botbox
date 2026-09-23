@@ -6,7 +6,7 @@ import (
 )
 
 // Bug selects the seeded bug the controller runs with. Zero is the correct
-// controller; B1 through B12 are the catalog of DESIGN.md §9.1.
+// controller; B1 through B12 are the seeded bugs.
 type Bug int
 
 const (

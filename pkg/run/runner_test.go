@@ -66,6 +66,8 @@ type fakeHarness struct {
 	// Together they show whether the teardown was stamped before the delete.
 	deleteCRDelay time.Duration
 	deletedCRAt   time.Time
+	// finalizerStays has the Observer record a deleted CR still under deletion.
+	finalizerStays bool
 
 	// targetGone makes the harness report a target that has stopped, and
 	// stopsAfter is the call it stops at.
@@ -214,6 +216,9 @@ func (f *fakeHarness) targetStatus() launch.Status {
 
 func (f *fakeHarness) deleteCR(_ context.Context, name string) error {
 	f.deletedCRAt = time.Now()
+	if f.finalizerStays {
+		f.recordDeletingCR(name, "deleted", f.deletedCRAt)
+	}
 	time.Sleep(f.deleteCRDelay)
 	return f.record("deleteCR " + name)
 }
@@ -872,17 +877,17 @@ func TestRunTellsTheSettleWaitWhatRecoveryTheFaultsAreOwed(t *testing.T) {
 
 func TestRunGivesADeletionUntilItsDeadline(t *testing.T) {
 	h := newFakeHarness()
-	deleted := time.Now()
-	h.recordDeletingCR("widget", "11", deleted)
+	h.finalizerStays = true
 
 	_, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}, Op{Type: OpDelete}))
 
 	if err != nil {
 		t.Fatalf("The run failed: %v", err)
 	}
-	want := deleted.Add(testTimeouts.Delete)
-	if len(h.owed) != 2 || !h.owed[1].Equal(want) {
-		t.Errorf("The settle waits were told the run owed %v, want the delete's to run to %v.", h.owed, want)
+	deleted := h.store.HistoryOf(widgetKind, "widget")[0].Time
+	want := []time.Time{{}, deleted.Add(testTimeouts.Delete)}
+	if !slices.EqualFunc(h.owed, want, time.Time.Equal) {
+		t.Errorf("The settle waits were told the run owed %v, want %v.", h.owed, want)
 	}
 }
 

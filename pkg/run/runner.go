@@ -460,7 +460,8 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		return err
 	}
 	r.timeline.Ops[len(r.timeline.Ops)-1].Settled = &wait
-	return r.judge(op.Index, fmt.Sprintf("op %d (%s)", op.Index, op.Type), wait)
+	excused := r.faultsSoFar().Recovering(wait.Window.End)
+	return r.judge(op.Index, fmt.Sprintf("op %d (%s)", op.Index, op.Type), wait, excused)
 }
 
 // wait waits for the target to converge, for as long as the faults leave it
@@ -486,16 +487,16 @@ func (r *runner) faultsSoFar() invariant.Input {
 	}
 }
 
-// judge checkpoints where a settle wait ended. A wait that expired while no
-// fault was active is a G4 violation, which ends the run.
-func (r *runner) judge(checkpoint int, after string, wait Wait) error {
+// judge checkpoints where a settle wait ended. A wait that expired where the
+// faults did not excuse it is a G4 violation, which ends the run.
+func (r *runner) judge(checkpoint int, after string, wait Wait, excused bool) error {
 	if !wait.Converged {
 		// A target that is gone cannot converge, so that is the harness's
 		// failure to report, not the target's to answer for.
 		if status := r.h.targetStatus(); !status.Running {
 			return r.targetStopped(status)
 		}
-		if !r.faultActive() {
+		if !excused {
 			r.violate(r.expired(after, wait))
 		}
 	}
@@ -679,15 +680,6 @@ func (r *runner) setFaults() {
 	r.h.setFaults(specs)
 }
 
-// faultActive reports whether the proxy is still applying a fault it has
-// applied at least once. A settle wait runs until the target owes no recovery
-// from the faults that stopped, so an active fault is what excuses one that
-// expired.
-func (r *runner) faultActive() bool {
-	r.readFaultWindows()
-	return slices.ContainsFunc(r.faults, func(f activeFault) bool { return f.applied && !f.retired })
-}
-
 // clearFaults takes every fault off the proxy and closes its window, which the
 // teardown does before it measures anything (DESIGN.md §5.5).
 func (r *runner) clearFaults() {
@@ -710,7 +702,9 @@ func (r *runner) recover(ctx context.Context) error {
 	wait, err := r.wait(ctx)
 	if err == nil {
 		r.timeline.Recovery = &wait
-		err = r.judge(Recovery, "the last fault stopped", wait)
+		// The faults are cleared, and the wait ran until the time they left
+		// the target was up, so nothing excuses it.
+		err = r.judge(Recovery, "the last fault stopped", wait, false)
 	}
 	if err != nil {
 		r.failed = true

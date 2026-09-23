@@ -14,9 +14,9 @@ const settlePoll = 50 * time.Millisecond
 // Settle waits for the target's reaction (DESIGN.md §5.5): the Ready predicate
 // holds and neither the CR nor a managed object has changed for T_stable. It
 // reports whether it converged within T_settle, or by what owed returns if
-// that is later: the target may still be recovering from a fault. A wait that
-// expires while no fault excuses it is a G4 violation, which the caller
-// records.
+// that is later: the target may still be recovering from a fault. A nil owed
+// owes nothing. A wait that expires while no fault excuses it is a G4
+// violation, which the caller records.
 func (h *Harness) Settle(ctx context.Context, owed func() time.Time) (bool, error) {
 	return settle{
 		timeouts: h.target.Timeouts,
@@ -42,7 +42,7 @@ type settle struct {
 	// stopped is closed once the target's process has stopped.
 	stopped <-chan struct{}
 	// owed is when the target must have recovered from the faults by, which
-	// can move while the wait runs.
+	// can move while the wait runs. Nil owes nothing.
 	owed func() time.Time
 }
 
@@ -55,8 +55,10 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 			return true, nil
 		}
 		deadline := start.Add(s.timeouts.Settle)
-		if owed := s.owed(); owed.After(deadline) {
-			deadline = owed
+		if s.owed != nil {
+			if owed := s.owed(); owed.After(deadline) {
+				deadline = owed
+			}
 		}
 		// A target that stopped will never converge, so the wait ends there.
 		if !now.Before(deadline) || closed(s.stopped) {

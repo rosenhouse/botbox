@@ -45,7 +45,7 @@ var neverStops = make(chan struct{})
 // how long it took on the clock.
 func waitOn(t *testing.T, ctx context.Context, c *clock, state func(since time.Time) (bool, time.Time), stopped <-chan struct{}) (bool, time.Duration, error) {
 	t.Helper()
-	return waitOwing(t, ctx, c, state, stopped, owesNothing)
+	return waitOwing(t, ctx, c, state, stopped, nil)
 }
 
 // waitOwing is waitOn for a target owed time to recover from faults.
@@ -64,8 +64,6 @@ func waitOwing(t *testing.T, ctx context.Context, c *clock, state func(since tim
 	converged, err := wait.wait(ctx)
 	return converged, c.now.Sub(start), err
 }
-
-func owesNothing() time.Time { return time.Time{} }
 
 // A fault that stops 4s into the wait leaves the target owed until 9s, which
 // the wait learns only then.

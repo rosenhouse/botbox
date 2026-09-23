@@ -520,7 +520,7 @@ func TestRunKeepsTheViolationTheExpiredSettleFoundFirst(t *testing.T) {
 	}
 }
 
-func TestRunLeavesTheExpiredSettleToTheChecksWhileAFaultIsActive(t *testing.T) {
+func TestRunExcusesEveryWaitAFaultWasActiveThrough(t *testing.T) {
 	h := newFakeHarness()
 	h.converged = false
 	h.faulting = true
@@ -551,7 +551,7 @@ func TestRunLeavesTheExpiredSettleToTheChecksWhileAFaultIsActive(t *testing.T) {
 func TestRunStopsExcusingTheTargetWhereTheProxyRetiredTheFault(t *testing.T) {
 	h := newFakeHarness()
 	h.converged = false
-	applied, retired := time.Now(), time.Now().Add(time.Millisecond)
+	applied, retired := time.Now().Add(-10*time.Second), time.Now().Add(-9*time.Second)
 	h.applying = []proxy.FaultWindow{{First: applied, Retired: retired}}
 	sequence := sequenceOf(
 		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 1}}},
@@ -568,6 +568,27 @@ func TestRunStopsExcusingTheTargetWhereTheProxyRetiredTheFault(t *testing.T) {
 	}
 	if got := result.Timeline.Faults; len(got) != 1 || !got[0].Start.Equal(applied) || !got[0].End.Equal(retired) {
 		t.Errorf("The fault's window is %+v, want the %v to %v the proxy applied it in.", got, applied, retired)
+	}
+}
+
+// A fault that stopped as the wait ended leaves the target time it has not
+// had yet, so the Runner leaves the wait to the teardown's recovery.
+func TestRunExcusesAWaitThatEndedWhileTheTargetWasOwedRecovery(t *testing.T) {
+	h := newFakeHarness()
+	h.converged = false
+	h.applying = []proxy.FaultWindow{{First: time.Now().Add(-time.Second), Retired: time.Now()}}
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 1}}},
+		Op{Type: OpCreate, Obj: widget("widget")},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || !strings.Contains(result.Violation.Statement, "after the last fault stopped") {
+		t.Errorf("The run reported %v, want only the G4 of the wait after the last fault stopped.", result.Violation)
 	}
 }
 

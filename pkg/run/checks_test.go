@@ -140,6 +140,18 @@ func TestTheChecksReadTheRecoveryCheckpointAsASettleWait(t *testing.T) {
 	}
 }
 
+func TestTheChecksMeasureAnExpiredWaitFromWhereItBegan(t *testing.T) {
+	in := convergedRun()
+	in.Timeline.Ops = append(in.Timeline.Ops, appliedOp(1, OpSettle, at(3)))
+	in.Timeline.Checkpoints = append(in.Timeline.Checkpoints, Checkpoint{At: at(9), Began: at(4), Op: 1, Converged: false})
+
+	violations := checked(t, in)
+
+	if len(violations) != 1 || !strings.Contains(violations[0].Statement, "expired with no fault active: in 5s, ready held from 0s on") {
+		t.Errorf("The checks reported %v, want the G4 of a wait that ran 5s on a ready CR.", violations)
+	}
+}
+
 // A namespace that came clean settles G3 where the teardown stopped watching,
 // which is before T_delete is up whenever the target cleans up promptly
 // (DESIGN.md §6). The timeline carries that instant, not a teardown
@@ -244,6 +256,25 @@ func TestTheChecksCarryNoObjectForAnOpThatResolvedToNothing(t *testing.T) {
 
 	if got := ops[0].Deleted; got != (observe.Key{}) {
 		t.Errorf("The op names the object %+v, and its index resolved to nothing.", got)
+	}
+}
+
+func TestTheChecksNameTheCRAnOpWrote(t *testing.T) {
+	timeline := Timeline{
+		Namespace: fakeNamespace,
+		Ops: []AppliedOp{
+			{Op: Op{Index: 0, Type: OpUpdate}, At: at(1), CR: "widget-b"},
+			{Op: Op{Index: 1, Type: OpSettle}, At: at(2)},
+		},
+	}
+
+	ops := engineOps(checkTarget(), timeline)
+
+	if want := (observe.Key{GVK: widgetKind, Namespace: fakeNamespace, Name: "widget-b"}); ops[0].CR != want {
+		t.Errorf("The update names the CR %+v, want %+v.", ops[0].CR, want)
+	}
+	if got := ops[1].CR; got != (observe.Key{}) {
+		t.Errorf("The settle names the CR %+v, and it wrote none.", got)
 	}
 }
 
@@ -432,6 +463,91 @@ func TestTheChecksQuoteWhatTheRunDid(t *testing.T) {
 	if want := "toy.botbox/v1/Widget widget"; first.VersionsOf != want {
 		t.Errorf("G4 says its timeline is of %q, want %q.", first.VersionsOf, want)
 	}
+}
+
+func TestTheChecksNameWhatARestartChanged(t *testing.T) {
+	for _, c := range []struct {
+		name          string
+		before, after map[string]any
+		differences   int
+		evidence      string
+	}{
+		{"one field", map[string]any{"a": "0", "b": "0"}, map[string]any{"a": "1", "b": "0"}, 1,
+			`data.a was "0", is "1"; 2 versions, the first v1/ConfigMap widget-0`},
+		{"two fields", map[string]any{"a": "0", "b": "0"}, map[string]any{"a": "1", "b": "1"}, 2,
+			`data.a was "0", is "1" (1 of 2 differences); 2 versions, the first v1/ConfigMap widget-0`},
+		{"a whole object, which the statement names", nil, map[string]any{"a": "0"}, 1,
+			"1 version, the first v1/ConfigMap widget-0"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			store := history()
+			recordWidget(store, at(0.1), "11", 1)
+			if c.before != nil {
+				recordData(store, at(0.2), "widget-0", "12", c.before)
+			}
+			recordData(store, at(3.5), "widget-0", "22", c.after)
+
+			restart := restartChanged(t, store)
+
+			if len(restart.Differences) != c.differences || restart.DifferencesTotal != c.differences {
+				t.Errorf("G5 carried out %+v of %d differences, want %d.", restart.Differences, restart.DifferencesTotal, c.differences)
+			}
+			if want := "the state converged after op 0 (create) and the one after op 2 (settle)"; restart.Compared != want {
+				t.Errorf("G5 carried out that it compared %q, want %q.", restart.Compared, want)
+			}
+			if restart.Evidence != c.evidence {
+				t.Errorf("G5's evidence is %q, want %q.", restart.Evidence, c.evidence)
+			}
+		})
+	}
+}
+
+// The statement names the first object, here a whole one, so the line names
+// the object whose field it quotes.
+func TestTheChecksNameTheFirstFieldARestartChanged(t *testing.T) {
+	store := history()
+	recordWidget(store, at(0.1), "11", 1)
+	recordData(store, at(0.2), "widget-1", "12", map[string]any{"a": "0"})
+	recordData(store, at(3.5), "widget-0", "21", map[string]any{"a": "0"})
+	recordData(store, at(3.6), "widget-1", "22", map[string]any{"a": "1"})
+
+	restart := restartChanged(t, store)
+
+	want := `data.a of the v1/ConfigMap widget-1 was "0", is "1" (1 of 2 differences); 1 version, the first v1/ConfigMap widget-0`
+	if restart.Evidence != want {
+		t.Errorf("G5's evidence is %q, want %q.", restart.Evidence, want)
+	}
+}
+
+// restartChanged returns the G5 of a run that converged, restarted and
+// converged again on the objects recorded.
+func restartChanged(t *testing.T, store *observe.Store) Violation {
+	t.Helper()
+	violations := checked(t, Input{
+		Target:  checkTarget(),
+		Objects: store,
+		Timeline: Timeline{
+			Ops: []AppliedOp{appliedOp(0, OpCreate, at(0)), appliedOp(1, OpRestart, at(3)), appliedOp(2, OpSettle, at(3.1))},
+			Checkpoints: []Checkpoint{
+				{At: at(2.1), Op: 0, Converged: true},
+				{At: at(5.1), Op: 2, Converged: true},
+			},
+		},
+	})
+	if ids := ids(violations); len(ids) != 1 || ids[0] != "G5" {
+		t.Fatalf("The checks reported %v, want G5 alone.", ids)
+	}
+	return violations[0]
+}
+
+// recordData records a ConfigMap holding the data.
+func recordData(store *observe.Store, when time.Time, name, resourceVersion string, data map[string]any) {
+	child := &unstructured.Unstructured{Object: map[string]any{"data": data}}
+	child.SetGroupVersionKind(configMapKind)
+	child.SetNamespace(fakeNamespace)
+	child.SetName(name)
+	child.SetResourceVersion(resourceVersion)
+	store.Record(configMapKind, child, when)
 }
 
 // A property that cannot be evaluated is a configuration error, never a

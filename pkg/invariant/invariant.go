@@ -48,6 +48,8 @@ type Op struct {
 	// the zero Key, and so does a DeleteManaged op whose index resolved to
 	// nothing (DESIGN.md §5.4).
 	Deleted observe.Key
+	// CR is the primary CR a CR op wrote. Every other op carries the zero Key.
+	CR observe.Key
 }
 
 // changesRun reports whether the op changed the CR or a managed object.
@@ -74,7 +76,10 @@ const (
 // Checkpoint is a point at which the engine evaluates (DESIGN.md §4).
 type Checkpoint struct {
 	// Op is the Index of the op the checkpoint follows, Teardown or Recovery.
-	Op     int
+	Op int
+	// Began is when the settle wait that ends here began. The teardown's
+	// checkpoint follows no wait and leaves it zero.
+	Began  time.Time
 	Time   time.Time
 	Settle SettleResult
 }
@@ -140,6 +145,47 @@ type Violation struct {
 	// (DESIGN.md §5.7, D39).
 	Managed      []observe.Version `json:"managed,omitempty"`
 	ManagedTotal *int              `json:"managedTotal,omitempty"`
+	// Ready is what a readiness verdict read. Other checks leave it nil.
+	Ready *Readiness `json:"ready,omitempty"`
+	// Differences are what G5 found changed across a restart, and
+	// DifferencesTotal how many there were. Compared names the two states.
+	Differences      []Difference `json:"differences,omitempty"`
+	DifferencesTotal int          `json:"differencesTotal,omitempty"`
+	Compared         string       `json:"compared,omitempty"`
+}
+
+// Readiness is the Ready predicate at a verdict and the CR it read.
+type Readiness struct {
+	// Expr is the target's ready: CEL, or go:<name>.
+	Expr string `json:"expr,omitempty"`
+	// CR is the name of the CR it read.
+	CR string `json:"cr,omitempty"`
+	// Error is what evaluating Expr on the CR returned.
+	Error string `json:"error,omitempty"`
+	// Status is the CR's status, unbounded. A report bounds it.
+	Status map[string]any `json:"status,omitempty"`
+}
+
+// Difference is one field that differs between two versions of an object,
+// with its value in each. Path is empty where one version is absent, whose
+// resourceVersion is then empty, or where the target's own equality compared
+// the whole object.
+type Difference struct {
+	Object           string    `json:"object"`
+	ResourceVersions [2]string `json:"resourceVersions"`
+	Path             string    `json:"path"`
+	Before           string    `json:"before"`
+	After            string    `json:"after"`
+}
+
+// NamesAField says whether Path names what differs, which it does unless the
+// difference is of the object taken as one.
+func (d Difference) NamesAField() bool { return d.Path != "" }
+
+// whole is the difference of an object taken as one.
+func whole(object Difference, before, after string) Difference {
+	object.Before, object.After = before, after
+	return object
 }
 
 // Result is what one check found.
@@ -188,6 +234,12 @@ func (v Violation) quotingRequests(e Excerpt[proxy.Request]) Violation {
 // quotingVersions does the same for a timeline of object versions.
 func (v Violation) quotingVersions(e Excerpt[observe.Version]) Violation {
 	v.Versions, v.VersionsTotal, v.VersionsOf = e.Quoted, e.Total, e.Of
+	return v
+}
+
+// quotingDifferences does the same for what changed across a restart.
+func (v Violation) quotingDifferences(e Excerpt[Difference]) Violation {
+	v.Differences, v.DifferencesTotal = e.Quoted, e.Total
 	return v
 }
 

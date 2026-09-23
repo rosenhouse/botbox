@@ -29,7 +29,7 @@ func ParsePath(text string) (Path, error) {
 		var step Step
 		var err error
 		switch {
-		case isStringMap(path) && !strings.HasPrefix(rest, "[") && strings.ContainsAny(rest, "./"):
+		case path.MapsToStrings() && !strings.HasPrefix(rest, "[") && strings.ContainsAny(rest, "./"):
 			return nil, at(text, i, "%s maps keys to strings, so %s is one key; quote it, as in %s"+inBlockStyle,
 				path, rest, append(path, Step{Key: rest}))
 		case strings.HasPrefix(rest, "[") && !strings.HasSuffix(text[:i], "."):
@@ -42,7 +42,7 @@ func ParsePath(text string) (Path, error) {
 			return nil, err
 		case step.Each && len(path) == 0:
 			return nil, at(text, start, "a path starts with a key")
-		case isStringMap(path) && i < len(text):
+		case path.MapsToStrings() && i < len(text):
 			return nil, at(text, start, "%s maps keys to strings, so the path ends one step below it", path)
 		}
 		path = append(path, step)
@@ -70,12 +70,12 @@ func MustParsePath(text string) Path {
 	return path
 }
 
-// isStringMap reports whether path ends at the labels or the annotations of
-// some metadata.
-func isStringMap(path Path) bool {
-	n := len(path)
-	return n >= 2 && path[n-2] == Step{Key: "metadata"} &&
-		(path[n-1] == Step{Key: "labels"} || path[n-1] == Step{Key: "annotations"})
+// MapsToStrings reports whether p ends at the labels or the annotations of
+// some metadata, one step above where a path ends.
+func (p Path) MapsToStrings() bool {
+	n := len(p)
+	return n >= 2 && p[n-2] == Step{Key: "metadata"} &&
+		(p[n-1] == Step{Key: "labels"} || p[n-1] == Step{Key: "annotations"})
 }
 
 // bare reads the key at text[i], which runs to the next . or [.

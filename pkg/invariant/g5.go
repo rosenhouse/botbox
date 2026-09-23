@@ -26,12 +26,12 @@ func RestartStable(in Input) (Result, error) {
 			out.note("for %s: it has no converged snapshot %s it", describe(op), missing)
 			continue
 		}
-		if changed, found := in.changedBetween(before.at, after.at); found {
+		if changed, found := in.changedBetween(before.Time, after.Time); found {
 			out.note("for %s: %s ran between the converged states before and after it, so G5 cannot tell what the restart changed; a settle op on each side of a restart lets G5 judge it",
 				describe(op), describe(changed))
 			continue
 		}
-		if in.faulted(before.at, after.at) {
+		if in.faulted(before.Time, after.Time) {
 			out.note("for %s: a fault was active between the converged states before and after it, so G5 cannot tell what the restart changed",
 				describe(op))
 			continue
@@ -52,9 +52,9 @@ func (in Input) changedBetween(from, to time.Time) (Op, bool) {
 	return Op{}, false
 }
 
-// convergedAround returns the states the settle waits converged at on either
-// side of the op, or which side is missing (DESIGN.md §6, G5 evaluation).
-func (in Input) convergedAround(op Op) (before, after state, missing string) {
+// convergedAround returns the checkpoints of the settle waits that converged
+// on either side of the op, or which side is missing.
+func (in Input) convergedAround(op Op) (before, after Checkpoint, missing string) {
 	var last, first *Checkpoint
 	for i, checkpoint := range in.Checkpoints {
 		switch {
@@ -71,13 +71,22 @@ func (in Input) convergedAround(op Op) (before, after state, missing string) {
 	case first == nil:
 		return before, after, "after"
 	}
-	states := in.statesAt([]time.Time{last.Time, first.Time})
-	return states[0], states[1], ""
+	return *last, *first, ""
 }
 
-// compare reports every object that the Restart added, dropped or changed.
-func (out *Result) compare(in Input, op Op, before, after state) {
-	equal := in.equality(before, after, out)
+// changedObject is one object that differs across a Restart, and the version
+// whose history a report quotes.
+type changedObject struct {
+	version     observe.Version
+	how         string
+	differences []Difference
+}
+
+// compare reports every object that the Restart added, dropped or changed, in
+// one violation.
+func (out *Result) compare(in Input, op Op, before, after Checkpoint) {
+	states := in.statesAt([]time.Time{before.Time, after.Time})
+	differ := in.differ(states[0], states[1], out)
 	indexed := func(s state) map[objectKey]observe.Version {
 		objects := map[objectKey]observe.Version{}
 		for _, v := range s.live {
@@ -85,28 +94,64 @@ func (out *Result) compare(in Input, op Op, before, after state) {
 		}
 		return objects
 	}
-	was, is := indexed(before), indexed(after)
+	was, is := indexed(states[0]), indexed(states[1])
+	var changed []changedObject
 	for _, key := range union(was, is) {
 		old, existed := was[key]
 		current, exists := is[key]
+		object := Difference{Object: key.kind + " " + key.name, ResourceVersions: [2]string{old.ResourceVersion, current.ResourceVersion}}
 		switch {
-		case existed && !exists:
-			out.differs(in, op, old, "is gone after")
-		case !existed && exists:
-			out.differs(in, op, current, "appeared only after")
-		case !equal(old, current):
-			out.differs(in, op, current, "changed across")
+		case !exists:
+			changed = append(changed, changedObject{old, "is gone after", []Difference{whole(object, "(present)", "(absent)")}})
+		case !existed:
+			changed = append(changed, changedObject{current, "appeared only after", []Difference{whole(object, "(absent)", "(present)")}})
+		default:
+			if differences := differ(object, old, current); len(differences) > 0 {
+				changed = append(changed, changedObject{current, "changed across", differences})
+			}
 		}
 	}
+	if len(changed) == 0 {
+		return
+	}
+	first := changed[0].version
+	statement := fmt.Sprintf("the %s %s %s the Restart at %s", kindName(first.GVK), first.Name, changed[0].how, describe(op))
+	if len(changed) > 1 {
+		statement = fmt.Sprintf("%d objects differ across the Restart at %s, the first the %s %s, which %s it",
+			len(changed), describe(op), kindName(first.GVK), first.Name, changed[0].how)
+	}
+	out.violate(Violation{
+		Statement: statement,
+		At:        after.Time,
+		Compared:  fmt.Sprintf("the state converged after %s and the one after %s", in.describeOp(before.Op), in.describeOp(after.Op)),
+	}.quotingVersions(RecentHistory(first.Key, upTo(in.History.History(first.Key), after.Time))).
+		quotingDifferences(spread(changed)))
 }
 
 type objectKey struct{ kind, name string }
 
-func (out *Result) differs(in Input, op Op, v observe.Version, how string) {
-	out.violate(Violation{
-		Statement: fmt.Sprintf("the %s %s %s the Restart at %s", kindName(v.GVK), v.Name, how, describe(op)),
-		At:        op.Time,
-	}.quotingVersions(RecentHistory(v.Key, in.History.History(v.Key))))
+// spread bounds the differences at MaxEvidence, taking one from each object in
+// turn, so that the bound drops those of the objects with the most rather than
+// every object after the first.
+func spread(changed []changedObject) Excerpt[Difference] {
+	total := 0
+	for _, c := range changed {
+		total += len(c.differences)
+	}
+	kept := make([]int, len(changed))
+	for n := 0; n < min(total, MaxEvidence); {
+		for i, c := range changed {
+			if kept[i] < len(c.differences) && n < MaxEvidence {
+				kept[i]++
+				n++
+			}
+		}
+	}
+	var quoted []Difference
+	for i, c := range changed {
+		quoted = append(quoted, c.differences[:kept[i]]...)
+	}
+	return Excerpt[Difference]{Quoted: quoted, Total: total}
 }
 
 func union(was, is map[objectKey]observe.Version) []objectKey {

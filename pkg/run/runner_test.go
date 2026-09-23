@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -315,10 +316,18 @@ func (c *fakeChecker) Check(in Input) (Findings, error) {
 }
 
 var toyTarget = &target.Target{
-	Name:     "toy-widget",
-	Primary:  widgetKind,
-	Manages:  []schema.GroupVersionKind{configMapKind},
-	Timeouts: testTimeouts,
+	Name:      "toy-widget",
+	Primary:   widgetKind,
+	Manages:   []schema.GroupVersionKind{configMapKind},
+	Timeouts:  testTimeouts,
+	Ready:     readyCountsChildren,
+	ReadyExpr: "has(status.ready) && status.ready == spec.count",
+}
+
+func readyCountsChildren(cr *unstructured.Unstructured) (bool, error) {
+	ready, found, err := unstructured.NestedFloat64(cr.Object, "status", "ready")
+	count, _, _ := unstructured.NestedFloat64(cr.Object, "spec", "count")
+	return found && ready == count, err
 }
 
 func widget(name string) *unstructured.Unstructured {
@@ -379,6 +388,30 @@ func TestRunAppliesTheOpsInOrder(t *testing.T) {
 	}
 	if got := h.opCalls(); !slices.Equal(got, want) {
 		t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
+	}
+}
+
+func TestRunNamesTheCREachCROpWrote(t *testing.T) {
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("a")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+		Op{Type: OpSettle},
+		Op{Type: OpRestart},
+		Op{Type: OpRecreate, Obj: widget("b")},
+		Op{Type: OpDelete},
+	)
+
+	result, err := runFake(t, newFakeHarness(), nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	var got []string
+	for _, op := range result.Timeline.Ops {
+		got = append(got, op.CR)
+	}
+	if want := []string{"a", "a", "", "", "b", "b"}; !slices.Equal(got, want) {
+		t.Errorf("The ops name the CRs %q, want %q.", got, want)
 	}
 }
 
@@ -951,8 +984,8 @@ func TestRunRecordsG4WhenTheRecoveryExpires(t *testing.T) {
 	if recovery == nil || recovery.Converged || !violation.At.Equal(recovery.Window.End) {
 		t.Errorf("The violation is stamped %v, want the end of a recovery that expired: %+v.", violation.At, recovery)
 	}
-	if want := fmt.Sprintf("in %v the target", recovery.Window.End.Sub(recovery.Window.Start).Round(time.Millisecond)); !strings.Contains(violation.Evidence, want) {
-		t.Errorf("The evidence is %q, want it to say how long the wait ran: %q.", violation.Evidence, want)
+	if want := fmt.Sprintf("with no fault active: in %v,", recovery.Window.End.Sub(recovery.Window.Start).Round(time.Millisecond)); !strings.Contains(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to say how long the wait ran: %q.", violation.Statement, want)
 	}
 	if got := checkpointsAt(result.Timeline); !slices.Equal(got, []int{1, Recovery}) {
 		t.Errorf("The run checkpointed at %v, want the recovery's last and no deletion judged.", got)
@@ -1386,6 +1419,9 @@ func TestTheTeardownReportsNoCleanWhenTheNamespaceStaysDirty(t *testing.T) {
 		t.Errorf("The timeline reports the namespace clean at %v, and the teardown never saw it empty.",
 			result.Timeline.Cleaned)
 	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %v, and a namespace that stays dirty is for G3 to judge.", result.Violation)
+	}
 }
 
 // The checks name what they could not judge, and the run carries it out, so
@@ -1768,5 +1804,88 @@ func TestTheG4OfAnExpiredWaitQuotesTheManagedObjects(t *testing.T) {
 	}
 	if slices.ContainsFunc(versions, func(v observe.Version) bool { return v.GVK == configMapKind }) {
 		t.Errorf("The timeline holds %v, want the CR's history alone.", versions)
+	}
+}
+
+// engineChecker is the engine, remembering what it found at each checkpoint.
+type engineChecker struct{ found []Findings }
+
+func (c *engineChecker) Check(in Input) (Findings, error) {
+	found, err := Engine{}.Check(in)
+	c.found = append(c.found, found)
+	return found, err
+}
+
+// The Runner raises the G4 of an expired wait itself, and the engine raises it
+// again at that checkpoint. They must say the same.
+func TestTheRunnersG4OfAnExpiredWaitIsTheEngines(t *testing.T) {
+	h := newFakeHarness()
+	h.converged = false
+	h.recordCR("widget", "11")
+	h.recordChild("widget-0", "12")
+	check := &engineChecker{}
+
+	result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || len(check.found) == 0 {
+		t.Fatalf("The run reported %v and the engine %v, want a G4 from each.", result.Violation, check.found)
+	}
+	var engine *Violation
+	for _, v := range check.found[0].Violations {
+		if strings.HasPrefix(v.Statement, "the settle wait") {
+			engine = &v
+		}
+	}
+	if engine == nil {
+		t.Fatalf("The engine found %v, want the G4 of the expired wait.", check.found[0].Violations)
+	}
+	if !reflect.DeepEqual(*result.Violation, *engine) {
+		t.Errorf("The Runner raised\n\t%+v\nand the engine\n\t%+v", *result.Violation, *engine)
+	}
+	if !strings.Contains(result.Violation.Statement, "ready never held: it evaluated to false") {
+		t.Errorf("The Runner says %q, want it to say why the wait expired.", result.Violation.Statement)
+	}
+	if result.Violation.Ready == nil || result.Violation.Ready.Expr != toyTarget.ReadyExpr {
+		t.Errorf("The Runner quotes the ready predicate %+v, want the target's.", result.Violation.Ready)
+	}
+}
+
+func TestRunEndsAtAReadyThatYieldsNoBoolInTheHistory(t *testing.T) {
+	h := newFakeHarness()
+	h.converged = false
+	h.recordCR("widget", "11")
+	yieldsAnInt := *toyTarget
+	yieldsAnInt.Ready = func(*unstructured.Unstructured) (bool, error) {
+		return false, &target.EvalError{Predicate: "ready", Expr: "status.ready", Err: fmt.Errorf("%w: it yielded float64", target.ErrNotBool)}
+	}
+
+	result, err := runSequence(t.Context(), &yieldsAnInt, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}),
+		Options{Check: &fakeChecker{}}, h)
+
+	if !errors.Is(err, target.ErrNotBool) {
+		t.Errorf("The run returned the error %v, want the ready that yields no bool.", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %v against the target, and the declaration is at fault.", result.Violation)
+	}
+}
+
+// A checkpoint is where its settle wait ended, which is where a quiet window
+// opens, and it says where the wait began.
+func TestACheckpointIsWhereItsWaitEnded(t *testing.T) {
+	h := newFakeHarness()
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	wait := result.Timeline.Ops[0].Settled
+	checkpoint := result.Timeline.Checkpoints[0]
+	if wait == nil || !checkpoint.At.Equal(wait.Window.End) || !checkpoint.Began.Equal(wait.Window.Start) {
+		t.Errorf("The checkpoint is %+v, want it over the wait %+v.", checkpoint, wait)
 	}
 }

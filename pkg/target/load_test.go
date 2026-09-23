@@ -402,6 +402,30 @@ func TestLoadDefaults(t *testing.T) {
 	}
 }
 
+// A report quotes the ready expression, so the target keeps its text.
+func TestLoadKeepsTheReadyExpression(t *testing.T) {
+	for _, tc := range []struct {
+		name, declared, want string
+	}{
+		{"declared", "ready: has(status.ready)\n", "has(status.ready)"},
+		{"default", "", target.DefaultReady},
+		{"hook", "ready: 'go:alwaysReady'\n", "go:alwaysReady"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := writeTarget(t, minimalTarget+tc.declared, map[string]string{"widget.yaml": sampleWidget})
+
+			loaded, err := target.Load(path)
+
+			if err != nil {
+				t.Fatalf("Load rejected the target: %v", err)
+			}
+			if loaded.ReadyExpr != tc.want {
+				t.Errorf("Load kept the ready expression %q, want %q.", loaded.ReadyExpr, tc.want)
+			}
+		})
+	}
+}
+
 func TestLoadDefaultsEachTimeoutSeparately(t *testing.T) {
 	path := writeTarget(t, minimalTarget+"timeouts:\n  stable: 1s\n  delete: 2s\nthresholds: {}\n", map[string]string{"widget.yaml": sampleWidget})
 

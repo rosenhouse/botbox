@@ -195,9 +195,13 @@ The Runner executes one sequence:
    still owed time to recover from a fault that stopped (§6). The wait ends once the
    `Ready` predicate holds and neither the CR nor a managed object has changed for
    `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
-   that expires while no fault excuses it records a G4 violation. A fault excuses it while
-   active, which is once the proxy has applied it and until the proxy stops (D36), and
-   while the target is still owed time to recover from it (§6). A wait also ends
+   that expires while no fault excuses it records a G4 violation, which says why from the
+   Observer's history of the wait: `Ready` never held, held and then stopped, or held while
+   the namespace kept changing within `T_stable`; or no CR was left to be ready. Where
+   `Ready` held and nothing changed within `T_stable`, it says that. The Runner and the
+   engine raise it with one function, so they agree. A fault excuses it while active, which
+   is once the proxy has applied it and until the proxy stops (D36), and while the target
+   is still owed time to recover from it (§6). A wait also ends
    where the target's process exits, and the Runner checks the target is running before it
    applies each op. A target that stopped ends the run as a harness error naming the op it
    was at (§11), because the ops behind it would run against nothing.
@@ -249,11 +253,25 @@ re-examined without re-running. A readiness verdict and a
 property violation also quote the state of the objects the target managed where it failed,
 in a table of its own, bounded on its own, and say how many there were: a child the
 target never created has no version to quote, and the count is what a report about a
-missing one turns on (D39).
+missing one turns on (D39). A G5 violation names the two states it compared and quotes, in
+a table of its own, each field that differs between them: the object, the resourceVersions
+compared, the path in the form `equalIgnore` takes, and the value on each side, cut to 80
+runes. An object only one state holds is one row, which names no path. The table holds at
+most twenty rows, taken from each object in turn (D50).
 Every violation says how many entries it chose each excerpt from, because a report that
 counted only what it was handed would claim every bounded excerpt was whole. It also says
-the instant it judged, which aligns the two tables, and whose history a one-object
-timeline is.
+the instant it judged, which aligns a timeline with the state at the verdict, and whose
+history a one-object timeline is. A readiness verdict also quotes the `ready` expression,
+the error evaluating it, and the name and status of the CR it read. A status holds
+whatever its controller wrote, so the report bounds it: twenty conditions as a table, 200
+bytes of each field, and 1000 bytes of the rest as JSON. Each code block's fence is longer
+than any run of backticks inside it. A readiness verdict and a G1 name the failing request
+the target repeated most in their window, with its count, because an error loop that
+backs off can stay under `N_errloop` and surface only as G4 or G1 (D48).
+
+A report's version rows carry no object body. G5's table quotes a Secret's values as the
+markers `objects.jsonl` writes (§11). A report's sequence and replay command hold the sample
+and the command line as given.
 
 A report is a snapshot taken where the check failed, and the recordings beside it are
 finalized when the run ends. A request still open at the snapshot, which a watch usually
@@ -337,7 +355,9 @@ is not judged, rather than judged early: judging early would hold the target to 
 window than §6 gives it, and where the boundary falls would depend on harness timing. G3
 is the exception, since §5.5 step 4 opens its window deliberately, and §4's teardown
 checkpoint still evaluates properties. A primary CR with a deletionTimestamp need not
-satisfy `Ready`: it is being deleted, so G3 judges it, not G4.
+satisfy `Ready`: it is being deleted, so G3 judges it, not G4. A settle wait still waits
+for `Ready`, so a wait can expire on such a CR, and its G4 then blames the CR's
+finalizers, not `Ready`.
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
 namespace that is neither a fixture nor created by botbox. The namespace is private to one
@@ -380,7 +400,8 @@ the settle wait, which the predicate ends. The default is
 `has(status.observedGeneration) && status.observedGeneration == metadata.generation`, and
 a target whose primary CR lacks that field must declare `ready` (§8.4).
 
-**G5 evaluation.** G5 is evaluated once per `Restart`. The Runner snapshots whenever a
+**G5 evaluation.** G5 is evaluated once per `Restart`, and one violation names every object
+that differs across it, judged at the snapshot after it. The Runner snapshots whenever a
 settle wait converges, implicit or explicit. A `Restart` is compared against the last
 converged snapshot before it and the first converged snapshot after it. If either is
 missing, G5 is not evaluated for that `Restart` and the report says so. The same holds
@@ -556,6 +577,7 @@ type Target struct {
     Manages       []schema.GroupVersionKind
     Selector      labels.Selector
     Ready         func(*unstructured.Unstructured) bool // compiled from `ready`, or a hook
+    ReadyExpr     string                                // `ready` as declared, the default, or go:<name>
     Equal         func(a, b Snapshot) bool              // §6 default plus `equalIgnore`, or a hook
     Properties    []Property
     Generate      GenerateSpec
@@ -607,10 +629,12 @@ macros (`exists`, `all`, `has`, `map`, `filter`) and the string extensions are a
 Observer cache, so cross-informer ordering cannot produce a false finding.
 
 A compile error or a non-boolean result is a configuration error (exit code 2, §11), never
-a finding. An expression is evaluated against objects that may not yet carry the fields it
-reads, so it must guard optional fields with `has()`. An evaluation error while polling
-for readiness means "not ready"; it becomes a G4 finding only if it persists past
-`T_settle`, and the report quotes the CEL error. An evaluation error in a property is a
+a finding. `ready` is typed dynamically, so a non-boolean result can first appear at run
+time; the run ends there. An expression is evaluated against objects that may not yet
+carry the fields it reads, so it must guard optional fields with `has()`. An evaluation
+error while polling for readiness means "not ready"; it becomes a G4 finding only if it
+persists past `T_settle`. The finding quotes the CEL error, and the report quotes the
+expression and the CR's status beside it (§5.7). An evaluation error in a property is a
 configuration error.
 
 A Go hook is a function registered under a name in `pkg/target` and referenced as
@@ -794,7 +818,14 @@ the proxy; the `Image` launcher. Separate design addendum.
   with `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl`,
   `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
   where the deadline ended the shrink pass before its result could be run there. Passing
-  runs are not persisted.
+  runs are not persisted. `objects.jsonl` writes each value of a Secret's `data` and
+  annotations as a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The
+  HMAC key is drawn per invocation and never written, so equal values share a marker
+  within one invocation and a marker reveals only the value's length. The Observer's
+  history keeps the values, so G5 compares them exactly, and its report quotes the
+  markers. Nothing else is redacted: a Secret's labels, every other object, `target.log`,
+  `sequence.json`, and a report's sequence and replay command hold what the target, the
+  sample and the command line gave them (D49).
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -1083,9 +1114,11 @@ built from source and run as a black-box binary.
   timeline's last entries, and the report says so rather than calling them the nearest: a
   violation is stamped where its evidence opens as often as where it closes. A state is
   bounded and counted on its own (D39). Quoted versions leave their object bodies to
-  `objects.jsonl`. The report also carries what no check could judge, for D31's reason: a
-  report that omits "G3 could not be judged" reads like one where G3 passed, and it is the
-  artefact a human actually reads.
+  `objects.jsonl`, except that a readiness verdict quotes the CR's status its predicate
+  read, bounded (D48), and G5 quotes the value of each field it found changed, bounded
+  and counted in the same way (D50). The report also carries what no check could judge,
+  for D31's reason: a report that omits "G3 could not be judged" reads like one where G3
+  passed, and it is the artefact a human actually reads.
 - **D38 G3 credits no cleanup botbox performed.** A `DeleteManaged` op deletes a managed
   object behind the target's back (§5.4). Inside a CR deletion's window that deletes the
   evidence: G3 asked whether the object was gone by the deadline and never asked who
@@ -1188,3 +1221,45 @@ built from source and run as a black-box binary.
   fault by its spec, so a spent fault displaced an equal one, and the toy with no bug failed
   G4. Each fault has an ID, and a removed fault keeps its window. The Runner drops a fault
   once its window is closed, so a request faulted just before a removal stays in it.
+- **D48 A G4 says why `Ready` never held, and quotes the predicate and the CR's status.**
+  A misspelled `ready`, a controller that never converges and one that never stops writing
+  need different fixes, so the G4 of an expired wait names its cause. It walks `Ready`
+  over the CR's versions in the wait. The Runner calls the engine's function for it, so
+  the two agree, and a checkpoint sits where its wait ended, where the engine stamps the
+  verdict. A wait can begin before the Observer sees the op's write, so the walk counts a
+  missing CR as not holding. It says `Ready` held and then stopped only if `Ready` held
+  once the op's CR had a version recorded after the op. It tells that version by when the
+  Observer saw it, and the op is stamped before its first request, so a controller write
+  that lands before the op's own write can still count. The window opens the watch's delay
+  before the stamp and closes at the op's write, so it spans an update's read and any retry
+  on a conflict, and a recreate's wait for the old CR to go. Where several CRs
+  are live, the verdict quotes the one `Ready` failed on. The report quotes the CR's status, which D35 left to
+  `objects.jsonl`, because a reason such as "0/10 replicas available" lives there. A
+  controller can copy anything into its status, so the quote is bounded. The verdict
+  quotes the CEL error, and a non-bool ends the run at its first evaluation. The same
+  verdicts name a failing request the target repeated, which #46 found behind G4 and G1
+  under controller-runtime's default backoff.
+- **D49 A Secret's values are written as keyed markers.** CI uploads `botbox-out/` when a
+  tier fails, and `objects.jsonl` held the external-secrets control's token and the
+  cert-manager control's private keys. A marker still shows a reader which value changed.
+  An unkeyed hash would let anyone confirm a guessed value. external-secrets annotates its
+  Secret with exactly such a hash, and kubectl with a copy of the data, so every annotation
+  value is marked too. Labels are not, because a reader checks a `selector`'s attribution
+  against them. Only core Secrets are redacted, because botbox cannot tell a credential
+  anywhere else from other data. No flag writes the raw values. Each example tier fails if
+  its control's evidence holds its Secret's value.
+- **D50 A G5 violation names each field that differs.** A G5 report named the object and
+  the restart, so an adopter diffed two versions in `objects.jsonl` by hand to learn what
+  changed and whether it belonged in `equalIgnore`. G5 now diffs the forms it compared,
+  after the default and `equalIgnore` reductions, so nothing it ignores appears. A path
+  writes a list item as `[*]` and ends at a label or an annotation, so every path pastes
+  into `equalIgnore`; a list whose length changed is one row. A map only one version holds
+  compares as an empty one, so a stamp on a child that had no annotations (D45) names its
+  key, and pasting it leaves the other annotations compared. One violation covers
+  every object a restart changed, because a run keeps its first violation and one per object
+  hid the rest. The bound takes each object's rows in turn, so one noisy object does not
+  crowd out the others. G5 is stamped at the state after the restart, where it judged. A
+  target with its own equality hook gets one row per object, because G5 cannot see what the
+  hook compared. A row of a whole object names no path, because `equalIgnore` cannot ignore
+  an object. The line botbox prints quotes the first row with a path, since that is what an
+  adopter pastes, and names its object where the statement names another.

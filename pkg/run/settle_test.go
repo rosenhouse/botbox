@@ -51,6 +51,14 @@ func waitOn(t *testing.T, ctx context.Context, c *clock, state func(since time.T
 // waitOwing is waitOn for a target owed time to recover from faults.
 func waitOwing(t *testing.T, ctx context.Context, c *clock, state func(since time.Time) (bool, time.Time), stopped <-chan struct{}, owed func() time.Time) (bool, time.Duration, error) {
 	t.Helper()
+	return waitReading(ctx, c, func(since time.Time) (bool, time.Time, error) {
+		ready, changed := state(since)
+		return ready, changed, nil
+	}, stopped, owed)
+}
+
+// waitReading is a settle wait over a reading of the run that can fail.
+func waitReading(ctx context.Context, c *clock, state func(since time.Time) (bool, time.Time, error), stopped <-chan struct{}, owed func() time.Time) (bool, time.Duration, error) {
 	start := c.now
 	wait := settle{
 		timeouts: testTimeouts,
@@ -63,6 +71,29 @@ func waitOwing(t *testing.T, ctx context.Context, c *clock, state func(since tim
 	}
 	converged, err := wait.wait(ctx)
 	return converged, c.now.Sub(start), err
+}
+
+// A ready that yields a non-bool is a configuration error the first time it
+// does, not a CR that is never ready.
+func TestSettleEndsWhereReadingTheRunFails(t *testing.T) {
+	c := newClock()
+	failed := errors.New("the expression did not yield a bool")
+	polls := 0
+	failsOnTheThirdPoll := func(since time.Time) (bool, time.Time, error) {
+		if polls++; polls == 3 {
+			return false, since, failed
+		}
+		return false, since, nil
+	}
+
+	converged, elapsed, err := waitReading(t.Context(), c, failsOnTheThirdPoll, neverStops, nil)
+
+	if !errors.Is(err, failed) || converged {
+		t.Fatalf("The wait returned (%t, %v), want the error reading the run.", converged, err)
+	}
+	if want := 2 * testPoll; elapsed != want {
+		t.Errorf("The wait took %v, want the %v to the poll that failed.", elapsed, want)
+	}
 }
 
 // A fault that stops 4s into the wait leaves the target owed until 9s, which

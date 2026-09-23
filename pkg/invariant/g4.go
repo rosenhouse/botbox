@@ -1,11 +1,13 @@
 package invariant
 
 import (
+	"errors"
 	"fmt"
 	"slices"
 	"time"
 
 	"github.com/rosenhouse/botbox/pkg/observe"
+	"github.com/rosenhouse/botbox/pkg/target"
 )
 
 // Convergence is G4: within T_settle after any spec change, and by what Owed
@@ -28,18 +30,22 @@ func Convergence(in Input) (Result, error) {
 			continue // A CR under deletion need not be ready; G3 judges it (§6).
 		}
 		ready, err := in.Target.Ready(cr.Object)
+		if errors.Is(err, target.ErrNotBool) {
+			return out, err
+		}
 		if ready && err == nil {
 			continue
 		}
-		out.violate(Violation{
-			Statement: fmt.Sprintf("the CR %s was not ready %s after %s%s",
-				cr.Name, deadline.Sub(from.at).Round(time.Millisecond), from.what, quoted(err)),
+		violation := Violation{
+			Statement: fmt.Sprintf("the CR %s was not ready %s after %s%s%s",
+				cr.Name, deadline.Sub(from.at).Round(time.Millisecond), from.what, quoted(err), in.repeated(from.at, deadline)),
 			At: deadline,
 		}.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), deadline))).
-			quotingManaged(Sample(seen.managed(in))))
+			quotingManaged(Sample(seen.managed(in)))
+		violation.Ready = in.readiness(cr, err)
+		out.violate(violation)
 	}
-	out.reportExpiredWaits(in)
-	return out, nil
+	return out, out.reportExpiredWaits(in)
 }
 
 // anchor is a moment the target must have converged by a deadline after.
@@ -85,22 +91,18 @@ func (in Input) respecified(from, to time.Time) bool {
 
 // reportExpiredWaits records the settle waits that ran out while the target
 // had no fault to blame (DESIGN.md §5.5).
-func (out *Result) reportExpiredWaits(in Input) {
+func (out *Result) reportExpiredWaits(in Input) error {
 	for _, checkpoint := range in.Checkpoints {
 		if checkpoint.Settle != Expired || in.Recovering(checkpoint.Time) {
 			continue
 		}
-		seen := in.stateAt(checkpoint.Time)
-		violation := Violation{
-			Statement: fmt.Sprintf("the settle wait after %s expired with no fault active",
-				in.describeOp(checkpoint.Op)),
-			At: checkpoint.Time,
-		}.quotingManaged(Sample(seen.managed(in)))
-		if cr, found := seen.cr(in.Target.Primary); found {
-			violation = violation.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), checkpoint.Time)))
+		violation, err := in.ExpiredWait(checkpoint)
+		if err != nil {
+			return err
 		}
 		out.violate(violation)
 	}
+	return nil
 }
 
 func (in Input) describeOp(index int) string {

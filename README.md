@@ -85,8 +85,9 @@ run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was delete
 
 Seed 23 draws a single op, so there is nothing to minimize. A longer sequence is cut to the ops
 the failure needs before it is reported, which costs a replay each: give `--deadline` room for
-that. `make test-example` runs this same control, and fails unless the default configuration
-passes and the control fails on G3 naming that Secret. A nightly workflow draws its own seeds.
+that. `make test-example` runs this same control. It fails unless the default configuration
+passes, the control fails on G3 naming that Secret, and the control's evidence hides the
+Secret's private key. A nightly workflow draws its own seeds.
 
 ## A second example: external-secrets
 
@@ -108,13 +109,13 @@ It shows three things cert-manager does not.
   the Secret it manages. `spec.target.creationPolicy: Orphan` in the CR does.
 
 `make test-example-external-secrets` runs the drawn sequences, then the pinned ones, then
-that control, and fails unless the control reports G3:
+that control. It fails unless the control reports G3 and its evidence hides the Secret's value:
 
 ```
 run 1: seed 20260922, sequence examples/external-secrets/sequences/orphan.json
 run 1: G3 the v1/Secret example-secret was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-22T16:43:05.836050746Z; 1 version, the first v1/Secret example-secret
-  the evidence is in botbox-out/20260922T164150Z-20260922/run-1
+  the evidence is in botbox-out/external-secrets-control/20260922T164150Z-20260922/run-1
 ```
 
 ## Your own controller
@@ -245,15 +246,56 @@ target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `sequence.json` — the sequence the rest of the directory is evidence of.
 - `sequence.shrunk.json` — a smaller sequence the deadline left unrun. Present only then.
 - `requests.jsonl` — every request the target made, as the proxy saw it.
-- `objects.jsonl` — every version of every object the Observer saw.
+- `objects.jsonl` — every version of every object the Observer saw. Each value of a Secret's
+  `data` and annotations is a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`.
 - `target.log` — the target's own output.
 - `kubeconfig` — what the target was pointed at, which is the proxy and not the cluster.
+
+Equal Secret values share a marker within one invocation, so you can see which value changed
+without learning it. botbox hides nothing else. A Secret's labels, your sample, your CRs and
+other objects, the `--launch-arg` values and your controller's log are written as they are, so
+keep credentials out of them before you share `botbox-out/`.
 
 The report quotes the last twenty requests and the last twenty object versions the check
 chose from, says how many that was, and names the file holding the rest. A G4 or a
 property also quotes the state of the objects your controller managed where it failed,
 over the kinds your target declares: a second table with its own bound of twenty and
 the count beside it. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-report)).
+
+A G4 also quotes your `ready`, the error evaluating it, and your CR's status where it
+failed. The status holds whatever your controller wrote, so the report cuts it: twenty
+conditions, 200 bytes of each field and 1000 bytes of the rest. `objects.jsonl` holds it
+whole.
+
+A G5 report lists each field the restart changed, with its value before and after, and the line
+botbox prints names the first. If your controller stamps one of those fields at startup, paste
+its path into `equalIgnore` as written. A Secret's values appear there as markers too.
+
+### When a settle wait fails G4
+
+A settle wait expired. What follows `expired with no fault active` says why:
+
+- `ready never held: evaluating ready "…": no such key: …` means your `ready` reads a
+  field the CR does not have. Check the spelling, and guard an optional field with `has()`.
+- `ready never held: it evaluated to false` means your controller never reached the state
+  your `ready` describes. The report's Ready predicate section shows the CR's conditions
+  and status, which is where a reason such as `0/10 replicas available` appears. Compare
+  that status with your `ready`: a misspelled field under `has()` also evaluates to false.
+  envtest runs only the API server and etcd: no Deployment, ReplicaSet or Pod controller
+  runs, so a CR that waits on a Deployment's replicas never becomes ready there.
+- `ready held from … on, but the namespace never held still for stable (2s)` means your
+  controller converged and kept writing. The Object versions table lists the writes. A
+  status field rewritten on every reconcile, such as a timestamp, does this.
+- `ready held until …` means `ready` held and then stopped holding.
+
+After a `delete`, `the CR … was still being deleted, held by the finalizers …` means
+nothing removed those finalizers within `settle`. `no CR was left to be ready, but the
+namespace never held still …` means something kept writing after the CR was gone.
+
+A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
+`settle`. Where your controller repeated a failing request, the line names it and its
+count: an error loop that backs off can fail too rarely for G6 to count. A `ready` that yields
+something other than a bool is a configuration error, and botbox exits 2 naming it.
 
 ## Running in CI
 

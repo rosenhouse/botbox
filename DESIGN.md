@@ -64,7 +64,7 @@ external-secrets, upstream open-source projects, unmodified and pinned by versio
 | **Sequence** | An ordered list of ops plus a seed. The unit of generation, replay, and shrinking. |
 | **Invariant** | A generic check that applies to every target. IDs `G1..Gn`. |
 | **Property** | A per-target check declared by the target. IDs `P1..Pn`. |
-| **Checkpoint** | A point at which invariants and properties are evaluated: when a settle wait ends, whether converged or expired; after each `Restart`, `Fault` and `DeleteManaged` op once the following settle ends; and once after the teardown deletion window. |
+| **Checkpoint** | A point at which invariants and properties are evaluated: when a settle wait ends, whether converged or expired; after each `Restart`, `Fault` and `DeleteManaged` op once the following settle ends; where the teardown's recovery wait ends (§5.5); and once after the teardown deletion window. |
 | **Run** | Execution of one sequence against a clean namespace. |
 | **Report** | Machine- and human-readable output of a failing run. |
 
@@ -191,7 +191,8 @@ The Runner executes one sequence:
 1. Create a fresh namespace. Apply the target's fixtures. Start the target via the
    Launcher.
 2. Apply ops in order. After each op that mutates the CR or a managed object, wait up to
-   `T_settle` for convergence unless the op sets `noSettle`. The wait ends once the
+   `T_settle` for convergence unless the op sets `noSettle`, and longer while the target is
+   still owed time to recover from a fault that stopped (§6). The wait ends once the
    `Ready` predicate holds and neither the CR nor a managed object has changed for
    `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
    that expires while no fault is active records a G4 violation, where a fault counts as
@@ -202,7 +203,11 @@ The Runner executes one sequence:
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
-4. Tear down. Clear every active fault and wait `T_stable`, which is the last quiet
+4. Tear down. Clear every active fault. If the target is still owed time to recover from
+   a fault, which is so for a fault the teardown just cleared, wait for convergence as
+   step 2 does and checkpoint where the wait ends. This recovery wait is judged as an op's
+   wait is, so the caller's deadline can end it and no later step. A run that ended at a
+   violation or a harness error gets none. Then wait `T_stable`, which is the last quiet
    window (§6). Delete the primary CR if it still exists and wait for the G3 window. A
    target that stopped cleaned nothing up, so the run ends as that harness error rather
    than at a verdict on the deletion. A run that ended at a harness error judges no
@@ -288,15 +293,15 @@ real targets; the toy target sets much shorter ones (§9).
 
 | ID | Name | Statement | Signal |
 |---|---|---|---|
-| **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s), the target makes no further API request for `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io` leases, since leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
+| **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault (§5.5), the target makes no further API request for `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io` leases, since leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
 | **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
-| **G4** | Convergence | Within `T_settle` after any spec change, and within `T_settle` after faults stop, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). This is ESR as a test. | Observer + target predicate |
+| **G4** | Convergence | Within `T_settle` after any spec change, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
 | **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
 
 **The quiet window.** G1 and G2 judge the `T_stable` that follows a settle wait, which
-ends where the run converged or, at the latest, `T_settle` after the op (§5.5). Measuring
+ends where the run converged or where the wait gave up (§5.5). Measuring
 it from the op instead leaves it unjudged for a target that converges quickly, because the
 teardown begins one `T_stable` after the settle wait ends. The `T_stable` the teardown
 waits before it deletes is a window of its own, closing at the teardown boundary (§5.5
@@ -305,9 +310,18 @@ a sequence whose last op does not settle has only the teardown's, and where the 
 did settle the two overlap, so traffic in the overlap breaks both. A window a later op or
 a fault reaches into is not judged, where a fault's window runs from the first request the
 proxy faulted with it to the request or the instant its trigger ran out (D36). The
-teardown clears every fault as its window opens,
-so a fault it cleared did not reach into it; it does not wait for convergence first, so a
-sequence ends with an op that settles.
+teardown clears every fault before its window opens, so a fault it cleared did not reach
+into it. It waits for convergence first only where the target is still owed time to
+recover from a fault (§5.5 step 4), so a sequence ends with an op that settles.
+
+**Recovery from faults.** A target backs off while its requests fail, and one that doubles
+its delay retries within as long as it has been failing. Once faults stop, G4 therefore
+owes the target as long as they lasted plus `T_settle`. The faults are those whose windows
+reach past the last settle wait that converged, since a target that converged had
+recovered, and they lasted from the first request the proxy faulted with any of them to
+the instant the last of them stopped. A settle wait does not give up before that time has
+passed, and one that expired is excused only while a fault is active or that time is still
+owed. A spec change made within that time is judged at the later of the two deadlines.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -400,6 +414,8 @@ Details the example does not show:
 - G5 judges a `restart` only between two converged settle waits with no CR op, no
   `deleteManaged` that deleted something and no fault's window between them (§6). Put a
   `settle` op after a `restart`, and one before it unless the op before it settles.
+- A fault may outlast the sequence. The teardown then clears it and waits for the target
+  to recover (§5.5).
 - `update` applies `patch` as a JSON merge patch (RFC 7386).
 - `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
@@ -608,7 +624,9 @@ B11's row scales down and back up: the belief outlives the child the toy itself 
 The unconfirmed write needs a fault, and §10 M6's acceptance test runs `b11-fault.json`
 for it. B11 is the deterministic form of §5.6's "a transient state is made permanent by a
 `Fault`", so that settle wait expires whatever the windows are. A `Restart` heals B11,
-because the belief lives in the process.
+because the belief lives in the process. `fault.json`, the README's fault example, holds a
+fault that outlasts the sequence. The envtest tier runs it, not the matrix: the toy with
+no bug recovers once the teardown clears the fault, and B11 fails G4 there.
 
 Acceptance for M3: a matrix in `docs/bug-matrix.md` showing which invariant or property
 catches each bug, generated by CI, with no empty rows and no check firing on any sequence
@@ -1096,3 +1114,19 @@ built from source and run as a black-box binary.
   there fails the matrix. B0's one run is both. A `?` there does not fail it, because the
   check found nothing: G5 leaves the restart of `b10.json` unjudged. The cost is a second
   run per sequence.
+- **D@40 After faults stop, a target has as long as they lasted plus `T_settle` to
+  recover, and the teardown waits for it.** The README's fault example failed the toy with
+  no bug. Its fault outlived the sequence, the teardown cleared it and opened its quiet
+  window at once, and the toy's next create landed there as G1. B11, which never
+  recovers, passed the same sequence, because nothing judged the time after the fault.
+  With the fault's count at 10 the correct toy failed G4 instead: its wait ended
+  `T_settle` after the update, 2.47 s after the fault stopped. §6 asked for `T_settle`
+  after faults stop, and the Runner and the engine each measured something else. The
+  teardown now waits for a target still owed that time, and every wait runs until it has
+  passed. `T_settle` alone is too short. controller-runtime doubles the toy's delay from
+  5 ms, so eleven refusals put its next create 5.12 s out, and after a fault that spanned
+  three expired waits that create came 5.4 s after the teardown cleared the fault. A
+  target that doubles its delay retries within as long as it has been failing, so G4 owes
+  it that span too, counted from the last wait that converged. The Runner and the engine
+  share the rule. The recovery wait is judged as an op's wait is, so the caller's deadline
+  ends it. This is the teardown that settles first that D32 deferred, for faults only.

@@ -175,6 +175,15 @@ func TestEnvOverridesAnInheritedVariable(t *testing.T) {
 	waitForLog(t, log, "env="+runNamespace+" kept\n")
 }
 
+func TestEnvDoesNotOverrideKubeconfig(t *testing.T) {
+	binary, log := newBinaryInNamespace(t, `echo "env=${KUBECONFIG}"; `+forever,
+		map[string]string{"KUBECONFIG": "/elsewhere"})
+
+	kubeconfig := mustStart(t, binary)
+
+	waitForLog(t, log, "env="+kubeconfig+"\n")
+}
+
 func TestStopTerminatesGracefully(t *testing.T) {
 	binary, log := newBinary(t, 5*time.Second, `trap 'echo caught SIGTERM; exit 0' TERM; echo pid=$$; `+forever)
 	mustStart(t, binary)

@@ -16,9 +16,9 @@ export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 
 ### Against kind
 
-botbox starts its own API server by default. It has no controller manager, so nothing
-collects garbage there but botbox's own emulation. To test against a real one, point botbox at
-a throwaway cluster:
+botbox starts its own API server by default. That server runs no controller manager, so
+botbox emulates the garbage collector. To test against a real garbage collector, point botbox
+at a throwaway cluster:
 
 ```sh
 kind create cluster --kubeconfig kind.kubeconfig

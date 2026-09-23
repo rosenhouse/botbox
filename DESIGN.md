@@ -286,7 +286,8 @@ botbox owns the API server a run executes against.
 - **envtest** (default). botbox starts `kube-apiserver` and `etcd` from
   `KUBEBUILDER_ASSETS` (installed by `setup-envtest`) using
   `sigs.k8s.io/controller-runtime/pkg/envtest` inside `pkg/cluster`. This is the one
-  harness package allowed to import controller-runtime (§11).
+  harness package allowed to import controller-runtime (§11). It starts its own control
+  plane even where `USE_EXISTING_CLUSTER` is set.
 - **kubeconfig**. An existing cluster, normally kind. Used by `make test-kind` and, in
   phase 2, by `Image` targets. botbox installs the target's CRDs there, creating or
   replacing each one, and leaves them installed. The cluster runs
@@ -294,8 +295,6 @@ botbox owns the API server a run executes against.
   adds the `default` ServiceAccount and the `kube-root-ca.crt` ConfigMap to every
   namespace. A run waits up to 30 s for those of a kind it watches, and a missing one is a
   harness error.
-
-envtest mode starts its own control plane even where `USE_EXISTING_CLUSTER` is set.
 
 envtest runs only the API server and etcd. There is no `kube-controller-manager`, so
 nothing garbage-collects owned objects, namespaces never finish terminating, no default

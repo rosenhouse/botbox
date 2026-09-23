@@ -8,6 +8,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 )
 
@@ -58,6 +59,13 @@ func (v Version) MarshalJSON() ([]byte, error) {
 		DeletionTimestamp:  v.DeletionTimestamp,
 		Labels:             v.Labels,
 		Deleted:            v.Deleted,
-		Object:             v.Object,
+		Object:             redacted(v.GVK, v.Object),
 	})
+}
+
+func redacted(gvk schema.GroupVersionKind, obj *unstructured.Unstructured) *unstructured.Unstructured {
+	if obj == nil {
+		return nil
+	}
+	return &unstructured.Unstructured{Object: Redacted(gvk, obj.Object)}
 }

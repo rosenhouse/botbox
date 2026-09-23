@@ -1228,9 +1228,10 @@ built from source and run as a black-box binary.
   the two agree, and a checkpoint sits where its wait ended, where the engine stamps the
   verdict. A wait can begin before the Observer sees the op's write, so the walk counts a
   missing CR as not holding. It says `Ready` held and then stopped only if `Ready` held
-  once the op's CR had a version recorded after the op. It tells that version by time, and
-  the op is stamped before its first request, so a controller write to the CR before the
-  op's own write lands can still count. That window spans an update's read and any retry
+  once the op's CR had a version recorded after the op. It tells that version by when the
+  Observer saw it, and the op is stamped before its first request, so a controller write
+  that lands before the op's own write can still count. The window opens the watch's delay
+  before the stamp and closes at the op's write, so it spans an update's read and any retry
   on a conflict, and a recreate's wait for the old CR to go. Where several CRs
   are live, the verdict quotes the one `Ready` failed on. The report quotes the CR's status, which D35 left to
   `objects.jsonl`, because a reason such as "0/10 replicas available" lives there. A

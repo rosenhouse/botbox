@@ -559,11 +559,13 @@ equality predicate as `equal: go:<name>` (§8.4). A hook takes no `equalIgnore`,
 nothing would read it.
 
 The primary, every managed kind and every fixture must be namespaced, because a run owns
-one namespace (§5.5, D13). botbox refuses the cluster-scoped ones in one error that names
-them all: when it loads the target, for the kinds its `crds` define, and once the control
-plane is up and before the first run, for the rest. botbox observes only the run namespace,
-so it does not see a child the target creates in another. A fixture sets no
-`metadata.namespace`, since botbox creates it in the run namespace.
+one namespace (§5.5, D13). botbox refuses the cluster-scoped ones before the first run, in
+two checks that each name every kind they refuse: one when it loads the target, for the
+kinds its `crds` define, and one once the control plane is up, for the rest. botbox
+observes only the run namespace, so it does not see a child the target creates in another.
+botbox creates the CR and each fixture in the run namespace. A fixture sets no
+`metadata.namespace`, because the target may look for it in the namespace it names. The
+CR may set one, which botbox replaces, because the target finds a CR by watching.
 
 `equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
 holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
@@ -1266,10 +1268,11 @@ built from source and run as a black-box binary.
   last frame of its stack trace. A fault on `configmap` matched nothing and said nothing.
   botbox now looks for the control plane where envtest does, checks `launch.binary` first,
   names a bad key's line and nearest key, and quotes the line above a stack trace. It
-  refuses every cluster-scoped primary, managed kind and fixture in one error: from the
-  CRD files at load time, and through discovery before the first run for built-in kinds,
-  which no file describes. D13 stands, and now covers managed kinds and fixtures. A fixture
-  that sets a namespace is refused rather than moved. `launch.binary` keeps the working
-  directory as its base, because `launch.args` and the target's own relative paths resolve
-  from there. The Runner checks a fault's resource when it applies the fault op, not when
-  the run starts, because a target may install its CRDs itself.
+  refuses every cluster-scoped primary, managed kind and fixture in one error per check:
+  from the CRD files at load time, and through discovery before the first run for built-in
+  kinds, which no file describes. D13 stands, and now covers managed kinds and fixtures. A
+  fixture that sets a namespace is refused rather than moved, because the target may look
+  for it there, while the target finds a moved CR by watching. `launch.binary` keeps the
+  working directory as its base, because `launch.args` and the target's own relative paths
+  resolve from there. The Runner checks a fault's resource when it applies the fault op,
+  not when the run starts, because a target may install its CRDs itself.

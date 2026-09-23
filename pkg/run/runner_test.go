@@ -896,7 +896,7 @@ func TestTheTeardownWaitsForNoRecoveryTheTargetIsNotOwed(t *testing.T) {
 }
 
 // A run that ended early is judged no further, so the teardown gives it no
-// time to recover.
+// time to recover. The recorded run still shows where the fault stopped.
 func TestTheTeardownWaitsForNoRecoveryAfterTheRunEnded(t *testing.T) {
 	for _, test := range []struct {
 		name  string
@@ -922,6 +922,9 @@ func TestTheTeardownWaitsForNoRecoveryAfterTheRunEnded(t *testing.T) {
 
 			if got := h.teardownCalls(); slices.Contains(got, "settle") || result.Timeline.Recovery != nil {
 				t.Errorf("The teardown did %v, want no wait: the run had ended.", got)
+			}
+			if fault := result.Timeline.Faults[0]; fault.End.IsZero() {
+				t.Errorf("The fault ran %+v, want its window closed where the teardown cleared it.", fault)
 			}
 		})
 	}

@@ -654,13 +654,9 @@ func (r *runner) expireFaults(op int) {
 func (r *runner) readFaultWindows() {
 	for i := range r.faults {
 		fault := &r.faults[i]
-		proxied, window := r.h.faultWindow(fault.id), &r.timeline.Faults[fault.window]
-		if !proxied.First.IsZero() {
-			window.Start = proxied.First
-		}
-		if !proxied.Retired.IsZero() {
-			fault.retired, window.End = true, proxied.Retired
-		}
+		proxied := r.h.faultWindow(fault.id)
+		r.timeline.Faults[fault.window] = Window{Start: proxied.First, End: proxied.Retired}
+		fault.retired = !proxied.Retired.IsZero()
 	}
 }
 
@@ -669,7 +665,6 @@ func (r *runner) readFaultWindows() {
 func (r *runner) clearFaults() {
 	r.h.clearFaults()
 	r.readFaultWindows()
-	r.faults = nil
 }
 
 // awaitRecovery waits for a target still owed time to recover from the faults.

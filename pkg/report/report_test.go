@@ -818,7 +818,7 @@ func TestReportBoundsTheCRsStatus(t *testing.T) {
 }
 
 // A controller can write a fence into its status, and the report's own fences
-// must outlast it.
+// must outlast it by one backtick.
 func TestReportFencesTheReadyPredicateAroundTheFencesItQuotes(t *testing.T) {
 	failure := deploymentBacked()
 	failure.Ready.Expr = "status.note == \"```\""
@@ -829,9 +829,9 @@ func TestReportFencesTheReadyPredicateAroundTheFencesItQuotes(t *testing.T) {
 
 	body := section(md, "Ready predicate")
 	for _, want := range []string{
-		"````\n" + failure.Ready.Expr + "\n````",
-		"`````\n" + failure.Ready.Error + "\n`````",
-		"````json\n{\"note\":\"```\"}\n````",
+		"\n\n````\n" + failure.Ready.Expr + "\n````\n",
+		"\n\n`````\n" + failure.Ready.Error + "\n`````\n",
+		"\n\n````json\n{\"note\":\"```\"}\n````\n",
 	} {
 		if !strings.Contains(body, want) {
 			t.Errorf("The Ready predicate section does not fence %q:\n%s", want, body)

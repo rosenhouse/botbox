@@ -99,9 +99,19 @@ func TestG5CountsAnEmptyConditionListAsNone(t *testing.T) {
 }
 
 func TestG5IgnoresAnOwnerReferenceWhoseOwnerIsGone(t *testing.T) {
-	in := restarted(child("w-0", "11", ownedByGhost), child("w-0", "21", orphaned))
+	for _, gone := range []struct {
+		kind  string
+		owner option
+	}{
+		{"the primary kind", ownedByGhost},
+		{"a managed kind", ownedBy(metav1.OwnerReference{APIVersion: "v1", Kind: "ConfigMap", Name: "gone", UID: "uid-gone"})},
+	} {
+		t.Run(gone.kind, func(t *testing.T) {
+			in := restarted(child("w-0", "11", gone.owner), child("w-0", "21", orphaned))
 
-	silent(t, invariant.RestartStable, in)
+			silent(t, invariant.RestartStable, in)
+		})
+	}
 }
 
 // An ownerReference may name any version the API server serves.

@@ -180,7 +180,8 @@ func quote(key string) string {
 
 // Remove deletes the fields p names from object. A map or a list along p that
 // is left empty counts as absent, so Remove deletes it too, unless [*] names it.
-// A key names nothing in a list, so Remove reports a list that a key of p meets.
+// A key names nothing in a list, so Remove reports the first list that a key of
+// p meets.
 func (p Path) Remove(object map[string]any) error {
 	r := removal{path: p}
 	if len(p) > 0 {
@@ -219,7 +220,7 @@ func (r *removal) remove(node any, p Path) bool {
 			for i, item := range node {
 				node[i] = r.removeFromItem(item, rest)
 			}
-		default:
+		case r.err == nil:
 			list := r.path[:len(r.path)-len(p)]
 			r.err = fmt.Errorf("%s is a list; write %s"+inBlockStyle, list, slices.Concat(list, Path{{Each: true}}, p))
 		}

@@ -263,6 +263,10 @@ func TestPathRemoveReportsAKeyThatMeetsAList(t *testing.T) {
 			`{"spec": {"groups": [{"members": [{"name": "a"}]}, {"members": {"name": "b"}}]}}`,
 			`{"spec": {"groups": [{"members": [{"name": "a"}]}, {}]}}`,
 			"spec.groups[*].members is a list; write spec.groups[*].members[*].name; a path with brackets goes in a block-style list"},
+		{"lists at different steps, of which the first", "spec.groups[*].members.name.first",
+			`{"spec": {"groups": [{"members": [{"name": "a"}]}, {"members": {"name": [{"first": "b"}]}}]}}`,
+			`{"spec": {"groups": [{"members": [{"name": "a"}]}, {"members": {"name": [{"first": "b"}]}}]}}`,
+			"spec.groups[*].members is a list; write spec.groups[*].members[*].name.first; a path with brackets goes in a block-style list"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			object, want := decode(t, tc.object), decode(t, tc.want)

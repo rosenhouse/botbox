@@ -1012,8 +1012,8 @@ func TestRunNotesEachOwnerTheCollectorCouldNotResolve(t *testing.T) {
 			Unserved: true,
 		},
 		{
-			DependentKind: configMapKind, DependentName: "widget-tls",
-			OwnerKind: schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, OwnerName: "tls",
+			DependentKind: schema.GroupVersionKind{Version: "v1", Kind: "Secret"}, DependentName: "widget-tls",
+			OwnerKind: schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}, OwnerName: "issuer",
 		},
 	}
 	check := &fakeChecker{notes: [][]string{nil, {"G3 is not evaluated for the deletion of widget"}}}
@@ -1025,7 +1025,7 @@ func TestRunNotesEachOwnerTheCollectorCouldNotResolve(t *testing.T) {
 	}
 	want := []string{
 		"botbox's garbage collector never deletes v1/ConfigMap widget-cfg, because the API server does not serve toy.botbox/v1alpha9/Widget, the kind of its owner widget",
-		"botbox's garbage collector never deletes v1/ConfigMap widget-tls, because it does not watch v1/Secret, the kind of its owner tls",
+		"botbox's garbage collector never deletes v1/Secret widget-tls, because it does not watch apps/v1/Deployment, the kind of its owner issuer",
 		"G3 is not evaluated for the deletion of widget",
 	}
 	if !slices.Equal(result.Notes, want) {

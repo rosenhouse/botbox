@@ -278,6 +278,26 @@ func TestSweepCollectsAChildWhoseOwnerIsGoneAtAnotherServedVersion(t *testing.T)
 	}
 }
 
+func TestSweepReadsAnOwnerOnceWhateverVersionNamesIt(t *testing.T) {
+	c, client, _ := fakeCollector(t)
+	objects := []object{
+		configMapObject("v1-child", "uid-v1-child", widgetOwner(widgetKind, "parent", "uid-parent")),
+		configMapObject("v1alpha1-child", "uid-v1alpha1-child", widgetOwner(widgetV1alpha1, "parent", "uid-parent")),
+	}
+
+	c.sweep(context.Background(), objects)
+
+	reads := 0
+	for _, action := range client.Actions() {
+		if action.GetVerb() == "get" {
+			reads++
+		}
+	}
+	if reads != 1 {
+		t.Errorf("The collector read the owner %d times, want once.", reads)
+	}
+}
+
 func TestSweepKeepsAChildWhoseOwnerLives(t *testing.T) {
 	c, client, _ := fakeCollector(t)
 	parent := configMapOwner("parent", "uid-parent")
@@ -454,6 +474,22 @@ func TestUnresolvedNamesEachDependentAndOwnerOnce(t *testing.T) {
 	}
 	if got, want := c.Unresolved(), []Unresolved{owned("first"), owned("second")}; !slices.Equal(got, want) {
 		t.Errorf("Unresolved returned %+v, want %+v.", got, want)
+	}
+}
+
+// A kind given without a version is listed at the one the API server prefers,
+// and the collector names its objects at that version.
+func TestNamespacedKindsHoldTheVersionTheyList(t *testing.T) {
+	mapper := apimeta.NewDefaultRESTMapper([]schema.GroupVersion{configMapKind.GroupVersion()})
+	mapper.Add(configMapKind, apimeta.RESTScopeNamespace)
+
+	watched, err := namespacedKinds(mapper, []schema.GroupVersionKind{{Kind: configMapKind.Kind}})
+
+	if err != nil {
+		t.Fatalf("namespacedKinds returned an error: %v", err)
+	}
+	if got := watched[configMapKind.GroupKind()].kind; got != configMapKind {
+		t.Errorf("namespacedKinds holds the kind %v, want %v.", got, configMapKind)
 	}
 }
 

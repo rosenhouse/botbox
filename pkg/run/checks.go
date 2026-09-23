@@ -2,6 +2,7 @@ package run
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
@@ -160,10 +161,15 @@ func count(n int, noun string) string {
 // the run directory (DESIGN.md §5.7).
 func evidence(violation invariant.Violation) string {
 	var quoted []string
-	// The statement already says how a whole object differs.
-	if differences := violation.Differences; len(differences) > 0 && differences[0].Path != "" {
-		first := differences[0]
-		clause := fmt.Sprintf("%s was %s, is %s", first.Path, first.Before, first.After)
+	// The statement names the first object that differs, and how a whole one does.
+	differences := violation.Differences
+	if i := slices.IndexFunc(differences, invariant.Difference.NamesAField); i >= 0 {
+		field := differences[i]
+		path := field.Path
+		if field.Object != differences[0].Object {
+			path += " of the " + field.Object
+		}
+		clause := fmt.Sprintf("%s was %s, is %s", path, field.Before, field.After)
 		if violation.DifferencesTotal > 1 {
 			clause += fmt.Sprintf(" (1 of %s)", count(violation.DifferencesTotal, "difference"))
 		}

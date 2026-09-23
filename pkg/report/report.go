@@ -115,52 +115,50 @@ func Write(dir string, r Report) error {
 // document is the report as both files render it: the evidence bounded, and
 // the totals that say what the bound left out. Field order is report.json's.
 type document struct {
-	Check         Check             `json:"check"`
-	Target        Target            `json:"target"`
-	Botbox        string            `json:"botbox,omitempty"`
-	Seed          int64             `json:"seed"`
-	Notes         []string          `json:"notes,omitempty"`
-	Replay        string            `json:"replay"`
-	Sequence      json.RawMessage   `json:"sequence"`
-	Ready         *ready            `json:"ready,omitempty"`
-	Applied       int               `json:"applied,omitempty"`
-	Ops           int               `json:"ops,omitempty"`
-	Requests      []proxy.Request   `json:"requests,omitempty"`
-	RequestsTotal int               `json:"requestsTotal,omitempty"`
-	Versions      []observe.Version `json:"versions,omitempty"`
-	VersionsTotal int               `json:"versionsTotal,omitempty"`
-	VersionsOf    string            `json:"versionsOf,omitempty"`
-	Managed       []observe.Version `json:"managed,omitempty"`
-	ManagedTotal  *int              `json:"managedTotal,omitempty"`
-
+	Check            Check                  `json:"check"`
+	Target           Target                 `json:"target"`
+	Botbox           string                 `json:"botbox,omitempty"`
+	Seed             int64                  `json:"seed"`
+	Notes            []string               `json:"notes,omitempty"`
+	Replay           string                 `json:"replay"`
 	Differences      []invariant.Difference `json:"differences,omitempty"`
 	DifferencesTotal int                    `json:"differencesTotal,omitempty"`
 	Compared         string                 `json:"compared,omitempty"`
+	Ready            *ready                 `json:"ready,omitempty"`
+	Sequence         json.RawMessage        `json:"sequence"`
+	Applied          int                    `json:"applied,omitempty"`
+	Ops              int                    `json:"ops,omitempty"`
+	Requests         []proxy.Request        `json:"requests,omitempty"`
+	RequestsTotal    int                    `json:"requestsTotal,omitempty"`
+	Versions         []observe.Version      `json:"versions,omitempty"`
+	VersionsTotal    int                    `json:"versionsTotal,omitempty"`
+	VersionsOf       string                 `json:"versionsOf,omitempty"`
+	Managed          []observe.Version      `json:"managed,omitempty"`
+	ManagedTotal     *int                   `json:"managedTotal,omitempty"`
 }
 
 func (r Report) document() document {
 	return document{
-		Check:         r.Check,
-		Target:        r.Target,
-		Botbox:        r.Botbox,
-		Seed:          r.Seed,
-		Notes:         r.Notes,
-		Replay:        r.Replay,
-		Sequence:      r.Sequence,
-		Ready:         quoteReady(r.Ready),
-		Applied:       r.Applied,
-		Ops:           r.Ops,
-		Requests:      recent(r.Requests),
-		RequestsTotal: max(r.RequestsTotal, len(r.Requests)),
-		Versions:      timeline(r.Versions),
-		VersionsTotal: max(r.VersionsTotal, len(r.Versions)),
-		VersionsOf:    r.VersionsOf,
-		Managed:       state(r.Managed),
-		ManagedTotal:  managedTotal(r.ManagedTotal, len(r.Managed)),
-
+		Check:            r.Check,
+		Target:           r.Target,
+		Botbox:           r.Botbox,
+		Seed:             r.Seed,
+		Notes:            r.Notes,
+		Replay:           r.Replay,
 		Differences:      leading(r.Differences),
 		DifferencesTotal: max(r.DifferencesTotal, len(r.Differences)),
 		Compared:         r.Compared,
+		Ready:            quoteReady(r.Ready),
+		Sequence:         r.Sequence,
+		Applied:          r.Applied,
+		Ops:              r.Ops,
+		Requests:         recent(r.Requests),
+		RequestsTotal:    max(r.RequestsTotal, len(r.Requests)),
+		Versions:         timeline(r.Versions),
+		VersionsTotal:    max(r.VersionsTotal, len(r.Versions)),
+		VersionsOf:       r.VersionsOf,
+		Managed:          state(r.Managed),
+		ManagedTotal:     managedTotal(r.ManagedTotal, len(r.Managed)),
 	}
 }
 

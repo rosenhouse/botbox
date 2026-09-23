@@ -130,12 +130,6 @@ func (out *Result) compare(in Input, op Op, before, after Checkpoint) {
 
 type objectKey struct{ kind, name string }
 
-// whole is the difference of an object taken as one, which no path names.
-func whole(object Difference, before, after string) Difference {
-	object.Before, object.After = before, after
-	return object
-}
-
 // spread bounds the differences at MaxEvidence, taking one from each object in
 // turn, so that the bound drops those of the objects with the most rather than
 // every object after the first.

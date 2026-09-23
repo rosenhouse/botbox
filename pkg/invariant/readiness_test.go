@@ -153,24 +153,41 @@ func TestAnExpiredWaitJudgesTheCRFromTheWriteOn(t *testing.T) {
 }
 
 // Ready need not hold on a CR being deleted, so a wait that ends on one names
-// what holds it.
+// what holds it. Where Ready holds, the churn is why the wait expired.
 func TestAnExpiredWaitSaysTheCRWasStillBeingDeleted(t *testing.T) {
 	stuck := []option{spec(3), finalizers("example.com/stuck", "toy"), deleting(2 * time.Second)}
-	for name, r := range map[string]*run{
-		"ready never held": newRun().
+	deleted := func() *run {
+		return newRun().
 			record(time.Second, widget("10", spec(3), finalizers("example.com/stuck"), status(3, 1))).
-			op(invariant.OpDelete, 2*time.Second).
-			record(2001*time.Millisecond, widget("11", append(stuck, generation(2), status(3, 1))...)),
-		"ready held and stopped": newRun().
-			record(time.Second, widget("10", spec(3), finalizers("example.com/stuck"), status(3, 1))).
-			op(invariant.OpDelete, 2*time.Second).
-			record(2001*time.Millisecond, widget("11", append(stuck, status(3, 1))...)).
-			record(3*time.Second, widget("12", append(stuck, status(2, 1))...)),
+			op(invariant.OpDelete, 2*time.Second)
+	}
+	const stillDeleting = "in 5s, the CR w was still being deleted, held by the finalizers example.com/stuck, toy"
+	for _, c := range []struct {
+		name string
+		run  *run
+		want string
+	}{
+		{"ready never held", deleted().record(2001*time.Millisecond, widget("11", append(stuck, generation(2), status(3, 1))...)), stillDeleting},
+		{
+			"ready held and stopped",
+			deleted().
+				record(2001*time.Millisecond, widget("11", append(stuck, status(3, 1))...)).
+				record(3*time.Second, widget("12", append(stuck, status(2, 1))...)),
+			stillDeleting,
+		},
+		{
+			"ready held while a child churned",
+			deleted().
+				record(2001*time.Millisecond, widget("11", append(stuck, status(3, 1))...)).
+				record(5500*time.Millisecond, child("w-0", "12")).
+				record(6500*time.Millisecond, child("w-0", "13")),
+			"in 5s, ready held from 0s on, but the namespace never held still for stable (2s): 2 changes",
+		},
 	} {
-		t.Run(name, func(t *testing.T) {
-			violation := expiredWait(t, r.checkpoint(7*time.Second, invariant.Expired).through(9*time.Second))
+		t.Run(c.name, func(t *testing.T) {
+			violation := expiredWait(t, c.run.checkpoint(7*time.Second, invariant.Expired).through(9*time.Second))
 
-			requireStatement(t, violation, "in 5s, the CR w was still being deleted, held by the finalizers example.com/stuck, toy")
+			requireStatement(t, violation, c.want)
 		})
 	}
 }

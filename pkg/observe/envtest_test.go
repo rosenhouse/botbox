@@ -4,6 +4,7 @@ package observe_test
 
 import (
 	"context"
+	"encoding/hex"
 	"fmt"
 	"slices"
 	"strings"
@@ -242,7 +243,7 @@ func TestObjectsJSONLNamesASecretsKeysAndNotItsValues(t *testing.T) {
 	if !strings.Contains(written.String(), `"token":"[redacted 6 bytes`) {
 		t.Errorf("objects.jsonl does not mark the Secret's token: %s", written.String())
 	}
-	for _, value := range []string{"s3cr3t", "czNjcjN0"} {
+	for _, value := range []string{"s3cr3t", "czNjcjN0", hex.EncodeToString([]byte("s3cr3t"))} {
 		if strings.Contains(written.String(), value) {
 			t.Errorf("objects.jsonl holds the Secret's value %q: %s", value, written.String())
 		}

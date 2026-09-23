@@ -39,10 +39,10 @@ func (d document) markdown() []byte {
 		md.WriteString(differencesLine(d.Differences, d.DifferencesTotal, d.Compared))
 		table(&md, []string{"object", "resourceVersion", "path", "before", "after"}, differenceRows(d.Differences))
 	}
-	fmt.Fprintf(&md, "\n## Sequence\n\n```json\n%s\n```\n", strings.TrimRight(string(d.Sequence), "\n"))
 	if d.Ready != nil {
 		d.Ready.markdown(&md)
 	}
+	fmt.Fprintf(&md, "\n## Sequence\n\n```json\n%s\n```\n", strings.TrimRight(string(d.Sequence), "\n"))
 	if len(d.Requests) > 0 {
 		md.WriteString("\n## Requests\n\n")
 		md.WriteString(quotedLine(d.RequestsTotal, len(d.Requests), "request", "", "requests.jsonl", "every request the run made"))
@@ -109,13 +109,11 @@ func differencesLine(differences []invariant.Difference, total int, compared str
 		quoted += " between " + compared
 	}
 	held := "`objects.jsonl` holds every version the Observer saw.\n\n"
-	if slices.ContainsFunc(differences, namesAField) {
+	if slices.ContainsFunc(differences, invariant.Difference.NamesAField) {
 		held = "`equalIgnore` takes each path as written, and " + held
 	}
 	return "The violation quotes " + quoted + ". " + held
 }
-
-func namesAField(d invariant.Difference) bool { return d.Path != "" }
 
 // count writes a number of things, in the singular where there is one.
 func count(n int, noun string) string {
@@ -154,7 +152,7 @@ func differenceRows(differences []invariant.Difference) [][]string {
 	rows := make([][]string, len(differences))
 	for i, d := range differences {
 		path := "(whole object)"
-		if namesAField(d) {
+		if d.NamesAField() {
 			path = code(d.Path)
 		}
 		rows[i] = []string{

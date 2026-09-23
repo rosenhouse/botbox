@@ -271,9 +271,9 @@ A G5 report lists each field the restart changed, with its value before and afte
 botbox prints names the first. If your controller stamps one of those fields at startup, paste
 its path into `equalIgnore` as written. A Secret's values appear there as markers too.
 
-### When G4 fails on op 0
+### When a settle wait fails G4
 
-The first settle wait expired. What follows `expired with no fault active` says why:
+A settle wait expired. What follows `expired with no fault active` says why:
 
 - `ready never held: evaluating ready "…": no such key: …` means your `ready` reads a
   field the CR does not have. Check the spelling, and guard an optional field with `has()`.
@@ -289,7 +289,8 @@ The first settle wait expired. What follows `expired with no fault active` says 
 - `ready held until …` means `ready` held and then stopped holding.
 
 After a `delete`, `the CR … was still being deleted, held by the finalizers …` means
-nothing removed those finalizers within `settle`.
+nothing removed those finalizers within `settle`. `no CR was left to be ready, but the
+namespace never held still …` means something kept writing after the CR was gone.
 
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
 `settle`. Where your controller repeated a failing request, the line names it and its

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -344,9 +345,6 @@ func TestReportQuotesWhatARestartChanged(t *testing.T) {
 			t.Errorf("The section is\n%s\nwant it to hold %q.", body, want)
 		}
 	}
-	if strings.Index(md, "## What changed across the restart") > strings.Index(md, "## Sequence") {
-		t.Errorf("The report is\n%s\nwant what changed ahead of the sequence.", md)
-	}
 	var carried []invariant.Difference
 	if err := json.Unmarshal([]byte(field(t, encoded, "differences")), &carried); err != nil {
 		t.Fatal(err)
@@ -419,6 +417,25 @@ func TestReportQuotesAValueAsCode(t *testing.T) {
 	}
 }
 
+func TestReportSaysWhyAheadOfTheSequence(t *testing.T) {
+	failure := deploymentBacked()
+	failure.Differences = []invariant.Difference{{Object: "v1/ConfigMap widget-0", Path: "data.a"}}
+
+	md, encoded := write(t, failure)
+
+	for _, heading := range []string{"## What changed across the restart", "## Ready predicate"} {
+		if at := strings.Index(md, heading); at < 0 || at > strings.Index(md, "## Sequence") {
+			t.Errorf("The report is\n%s\nwant %q ahead of the sequence.", md, heading)
+		}
+	}
+	fields := keys(t, encoded)
+	for _, key := range []string{"differences", "ready"} {
+		if at := slices.Index(fields, key); at < 0 || at > slices.Index(fields, "sequence") {
+			t.Errorf("report.json holds %v, want %q ahead of the sequence.", fields, key)
+		}
+	}
+}
+
 func TestReportOmitsTheSectionsWithNothingToSay(t *testing.T) {
 	md, encoded := write(t, failingRun())
 
@@ -484,10 +501,10 @@ func read(t *testing.T, dir, name string) string {
 	return string(content)
 }
 
-// fencedJSON returns the content of the report's json code block.
+// fencedJSON returns the content of the Sequence section's json code block.
 func fencedJSON(t *testing.T, md string) string {
 	t.Helper()
-	_, after, found := strings.Cut(md, "```json\n")
+	_, after, found := strings.Cut(section(md, "Sequence"), "```json\n")
 	if !found {
 		t.Fatalf("The report embeds no json block:\n%s", md)
 	}
@@ -510,6 +527,28 @@ func field(t *testing.T, encoded, name string) string {
 		t.Fatalf("report.json holds no %q:\n%s", name, encoded)
 	}
 	return string(held)
+}
+
+// keys returns report.json's top-level fields in the order it writes them.
+func keys(t *testing.T, encoded string) []string {
+	t.Helper()
+	decoder := json.NewDecoder(strings.NewReader(encoded))
+	if _, err := decoder.Token(); err != nil {
+		t.Fatalf("report.json does not parse: %v\n%s", err, encoded)
+	}
+	var fields []string
+	for decoder.More() {
+		key, err := decoder.Token()
+		if err != nil {
+			t.Fatalf("report.json does not parse: %v\n%s", err, encoded)
+		}
+		fields = append(fields, key.(string))
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			t.Fatalf("report.json does not parse: %v\n%s", err, encoded)
+		}
+	}
+	return fields
 }
 
 // section returns one markdown section, from its heading to the next.

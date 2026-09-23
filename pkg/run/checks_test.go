@@ -263,14 +263,14 @@ func TestTheChecksNameTheCRAnOpWrote(t *testing.T) {
 	timeline := Timeline{
 		Namespace: fakeNamespace,
 		Ops: []AppliedOp{
-			{Op: Op{Index: 0, Type: OpUpdate}, At: at(1), CR: "widget"},
+			{Op: Op{Index: 0, Type: OpUpdate}, At: at(1), CR: "widget-b"},
 			{Op: Op{Index: 1, Type: OpSettle}, At: at(2)},
 		},
 	}
 
 	ops := engineOps(checkTarget(), timeline)
 
-	if want := (observe.Key{GVK: widgetKind, Namespace: fakeNamespace, Name: "widget"}); ops[0].CR != want {
+	if want := (observe.Key{GVK: widgetKind, Namespace: fakeNamespace, Name: "widget-b"}); ops[0].CR != want {
 		t.Errorf("The update names the CR %+v, want %+v.", ops[0].CR, want)
 	}
 	if got := ops[1].CR; got != (observe.Key{}) {
@@ -483,27 +483,12 @@ func TestTheChecksNameWhatARestartChanged(t *testing.T) {
 			store := history()
 			recordWidget(store, at(0.1), "11", 1)
 			if c.before != nil {
-				recordData(store, at(0.2), "12", c.before)
+				recordData(store, at(0.2), "widget-0", "12", c.before)
 			}
-			recordData(store, at(3.5), "22", c.after)
-			in := Input{
-				Target:  checkTarget(),
-				Objects: store,
-				Timeline: Timeline{
-					Ops: []AppliedOp{appliedOp(0, OpCreate, at(0)), appliedOp(1, OpRestart, at(3)), appliedOp(2, OpSettle, at(3.1))},
-					Checkpoints: []Checkpoint{
-						{At: at(2.1), Op: 0, Converged: true},
-						{At: at(5.1), Op: 2, Converged: true},
-					},
-				},
-			}
+			recordData(store, at(3.5), "widget-0", "22", c.after)
 
-			violations := checked(t, in)
+			restart := restartChanged(t, store)
 
-			if ids := ids(violations); len(ids) != 1 || ids[0] != "G5" {
-				t.Fatalf("The checks reported %v, want G5 alone.", ids)
-			}
-			restart := violations[0]
 			if len(restart.Differences) != c.differences || restart.DifferencesTotal != c.differences {
 				t.Errorf("G5 carried out %+v of %d differences, want %d.", restart.Differences, restart.DifferencesTotal, c.differences)
 			}
@@ -517,12 +502,50 @@ func TestTheChecksNameWhatARestartChanged(t *testing.T) {
 	}
 }
 
-// recordData records the ConfigMap widget-0 holding the data.
-func recordData(store *observe.Store, when time.Time, resourceVersion string, data map[string]any) {
+// The statement names the first object, here a whole one, so the line names
+// the object whose field it quotes.
+func TestTheChecksNameTheFirstFieldARestartChanged(t *testing.T) {
+	store := history()
+	recordWidget(store, at(0.1), "11", 1)
+	recordData(store, at(0.2), "widget-1", "12", map[string]any{"a": "0"})
+	recordData(store, at(3.5), "widget-0", "21", map[string]any{"a": "0"})
+	recordData(store, at(3.6), "widget-1", "22", map[string]any{"a": "1"})
+
+	restart := restartChanged(t, store)
+
+	want := `data.a of the v1/ConfigMap widget-1 was "0", is "1" (1 of 2 differences); 1 version, the first v1/ConfigMap widget-0`
+	if restart.Evidence != want {
+		t.Errorf("G5's evidence is %q, want %q.", restart.Evidence, want)
+	}
+}
+
+// restartChanged returns the G5 of a run that converged, restarted and
+// converged again on the objects recorded.
+func restartChanged(t *testing.T, store *observe.Store) Violation {
+	t.Helper()
+	violations := checked(t, Input{
+		Target:  checkTarget(),
+		Objects: store,
+		Timeline: Timeline{
+			Ops: []AppliedOp{appliedOp(0, OpCreate, at(0)), appliedOp(1, OpRestart, at(3)), appliedOp(2, OpSettle, at(3.1))},
+			Checkpoints: []Checkpoint{
+				{At: at(2.1), Op: 0, Converged: true},
+				{At: at(5.1), Op: 2, Converged: true},
+			},
+		},
+	})
+	if ids := ids(violations); len(ids) != 1 || ids[0] != "G5" {
+		t.Fatalf("The checks reported %v, want G5 alone.", ids)
+	}
+	return violations[0]
+}
+
+// recordData records a ConfigMap holding the data.
+func recordData(store *observe.Store, when time.Time, name, resourceVersion string, data map[string]any) {
 	child := &unstructured.Unstructured{Object: map[string]any{"data": data}}
 	child.SetGroupVersionKind(configMapKind)
 	child.SetNamespace(fakeNamespace)
-	child.SetName("widget-0")
+	child.SetName(name)
 	child.SetResourceVersion(resourceVersion)
 	store.Record(configMapKind, child, when)
 }

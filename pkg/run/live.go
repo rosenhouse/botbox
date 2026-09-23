@@ -17,6 +17,7 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/retry"
 
+	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -62,15 +63,21 @@ func (l *liveRun) crs() dynamic.ResourceInterface { return l.of(l.target.Primary
 
 func (l *liveRun) namespace() string { return l.h.Namespace }
 
-func (l *liveRun) settle(ctx context.Context) (bool, error) { return l.h.Settle(ctx) }
+func (l *liveRun) settle(ctx context.Context, owed func() time.Time) (bool, error) {
+	return l.h.Settle(ctx, owed)
+}
 
 func (l *liveRun) sleep(ctx context.Context, d time.Duration) error { return sleep(ctx, d) }
 
 func (l *liveRun) restart(ctx context.Context) error { return l.h.Launcher.Restart(ctx) }
 
-func (l *liveRun) setFaults(specs []proxy.FaultSpec) { l.h.Proxy.SetFaults(specs) }
+func (l *liveRun) addFault(spec proxy.FaultSpec) proxy.FaultID { return l.h.Proxy.AddFault(spec) }
 
-func (l *liveRun) faultWindows() []proxy.FaultWindow { return l.h.Proxy.Windows() }
+func (l *liveRun) removeFault(id proxy.FaultID) { l.h.Proxy.RemoveFault(id) }
+
+func (l *liveRun) clearFaults() { l.h.Proxy.ClearFaults() }
+
+func (l *liveRun) faultWindow(id proxy.FaultID) proxy.FaultWindow { return l.h.Proxy.Window(id) }
 
 // createCR creates the op's object as the primary CR and tells the Observer
 // botbox created it, so that it never counts as managed (DESIGN.md §6).
@@ -222,6 +229,8 @@ func (l *liveRun) objects() *observe.Store { return l.h.Observer.Store }
 func (l *liveRun) targetStatus() launch.Status { return l.h.Launcher.Status() }
 
 func (l *liveRun) stop(ctx context.Context) error { return l.h.Stop(ctx) }
+
+func (l *liveRun) unresolvedOwners() []cluster.Unresolved { return l.h.unresolved }
 
 // await polls until the condition holds or the window closes, and reports
 // whether it held.

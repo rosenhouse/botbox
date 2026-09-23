@@ -1,6 +1,8 @@
 package main
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/run"
@@ -78,24 +82,47 @@ func readMatrix(t *testing.T, path string) string {
 	return string(written)
 }
 
-func TestMatrixRunsEachSequenceUnderItsBug(t *testing.T) {
-	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, false)}}
+// Each sequence runs under its bug and then against the toy with no bug. B0's
+// one run is both.
+func TestMatrixRunsEachSequenceUnderItsBugAndWithout(t *testing.T) {
+	session := &fakeSession{results: []run.Result{
+		recorded(t, true), recorded(t, false), recorded(t, true), recorded(t, false), recorded(t, true),
+	}}
 	sequences := bugSequences(t, 0, 1, 2)
 	out := matrixFile(t)
 
-	code, stdout, stderr := invoke(t, session, "matrix", "--target", toyTargetYAML, "--sequences", sequences, "--out", out)
+	code, stdout, stderr := invoke(t, session, "matrix", "--target", toyTargetYAML, "--sequences", sequences, "--out", out,
+		"--launch-arg", "--x=1")
 
 	if code != exitOK {
 		t.Fatalf("botbox matrix exited %d: %s%s", code, stdout, stderr)
 	}
-	if len(session.sequences) != 3 {
-		t.Fatalf("The session executed %d sequences, want one per bug.", len(session.sequences))
+	correct := append(loadToyArgs(t), "--x=1")
+	want := []struct {
+		bug  int64
+		args []string
+	}{
+		{0, correct},
+		{1, append(slices.Clone(correct), "--bug=1")}, {1, correct},
+		{2, append(slices.Clone(correct), "--bug=2")}, {2, correct},
 	}
-	declared := loadToyArgs(t)
-	for bug, args := range session.args {
-		want := append(slices.Clone(declared), "--bug="+strconv.Itoa(bug))
-		if !slices.Equal(args, want) {
-			t.Errorf("Bug %d ran with %v, want %v.", bug, args, want)
+	if len(session.sequences) != len(want) {
+		t.Fatalf("The session executed %d sequences, want %d: each under its bug and with none, and B0 once.",
+			len(session.sequences), len(want))
+	}
+	for i, want := range want {
+		if ran := session.sequences[i].Seed; ran != want.bug || !slices.Equal(session.args[i], want.args) {
+			t.Errorf("Run %d executed b%d.json with %v, want b%d.json with %v.", i, ran, session.args[i], want.bug, want.args)
+		}
+	}
+	if dirs := slices.Compact(slices.Sorted(slices.Values(session.dirs))); len(dirs) != len(want) {
+		t.Errorf("The runs wrote to %v, want a directory each.", session.dirs)
+	}
+	for _, line := range []string{
+		"B0: b0.json fired nothing", "B1: b1.json under --bug=1 fired G4, G6", "B1: b1.json without --bug=1 fired nothing",
+	} {
+		if !strings.Contains(stdout, line) {
+			t.Errorf("botbox matrix printed\n%s\nwant the line %q.", stdout, line)
 		}
 	}
 	if !session.closed {
@@ -104,7 +131,7 @@ func TestMatrixRunsEachSequenceUnderItsBug(t *testing.T) {
 }
 
 func TestMatrixWritesBugAgainstCheck(t *testing.T) {
-	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false)}}
+	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)}}
 	out := matrixFile(t)
 
 	code, _, stderr := invoke(t, session, "matrix",
@@ -115,17 +142,21 @@ func TestMatrixWritesBugAgainstCheck(t *testing.T) {
 	}
 	written := readMatrix(t, out)
 	want := []string{
-		"| Bug | G1 | G2 | G3 | G4 | G5 | G6 | P1 |",
-		"| B0 |  |  |  |  |  |  |  |",
-		"| B1 |  |  |  | ✓ |  | ✓ |  |",
+		"| Bug | G1 | G2 | G3 | G4 | G5 | G6 | P1 | No bug |",
+		"|---|---|---|---|---|---|---|---|---|",
+		"| B0 |  |  |  |  |  |  |  |  |",
+		"| B1 |  |  |  | ✓ |  | ✓ |  |  |",
 	}
 	for _, line := range want {
-		if !strings.Contains(written, line) {
+		if !slices.Contains(strings.Split(written, "\n"), line) {
 			t.Errorf("The matrix is\n%s\nwant the line %q.", written, line)
 		}
 	}
 	if !strings.Contains(written, "every check that fired") {
 		t.Errorf("The matrix is\n%s\nwant it to say a row lists every check that fired.", written)
+	}
+	if !strings.Contains(written, "also runs against the toy with no bug") {
+		t.Errorf("The matrix is\n%s\nwant it to say what its last column is.", written)
 	}
 }
 
@@ -133,7 +164,7 @@ func TestMatrixWritesBugAgainstCheck(t *testing.T) {
 // from outside, so the matrix says which cell is which.
 func TestMatrixMarksACheckThatLeftSomethingUnjudged(t *testing.T) {
 	// The control is the row D31 is about: it reads as empty either way.
-	session := &fakeSession{results: []run.Result{recordedWithAnUnjudgedRestart(t), recorded(t, false)}}
+	session := &fakeSession{results: []run.Result{recordedWithAnUnjudgedRestart(t), recorded(t, false), recorded(t, true)}}
 	out := matrixFile(t)
 
 	code, stdout, stderr := invoke(t, session, "matrix",
@@ -143,8 +174,8 @@ func TestMatrixMarksACheckThatLeftSomethingUnjudged(t *testing.T) {
 		t.Fatalf("botbox matrix exited %d: %s", code, stderr)
 	}
 	written := readMatrix(t, out)
-	if !strings.Contains(written, "| B0 |  |  |  |  | ? |  |  |") {
-		t.Errorf("The matrix is\n%s\nwant B0's G5 cell to say it judged nothing.", written)
+	if !strings.Contains(written, "| B0 |  |  |  |  | ? |  |  | G5 ? |") {
+		t.Errorf("The matrix is\n%s\nwant B0's G5 cell and its no-bug cell to say G5 judged nothing.", written)
 	}
 	if !strings.Contains(written, "left something unjudged") {
 		t.Errorf("The matrix is\n%s\nwant it to say what the mark means.", written)
@@ -154,8 +185,36 @@ func TestMatrixMarksACheckThatLeftSomethingUnjudged(t *testing.T) {
 	}
 }
 
+func TestACheckThatFiredIsMarkedCaughtWhateverItLeftUnjudged(t *testing.T) {
+	found := checked{fired: []string{"G5"}, skipped: []string{"G5"}}
+
+	if mark := found.mark("G5"); mark != "✓" {
+		t.Errorf("A check that fired and left a note is marked %q, want ✓.", mark)
+	}
+}
+
+// A run note says why a row reads as it does, such as why G3 fired.
+func TestMatrixPrintsTheRunsNotes(t *testing.T) {
+	control := recorded(t, true)
+	note := "botbox's garbage collector never deletes v1/ConfigMap widget-0, because it does not watch v1/Secret, the kind of its owner tls"
+	control.Notes = []string{note}
+	session := &fakeSession{results: []run.Result{control, recorded(t, false), recorded(t, true)}}
+
+	code, stdout, stderr := invoke(t, session, "matrix",
+		"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", matrixFile(t))
+
+	if code != exitOK {
+		t.Fatalf("botbox matrix exited %d: %s", code, stderr)
+	}
+	if want := "B0: b0.json fired nothing\n  " + note + "\n"; !strings.Contains(stdout, want) {
+		t.Errorf("botbox matrix printed %q, want %q.", stdout, want)
+	}
+}
+
 func TestMatrixListsTheBugsInCatalogOrder(t *testing.T) {
-	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, false)}}
+	session := &fakeSession{results: []run.Result{
+		recorded(t, true), recorded(t, false), recorded(t, true), recorded(t, false), recorded(t, true),
+	}}
 	out := matrixFile(t)
 
 	code, _, stderr := invoke(t, session, "matrix",
@@ -174,23 +233,33 @@ func TestMatrixListsTheBugsInCatalogOrder(t *testing.T) {
 	}
 }
 
-// The acceptance of DESIGN.md §10 M3: no bug's row is empty, and the control's
-// row is.
+// The acceptance: some check catches each bug, and none fires against the toy
+// with no bug.
 func TestMatrixFailsOnARowThatBreaksTheAcceptance(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		results []run.Result
-		want    string
+		want    []string
 	}{
 		{
 			name:    "a bug nothing caught",
-			results: []run.Result{recorded(t, true), recorded(t, true)},
-			want:    "B1",
+			results: []run.Result{recorded(t, true), recorded(t, true), recorded(t, true)},
+			want:    []string{"B1: b1.json under --bug=1 fired nothing"},
 		},
 		{
 			name:    "a control something caught",
-			results: []run.Result{recorded(t, false), recorded(t, false)},
-			want:    "B0",
+			results: []run.Result{recorded(t, false), recorded(t, false), recorded(t, true)},
+			want:    []string{"B0: b0.json fired G4, G6"},
+		},
+		{
+			name:    "a sequence something caught against the toy with no bug",
+			results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, false)},
+			want:    []string{"B1: b1.json without --bug=1 fired G4, G6"},
+		},
+		{
+			name:    "both runs of one sequence",
+			results: []run.Result{recorded(t, true), recorded(t, true), recorded(t, false)},
+			want:    []string{"B1: b1.json under --bug=1 fired nothing", "B1: b1.json without --bug=1 fired G4, G6"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -203,11 +272,139 @@ func TestMatrixFailsOnARowThatBreaksTheAcceptance(t *testing.T) {
 			if code != exitViolation {
 				t.Errorf("botbox matrix exited %d, want %d.", code, exitViolation)
 			}
-			if !strings.Contains(stderr, test.want) {
-				t.Errorf("botbox matrix reported %q, want it to name %s.", stderr, test.want)
+			for _, want := range test.want {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("botbox matrix reported %q, want %q.", stderr, want)
+				}
 			}
 			if readMatrix(t, out) == "" {
 				t.Errorf("botbox matrix wrote no matrix, want the one it judged.")
+			}
+		})
+	}
+}
+
+// replayed parses each replay command the matrix printed.
+func replayed(t *testing.T, stderr string) []options {
+	t.Helper()
+	var commands []options
+	for _, line := range strings.Split(stderr, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "botbox replay ") {
+			continue
+		}
+		command, _, err := parse(shellWords(t, line)[1:])
+		if err != nil {
+			t.Fatalf("botbox cannot parse the replay command %q: %v", line, err)
+		}
+		commands = append(commands, command)
+	}
+	return commands
+}
+
+// A sequence that fails the toy with no bug proves nothing about its bug.
+func TestMatrixFailsWhereASequenceFiresAgainstTheToyWithNoBug(t *testing.T) {
+	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, false)}}
+	out := matrixFile(t)
+
+	code, _, stderr := invoke(t, session, "matrix",
+		"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", out,
+		"--kubeconfig", "kind.kubeconfig", "--launch-arg", "--x=1")
+
+	if code != exitViolation {
+		t.Errorf("botbox matrix exited %d, want %d.", code, exitViolation)
+	}
+	if !strings.Contains(stderr, "B1: b1.json without --bug=1 fired G4, G6") {
+		t.Errorf("botbox matrix reported %q, want it to name B1's run without its bug.", stderr)
+	}
+	commands := replayed(t, stderr)
+	if len(commands) != 1 || commands[0].kubeconfig != "kind.kubeconfig" || !slices.Equal(commands[0].launchArgs, []string{"--x=1"}) {
+		t.Errorf("botbox matrix printed the replay commands %+v, want one with the kubeconfig and --x=1 and no --bug.", commands)
+	}
+	if written := readMatrix(t, out); !strings.Contains(written, "| B1 |  |  |  | ✓ |  | ✓ |  | G4 ✓, G6 ✓ |") {
+		t.Errorf("The matrix is\n%s\nwant B1's no-bug cell to name the checks that fired.", written)
+	}
+}
+
+// A bug nothing caught replays under its bug, with every flag the matrix ran.
+func TestMatrixReplaysABugNothingCaughtUnderItsBug(t *testing.T) {
+	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, true), recorded(t, true)}}
+
+	code, _, stderr := invoke(t, session, "matrix",
+		"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", matrixFile(t),
+		"--kubeconfig", "kind.kubeconfig", "--launch-arg", "--x=1")
+
+	if code != exitViolation {
+		t.Errorf("botbox matrix exited %d, want %d.", code, exitViolation)
+	}
+	commands := replayed(t, stderr)
+	if len(commands) != 1 || commands[0].kubeconfig != "kind.kubeconfig" ||
+		!slices.Equal(commands[0].launchArgs, []string{"--x=1", "--bug=1"}) {
+		t.Errorf("botbox matrix printed the replay commands %+v, want one with the kubeconfig, --x=1 and --bug=1.", commands)
+	}
+}
+
+// recordedWithABrokenProperty is a run whose property cannot be evaluated.
+func recordedWithABrokenProperty(t *testing.T) run.Result {
+	t.Helper()
+	result := recorded(t, true)
+	broken := *result.Recorded.Target
+	broken.Properties = []target.Property{{ID: "P1", Eval: func(*unstructured.Unstructured, []*unstructured.Unstructured) (bool, error) {
+		return false, errors.New("the predicate broke")
+	}}}
+	result.Recorded.Target = &broken
+	return result
+}
+
+// A run that errored judged nothing, so the matrix neither passes it nor
+// writes it.
+func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
+	stopped := errors.New("the target stopped")
+	for _, test := range []struct {
+		name     string
+		results  []run.Result
+		failures []error
+		want     string
+	}{
+		{
+			name:     "under the bug",
+			results:  []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)},
+			failures: []error{nil, stopped},
+			want:     "b1.json under --bug=1: the target stopped",
+		},
+		{
+			name:     "without the bug",
+			results:  []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)},
+			failures: []error{nil, nil, stopped},
+			want:     "b1.json without --bug=1: the target stopped",
+		},
+		{
+			name:     "in the control",
+			results:  []run.Result{recorded(t, true)},
+			failures: []error{stopped},
+			want:     "b0.json: the target stopped",
+		},
+		{
+			name:    "in the checks",
+			results: []run.Result{recorded(t, true), recorded(t, false), recordedWithABrokenProperty(t)},
+			want:    "b1.json without --bug=1: evaluating property P1: the predicate broke",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			session := &fakeSession{results: test.results, failures: test.failures}
+			out := matrixFile(t)
+
+			code, _, stderr := invoke(t, session, "matrix",
+				"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", out)
+
+			if code != exitError {
+				t.Errorf("botbox matrix exited %d, want %d.", code, exitError)
+			}
+			if !strings.Contains(stderr, test.want) {
+				t.Errorf("botbox matrix reported %q, want %q.", stderr, test.want)
+			}
+			if _, err := os.Stat(out); !errors.Is(err, fs.ErrNotExist) {
+				t.Errorf("botbox matrix wrote %s, want no matrix of a run that errored.", out)
 			}
 		})
 	}
@@ -287,7 +484,7 @@ func TestTheSeededBugSequencesAreShortAndFaultless(t *testing.T) {
 // A matrix run ends at no violation, so that the whole sequence executes and
 // every check the run trips is recorded.
 func TestMatrixChecksWithoutEndingTheRun(t *testing.T) {
-	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false)}}
+	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)}}
 
 	code, _, stderr := invoke(t, session, "matrix",
 		"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", matrixFile(t))

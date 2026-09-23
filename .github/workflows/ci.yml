@@ -71,8 +71,9 @@ jobs:
       - name: envtest tests
         run: make test-envtest
 
-  # The bug matrix of DESIGN.md §9.1: one envtest run per seeded bug, which the
-  # committed docs/bug-matrix.md must match.
+  # The bug matrix of DESIGN.md §9.1: two envtest runs per seeded bug, under it
+  # and without it, and one of b0.json. The committed docs/bug-matrix.md must
+  # match. It takes about four minutes.
   bug-matrix:
     runs-on: ubuntu-latest
     timeout-minutes: 10

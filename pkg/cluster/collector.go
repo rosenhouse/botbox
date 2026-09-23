@@ -1,10 +1,14 @@
 package cluster
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
+	"slices"
+	"strings"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -35,7 +39,8 @@ type CollectorOptions struct {
 	// Kinds are the namespaced kinds the collector watches. An owner of any
 	// other kind counts as live.
 	Kinds []schema.GroupVersionKind
-	// Mapper resolves those kinds to the resources the collector lists.
+	// Mapper resolves those kinds to the resources the collector lists, and
+	// the version an ownerReference names.
 	Mapper apimeta.RESTMapper
 	// Log defaults to slog.Default().
 	Log *slog.Logger
@@ -62,9 +67,10 @@ func (o CollectorOptions) Validate() error {
 type Collector struct {
 	client     metadata.Interface
 	namespace  string
-	watched    map[schema.GroupVersionKind]watchedKind
+	mapper     apimeta.RESTMapper
+	watched    map[schema.GroupKind]watchedKind
 	log        *slog.Logger
-	unresolved map[ownerKey]bool
+	unresolved map[Unresolved]bool
 
 	informers metadatainformer.SharedInformerFactory
 	events    chan struct{}
@@ -72,10 +78,25 @@ type Collector struct {
 	stopped   chan struct{}
 }
 
-// watchedKind is one kind the collector watches.
+// watchedKind is one kind the collector watches, at the version it lists.
 type watchedKind struct {
+	kind     schema.GroupVersionKind
 	resource schema.GroupVersionResource
 	store    cache.Store
+}
+
+// Unresolved is an owner the collector cannot resolve and the dependent that
+// names it. The collector counts that owner as live, so it never deletes the
+// dependent.
+type Unresolved struct {
+	DependentKind schema.GroupVersionKind
+	DependentName string
+	// OwnerKind is the kind at the version the reference names.
+	OwnerKind schema.GroupVersionKind
+	OwnerName string
+	// Unserved says the API server does not serve OwnerKind. Otherwise the
+	// collector does not watch the owner's kind.
+	Unserved bool
 }
 
 // StartCollector runs the collector over opts.Namespace until Stop.
@@ -88,7 +109,7 @@ func StartCollector(config *rest.Config, opts CollectorOptions) (*Collector, err
 	if err != nil {
 		return nil, fmt.Errorf("building the collector's client: %w", err)
 	}
-	resources, err := namespacedResources(opts.Mapper, opts.Kinds)
+	watched, err := namespacedKinds(opts.Mapper, opts.Kinds)
 	if err != nil {
 		return nil, err
 	}
@@ -99,9 +120,10 @@ func StartCollector(config *rest.Config, opts CollectorOptions) (*Collector, err
 	c := &Collector{
 		client:     client,
 		namespace:  opts.Namespace,
-		watched:    map[schema.GroupVersionKind]watchedKind{},
+		mapper:     opts.Mapper,
+		watched:    watched,
 		log:        log,
-		unresolved: map[ownerKey]bool{},
+		unresolved: map[Unresolved]bool{},
 		informers:  metadatainformer.NewFilteredSharedInformerFactory(client, noResync, opts.Namespace, nil),
 		events:     make(chan struct{}, 1),
 		stopped:    make(chan struct{}),
@@ -111,12 +133,13 @@ func StartCollector(config *rest.Config, opts CollectorOptions) (*Collector, err
 		UpdateFunc: func(any, any) { c.notify() },
 		DeleteFunc: func(any) { c.notify() },
 	}
-	for gvk, resource := range resources {
-		informer := c.informers.ForResource(resource).Informer()
+	for group, kind := range c.watched {
+		informer := c.informers.ForResource(kind.resource).Informer()
 		if _, err := informer.AddEventHandler(sweepOn); err != nil {
-			return nil, fmt.Errorf("watching %s: %w", gvk, err)
+			return nil, fmt.Errorf("watching %s: %w", kind.kind, err)
 		}
-		c.watched[gvk] = watchedKind{resource: resource, store: informer.GetStore()}
+		kind.store = informer.GetStore()
+		c.watched[group] = kind
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	c.cancel = cancel
@@ -129,11 +152,26 @@ func StartCollector(config *rest.Config, opts CollectorOptions) (*Collector, err
 	return c, nil
 }
 
-// Stop stops the collector. A sweep in progress is abandoned.
-func (c *Collector) Stop() {
+// Stop stops the collector and abandons a sweep in progress. It names each
+// owner the collector could not resolve, once per dependent.
+func (c *Collector) Stop() []Unresolved {
 	c.cancel()
 	<-c.stopped
 	c.informers.Shutdown()
+	return c.unresolvedOwners()
+}
+
+func (c *Collector) unresolvedOwners() []Unresolved {
+	found := slices.Collect(maps.Keys(c.unresolved))
+	slices.SortFunc(found, func(a, b Unresolved) int {
+		return cmp.Or(
+			strings.Compare(a.DependentKind.String(), b.DependentKind.String()),
+			strings.Compare(a.DependentName, b.DependentName),
+			strings.Compare(a.OwnerKind.String(), b.OwnerKind.String()),
+			strings.Compare(a.OwnerName, b.OwnerName),
+		)
+	})
+	return found
 }
 
 // collectorConfig is the collector's own connection to the API server. Its
@@ -144,10 +182,10 @@ func collectorConfig(config *rest.Config) *rest.Config {
 	return config
 }
 
-// namespacedResources maps each kind to the resource it is served at.
+// namespacedKinds maps each kind to the resource it is served at.
 // Cluster-scoped kinds are out of scope in phase 1 (DESIGN.md §15, D13).
-func namespacedResources(mapper apimeta.RESTMapper, kinds []schema.GroupVersionKind) (map[schema.GroupVersionKind]schema.GroupVersionResource, error) {
-	resources := map[schema.GroupVersionKind]schema.GroupVersionResource{}
+func namespacedKinds(mapper apimeta.RESTMapper, kinds []schema.GroupVersionKind) (map[schema.GroupKind]watchedKind, error) {
+	watched := map[schema.GroupKind]watchedKind{}
 	for _, gvk := range kinds {
 		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
@@ -156,11 +194,9 @@ func namespacedResources(mapper apimeta.RESTMapper, kinds []schema.GroupVersionK
 		if mapping.Scope.Name() != apimeta.RESTScopeNameNamespace {
 			return nil, fmt.Errorf("the collector watches namespaced kinds only, and %s is cluster-scoped", gvk)
 		}
-		// The mapping's kind carries the version the API server serves, which
-		// is the version an ownerReference names.
-		resources[mapping.GroupVersionKind] = mapping.Resource
+		watched[gvk.GroupKind()] = watchedKind{kind: mapping.GroupVersionKind, resource: mapping.Resource}
 	}
-	return resources, nil
+	return watched, nil
 }
 
 // sync starts the watches and waits for their caches, so that the first sweep
@@ -202,8 +238,10 @@ func (c *Collector) notify() {
 func (c *Collector) sweep(ctx context.Context, objects []object) {
 	live := c.liveOwners(ctx, objects)
 	for _, obj := range objects {
-		collect, unresolved := live.collectible(obj.meta.OwnerReferences)
-		c.logUnresolved(unresolved)
+		collect, unresolved := live.collectible(obj)
+		for _, owner := range unresolved {
+			c.unresolved[owner] = true
+		}
 		if collect {
 			c.delete(ctx, obj)
 		}
@@ -212,6 +250,7 @@ func (c *Collector) sweep(ctx context.Context, objects []object) {
 
 // object is one watched object in the run namespace.
 type object struct {
+	kind     schema.GroupVersionKind
 	resource schema.GroupVersionResource
 	meta     *metav1.PartialObjectMetadata
 }
@@ -226,7 +265,7 @@ func (c *Collector) objects() []object {
 			if !ok || meta.Namespace != c.namespace || meta.DeletionTimestamp != nil {
 				continue
 			}
-			found = append(found, object{resource: watched.resource, meta: meta})
+			found = append(found, object{kind: watched.kind, resource: watched.resource, meta: meta})
 		}
 	}
 	return found
@@ -236,13 +275,13 @@ func (c *Collector) objects() []object {
 // live because the watch on one kind can lag the watch on another, and a
 // dependent that arrives before its owner must not be collected.
 func (c *Collector) liveOwners(ctx context.Context, objects []object) owners {
-	live := owners{watched: c.watched, resolved: map[ownerKey]owner{}}
+	live := owners{mapper: c.mapper, watched: c.watched, resolved: map[ownerKey]owner{}}
 	for _, obj := range objects {
 		for _, ref := range obj.meta.OwnerReferences {
 			key := keyOf(ref)
-			kind, watched := live.watched[key.gvk]
+			kind, how := live.resolve(ref)
 			_, alreadyRead := live.resolved[key]
-			if !watched || alreadyRead {
+			if how != resolvable || alreadyRead {
 				continue
 			}
 			found, err := c.client.Resource(kind.resource).Namespace(c.namespace).
@@ -255,7 +294,7 @@ func (c *Collector) liveOwners(ctx context.Context, objects []object) owners {
 			default:
 				live.resolved[key] = owner{unreadable: true}
 				c.logFailure(ctx, "The collector could not read an owner.",
-					"kind", key.gvk.Kind, "name", key.name, "error", err)
+					"kind", key.kind.Kind, "name", key.name, "error", err)
 			}
 		}
 	}
@@ -288,14 +327,15 @@ func (c *Collector) logFailure(ctx context.Context, message string, args ...any)
 	time.AfterFunc(retryDelay, c.notify)
 }
 
-// ownerKey identifies an owner within the run namespace.
+// ownerKey identifies an owner within the run namespace. A reference may name
+// the owner at any version the API server serves, so the key holds none.
 type ownerKey struct {
-	gvk  schema.GroupVersionKind
+	kind schema.GroupKind
 	name string
 }
 
 func keyOf(ref metav1.OwnerReference) ownerKey {
-	return ownerKey{gvk: schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind), name: ref.Name}
+	return ownerKey{kind: schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind).GroupKind(), name: ref.Name}
 }
 
 // owner is what one live read found. The zero value says the owner is gone.
@@ -306,45 +346,62 @@ type owner struct {
 	unreadable bool
 }
 
-// owners is what the collector knows about the run namespace: the kinds it
-// watches and the owners it resolved.
+// owners is what the collector knows about the run namespace: the kinds the
+// API server serves, the kinds the collector watches, and the owners it
+// resolved.
 type owners struct {
-	watched  map[schema.GroupVersionKind]watchedKind
+	mapper   apimeta.RESTMapper
+	watched  map[schema.GroupKind]watchedKind
 	resolved map[ownerKey]owner
 }
 
-// collectible reports whether an object carrying these ownerReferences must be
-// deleted: it has at least one and every owner is gone. Only an owner read and
-// found missing counts as gone, and a name read back under a different UID
-// counts the same. An owner of an unwatched kind counts as live and comes back
-// as unresolved, so the collector never deletes an object whose owners it
-// cannot resolve (DESIGN.md §5.8).
-func (o owners) collectible(refs []metav1.OwnerReference) (bool, []metav1.OwnerReference) {
+// resolution says whether the collector can resolve an owner, or why not.
+type resolution int
+
+const (
+	resolvable resolution = iota
+	unwatchedKind
+	unservedVersion
+)
+
+// resolve finds the watched kind a reference names. Like the garbage
+// collector, it resolves a reference only at a version the API server serves.
+func (o owners) resolve(ref metav1.OwnerReference) (watchedKind, resolution) {
+	gvk := schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind)
+	kind, watched := o.watched[gvk.GroupKind()]
+	if !watched {
+		return watchedKind{}, unwatchedKind
+	}
+	if _, err := o.mapper.RESTMapping(gvk.GroupKind(), gvk.Version); err != nil {
+		return watchedKind{}, unservedVersion
+	}
+	return kind, resolvable
+}
+
+// collectible reports whether obj must be deleted: it has at least one
+// ownerReference and every owner is gone. Only an owner read and found missing
+// counts as gone, and a name read back under a different UID counts the same.
+// An owner the collector cannot resolve counts as live and comes back as
+// unresolved.
+func (o owners) collectible(obj object) (bool, []Unresolved) {
+	refs := obj.meta.OwnerReferences
 	collect := len(refs) > 0
-	var unresolved []metav1.OwnerReference
+	var unresolved []Unresolved
 	for _, ref := range refs {
-		key := keyOf(ref)
-		if _, watched := o.watched[key.gvk]; !watched {
-			unresolved = append(unresolved, ref)
+		if _, how := o.resolve(ref); how != resolvable {
+			unresolved = append(unresolved, Unresolved{
+				DependentKind: obj.kind,
+				DependentName: obj.meta.Name,
+				OwnerKind:     schema.FromAPIVersionAndKind(ref.APIVersion, ref.Kind),
+				OwnerName:     ref.Name,
+				Unserved:      how == unservedVersion,
+			})
 			collect = false
 			continue
 		}
-		if found, read := o.resolved[key]; !read || found.unreadable || found.uid == ref.UID {
+		if found, read := o.resolved[keyOf(ref)]; !read || found.unreadable || found.uid == ref.UID {
 			collect = false
 		}
 	}
 	return collect, unresolved
-}
-
-// logUnresolved names each owner the collector cannot resolve once per run.
-func (c *Collector) logUnresolved(refs []metav1.OwnerReference) {
-	for _, ref := range refs {
-		key := keyOf(ref)
-		if c.unresolved[key] {
-			continue
-		}
-		c.unresolved[key] = true
-		c.log.Warn("The collector does not watch this owner's kind and treats it as live.",
-			"apiVersion", ref.APIVersion, "kind", ref.Kind, "name", ref.Name)
-	}
 }

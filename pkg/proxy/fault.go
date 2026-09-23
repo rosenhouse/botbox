@@ -7,7 +7,6 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"path"
-	"slices"
 	"time"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -77,37 +76,46 @@ func (a Delay) String() string { return fmt.Sprintf("delay(%s)", a.For) }
 func (Drop) String() string    { return "drop" }
 
 // Trigger ends a fault after a count of applications or a duration from the
-// SetFaults call. The zero Trigger never ends, which is how the Runner drives
-// the op-index trigger of DESIGN.md §5.2.
+// AddFault call. A fault with the zero Trigger ends only at RemoveFault or
+// ClearFaults.
 type Trigger struct {
 	Count int
 	For   time.Duration
 }
 
-// SetFaults replaces the active faults. A spec the proxy already holds keeps
-// what it has done so far, so that adding or dropping one fault does not
-// restart another's trigger. The first spec that matches a request wins.
-func (p *Proxy) SetFaults(specs []FaultSpec) {
+// FaultID names a fault that AddFault gave the proxy. Two faults can have
+// equal specs.
+type FaultID int
+
+// AddFault has the proxy apply the fault after those it already holds. The
+// first fault that applies to a request wins.
+func (p *Proxy) AddFault(spec FaultSpec) FaultID {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	held := slices.Clone(p.faults)
-	faults := make([]*activeFault, len(specs))
-	for i, spec := range specs {
-		if j := slices.IndexFunc(held, func(f *activeFault) bool { return f != nil && f.spec == spec }); j >= 0 {
-			faults[i], held[j] = held[j], nil
-			continue
-		}
-		faults[i] = &activeFault{
-			spec:   spec,
-			since:  time.Now(),
-			random: rand.New(rand.NewPCG(uint64(p.seed), uint64(i))),
-		}
-	}
-	p.faults = faults
+	id := FaultID(len(p.faults))
+	p.faults = append(p.faults, &injectedFault{
+		spec:   spec,
+		since:  time.Now(),
+		random: rand.New(rand.NewPCG(uint64(p.seed), uint64(id))),
+	})
+	return id
 }
 
-// ClearFaults removes every active fault.
-func (p *Proxy) ClearFaults() { p.SetFaults(nil) }
+// RemoveFault retires the fault at once.
+func (p *Proxy) RemoveFault(id FaultID) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.faults[id].remove()
+}
+
+// ClearFaults retires every fault at once.
+func (p *Proxy) ClearFaults() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, fault := range p.faults {
+		fault.remove()
+	}
+}
 
 // FaultWindow is what the proxy has done with one fault (DESIGN.md §5.2).
 type FaultWindow struct {
@@ -119,39 +127,40 @@ type FaultWindow struct {
 	Retired time.Time
 }
 
-// Windows reports what the proxy has done with each fault of the last
-// SetFaults call, in that order. The Runner reads them into the run's timeline:
-// a fault excuses the target over the window the proxy applied it in, and a
-// fault it never applied excuses nothing (DESIGN.md §6).
-func (p *Proxy) Windows() []FaultWindow {
+// Window reports what the proxy has done with the fault, removed or not. The
+// Runner reads it into the run's timeline: a fault excuses the target over the
+// window the proxy applied it in, and a fault it never applied excuses nothing
+// (DESIGN.md §6).
+func (p *Proxy) Window(id FaultID) FaultWindow {
 	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	windows := make([]FaultWindow, len(p.faults))
-	for i, fault := range p.faults {
-		windows[i] = FaultWindow{First: fault.first, Retired: fault.retiredBy(now)}
-	}
-	return windows
+	fault := p.faults[id]
+	return FaultWindow{First: fault.first, Retired: fault.retiredBy(now)}
 }
 
-type activeFault struct {
+type injectedFault struct {
 	spec    FaultSpec
 	since   time.Time
 	random  *rand.Rand
 	applied int
-	// first is when the fault was applied to a request, and spent is when the
-	// request that used up Until.Count arrived.
-	first, spent time.Time
+	// first is when the fault was applied to a request, spent is when the
+	// request that used up Until.Count arrived, and removed is when the
+	// caller retired it.
+	first, spent, removed time.Time
 }
 
-func (f *activeFault) expired(now time.Time) bool {
-	if f.spec.Until.Count > 0 && f.applied >= f.spec.Until.Count {
-		return true
+// remove stamps the removal. The caller holds the proxy's lock, so no request
+// the fault applied to comes after it.
+func (f *injectedFault) remove() {
+	if f.removed.IsZero() {
+		f.removed = time.Now()
 	}
-	return f.spec.Until.For > 0 && now.Sub(f.since) >= f.spec.Until.For
 }
 
-func (f *activeFault) applies(r Request, now time.Time) bool {
+func (f *injectedFault) expired(now time.Time) bool { return !f.retiredBy(now).IsZero() }
+
+func (f *injectedFault) applies(r Request, now time.Time) bool {
 	if !f.spec.Match.Matches(r) {
 		return false
 	}
@@ -169,16 +178,23 @@ func (f *activeFault) applies(r Request, now time.Time) bool {
 }
 
 // retiredBy is when the proxy stopped applying the fault, or the zero time
-// while it still applies. A count runs out on the request that spends it, and
-// a window runs out on the clock, whether or not a request came.
-func (f *activeFault) retiredBy(now time.Time) time.Time {
-	retired := f.spent
-	if f.spec.Until.For > 0 {
-		if ends := f.since.Add(f.spec.Until.For); !ends.After(now) && (retired.IsZero() || ends.Before(retired)) {
-			retired = ends
-		}
+// while it still applies. A count runs out on the request that spends it, a
+// window runs out on the clock, whether or not a request came, and a removal
+// retires the fault at once.
+func (f *injectedFault) retiredBy(now time.Time) time.Time {
+	retired := earliest(f.spent, f.removed)
+	if windowEnd := f.since.Add(f.spec.Until.For); f.spec.Until.For > 0 && !windowEnd.After(now) {
+		retired = earliest(retired, windowEnd)
 	}
 	return retired
+}
+
+// earliest is the earlier of two instants, where a zero one has not come.
+func earliest(a, b time.Time) time.Time {
+	if a.IsZero() || (!b.IsZero() && b.Before(a)) {
+		return b
+	}
+	return a
 }
 
 // faultFor returns the action of the first active fault the request matches.

@@ -155,6 +155,54 @@ func TestRunner(t *testing.T) {
 		requireNamespaceEmpty(t, ctx, testCluster.Config(), result.Timeline.Namespace)
 	})
 
+	// b10.json scales the toy down right after a restart, before anything
+	// settles, so botbox's update lies between the states G5 compares.
+	t.Run("passes the toy without a bug on b10.json and notes the restart", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		sequence, err := run.ReadSequence(repoRoot + "/targets/toy-widget/sequences/b10.json")
+		if err != nil {
+			t.Fatalf("Reading the sequence failed: %v", err)
+		}
+
+		result, err := run.Run(ctx, toy, sequence, run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy runs without a bug.", result.Violation)
+		}
+		if !slices.ContainsFunc(result.Notes, func(note string) bool {
+			return strings.HasPrefix(note, "G5") && strings.Contains(note, "for op 1 (restart): op 2 (update) ran")
+		}) {
+			t.Errorf("The run noted %q, want G5 to say the update of op 2 kept it from judging the restart of op 1.", result.Notes)
+		}
+	})
+
+	t.Run("notes an owner the collector cannot resolve", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		ownedBySecret := fixtureConfigMap()
+		ownedBySecret.SetOwnerReferences([]metav1.OwnerReference{{
+			APIVersion: "v1", Kind: "Secret", Name: "absent", UID: "8a1d0f2c-5b3e-4d7a-9c6f-1e2b3c4d5e6f",
+		}})
+		toy.Fixtures = append(toy.Fixtures, ownedBySecret)
+
+		result, err := run.Run(ctx, toy, readSequence(t, oneCreate), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: &recordingChecker{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		want := "botbox's garbage collector never deletes v1/ConfigMap " + fixtureName +
+			", because it does not watch v1/Secret, the kind of its owner absent"
+		if !slices.Equal(result.Notes, []string{want}) {
+			t.Errorf("The run carried the notes %q, want %q.", result.Notes, want)
+		}
+	})
+
 	// A target that dies mid-run takes the run with it, and no wait outlives
 	// it (DESIGN.md §5.5).
 	t.Run("ends the settle wait where the target stopped", func(t *testing.T) {

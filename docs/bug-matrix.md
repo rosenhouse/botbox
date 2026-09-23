@@ -9,17 +9,21 @@ bug: several bugs trip more than one. B0 is the control, the toy with no bug,
 and its row is empty. A `✓` caught the bug; a `?` left something unjudged,
 which is not the same as a pass.
 
-| Bug | G1 | G2 | G3 | G4 | G5 | G6 | P1 |
-|---|---|---|---|---|---|---|---|
-| B0 |  |  |  |  |  |  |  |
-| B1 | ✓ | ✓ |  |  |  |  | ✓ |
-| B2 | ✓ | ✓ |  | ✓ |  |  |  |
-| B3 |  |  | ✓ |  |  |  |  |
-| B4 |  |  |  | ✓ |  |  |  |
-| B5 | ✓ |  |  | ✓ |  | ✓ |  |
-| B6 | ✓ | ✓ |  | ✓ |  |  |  |
-| B7 |  |  |  | ✓ |  |  |  |
-| B8 |  |  | ✓ |  | ✓ |  | ✓ |
-| B9 |  |  | ✓ | ✓ |  |  |  |
-| B10 |  |  |  | ✓ | ? |  | ✓ |
-| B11 |  |  |  | ✓ |  |  |  |
+Each sequence also runs against the toy with no bug. The last column names each
+check that fired there or left something unjudged, with the same marks. CI fails
+if a check fires there.
+
+| Bug | G1 | G2 | G3 | G4 | G5 | G6 | P1 | No bug |
+|---|---|---|---|---|---|---|---|---|
+| B0 |  |  |  |  |  |  |  |  |
+| B1 | ✓ | ✓ |  |  |  |  | ✓ |  |
+| B2 | ✓ | ✓ |  | ✓ |  |  |  |  |
+| B3 |  |  | ✓ |  |  |  |  |  |
+| B4 |  |  |  | ✓ |  |  |  |  |
+| B5 | ✓ |  |  | ✓ |  | ✓ |  |  |
+| B6 | ✓ | ✓ |  | ✓ |  |  |  |  |
+| B7 |  |  |  | ✓ |  |  |  |  |
+| B8 |  |  | ✓ |  | ✓ |  | ✓ |  |
+| B9 |  |  | ✓ | ✓ |  |  |  |  |
+| B10 |  |  |  | ✓ | ? |  | ✓ | G5 ? |
+| B11 |  |  |  | ✓ |  |  |  |  |

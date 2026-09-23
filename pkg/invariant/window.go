@@ -57,8 +57,8 @@ func (in Input) quietWindows() []quiet {
 
 // teardownWindow is the T_stable the teardown waits before it deletes
 // anything, which §5.5 step 4 makes a quiet window of its own: a run whose
-// last op never settles has no other. The teardown clears every fault as the
-// window opens, so a fault it cleared did not reach into it.
+// last op never settles has no other. The teardown clears every fault before
+// the window opens, so a fault it cleared did not reach into it.
 func (in Input) teardownWindow() (quiet, bool) {
 	w := quiet{what: "the quiet window the teardown waited before deleting", start: in.Quiet, end: in.Teardown}
 	if w.start.IsZero() || w.end.IsZero() || !in.observed(w.end) || in.faulted(w.start, w.end) {
@@ -67,8 +67,8 @@ func (in Input) teardownWindow() (quiet, bool) {
 	return w, true
 }
 
-// settleEnd is when the op's settle wait ended, on convergence or on T_settle,
-// which is where §6's quiet window opens. An op the Runner did not settle
+// settleEnd is when the op's settle wait ended, on convergence or where it
+// gave up, which is where §6's quiet window opens. An op the Runner did not settle
 // after, or whose wait the run did not reach the end of, has no window.
 func (in Input) settleEnd(op int) (time.Time, bool) {
 	for _, checkpoint := range in.Checkpoints {

@@ -10,6 +10,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -39,9 +40,9 @@ const (
 
 const usage = `botbox exercises a controller against the generic invariants of DESIGN.md §6.
 
-  botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--launch-arg ARG]... [<sequence.json>...]
-  botbox replay --target <yaml> [--out DIR] [--deadline D] [--launch-arg ARG]... <sequence.json>
-  botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D]
+  botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]
+  botbox replay --target <yaml> [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>
+  botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...
   botbox version
 `
 
@@ -311,7 +312,25 @@ func (o options) replayCommand(sequence string) string {
 	for _, arg := range o.launchArgs {
 		command = append(command, "--launch-arg", arg)
 	}
-	return strings.Join(append(command, sequence), " ")
+	if strings.HasPrefix(sequence, "-") {
+		sequence = "./" + sequence
+	}
+	command = append(command, sequence)
+	for i, word := range command {
+		command[i] = shellQuote(word)
+	}
+	return strings.Join(command, " ")
+}
+
+var shellSafe = regexp.MustCompile(`^[A-Za-z0-9_./:@%+,-][A-Za-z0-9_./=:@%+,-]*$`)
+
+// shellQuote single-quotes a word unless shellSafe shows that sh and zsh read
+// it literally.
+func shellQuote(word string) string {
+	if shellSafe.MatchString(word) {
+		return word
+	}
+	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
 }
 
 // writeReport leaves §5.7's report beside the recordings it describes. replay
@@ -405,8 +424,9 @@ func exitCode(result run.Result, err error) int {
 
 // named blames the --deadline for a run its own budget cut short. §11 makes
 // this exit 2, which a reader has to be able to tell from a broken target. The
-// context botbox built from the flag is what it asks: the teardown runs on a
-// budget of its own, and that one is nobody's flag (DESIGN.md §5.5).
+// context botbox built from the flag is what it asks. That context also ends
+// the teardown's wait for the target to recover from the faults. The rest of
+// the teardown runs on a budget of its own, which is nobody's flag.
 func (o options) named(ctx context.Context, err error) error {
 	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return err

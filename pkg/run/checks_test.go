@@ -126,6 +126,20 @@ func TestTheChecksReadTheTeardownCheckpointAsNoSettleWait(t *testing.T) {
 	}
 }
 
+// The teardown's wait for the target to recover from the faults is a settle
+// wait, and one that expired is G4's.
+func TestTheChecksReadTheRecoveryCheckpointAsASettleWait(t *testing.T) {
+	in := convergedRun()
+	in.Timeline.Faults = []Window{{Start: at(3), End: at(4)}}
+	in.Timeline.Checkpoints = append(in.Timeline.Checkpoints, Checkpoint{At: at(10), Op: Recovery, Converged: false})
+
+	violations := checked(t, in)
+
+	if len(violations) != 1 || !strings.Contains(violations[0].Statement, "after the last fault stopped expired") {
+		t.Errorf("The checks reported %v, want the G4 of the expired wait after the last fault stopped.", violations)
+	}
+}
+
 // A namespace that came clean settles G3 where the teardown stopped watching,
 // which is before T_delete is up whenever the target cleans up promptly
 // (DESIGN.md §6). The timeline carries that instant, not a teardown

@@ -88,7 +88,7 @@ type Target struct {
 	// Equal is nil unless the target names a hook. The invariant engine then
 	// applies the §6 default equality together with EqualIgnore.
 	Equal       EqualFunc
-	EqualIgnore []string
+	EqualIgnore []Path
 	Properties  []Property
 	Generate    GenerateSpec
 	Launch      LaunchSpec

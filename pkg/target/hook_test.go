@@ -1,6 +1,7 @@
 package target_test
 
 import (
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -43,6 +44,15 @@ func TestEqualHook(t *testing.T) {
 	}
 	if loaded.Equal(observe.Snapshot{}, observe.Snapshot{}) {
 		t.Error("Load did not use the registered equality hook.")
+	}
+}
+
+func TestEqualHookRefusesPathsItWouldIgnore(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"equal: 'go:neverEqual'\nequalIgnore:\n  - status.lastSyncTime\n", map[string]string{"widget.yaml": sampleWidget})
+
+	_, err := target.Load(path)
+	if err == nil || !strings.Contains(err.Error(), "equalIgnore") {
+		t.Errorf("Load reported %v for a hook beside paths it would never read, want an error naming equalIgnore.", err)
 	}
 }
 

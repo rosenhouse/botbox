@@ -973,6 +973,22 @@ func TestTheReplayCommandQuotesAWordZshWouldExpand(t *testing.T) {
 	}
 }
 
+// literalBytes are the bytes a shell reads as themselves.
+const literalBytes = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_./=:@%+,-"
+
+func TestTheReplayCommandQuotesEveryByteAShellInterprets(t *testing.T) {
+	for c := byte(0); c < 0x7f; c++ {
+		if (c < ' ' && c != '\t' && c != '\n') || strings.IndexByte(literalBytes, c) >= 0 {
+			continue
+		}
+		for _, word := range []string{string(c), "x" + string(c)} {
+			if quoted := shellQuote(word); !strings.HasPrefix(quoted, "'") {
+				t.Errorf("shellQuote(%q) is %q, want it single-quoted.", word, quoted)
+			}
+		}
+	}
+}
+
 // A new flag either changes what a run executes, and the replay command
 // carries it, or it does not. This test makes its author say which.
 func TestEveryFlagIsReplayedOrSelectsNothing(t *testing.T) {

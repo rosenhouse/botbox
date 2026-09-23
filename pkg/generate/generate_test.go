@@ -155,6 +155,45 @@ func TestARefusedUpdateIsDrawnAgain(t *testing.T) {
 	}
 }
 
+func TestAnUpdateTheCRDAlwaysRefusesBecomesASettle(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	loaded.Generate.Mutate = []string{"spec.count"}
+	// The only count the overlay allows is below minCount's default.
+	loaded.Generate.Overlay = map[string]map[string]any{"spec.count": {"maximum": 0}}
+	g := newGenerator(t, loaded, Options{})
+	rapid.Check(t, func(rt *rapid.T) {
+		sequence := g.sequence(rt)
+		if err := sequence.Validate(); err != nil {
+			rt.Fatalf("The Runner rejects the sequence: %v.", err)
+		}
+		for _, op := range sequence.Ops {
+			if op.Type == run.OpUpdate {
+				rt.Fatalf("Op %d updates the gadget with %v, which its CRD refuses.", op.Index, op.Patch)
+			}
+		}
+	})
+}
+
+func TestTheStateFollowsTheCRBotboxLastWrote(t *testing.T) {
+	spec := func(count int64) map[string]any {
+		return map[string]any{"spec": map[string]any{"count": count, "mode": "fast"}}
+	}
+	at := state{cr: spec(3)}
+
+	at.advance(run.Op{Type: run.OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(5)}}})
+	if !equalJSON(at.cr, spec(5)) {
+		t.Errorf("After an update the state holds %v, want %v.", at.cr, spec(5))
+	}
+	at.advance(run.Op{Type: run.OpRecreate, Obj: &unstructured.Unstructured{Object: spec(7)}})
+	if !equalJSON(at.cr, spec(7)) {
+		t.Errorf("After a recreate the state holds %v, want %v.", at.cr, spec(7))
+	}
+	at.advance(run.Op{Type: run.OpDelete})
+	if at.cr != nil {
+		t.Errorf("After a delete the state holds %v, want no CR.", at.cr)
+	}
+}
+
 func TestSequencesAreLegalToReplay(t *testing.T) {
 	const maxOps = 5
 	for _, testCase := range targets {

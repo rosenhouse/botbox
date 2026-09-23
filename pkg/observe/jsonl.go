@@ -59,11 +59,11 @@ func (v Version) MarshalJSON() ([]byte, error) {
 		DeletionTimestamp:  v.DeletionTimestamp,
 		Labels:             v.Labels,
 		Deleted:            v.Deleted,
-		Object:             redacted(v.GVK, v.Object),
+		Object:             redactedObject(v.GVK, v.Object),
 	})
 }
 
-func redacted(gvk schema.GroupVersionKind, obj *unstructured.Unstructured) *unstructured.Unstructured {
+func redactedObject(gvk schema.GroupVersionKind, obj *unstructured.Unstructured) *unstructured.Unstructured {
 	if obj == nil {
 		return nil
 	}

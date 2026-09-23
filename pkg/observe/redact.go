@@ -25,20 +25,21 @@ func Redacted(gvk schema.GroupVersionKind, content map[string]any) map[string]an
 	if gvk != secretGVK {
 		return content
 	}
-	redacted := runtime.DeepCopyJSON(content)
-	data, _ := redacted["data"].(map[string]any)
+	secret := runtime.DeepCopyJSON(content)
+	data, _ := secret["data"].(map[string]any)
 	for key, value := range data {
+		// The API server serves only base64 strings, so other values may share a marker.
 		encoded, _ := value.(string)
 		decoded, _ := base64.StdEncoding.DecodeString(encoded)
 		data[key] = marker(decoded)
 	}
-	metadata, _ := redacted["metadata"].(map[string]any)
+	metadata, _ := secret["metadata"].(map[string]any)
 	annotations, _ := metadata["annotations"].(map[string]any)
 	for key, value := range annotations {
 		text, _ := value.(string)
 		annotations[key] = marker([]byte(text))
 	}
-	return redacted
+	return secret
 }
 
 func marker(secret []byte) string {

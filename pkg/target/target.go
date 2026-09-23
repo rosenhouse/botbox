@@ -74,7 +74,7 @@ func (l LaunchSpec) Check() error {
 		return nil
 	case strings.Contains(l.Binary, "/") && !filepath.IsAbs(l.Binary):
 		wd, _ := os.Getwd()
-		return fmt.Errorf("launch.binary: %w, in the working directory %s; the path is relative to where botbox runs, not to target.yaml", err, wd)
+		return fmt.Errorf("launch.binary: %w; the path is relative to the working directory %s, not to target.yaml", err, wd)
 	default:
 		return fmt.Errorf("launch.binary: %w", err)
 	}

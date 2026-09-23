@@ -105,8 +105,9 @@ func TestAHistoryLineHoldsNoPartOfASecretsValue(t *testing.T) {
 	}
 }
 
-// recognisable are the forms a reader would know part of a value in: each
-// 4-byte window as it is and in hex, and each base64 group at every alignment.
+// recognisable returns each form in which a reader would know part of the
+// value: every 4-byte window as it is and in hex, and every base64 group at
+// each alignment.
 func recognisable(value string) []string {
 	var forms []string
 	for i := range len(value) - 2 {

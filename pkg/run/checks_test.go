@@ -256,9 +256,9 @@ func TestTheChecksDoNotCreditACleanupBotboxPerformed(t *testing.T) {
 	}
 }
 
-// An op whose index resolved to nothing deleted nothing, so it names no
-// object for G3 to read (DESIGN.md §5.4).
-func TestTheChecksCarryNoObjectForAnOpThatResolvedToNothing(t *testing.T) {
+// An op that deleted nothing names no object for G3 or G7 to read
+// (DESIGN.md §7).
+func TestTheChecksCarryNoObjectForAnOpThatDeletedNothing(t *testing.T) {
 	timeline := Timeline{
 		Namespace: fakeNamespace,
 		Ops: []AppliedOp{{
@@ -269,7 +269,7 @@ func TestTheChecksCarryNoObjectForAnOpThatResolvedToNothing(t *testing.T) {
 	ops := engineOps(checkTarget(), timeline)
 
 	if got := ops[0].Deleted; got != (observe.Key{}) {
-		t.Errorf("The op names the object %+v, and its index resolved to nothing.", got)
+		t.Errorf("The op names the object %+v, and it deleted nothing.", got)
 	}
 }
 

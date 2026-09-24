@@ -67,6 +67,15 @@ const createThenRecreate = `{
   ]
 }`
 
+const createThenDeleteManaged = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
+  ]
+}`
+
 // checkpointState is what a check saw when it ran.
 type checkpointState struct {
 	op          int
@@ -119,6 +128,30 @@ func (c *recordingChecker) ops() []int {
 		ops = append(ops, state.op)
 	}
 	return ops
+}
+
+// staleObserver judges as the engine does, over an Observer that lags the API
+// server: from op 0's checkpoint it holds a managed ConfigMap the API server
+// does not, and it sees the ConfigMap go at op 1. The ConfigMap has no
+// creationTimestamp, so it sorts first.
+type staleObserver struct{}
+
+const vanished = "vanished"
+
+func (staleObserver) Check(in run.Input) (run.Findings, error) {
+	gone := &unstructured.Unstructured{}
+	gone.SetGroupVersionKind(configMapKind)
+	gone.SetNamespace(in.Timeline.Namespace)
+	gone.SetName(vanished)
+	gone.SetUID("uid-" + vanished)
+	gone.SetResourceVersion("1")
+	switch last := in.Timeline.Checkpoints[len(in.Timeline.Checkpoints)-1]; last.Op {
+	case 0:
+		in.Objects.Record(configMapKind, gone, last.At)
+	case 1:
+		in.Objects.RecordDeletion(configMapKind, gone, in.Timeline.Ops[1].At)
+	}
+	return run.Engine{}.Check(in)
 }
 
 func TestRunner(t *testing.T) {
@@ -229,6 +262,28 @@ func TestRunner(t *testing.T) {
 		}
 		if want := "the v1/ConfigMap widget-0 that op 1 (deleteManaged) deleted never came back"; !strings.HasPrefix(result.Violation.Statement, want) {
 			t.Errorf("G7 says %q, want it to begin %q.", result.Violation.Statement, want)
+		}
+	})
+
+	// A target can delete the object a deleteManaged op resolved to before
+	// botbox deletes it. The op then deleted nothing, so G7 has nothing to
+	// require back.
+	t.Run("notes a deleteManaged whose object was gone", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+
+		result, err := run.Run(ctx, toy, readSequence(t, createThenDeleteManaged), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: staleObserver{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: botbox deleted nothing.", result.Violation)
+		}
+		want := "op 1 (deleteManaged) deleted nothing: index 0 resolved to the v1/ConfigMap " + vanished + ", which was gone before botbox could delete it"
+		if !slices.Equal(result.Notes, []string{want}) {
+			t.Errorf("The run noted %q, want %q.", result.Notes, want)
 		}
 	})
 

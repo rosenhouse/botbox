@@ -296,7 +296,7 @@ func TestG7JudgesAnObjectDeletedBeforeTheTargetExited(t *testing.T) {
 	fired(t, invariant.SelfHealing, in)
 }
 
-// An index that resolved to nothing deleted nothing, which the Runner notes.
+// An op that deleted nothing names no object, so G7 has nothing to judge.
 func TestG7IgnoresAnOpThatDeletedNothing(t *testing.T) {
 	in := converged().
 		op(invariant.OpDeleteManaged, 10*time.Second).

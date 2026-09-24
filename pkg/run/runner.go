@@ -187,7 +187,8 @@ type AppliedOp struct {
 	At time.Time
 	// CR is the primary CR a CR op wrote.
 	CR string
-	// Resolved is the object a deleteManaged op chose (DESIGN.md §7).
+	// Resolved is the object a deleteManaged op resolved to, or empty where
+	// the op found nothing to delete (DESIGN.md §7).
 	Resolved string
 	// Settled is the settle wait that followed the op, or nil if none did.
 	Settled *Wait
@@ -287,7 +288,9 @@ type harness interface {
 	// managedObjects names the managed objects of one kind, ordered by
 	// creationTimestamp then name (DESIGN.md §7).
 	managedObjects(gvk schema.GroupVersionKind) []string
-	deleteManaged(ctx context.Context, gvk schema.GroupVersionKind, name string) error
+	// deleteManaged deletes the object, and reports false where it was
+	// already gone.
+	deleteManaged(ctx context.Context, gvk schema.GroupVersionKind, name string) (bool, error)
 	managedCount() int
 	// awaitClean waits for the run namespace to empty, and reports whether it
 	// did within the window.
@@ -539,8 +542,9 @@ func (r *runner) haveCR() error {
 // applyDeleteManaged resolves the op's index against the managed objects and
 // deletes the one it names, behind the target's back (DESIGN.md §5.4). How
 // many objects the target manages is its own doing, so an index that resolves
-// to nothing skips the op and is reported as a note. A kind the target does
-// not manage is still a configuration error: no run of that sequence can
+// to nothing skips the op and is reported as a note. So does an object
+// already gone, which the Observer had not yet seen go. A kind the target
+// does not manage is still a configuration error: no run of that sequence can
 // resolve it.
 func (r *runner) applyDeleteManaged(ctx context.Context, op Op) (string, error) {
 	gvk, err := managedKind(r.target, op.Kind)
@@ -554,7 +558,13 @@ func (r *runner) applyDeleteManaged(ctx context.Context, op Op) (string, error) 
 		return "", nil
 	}
 	name := names[*op.Nth]
-	return name, r.h.deleteManaged(ctx, gvk, name)
+	deleted, err := r.h.deleteManaged(ctx, gvk, name)
+	if err == nil && !deleted {
+		r.skipped = append(r.skipped, fmt.Sprintf("op %d (deleteManaged) deleted nothing: index %d resolved to the %s %s, which was gone before botbox could delete it",
+			op.Index, *op.Nth, op.Kind, name))
+		return "", nil
+	}
+	return name, err
 }
 
 // settle waits for the target's reaction and checkpoints where the wait ends

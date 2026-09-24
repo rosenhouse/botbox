@@ -63,6 +63,8 @@ type fakeHarness struct {
 	fail    map[string]error
 	// unresolved is what the collector reports once the harness has stopped.
 	unresolved []cluster.Unresolved
+	// gone names the managed objects the target deleted before botbox could.
+	gone []string
 
 	// deleteCRDelay holds the CR delete open, and deletedCRAt is when it began.
 	// Together they show whether a stamp was taken before or after the delete.
@@ -295,8 +297,8 @@ func (f *fakeHarness) managedObjects(gvk schema.GroupVersionKind) []string {
 	return f.managed[gvk]
 }
 
-func (f *fakeHarness) deleteManaged(_ context.Context, gvk schema.GroupVersionKind, name string) error {
-	return f.record("deleteManaged " + kindName(gvk) + " " + name)
+func (f *fakeHarness) deleteManaged(_ context.Context, gvk schema.GroupVersionKind, name string) (bool, error) {
+	return !slices.Contains(f.gone, name), f.record("deleteManaged " + kindName(gvk) + " " + name)
 }
 
 func (f *fakeHarness) managedCount() int { return f.count }
@@ -1422,6 +1424,28 @@ func TestRunSkipsADeleteManagedThatResolvesToNothing(t *testing.T) {
 	}
 	if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], "op 0 (deleteManaged)") {
 		t.Errorf("The run reported the notes %v, want the skipped op named.", result.Notes)
+	}
+}
+
+// The Observer lags the API server, so the object an index resolves to can be
+// gone by the delete. The op then deleted nothing, so it names no object for
+// G3 or G7 (DESIGN.md §7).
+func TestRunNotesADeleteManagedWhoseObjectWasGone(t *testing.T) {
+	h := newFakeHarness()
+	h.gone = []string{"widget-1"}
+	op := Op{Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(1)}
+
+	result, err := runFake(t, h, nil, sequenceOf(op))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if got := result.Timeline.Ops[0].Resolved; got != "" {
+		t.Errorf("The op recorded %q as the object it deleted, and it deleted nothing.", got)
+	}
+	want := "op 0 (deleteManaged) deleted nothing: index 1 resolved to the v1/ConfigMap widget-1, which was gone before botbox could delete it"
+	if !slices.Equal(result.Notes, []string{want}) {
+		t.Errorf("The run reported the notes %q, want %q.", result.Notes, want)
 	}
 }
 

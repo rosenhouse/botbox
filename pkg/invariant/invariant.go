@@ -45,8 +45,8 @@ type Op struct {
 	Type  OpType
 	Time  time.Time
 	// Deleted is the object a DeleteManaged op removed. Every other op carries
-	// the zero Key, and so does a DeleteManaged op whose index resolved to
-	// nothing (DESIGN.md §5.4).
+	// the zero Key, and so does a DeleteManaged op that deleted nothing
+	// (DESIGN.md §7).
 	Deleted observe.Key
 	// CR is the primary CR a CR op wrote. Every other op carries the zero Key.
 	CR observe.Key

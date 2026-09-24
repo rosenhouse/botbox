@@ -622,12 +622,14 @@ Details the example does not show:
   object still there where the wait ends is judged there, and the op creates nothing
   (§5.5).
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
-  then name. The index is resolved at execution time and the chosen object is recorded by
-  name in the report. An index that resolves to nothing is skipped and reported as a note,
-  since a target that manages fewer objects than the sequence expected is behaving, not
-  failing. A kind the target does not declare in `manages` is a configuration error. G7
-  judges a `deleteManaged` only once the run has converged since botbox last changed
-  something (§6), so put a `settle` op between a `noSettle` op and a `deleteManaged`.
+  then name. The index is resolved at execution time against what the Observer has seen.
+  An index that resolves to nothing is skipped and reported as a note, since a target that
+  manages fewer objects than the sequence expected is behaving, not failing. So is an
+  object already gone when botbox deletes it, which the Observer had not yet seen go: the
+  op deleted nothing, and the note names the object. A kind the target does not declare in
+  `manages` is a configuration error. G7 judges a `deleteManaged` only once the run has
+  converged since botbox last changed something (§6), so put a `settle` op between a
+  `noSettle` op and a `deleteManaged`.
 
 `botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
 embed the minimized sequence in this format.

@@ -175,11 +175,14 @@ func (l *liveRun) managedObjects(gvk schema.GroupVersionKind) []string {
 	return names
 }
 
-func (l *liveRun) deleteManaged(ctx context.Context, gvk schema.GroupVersionKind, name string) error {
-	if err := l.of(gvk).Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
-		return fmt.Errorf("deleting the managed %s %s: %w", kindName(gvk), name, err)
+func (l *liveRun) deleteManaged(ctx context.Context, gvk schema.GroupVersionKind, name string) (bool, error) {
+	switch err := l.of(gvk).Delete(ctx, name, metav1.DeleteOptions{}); {
+	case apierrors.IsNotFound(err):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("deleting the managed %s %s: %w", kindName(gvk), name, err)
 	}
-	return nil
+	return true, nil
 }
 
 func (l *liveRun) managedCount() int { return len(l.h.Observer.Managed()) }

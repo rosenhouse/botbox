@@ -80,7 +80,7 @@ func engineInput(in Input) invariant.Input {
 
 // engineOps carries each op's index, which is what a checkpoint names and not
 // the op's position in the timeline, the CR a CR op wrote, and the object a
-// deleteManaged op resolved to: G3 does not credit the target for a cleanup
+// deleteManaged op deleted: G3 does not credit the target for a cleanup
 // botbox performed (DESIGN.md §5.4, D38).
 func engineOps(t *target.Target, timeline Timeline) []invariant.Op {
 	ops := make([]invariant.Op, len(timeline.Ops))

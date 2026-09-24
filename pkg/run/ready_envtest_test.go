@@ -16,6 +16,7 @@ import (
 
 // A G4 on op 0 has three usual causes, and the run says which.
 func TestAnExpiredWaitSaysWhy(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	binary := buildToy(t)
 	testCluster := startCluster(t, loadTarget(t, binary).CRDs)

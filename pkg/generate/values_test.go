@@ -2,6 +2,7 @@ package generate
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -60,6 +61,20 @@ func TestListAndStringLengthsReadTheSchemasBounds(t *testing.T) {
 		declared string
 		lo, hi   int
 	}{
+		{`{"type":"object"}`, 0, defaultMaxItems},
+		{`{"type":"object","minProperties":5}`, 5, 5},
+		{`{"type":"object","maxProperties":1}`, 0, 1},
+	} {
+		t.Run(testCase.declared, func(t *testing.T) {
+			if lo, hi := propertyRange(parseSchema(t, testCase.declared)); lo != testCase.lo || hi != testCase.hi {
+				t.Errorf("propertyRange is %d to %d, want %d to %d.", lo, hi, testCase.lo, testCase.hi)
+			}
+		})
+	}
+	for _, testCase := range []struct {
+		declared string
+		lo, hi   int
+	}{
 		{`{"type":"string"}`, defaultMinLength, defaultMaxLength},
 		{`{"type":"string","minLength":20}`, 20, 20},
 		{`{"type":"string","maxLength":2}`, defaultMinLength, 2},
@@ -87,6 +102,9 @@ func TestGeneratedValuesMatchTheirSchema(t *testing.T) {
 		  "items":{"type":"string","minLength":5,"maxLength":8}}`,
 		`{"type":"object","required":["a"],"properties":{"a":{"type":"integer","minimum":1,"maximum":2},
 		  "c":{"type":"boolean"}}}`,
+		`{"type":"object","minProperties":1,"maxProperties":2,
+		  "additionalProperties":{"type":"integer","minimum":1,"maximum":9}}`,
+		`{"type":"object","additionalProperties":{"type":"object","required":["a"],"properties":{"a":{"type":"boolean"}}}}`,
 	} {
 		t.Run(declared, func(t *testing.T) {
 			parsed := parseSchema(t, declared)
@@ -123,8 +141,10 @@ func TestOptionalPropertiesTheSchemaSaysTooLittleAboutStayOut(t *testing.T) {
 func TestSchemasThatSayTooLittleAreConfigurationErrors(t *testing.T) {
 	for _, testCase := range []struct{ declared, reports string }{
 		{`{"type":"string","format":"date-time"}`, "format"},
-		{`{"x-kubernetes-int-or-string":true}`, "does not say what values"},
+		{`{"x-kubernetes-int-or-string":true}`, "x-kubernetes-int-or-string"},
 		{`{"type":"object","x-kubernetes-preserve-unknown-fields":true}`, "no property"},
+		{`{"type":"object","additionalProperties":true}`, "no property"},
+		{`{"type":"object","minProperties":3,"maxProperties":1,"additionalProperties":{"type":"string"}}`, "no map"},
 		{`{"type":"array"}`, "what the array holds"},
 		{`{"type":"integer","minimum":5,"maximum":3}`, "no integer"},
 		{`{"type":"string","minLength":5,"maxLength":3}`, "no string"},
@@ -140,6 +160,89 @@ func TestSchemasThatSayTooLittleAreConfigurationErrors(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), testCase.reports) {
 				t.Errorf("valuesOf reported %q, which does not mention %q.", err, testCase.reports)
+			}
+		})
+	}
+}
+
+func TestAMapFieldIsDrawn(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	loaded.Generate.Mutate = []string{"spec.config"}
+	g := newGenerator(t, loaded, Options{})
+	word := regexp.MustCompile(`^[a-z0-9]{1,12}$`)
+	keyed := 0
+	rapid.Check(t, func(rt *rapid.T) {
+		for _, drawn := range generatedAt(g.sequence(rt), loaded.Sample, "spec", "config") {
+			config, isMap := drawn.(map[string]any)
+			if !isMap || len(config) > 3 {
+				rt.Fatalf("spec.config is %#v, want a map of at most the CRD's 3 keys.", drawn)
+			}
+			for key, value := range config {
+				if text, isString := value.(string); !word.MatchString(key) || !isString || len(text) > 8 {
+					rt.Fatalf("spec.config holds %q: %#v, want a word keying a string of at most 8 runes.", key, value)
+				}
+			}
+			if len(config) > 0 {
+				keyed++
+			}
+		}
+	})
+	if keyed == 0 {
+		t.Error("No draw put a key in spec.config.")
+	}
+}
+
+func TestAnIntOrStringNamesTheOverlayThatSaysWhichItIs(t *testing.T) {
+	for _, declared := range []string{
+		`{"x-kubernetes-int-or-string":true}`,
+		// A word is rarely what an int-or-string's string form means.
+		`{"x-kubernetes-int-or-string":true,"type":"string"}`,
+	} {
+		t.Run(declared, func(t *testing.T) {
+			_, err := valuesOf(parseSchema(t, declared))
+			if err == nil {
+				t.Fatal("valuesOf guessed which form an int-or-string takes.")
+			}
+			for _, want := range []string{"x-kubernetes-int-or-string", "generate.overlay", "type: integer", "type: string", "pattern", "enum"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("valuesOf reported %q, which does not mention %q.", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestAnIntOrStringFollowsItsOverlay(t *testing.T) {
+	percent := regexp.MustCompile(`^[1-9]0%$`)
+	for _, testCase := range []struct {
+		overlay map[string]any
+		allowed func(any) bool
+	}{
+		{map[string]any{"type": "integer", "minimum": 1, "maximum": 3}, func(value any) bool {
+			whole, isInteger := value.(int64)
+			return isInteger && whole >= 1 && whole <= 3
+		}},
+		{map[string]any{"type": "string", "pattern": percent.String()}, func(value any) bool {
+			text, isString := value.(string)
+			return isString && percent.MatchString(text)
+		}},
+	} {
+		t.Run(testCase.overlay["type"].(string), func(t *testing.T) {
+			loaded := loadTarget(t, rulesTarget)
+			loaded.Generate.Mutate = []string{"spec.surge"}
+			loaded.Generate.Overlay = map[string]map[string]any{"spec.surge": testCase.overlay}
+			g := newGenerator(t, loaded, Options{})
+			drawn := 0
+			rapid.Check(t, func(rt *rapid.T) {
+				for _, surge := range generatedAt(g.sequence(rt), loaded.Sample, "spec", "surge") {
+					if !testCase.allowed(surge) {
+						rt.Fatalf("spec.surge is %#v, which the overlay %v does not allow.", surge, testCase.overlay)
+					}
+					drawn++
+				}
+			})
+			if drawn == 0 {
+				t.Error("No draw changed spec.surge.")
 			}
 		})
 	}

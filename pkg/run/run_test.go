@@ -1,10 +1,13 @@
 package run
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/rest"
 
+	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
@@ -52,15 +56,15 @@ func TestValidateOptions(t *testing.T) {
 		{name: "no target", opts: Options{Dir: "out"}, want: "target"},
 		{name: "no output directory", target: toy, want: "output directory"},
 		{
-			name:   "a garbage-collected cluster without a config",
+			name:   "a cluster with a controller manager and no config",
 			target: toy,
-			opts:   Options{Dir: "out", GarbageCollected: true},
-			want:   "garbage",
+			opts:   Options{Dir: "out", ControllerManager: true},
+			want:   "controller manager",
 		},
 		{
-			name:   "a garbage-collected cluster with a config",
+			name:   "a cluster with a controller manager and a config",
 			target: toy,
-			opts:   Options{Dir: "out", GarbageCollected: true, Config: &rest.Config{}},
+			opts:   Options{Dir: "out", ControllerManager: true, Config: &rest.Config{}},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -74,6 +78,87 @@ func TestValidateOptions(t *testing.T) {
 				t.Errorf("validate returned %q, want it to name %q.", err, test.want)
 			}
 		})
+	}
+}
+
+var serviceAccountKind = schema.GroupVersionKind{Version: "v1", Kind: "ServiceAccount"}
+
+func inRunNamespace(gvk schema.GroupVersionKind, name string) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(gvk)
+	u.SetNamespace("botbox-run-1")
+	u.SetName(name)
+	return u
+}
+
+func TestAwaitNamespaceDefaults(t *testing.T) {
+	serviceAccount := inRunNamespace(serviceAccountKind, "default")
+	rootCA := inRunNamespace(configMapKind, "kube-root-ca.crt")
+	both := []schema.GroupVersionKind{widgetKind, serviceAccountKind, configMapKind}
+	for _, test := range []struct {
+		name    string
+		watched []schema.GroupVersionKind
+		made    []*unstructured.Unstructured
+		// later is what the cluster makes while the wait sleeps.
+		later  []*unstructured.Unstructured
+		within time.Duration
+		want   string
+	}{
+		{name: "both made", watched: both, made: []*unstructured.Unstructured{serviceAccount, rootCA}},
+		{
+			name: "one made while it waits", watched: both, within: time.Minute,
+			made: []*unstructured.Unstructured{serviceAccount}, later: []*unstructured.Unstructured{rootCA},
+		},
+		{
+			name: "the ConfigMap never made", watched: both,
+			made: []*unstructured.Unstructured{serviceAccount}, want: "v1/ConfigMap kube-root-ca.crt",
+		},
+		{
+			name: "the ServiceAccount never made", watched: both,
+			made: []*unstructured.Unstructured{rootCA}, want: "v1/ServiceAccount default",
+		},
+		{
+			name: "an unwatched kind never made", watched: []schema.GroupVersionKind{widgetKind, configMapKind},
+			made: []*unstructured.Unstructured{rootCA},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := observe.NewStore(observe.Options{Namespace: "botbox-run-1"})
+			for _, made := range test.made {
+				store.Record(made.GroupVersionKind(), made, time.Now())
+			}
+			sleep := func(context.Context, time.Duration) error {
+				for _, made := range test.later {
+					store.Record(made.GroupVersionKind(), made, time.Now())
+				}
+				return nil
+			}
+
+			err := awaitNamespaceDefaults(t.Context(), store, test.watched, test.within, sleep)
+
+			switch {
+			case test.want == "" && err != nil:
+				t.Errorf("awaitNamespaceDefaults returned %v, want nil.", err)
+			case test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)):
+				t.Errorf("awaitNamespaceDefaults returned %v, want an error naming %q.", err, test.want)
+			}
+		})
+	}
+}
+
+func TestExcludePresentLeavesWhatComesLaterManaged(t *testing.T) {
+	store := observe.NewStore(observe.Options{Namespace: "botbox-run-1", Manages: []schema.GroupVersionKind{configMapKind}})
+	store.Record(configMapKind, inRunNamespace(configMapKind, "kube-root-ca.crt"), time.Now())
+
+	excludePresent(store, []schema.GroupVersionKind{widgetKind, configMapKind})
+	store.Record(configMapKind, inRunNamespace(configMapKind, "widget-0"), time.Now())
+
+	var managed []string
+	for _, v := range store.Managed() {
+		managed = append(managed, v.Name)
+	}
+	if !slices.Equal(managed, []string{"widget-0"}) {
+		t.Errorf("The managed objects are %v, want only widget-0.", managed)
 	}
 }
 
@@ -214,7 +299,7 @@ func TestTheHarnessReadsAReadyThatYieldsNoBoolAsAnError(t *testing.T) {
 	yieldsAnInt := &target.Target{Primary: widgetKind, Ready: func(*unstructured.Unstructured) (bool, error) {
 		return false, &target.EvalError{Predicate: "ready", Expr: "status.ready", Err: fmt.Errorf("%w: it yielded int64", target.ErrNotBool)}
 	}}
-	h := &Harness{target: yieldsAnInt, Observer: &observe.Observer{Store: store}}
+	h := &Harness{target: yieldsAnInt, Observer: &observe.Observer{Store: store}, Launcher: launcherReporting{status: launch.Status{Running: true}}}
 
 	_, _, err := h.state(time.Now())
 
@@ -263,5 +348,105 @@ func TestReady(t *testing.T) {
 				t.Errorf("ready returned the error %v, want one: %t.", err, test.wantErr)
 			}
 		})
+	}
+}
+
+// launcherReporting is a launcher that only reports status.
+type launcherReporting struct {
+	launch.Launcher
+	status launch.Status
+}
+
+func (l launcherReporting) Status() launch.Status { return l.status }
+
+// harnessOver reads a quiet, empty run namespace and the target as status says.
+func harnessOver(status launch.Status) *Harness {
+	return &Harness{
+		target:   &target.Target{Primary: widgetKind},
+		Observer: &observe.Observer{Store: observe.NewStore(observe.Options{Namespace: "botbox-run-1"})},
+		Launcher: launcherReporting{status: status},
+	}
+}
+
+// A target waiting out a restart backoff is down, whatever state it left.
+func TestATargetWaitingToRestartIsNotReady(t *testing.T) {
+	since := time.Now()
+	for _, test := range []struct {
+		name   string
+		status launch.Status
+		ready  bool
+	}{
+		{"running", launch.Status{Running: true, Started: since.Add(-time.Minute)}, true},
+		{"waiting to restart", launch.Status{Running: true, Restarting: true, Started: since.Add(-time.Minute)}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ready, _, err := harnessOver(test.status).state(since)
+
+			if err != nil || ready != test.ready {
+				t.Errorf("A target %s reads as ready: %t (%v), want %t.", test.name, ready, err, test.ready)
+			}
+		})
+	}
+}
+
+// A restarted target has to hold still for T_stable too, or a wait converges
+// before the new process has done anything.
+func TestARestartCountsAsAChange(t *testing.T) {
+	since := time.Now().Add(-time.Minute)
+	restarted := since.Add(time.Second)
+
+	_, changed, err := harnessOver(launch.Status{Running: true, Started: restarted}).state(since)
+
+	if err != nil || !changed.Equal(restarted) {
+		t.Errorf("The run last changed at %v (%v), want the restart at %v.", changed, err, restarted)
+	}
+}
+
+// Each exit of a supervised target is recorded with the line its own process
+// wrote as it stopped, though every process writes to one log.
+func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
+	dir := t.TempDir()
+	panicked := filepath.Join(dir, "panicked")
+	log, err := os.Create(filepath.Join(dir, targetLogFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { log.Close() })
+	binary := launch.NewBinary(launch.Options{
+		Path: "/bin/sh",
+		Args: []string{"-c", `if [ -e "$0" ]; then echo "E0923 lost the lease"; exit 1; fi
+			echo "panic: first"; echo "goroutine 1 [running]:"; : > "$0"; exit 2`, panicked},
+		Log:     log,
+		Backoff: launch.MaxBackoff,
+	})
+	t.Cleanup(func() { _ = binary.Stop(context.Background()) })
+	live := &liveRun{h: &Harness{dir: dir, Launcher: binary}}
+	if err := binary.Start(t.Context(), "kubeconfig"); err != nil {
+		t.Fatal(err)
+	}
+
+	live.supervise()
+
+	for deadline := time.Now().Add(10 * time.Second); len(live.exits()) < 2 && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+	}
+	exits := live.exits()
+	if len(exits) != 2 {
+		t.Fatalf("The harness recorded the exits %+v, want the first and the one after its restart.", exits)
+	}
+	for i, want := range []struct {
+		status, said string
+		backoff      time.Duration
+	}{
+		{"exit status 2", "panic: first", 0},
+		{"exit status 1", "E0923 lost the lease", launch.MaxBackoff},
+	} {
+		exit := exits[i]
+		if exit.Said != want.said || exit.Err == nil || exit.Err.Error() != want.status || exit.At.IsZero() {
+			t.Errorf("Exit %d is %+v, want %s after the target wrote %q.", i+1, exit, want.status, want.said)
+		}
+		if down := exit.Restart.Sub(exit.At); down > want.backoff || down < want.backoff-time.Second {
+			t.Errorf("Exit %d restarts %v after it, want %v.", i+1, down, want.backoff)
+		}
 	}
 }

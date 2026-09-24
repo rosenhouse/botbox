@@ -12,11 +12,11 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"time"
 
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/generate"
@@ -62,13 +62,14 @@ const (
 type Generator func(seed int64) (run.Sequence, error)
 
 // rapidGenerator draws sequences from the target's CRD schema (DESIGN.md
-// §5.4). It reads the CRDs once, because a draw itself does no I/O.
-func rapidGenerator(t *target.Target) (Generator, error) {
+// §5.4). It reads the CRDs once, because a draw itself does no I/O. It also
+// says which spec paths generation leaves alone.
+func rapidGenerator(t *target.Target) (Generator, []string, error) {
 	g, err := generate.New(t, generate.Options{})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return g.Draw, nil
+	return g.Draw, g.LeftAlone(), nil
 }
 
 // cli is one invocation. Its writers, its generator and its test cluster are
@@ -79,12 +80,14 @@ type cli struct {
 	// newGenerator builds the generator the invocation draws from, once, as
 	// pkg/generate's does: reading the target's CRDs costs I/O, drawing does
 	// not.
-	newGenerator func(*target.Target) (Generator, error)
+	newGenerator func(*target.Target) (Generator, []string, error)
 }
 
 // session executes sequences against one test cluster. Runs share it, because
 // starting a control plane costs seconds (DESIGN.md §5.5).
 type session interface {
+	// vet refuses a target the cluster cannot run, before any run starts.
+	vet(t *target.Target) error
 	execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error)
 	close() error
 }
@@ -139,11 +142,14 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		return c.fail(err)
 	}
 
-	s, err := c.open(opts, exercised)
+	s, err := c.startSession(opts, exercised)
 	if err != nil {
 		return c.fail(err)
 	}
 	defer func() { c.warn(s.close()) }()
+	if err := s.vet(exercised); err != nil {
+		return c.fail(err)
+	}
 	out, err := run.OpenOutput(opts.out, opts.invocationSeed(runs[0].sequence), time.Now())
 	if err != nil {
 		return c.fail(err)
@@ -164,14 +170,13 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		fmt.Fprintf(c.stdout, "run %d: seed %d, %s\n", number, planned.sequence.Seed, planned.source())
 		dir := out.RunDir(number)
 		result, err := s.execute(ctx, exercised, planned.sequence, dir, run.Engine{})
-		for _, note := range result.Notes {
-			fmt.Fprintf(c.stdout, "run %d: %s\n", number, note)
-		}
-		switch exitCode(result, err) {
-		case exitError:
-			return c.fail(opts.named(ctx, err))
-		case exitViolation:
+		code := exitCode(result, err)
+		if code == exitViolation {
 			return c.reportFailure(ctx, opts, s, exercised, planned, result, number, dir)
+		}
+		c.printNotes(number, result.Notes)
+		if code == exitError {
+			return c.failRun(number, planned, dir, opts.named(ctx, err))
 		}
 		if err := out.Discard(number); err != nil {
 			return c.fail(err)
@@ -211,9 +216,12 @@ func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, e
 		}
 		return runs, nil
 	}
-	draw, err := c.newGenerator(t)
+	draw, leftAlone, err := c.newGenerator(t)
 	if err != nil {
 		return nil, err
+	}
+	for _, note := range leftAlone {
+		fmt.Fprintln(c.stdout, note)
 	}
 	runs := make([]planned, opts.runs)
 	for i := range runs {
@@ -235,6 +243,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	if !failed.generated() {
 		// The caller's file is a better thing to replay than a copy of it.
 		c.warn(c.writeReport(dir, opts, t, failed.path, failed.sequence, result))
+		c.printNotes(number, result.Notes)
 		c.report(number, violation, dir)
 		return exitViolation
 	}
@@ -243,6 +252,8 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	})
 	reported := shrunk
 	simplified := simpler(shrunk, failed.sequence)
+	// notes are the reported run's. The report adds notes of its own below.
+	notes := result.Notes
 	switch {
 	case ctx.Err() != nil && simplified:
 		// The deadline ended the pass before the smaller sequence could be
@@ -263,7 +274,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 			"the deadline ended minimization before it found a smaller sequence: this is the sequence botbox drew")
 	case simplified:
 		if again := c.rerun(ctx, opts, s, t, shrunk, dir); again.Violation != nil {
-			result, violation = again, *again.Violation
+			result, violation, notes = again, *again.Violation, again.Notes
 		} else {
 			// The recordings are of the rerun, so the report counts its ops.
 			result.Timeline = again.Timeline
@@ -281,6 +292,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	c.warn(run.WriteRunSequence(dir, reported))
 	c.warn(c.writeReport(dir, opts, t, filepath.Join(dir, sequenceFile), reported, result))
 	// The violation is reported once the directory holds the run it belongs to.
+	c.printNotes(number, notes)
 	c.report(number, violation, dir)
 	fmt.Fprintf(c.stdout, "  the sequence is %s, in %s\n", ops(reported), filepath.Join(dir, sequenceFile))
 	return exitViolation
@@ -345,12 +357,16 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 		return err
 	}
 	violation := *result.Violation
+	notes := result.Notes
+	if limit := envtestLimit(opts, t); limit != "" && violation.ID == "G4" {
+		notes = append(notes, limit)
+	}
 	return report.Write(dir, report.Report{
 		Check:            report.Check{ID: violation.ID, Statement: violation.Statement, At: violation.At, Evidence: violation.Evidence},
 		Target:           report.Target{Name: t.Name, Version: t.Version},
 		Botbox:           version(),
 		Seed:             sequence.Seed,
-		Notes:            result.Notes,
+		Notes:            notes,
 		Replay:           opts.replayCommand(replay),
 		Sequence:         encoded,
 		Applied:          len(result.Timeline.Ops),
@@ -388,6 +404,12 @@ func ops(s run.Sequence) string {
 // seed, so that the failure is reproducible from it (DESIGN.md §11).
 func newSeed() int64 { return rand.Int64() }
 
+func (c *cli) printNotes(number int, notes []string) {
+	for _, note := range notes {
+		fmt.Fprintf(c.stdout, "run %d: %s\n", number, note)
+	}
+}
+
 func (c *cli) report(number int, violation run.Violation, dir string) {
 	fmt.Fprintf(c.stdout, "run %d: %s %s\n", number, violation.ID, violation.Statement)
 	if said := quotes(violation); said != "" {
@@ -411,6 +433,26 @@ func quotes(violation run.Violation) string {
 
 func (c *cli) fail(err error) int {
 	fmt.Fprintln(c.stderr, "botbox:", err)
+	return exitError
+}
+
+// failRun reports a run that could not finish and says where to look.
+func (c *cli) failRun(number int, failed planned, dir string, err error) int {
+	fmt.Fprintf(c.stderr, "botbox: run %d: %v\n", number, err)
+	var refused *run.Refused
+	switch {
+	case !errors.As(err, &refused):
+		if _, statErr := os.Stat(dir); statErr == nil {
+			fmt.Fprintf(c.stderr, "  the run's files are in %s\n", dir)
+		}
+	case failed.generated():
+		fmt.Fprintf(c.stderr, "  the op is in %s\n", filepath.Join(dir, sequenceFile))
+		fmt.Fprintln(c.stderr, "  botbox drew it to pass the CRD's schema and rules without the status the controller"+
+			" writes. So a CRD rule that reads status refused it, or a rule botbox cannot see, such as an admission"+
+			" webhook's. Keep drawn values inside that rule with generate.mutate or generate.overlay.")
+	default:
+		fmt.Fprintf(c.stderr, "  the op is in %s\n", failed.path)
+	}
 	return exitError
 }
 
@@ -567,43 +609,92 @@ func readSequences(paths []string) ([]run.Sequence, error) {
 // clusterSession runs against one test cluster: an envtest control plane
 // botbox starts, or the cluster a kubeconfig names (DESIGN.md §5.8).
 type clusterSession struct {
-	config *rest.Config
-	// collected says the cluster collects owned objects itself, which envtest
-	// does not.
-	collected bool
-	stop      func() error
+	*cluster.Cluster
+	// controllerManager says the cluster runs kube-controller-manager, which
+	// envtest does not.
+	controllerManager bool
+}
+
+// envtestStatic are the kinds that run Pods, and the claims Pods mount. Only
+// kube-controller-manager and a kubelet move their status.
+var envtestStatic = []schema.GroupKind{
+	{Group: "apps", Kind: "Deployment"},
+	{Group: "apps", Kind: "StatefulSet"},
+	{Group: "apps", Kind: "DaemonSet"},
+	{Group: "apps", Kind: "ReplicaSet"},
+	{Group: "batch", Kind: "Job"},
+	{Group: "batch", Kind: "CronJob"},
+	{Kind: "ReplicationController"},
+	{Kind: "Pod"},
+	{Kind: "PersistentVolumeClaim"},
+}
+
+// envtestLimit names the managed kinds envtest never moves, or is empty.
+func envtestLimit(opts options, t *target.Target) string {
+	if opts.kubeconfig != "" {
+		return ""
+	}
+	var static []string
+	for _, gvk := range t.Manages {
+		if slices.Contains(envtestStatic, gvk.GroupKind()) {
+			static = append(static, gvk.Kind)
+		}
+	}
+	if len(static) == 0 {
+		return ""
+	}
+	return "envtest runs no controller manager and no kubelet, so no Pod runs, and the status of these kinds never changes: " +
+		strings.Join(static, ", ") + ". A ready predicate that waits on that status never holds, and a controller that" +
+		" requeues while it waits can hide a missed watch. Run this target with --kubeconfig against a kind cluster."
+}
+
+// startSession warns of what envtest never runs, then opens the session.
+func (c *cli) startSession(opts options, t *target.Target) (session, error) {
+	if limit := envtestLimit(opts, t); limit != "" {
+		fmt.Fprintln(c.stderr, "botbox:", limit)
+	}
+	return c.open(opts, t)
 }
 
 func openSession(opts options, t *target.Target) (session, error) {
-	if opts.kubeconfig != "" {
-		config, err := clientcmd.BuildConfigFromFlags("", opts.kubeconfig)
-		if err != nil {
-			return nil, fmt.Errorf("reading the kubeconfig %s: %w", opts.kubeconfig, err)
-		}
-		return &clusterSession{config: config, collected: true}, nil
+	if err := t.Launch.Check(); err != nil {
+		return nil, err
 	}
-	started, err := cluster.Start(cluster.Options{CRDPaths: t.CRDs})
+	crds := cluster.Options{CRDPaths: t.CRDs}
+	if opts.kubeconfig != "" {
+		connected, err := cluster.Connect(opts.kubeconfig, crds)
+		if err != nil {
+			return nil, err
+		}
+		return &clusterSession{Cluster: connected, controllerManager: true}, nil
+	}
+	started, err := cluster.Start(crds)
 	if err != nil {
 		return nil, err
 	}
-	return &clusterSession{config: started.Config(), stop: started.Stop}, nil
+	return &clusterSession{Cluster: started}, nil
+}
+
+// vet refuses the kinds the cluster serves at cluster scope, which the target's
+// CRDs cannot show for a built-in kind.
+func (s *clusterSession) vet(t *target.Target) error {
+	mapper, err := cluster.NewRESTMapper(s.Config())
+	if err != nil {
+		return err
+	}
+	return t.CheckScopes(mapper)
 }
 
 func (s *clusterSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
 	return run.Run(ctx, t, sequence, run.Options{
-		Dir:              dir,
-		Config:           s.config,
-		GarbageCollected: s.collected,
-		Check:            check,
+		Dir:               dir,
+		Config:            s.Config(),
+		ControllerManager: s.controllerManager,
+		Check:             check,
 	})
 }
 
-func (s *clusterSession) close() error {
-	if s.stop == nil {
-		return nil
-	}
-	return s.stop()
-}
+func (s *clusterSession) close() error { return s.Stop() }
 
 func version() string {
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {

@@ -7,8 +7,17 @@ import (
 	"path/filepath"
 	"testing"
 
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 )
@@ -37,13 +46,30 @@ spec:
           type: object
 `
 
-func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
+func TestStartIgnoresUseExistingCluster(t *testing.T) {
+	t.Setenv("USE_EXISTING_CLUSTER", "true")
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "no-such-kubeconfig"))
+
+	c, err := cluster.Start(cluster.Options{})
+	if err != nil {
+		t.Fatalf("Start returned an error: %v", err)
+	}
+	if err := c.Stop(); err != nil {
+		t.Errorf("Stop returned an error: %v", err)
+	}
+}
+
+func thingCRDDir(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "thing.yaml"), []byte(thingCRD), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	return dir
+}
 
-	c, err := cluster.Start(cluster.Options{CRDPaths: []string{dir}})
+func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
+	c, err := cluster.Start(cluster.Options{CRDPaths: []string{thingCRDDir(t)}})
 	if err != nil {
 		t.Fatalf("Start returned an error: %v", err)
 	}
@@ -66,7 +92,130 @@ func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
 	}
 
 	// A mapper built after Start knows the kinds the CRDs installed.
-	mapper, err := cluster.NewRESTMapper(c.Config())
+	requireThingServed(t, c.Config())
+}
+
+// Nothing on envtest would remove a finalizer or create a ServiceAccount.
+func TestStartAdmitsWhatOnlyAControllerManagerWouldFinish(t *testing.T) {
+	c, err := cluster.Start(cluster.Options{})
+	if err != nil {
+		t.Fatalf("Start returned an error: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := c.Stop(); err != nil {
+			t.Errorf("Stop returned an error: %v", err)
+		}
+	})
+	client, err := kubernetes.NewForConfig(c.Config())
+	if err != nil {
+		t.Fatalf("Building a client failed: %v", err)
+	}
+	namespace := newNamespace(t, client)
+	ctx := t.Context()
+
+	t.Run("a claim carries no finalizer and deletes at once", func(t *testing.T) {
+		claim := &corev1.PersistentVolumeClaim{
+			ObjectMeta: metav1.ObjectMeta{Name: "data"},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{corev1.ReadWriteOnce},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceStorage: resource.MustParse("1Gi")},
+				},
+			},
+		}
+		claims := client.CoreV1().PersistentVolumeClaims(namespace)
+		created, err := claims.Create(ctx, claim, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("Creating the claim failed: %v", err)
+		}
+		if len(created.Finalizers) > 0 {
+			t.Errorf("The claim carries the finalizers %v, which nothing on envtest removes.", created.Finalizers)
+		}
+		if err := claims.Delete(ctx, created.Name, metav1.DeleteOptions{}); err != nil {
+			t.Fatalf("Deleting the claim failed: %v", err)
+		}
+		if _, err := claims.Get(ctx, created.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Errorf("Reading the deleted claim returned %v, want NotFound.", err)
+		}
+	})
+
+	t.Run("a Job, whose default is to orphan, deletes at once", func(t *testing.T) {
+		job := &batchv1.Job{
+			ObjectMeta: metav1.ObjectMeta{Name: "init"},
+			Spec: batchv1.JobSpec{Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{
+				RestartPolicy: corev1.RestartPolicyNever,
+				Containers:    []corev1.Container{{Name: "main", Image: "example.invalid/main"}},
+			}}},
+		}
+		jobs := client.BatchV1().Jobs(namespace)
+		created, err := jobs.Create(ctx, job, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("Creating the Job failed: %v", err)
+		}
+		if err := jobs.Delete(ctx, created.Name, metav1.DeleteOptions{}); err != nil {
+			t.Fatalf("Deleting the Job failed: %v", err)
+		}
+		if _, err := jobs.Get(ctx, created.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Errorf("Reading the deleted Job returned %v, want NotFound.", err)
+		}
+	})
+
+	t.Run("a foreground delete removes the object at once", func(t *testing.T) {
+		configMaps := client.CoreV1().ConfigMaps(namespace)
+		created, err := configMaps.Create(ctx, &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Name: "config"}}, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("Creating the ConfigMap failed: %v", err)
+		}
+		foreground := metav1.DeletePropagationForeground
+		if err := configMaps.Delete(ctx, created.Name, metav1.DeleteOptions{PropagationPolicy: &foreground}); err != nil {
+			t.Fatalf("Deleting the ConfigMap failed: %v", err)
+		}
+		if _, err := configMaps.Get(ctx, created.Name, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Errorf("Reading the deleted ConfigMap returned %v, want NotFound.", err)
+		}
+	})
+
+	t.Run("a pod needs no ServiceAccount", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "workload"},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "main", Image: "example.invalid/main"}}},
+		}
+		if _, err := client.CoreV1().Pods(namespace).Create(ctx, pod, metav1.CreateOptions{}); err != nil {
+			t.Errorf("Creating a pod in a namespace with no ServiceAccount failed: %v", err)
+		}
+	})
+}
+
+func TestConnectInstallsCRDsAndLeavesThem(t *testing.T) {
+	bare, err := cluster.Start(cluster.Options{})
+	if err != nil {
+		t.Fatalf("Start returned an error: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := bare.Stop(); err != nil {
+			t.Errorf("Stop returned an error: %v", err)
+		}
+	})
+	kubeconfig := writeKubeconfig(t, bare.Config())
+	crds := cluster.Options{CRDPaths: []string{thingCRDDir(t)}}
+
+	// The second Connect finds the CRD installed and replaces it.
+	for range 2 {
+		c, err := cluster.Connect(kubeconfig, crds)
+		if err != nil {
+			t.Fatalf("Connect returned an error: %v", err)
+		}
+		if err := c.Stop(); err != nil {
+			t.Fatalf("Stop returned an error: %v", err)
+		}
+	}
+
+	requireThingServed(t, bare.Config())
+}
+
+func requireThingServed(t *testing.T, config *rest.Config) {
+	t.Helper()
+	mapper, err := cluster.NewRESTMapper(config)
 	if err != nil {
 		t.Fatalf("Building the RESTMapper failed: %v", err)
 	}
@@ -77,4 +226,25 @@ func TestStartServesAPIAndInstallsCRDs(t *testing.T) {
 	if mapping.Resource != thingResource {
 		t.Errorf("The mapper resolves %s to %v, want %v.", thingKind.Kind, mapping.Resource, thingResource)
 	}
+}
+
+func writeKubeconfig(t *testing.T, config *rest.Config) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	kubeconfig := clientcmdapi.Config{
+		Clusters: map[string]*clientcmdapi.Cluster{"envtest": {
+			Server:                   config.Host,
+			CertificateAuthorityData: config.CAData,
+		}},
+		AuthInfos: map[string]*clientcmdapi.AuthInfo{"admin": {
+			ClientCertificateData: config.CertData,
+			ClientKeyData:         config.KeyData,
+		}},
+		Contexts:       map[string]*clientcmdapi.Context{"envtest": {Cluster: "envtest", AuthInfo: "admin"}},
+		CurrentContext: "envtest",
+	}
+	if err := clientcmd.WriteToFile(kubeconfig, path); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }

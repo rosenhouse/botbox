@@ -6,10 +6,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -35,9 +38,9 @@ const (
 	Recovery = invariant.Recovery
 )
 
-// maxTail is how much of the target's output the harness reads to quote its
-// last line.
-const maxTail = 4096
+// maxTail is how much of the target's output the harness reads to quote what
+// it said as it stopped. A panic's stack follows the line it opens with.
+const maxTail = 1 << 20
 
 // deletionMargin holds the run namespace open past T_delete, because G3's
 // window opens when the Observer recorded the deletion, which is after the
@@ -144,14 +147,38 @@ type Timeline struct {
 	// never did (DESIGN.md §6, D34).
 	Cleaned time.Time
 	// Faults are the windows the proxy applied each fault op's fault in, one
-	// per fault op. A window with no Start is a fault that matched no request,
-	// which changed nothing and excuses nothing (D36). A window with no End is
-	// a fault the proxy still applies.
+	// per fault op. A window with no Start is a fault the proxy applied to no
+	// request, which changed nothing and excuses nothing (D36). A window with
+	// no End is a fault the proxy still applies.
 	Faults []Window
 	// Forced names every object the teardown force-removed a finalizer from.
 	// The run notes each one: G3 judged the deletion window, which closed
 	// before any of this (DESIGN.md §5.5, D37).
 	Forced []string
+	// Exits are the times the target stopped on its own after the first
+	// settle wait converged.
+	Exits []Exit
+}
+
+// Exit is one time the target stopped on its own.
+type Exit struct {
+	At  time.Time
+	Err error
+	// Said is what the target wrote as it stopped, or empty.
+	Said string
+	// Restart is when the launcher starts the target again.
+	Restart time.Time
+}
+
+func (e Exit) String() string {
+	why := "no error"
+	if e.Err != nil {
+		why = e.Err.Error()
+	}
+	if e.Said == "" {
+		return why
+	}
+	return fmt.Sprintf("%s after writing %q", why, e.Said)
 }
 
 // AppliedOp is one op the Runner applied.
@@ -248,6 +275,9 @@ type harness interface {
 	clearFaults()
 	// faultWindow is what the proxy has done with the fault.
 	faultWindow(id proxy.FaultID) proxy.FaultWindow
+	// servedResources is what the API server serves now, which includes the
+	// CRDs a target installed.
+	servedResources() ([]metav1.APIResource, error)
 	createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error)
 	patchCR(ctx context.Context, name string, patch map[string]any) error
 	deleteCR(ctx context.Context, name string) error
@@ -269,6 +299,10 @@ type harness interface {
 	// targetStatus reports whether the target is still running, and why it
 	// stopped if it is not.
 	targetStatus() launch.Status
+	// supervise restarts the target from now on whenever it exits, and
+	// records each exit in exits.
+	supervise()
+	exits() []Exit
 	stop(ctx context.Context) error
 	// unresolvedOwners names each owner the collector could not resolve. It
 	// is complete once stop has returned.
@@ -292,9 +326,16 @@ type runner struct {
 	// botbox did to the run namespace itself (DESIGN.md §6).
 	skipped []string
 	failed  bool
+	// converged is where the last settle wait that converged ended. The first
+	// shows the target works, so botbox supervises it from there on.
+	converged time.Time
+	// teardownStart is where the teardown began.
+	teardownStart time.Time
 	// cr is the primary CR the CR ops act on.
 	cr     string
 	faults []heldFault
+	// faultOps is the op index of each of Timeline.Faults.
+	faultOps []int
 }
 
 // heldFault is a fault op's fault. The Runner holds it to read its window from
@@ -324,10 +365,32 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 	failure := r.applyOps(ctx)
 	r.failed = failure != nil
 	teardown := r.teardown(ctx)
+	r.readExits()
 	// The run's own notes come before the last checkpoint's.
-	notes := slices.Concat(r.skipped, r.notes)
+	notes := slices.Concat(r.exitNotes(), r.skipped, r.notes)
 	result := Result{Timeline: r.timeline, Violation: r.violation, Notes: notes, Recorded: r.input()}
 	return result, errors.Join(failure, teardown)
+}
+
+// Refused is the API server turning away the CR an op wrote. The CRD's schema
+// or rules refused it, or an admission webhook did.
+type Refused struct {
+	Op     Op
+	Reason error
+}
+
+func (r *Refused) Error() string {
+	return fmt.Sprintf("the API server refused op %d (%s): %v", r.Op.Index, r.Op.Type, r.Reason)
+}
+
+// refusal is err as a Refused when the API server turned the op's write away
+// for what it carried: 422 from validation, and 400 or 403 from an admission
+// webhook.
+func refusal(op Op, err error) error {
+	if apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) || apierrors.IsForbidden(err) {
+		return &Refused{Op: op, Reason: err}
+	}
+	return err
 }
 
 // applyOps applies the sequence in order and stops at the first violation
@@ -338,6 +401,9 @@ func (r *runner) applyOps(ctx context.Context) error {
 			return nil
 		}
 		if err := r.applyOp(ctx, op); err != nil {
+			if refused := (*Refused)(nil); errors.As(err, &refused) {
+				return err
+			}
 			return fmt.Errorf("op %d (%s): %w", op.Index, op.Type, err)
 		}
 	}
@@ -375,7 +441,7 @@ func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 		if err := r.haveCR(); err != nil {
 			return applied, err
 		}
-		return applied, r.h.patchCR(ctx, r.cr, op.Patch)
+		return applied, refusal(op, r.h.patchCR(ctx, r.cr, op.Patch))
 	case OpDelete:
 		if err := r.haveCR(); err != nil {
 			return applied, err
@@ -386,6 +452,9 @@ func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 	case OpRestart:
 		return applied, r.h.restart(ctx)
 	case OpFault:
+		if err := r.checkResource(op.Fault.Match.Resource); err != nil {
+			return applied, err
+		}
 		r.inject(op)
 		return applied, nil
 	case OpDeleteManaged:
@@ -401,7 +470,7 @@ func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 func (r *runner) create(ctx context.Context, op Op) error {
 	name, err := r.h.createCR(ctx, op.Obj)
 	if err != nil {
-		return err
+		return refusal(op, err)
 	}
 	r.cr = name
 	return nil
@@ -468,6 +537,12 @@ func (r *runner) wait(ctx context.Context) (Wait, error) {
 	wait := Wait{Window: Window{Start: r.now()}}
 	converged, err := r.h.settle(ctx, r.owed)
 	wait.Window.End, wait.Converged = r.now(), converged
+	if converged {
+		if r.converged.IsZero() {
+			r.h.supervise()
+		}
+		r.converged = wait.Window.End
+	}
 	return wait, err
 }
 
@@ -475,15 +550,20 @@ func (r *runner) wait(ctx context.Context) (Wait, error) {
 // checks judge it.
 func (r *runner) owed() time.Time { return r.faultsAndWaits().Owed(r.now()) }
 
-// faultsAndWaits is what the checks read of the run's faults and settle waits.
+// faultsAndWaits is what the checks read of the run's faults, exits and settle
+// waits.
 func (r *runner) faultsAndWaits() invariant.Input {
 	r.readFaultWindows()
+	r.readExits()
 	return invariant.Input{
 		Target:      r.target,
 		Checkpoints: engineCheckpoints(r.timeline.Checkpoints),
 		Faults:      engineFaults(r.timeline.Faults),
+		Exits:       engineExits(r.timeline.Exits),
 	}
 }
+
+func (r *runner) readExits() { r.timeline.Exits = r.h.exits() }
 
 // judge checkpoints where a settle wait ended. A wait that expired where the
 // faults did not excuse it is a G4 violation, which ends the run.
@@ -509,66 +589,81 @@ func (r *runner) targetStopped(status launch.Status) error {
 	if status.Exit != nil {
 		stopped += ": " + status.Exit.Error()
 	}
-	if said := whyItStopped(log); said != "" {
-		return fmt.Errorf("%s; it wrote %q, and the rest of its output is in %s", stopped, said, log)
+	said, _ := whyItStopped(log, 0)
+	err := fmt.Errorf("%s; its output is in %s", stopped, log)
+	if said != "" {
+		err = fmt.Errorf("%s; it wrote %q, and the rest of its output is in %s", stopped, said, log)
 	}
-	return fmt.Errorf("%s; its output is in %s", stopped, log)
+	switch {
+	case strings.Contains(said, "address already in use"):
+		err = fmt.Errorf("%w; another process holds that port, perhaps a concurrent run of this target, so give the target a free one in launch.args", err)
+	// A supervised target stops only where a restart failed, and a target that
+	// requested no resource never saw the CR.
+	case r.cr != "" && r.converged.IsZero() && slices.ContainsFunc(r.h.requests(), namesAResource):
+		err = fmt.Errorf("%w; botbox had created the CR, so the CR may have crashed the target, and %s replays the run",
+			err, filepath.Join(r.dir, sequenceFile))
+	}
+	return err
 }
 
-// panicked opens the report a Go runtime writes on the way out. The lines
-// after it are the stack, so the last line of such a log is a frame.
+func namesAResource(request proxy.Request) bool { return request.Resource != "" }
+
+// panicked opens the report a Go runtime writes on the way out.
 var panicked = []string{"panic: ", "fatal error: "}
 
-// whyItStopped is what the target said as it stopped: the line a panic opens
-// with, or the last whole line it wrote. It is empty where the log holds
-// neither, which leaves the reader the file itself.
-func whyItStopped(path string) string {
-	said := tailLines(path)
-	for _, line := range said {
+var (
+	// frameLocation is the file line of a Go stack frame, below its function.
+	frameLocation   = regexp.MustCompile(`^\t.+:\d+( \+0x[0-9a-f]+)?$`)
+	goroutineHeader = regexp.MustCompile(`^goroutine \d+ .*:$`)
+)
+
+// whyItStopped is what the target said as it stopped, in the log past from:
+// the line the last panic opens with, or else the last whole line above any
+// stack trace. It is empty where the log holds neither, which leaves the
+// reader the file itself. It also returns where the log ends.
+func whyItStopped(path string, from int64) (string, int64) {
+	said, end := tailLines(path, from)
+	for _, line := range slices.Backward(said) {
 		if slices.ContainsFunc(panicked, func(opener string) bool { return strings.HasPrefix(line, opener) }) {
-			return line
+			return line, end
 		}
 	}
-	if len(said) == 0 {
-		return ""
+	for i, line := range slices.Backward(said) {
+		inTrace := strings.TrimSpace(line) == "" || frameLocation.MatchString(line) || goroutineHeader.MatchString(line) ||
+			(i+1 < len(said) && frameLocation.MatchString(said[i+1]))
+		if !inTrace {
+			return strings.TrimSpace(line), end
+		}
 	}
-	return said[len(said)-1]
+	return "", end
 }
 
-// tailLines are the whole lines at the end of the file, trimmed, innermost
-// last. A line longer than maxTail has no whole form to quote, and a file
-// botbox cannot read has nothing.
-func tailLines(path string) []string {
+// tailLines are the whole lines of the file past from, at most maxTail bytes
+// of them, innermost last, and where the file ends. A line longer than
+// maxTail has no whole form to quote, and a file botbox cannot read has
+// nothing.
+func tailLines(path string, from int64) ([]string, int64) {
 	file, err := os.Open(path)
 	if err != nil {
-		return nil
+		return nil, from
 	}
 	defer file.Close()
 	info, err := file.Stat()
 	if err != nil {
-		return nil
+		return nil, from
 	}
-	tail := make([]byte, min(info.Size(), maxTail))
-	if _, err := file.ReadAt(tail, info.Size()-int64(len(tail))); err != nil {
-		return nil
+	start := max(from, info.Size()-maxTail)
+	tail := make([]byte, info.Size()-start)
+	if _, err := file.ReadAt(tail, start); err != nil {
+		return nil, from
 	}
-	body := strings.TrimRight(string(tail), "\n")
-	// A tail shorter than the file begins mid-line, so its first line is a
-	// fragment: klog puts the level and the message at the front.
-	if int64(len(tail)) < info.Size() {
-		cut := strings.IndexByte(body, '\n')
-		if cut < 0 {
-			return nil
-		}
-		body = body[cut+1:]
+	lines := strings.Split(strings.TrimRight(string(tail), "\n"), "\n")
+	// A tail cut short begins mid-line, so its first line is a fragment: klog
+	// puts the level and the message at the front.
+	if start > from {
+		lines = lines[1:]
 	}
-	var lines []string
-	for _, line := range strings.Split(body, "\n") {
-		if trimmed := strings.TrimSpace(line); trimmed != "" {
-			lines = append(lines, trimmed)
-		}
-	}
-	return lines
+	return lines, info.Size()
 }
 
 // checkpoint evaluates the checks and keeps the first violation. The G4 of a
@@ -578,6 +673,7 @@ func (r *runner) checkpoint(checkpoint Checkpoint, expired bool) error {
 		return fmt.Errorf("the run namespace holds %d managed objects, over the harness limit of %d", count, r.limit)
 	}
 	r.timeline.Checkpoints = append(r.timeline.Checkpoints, checkpoint)
+	r.readExits()
 	if expired {
 		violation, err := engineInput(r.input()).ExpiredWait(engineCheckpoint(checkpoint))
 		if err != nil {
@@ -607,10 +703,36 @@ func (r *runner) violate(violation Violation) {
 	}
 }
 
+// checkResource refuses a fault on a resource the API server does not serve,
+// since the proxy records a request's resource as the plural it is served at.
+func (r *runner) checkResource(resource string) error {
+	if resource == "" {
+		return nil
+	}
+	served, err := r.h.servedResources()
+	if err != nil {
+		return err
+	}
+	var meant string
+	for _, s := range served {
+		if s.Name == resource {
+			return nil
+		}
+		if strings.EqualFold(s.Name, resource) || strings.EqualFold(s.SingularName, resource) {
+			meant = s.Name
+		}
+	}
+	if meant != "" {
+		return fmt.Errorf("match.resource %q is not a resource the API server serves; did you mean %s?", resource, meant)
+	}
+	return fmt.Errorf("match.resource %q is not a resource the API server serves; it takes a plural such as configmaps", resource)
+}
+
 // inject adds the op's fault to those the proxy applies. Its window opens
 // where the proxy first applies it, which may be never (D36).
 func (r *runner) inject(op Op) {
 	r.timeline.Faults = append(r.timeline.Faults, Window{})
+	r.faultOps = append(r.faultOps, op.Index)
 	r.faults = append(r.faults, heldFault{
 		id:     r.h.addFault(op.Fault.spec()),
 		until:  op.Fault.Until.Op,
@@ -675,7 +797,13 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 // The caller's deadline can end the recovery, which is judged as an op's wait
 // is, but no step after it.
 func (r *runner) teardown(ctx context.Context) error {
+	r.teardownStart = r.now()
 	r.clearFaults()
+	for i, window := range r.timeline.Faults {
+		if window.Start.IsZero() {
+			r.skipped = append(r.skipped, fmt.Sprintf("the proxy applied the fault of op %d to no request", r.faultOps[i]))
+		}
+	}
 	failures := []error{r.awaitRecovery(ctx)}
 
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.teardownBudget())
@@ -716,6 +844,29 @@ func (r *runner) teardown(ctx context.Context) error {
 		r.skipped = append(r.skipped, unresolvedNote(owner))
 	}
 	return errors.Join(failures...)
+}
+
+func (r *runner) exitNotes() []string {
+	notes := make([]string, len(r.timeline.Exits))
+	for i, exit := range r.timeline.Exits {
+		notes[i] = fmt.Sprintf("the target exited during %s with %v", r.during(exit.At), exit)
+	}
+	return notes
+}
+
+// during names what the run was doing at t: the op it had applied last, or the
+// teardown.
+func (r *runner) during(t time.Time) string {
+	if !t.Before(r.teardownStart) {
+		return "the teardown"
+	}
+	var last AppliedOp
+	for _, applied := range r.timeline.Ops {
+		if !applied.At.After(t) {
+			last = applied
+		}
+	}
+	return fmt.Sprintf("op %d (%s)", last.Op.Index, last.Op.Type)
 }
 
 // unresolvedNote says why the collector kept an object: it counts an owner it

@@ -100,6 +100,7 @@ func (c *recordingChecker) ops() []int {
 }
 
 func TestRunner(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	binary := buildToy(t)
 	testCluster := startCluster(t, loadTarget(t, binary).CRDs)

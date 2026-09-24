@@ -22,7 +22,7 @@ func TestMergePatchFollowsRFC7386(t *testing.T) {
 		{object: `{"spec":{"count":3,"name":"w"}}`, patch: `{"spec":{"count":5}}`, want: `{"spec":{"count":5,"name":"w"}}`},
 	} {
 		t.Run(test.object+" + "+test.patch, func(t *testing.T) {
-			got := mergePatch(decode(t, test.object), decode(t, test.patch))
+			got := MergePatch(decode(t, test.object), decode(t, test.patch))
 
 			if encode(t, got) != encode(t, decode(t, test.want)) {
 				t.Errorf("The merge gave %s, want %s.", encode(t, got), test.want)
@@ -34,8 +34,8 @@ func TestMergePatchFollowsRFC7386(t *testing.T) {
 func TestMergePatchLeavesThePatchAlone(t *testing.T) {
 	patch := decode(t, `{"spec":{"count":5}}`)
 
-	mergePatch(decode(t, `{"spec":{"count":3}}`), patch)
-	mergePatch(decode(t, `{"spec":{"count":9}}`), patch)
+	MergePatch(decode(t, `{"spec":{"count":3}}`), patch)
+	MergePatch(decode(t, `{"spec":{"count":9}}`), patch)
 
 	if encode(t, patch) != `{"spec":{"count":5}}` {
 		t.Errorf("Applying the patch changed it to %s.", encode(t, patch))

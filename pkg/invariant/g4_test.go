@@ -283,6 +283,70 @@ func TestG4ExcusesAnExpiredWaitUntilTheTargetHadTimeToRecover(t *testing.T) {
 	}
 }
 
+// A target that exits on a fault's error waits out botbox's backoff, which is
+// not the target's to answer for. An exit no fault excused is.
+func TestG4JudgesNoDeadlineAnExitAFaultExcusedFellBefore(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		run     *run
+		excused bool
+	}{
+		{"an exit on the fault's error", newRun().fault(10100*time.Millisecond, 10100*time.Millisecond), true},
+		{"an exit with no fault", newRun(), false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			in := test.run.
+				op(invariant.OpCreate, 0).
+				record(time.Second, widget("10", spec(1), status(1, 1))).
+				checkpoint(3*time.Second, invariant.Converged).
+				op(invariant.OpUpdate, 10*time.Second).
+				record(10*time.Second, widget("11", spec(2), generation(2), status(1, 1))).
+				exit(10200*time.Millisecond, 20200*time.Millisecond).
+				record(21*time.Second, widget("12", spec(2), generation(2), status(2, 2))).
+				checkpoint(23*time.Second, invariant.Converged).
+				through(25 * time.Second)
+
+			if test.excused {
+				silent(t, invariant.Convergence, in)
+			} else {
+				fired(t, invariant.Convergence, in)
+			}
+		})
+	}
+}
+
+// An excused exit hands only the window it falls in to the recovery.
+func TestG4JudgesTheWindowsAnExcusedExitFallsOutside(t *testing.T) {
+	for _, test := range []struct {
+		name, fired string
+		in          invariant.Input
+	}{
+		{"a window before the exit", "op 0", newRun().
+			op(invariant.OpCreate, 0).
+			record(time.Second, widget("10", spec(2), status(0, 1))).
+			fault(20*time.Second, 20*time.Second).
+			exit(20100*time.Millisecond, 30100*time.Millisecond).
+			through(40 * time.Second)},
+		{"a window after the target recovered", "op 1", newRun().
+			op(invariant.OpCreate, 0).
+			fault(time.Second, time.Second).
+			exit(1100*time.Millisecond, 2*time.Second).
+			record(3*time.Second, widget("10", spec(1), status(1, 1))).
+			checkpoint(5*time.Second, invariant.Converged).
+			op(invariant.OpUpdate, 10*time.Second).
+			record(10*time.Second, widget("11", spec(2), generation(2), status(1, 1))).
+			through(20 * time.Second)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			violation := fired(t, invariant.Convergence, test.in)
+
+			if !strings.Contains(violation.Statement, test.fired) {
+				t.Errorf("The statement is %q, want the window after %s.", violation.Statement, test.fired)
+			}
+		})
+	}
+}
+
 // The teardown gives the target a settle wait of its own once the last fault
 // stops, and an expired one is named for that.
 func TestG4NamesTheWaitAfterTheLastFaultStopped(t *testing.T) {

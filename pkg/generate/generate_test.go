@@ -5,6 +5,7 @@ import (
 	"maps"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 
@@ -35,6 +36,7 @@ var targets = []struct {
 	{certManagerTarget,
 		[]string{"spec.dnsNames", "spec.duration", "spec.privateKey.algorithm", "spec.privateKey.rotationPolicy"},
 		[]string{"v1/Secret", "cert-manager.io/v1/CertificateRequest"}},
+	{externalSecretsTarget, []string{"spec.refreshInterval", "spec.target.name"}, []string{"v1/Secret"}},
 }
 
 func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
@@ -61,6 +63,156 @@ func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
 				}
 			})
 		})
+	}
+}
+
+// The gadget's CRD states rules its schema cannot. The test reads them here,
+// apart from the API server's code that generation runs.
+func gadgetRuleBroken(cr, old map[string]any) string {
+	spec, _ := cr["spec"].(map[string]any)
+	value := func(spec map[string]any, name string, absent int64) int64 {
+		if set, isInteger := spec[name].(int64); isInteger {
+			return set
+		}
+		return absent
+	}
+	_, left := spec["left"]
+	_, right := spec["right"]
+	switch count := value(spec, "count", 0); {
+	case value(spec, "maxUnavailable", 0) > count:
+		return "maxUnavailable exceeds count"
+	case count < value(spec, "minCount", 1):
+		return "count is below minCount's default"
+	case left == right:
+		return "left and right are both set or both unset"
+	}
+	previous, _ := old["spec"].(map[string]any)
+	switch {
+	case old == nil:
+	case previous["mode"] != spec["mode"]:
+		return "mode changed"
+	case value(spec, "minCount", 1) > value(previous, "minCount", 1):
+		return "minCount rose"
+	}
+	return ""
+}
+
+func TestGeneratedGadgetsKeepTheirCRDsRules(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	g := newGenerator(t, loaded, Options{})
+	crd := crdSchemaOf(t, rulesTarget)
+	var changed, switchedMode, updated int
+	rapid.Check(t, func(rt *rapid.T) {
+		var current map[string]any
+		for _, op := range g.sequence(rt).Ops {
+			var next, old map[string]any
+			switch op.Type {
+			case run.OpCreate, run.OpRecreate:
+				next = op.Obj.DeepCopy().Object
+				if !equalJSON(next, loaded.Sample.Object) {
+					changed++
+				}
+				if mode, _, _ := unstructured.NestedString(next, "spec", "mode"); mode != "fast" {
+					switchedMode++
+				}
+			case run.OpUpdate:
+				next, old = merge(current, op.Patch), current
+				updated++
+			case run.OpDelete:
+				current = nil
+				continue
+			default:
+				continue
+			}
+			if err := validate(crd, next, ""); err != nil {
+				rt.Fatalf("Op %d (%s) left the gadget outside its schema: %v.", op.Index, op.Type, err)
+			}
+			if broken := gadgetRuleBroken(next, old); broken != "" {
+				rt.Fatalf("Op %d (%s) left a gadget whose %s: %v.", op.Index, op.Type, broken, next["spec"])
+			}
+			current = next
+		}
+	})
+	if changed == 0 || updated == 0 {
+		t.Errorf("%d creates changed the sample and %d updates were drawn; a generator that changes nothing keeps every rule.",
+			changed, updated)
+	}
+	if switchedMode == 0 {
+		t.Error("No create switched the sample's mode, which only an update may not change.")
+	}
+}
+
+// countField is spec.count, drawn always as the count given. It counts its
+// draws.
+func countField(count int64, draws *int) field {
+	values := rapid.Custom(func(t *rapid.T) any {
+		*draws++
+		return rapid.Just(count).Draw(t, "count")
+	})
+	return field{path: []string{"spec", "count"}, dotted: "spec.count", values: values}
+}
+
+func TestARefusedUpdateIsDrawnEightTimes(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	g := newGenerator(t, loaded, Options{})
+	for _, testCase := range []struct {
+		count    int64
+		draws    int
+		accepted bool
+	}{
+		{5, 1, true},
+		// No count reaches minCount's default.
+		{0, 8, false},
+	} {
+		draws := 0
+		g.fields = []field{countField(testCase.count, &draws)}
+		patch := rapid.Custom(func(t *rapid.T) map[string]any { return g.patch(t, loaded.Sample.Object) }).Example(0)
+		if (patch != nil) != testCase.accepted || draws != testCase.draws {
+			t.Errorf("With every count %d, an update drew %d times and patched %v, want %d draws and accepted=%t.",
+				testCase.count, draws, patch, testCase.draws, testCase.accepted)
+		}
+	}
+}
+
+func TestAnUpdateTheCRDAlwaysRefusesBecomesASettle(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	g := newGenerator(t, loaded, Options{})
+	draws := 0
+	g.fields = []field{countField(0, &draws)}
+	refused := 0
+	rapid.Check(t, func(rt *rapid.T) {
+		before := draws
+		op := g.op(rt, 1, &state{cr: loaded.Sample.Object})
+		if draws-before != updateDraws {
+			return
+		}
+		refused++
+		if want := (run.Op{Index: 1, Type: run.OpSettle}); !reflect.DeepEqual(op, want) {
+			rt.Fatalf("An update the CRD refused became %+v, want %+v.", op, want)
+		}
+	})
+	if refused == 0 {
+		t.Error("No update was drawn.")
+	}
+}
+
+func TestTheStateFollowsTheCRBotboxLastWrote(t *testing.T) {
+	spec := func(count int64) map[string]any {
+		return map[string]any{"spec": map[string]any{"count": count, "mode": "fast"}}
+	}
+	at := state{cr: spec(3)}
+
+	at.advance(run.Op{Type: run.OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(5)}}})
+	if !equalJSON(at.cr, spec(5)) {
+		t.Errorf("After an update the state holds %v, want %v.", at.cr, spec(5))
+	}
+	at.advance(run.Op{Type: run.OpRecreate, Obj: &unstructured.Unstructured{Object: spec(7)}})
+	if !equalJSON(at.cr, spec(7)) {
+		t.Errorf("After a recreate the state holds %v, want %v.", at.cr, spec(7))
+	}
+	at.advance(run.Op{Type: run.OpDelete})
+	if at.cr != nil {
+		t.Errorf("After a delete the state holds %v, want no CR.", at.cr)
 	}
 }
 

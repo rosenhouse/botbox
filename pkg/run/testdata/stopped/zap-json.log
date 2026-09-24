@@ -1,0 +1,1 @@
+{"level":"error","ts":"2026-09-23T16:04:03Z","logger":"setup","msg":"unable to create controller","controller":"Widget","error":"no matches for kind \"Widget\" in version \"toy.botbox/v1\"","stacktrace":"main.main\n\tgithub.com/rosenhouse/botbox/zzprobe/main.go:39\nruntime.main\n\truntime/proc.go:290"}

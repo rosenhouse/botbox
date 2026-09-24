@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -138,6 +139,52 @@ func TestStartSubstitutesKubeconfig(t *testing.T) {
 	waitForLog(t, log, "env="+kubeconfig)
 }
 
+const runNamespace = "botbox-run-x"
+
+func newBinaryInNamespace(t *testing.T, script string, env map[string]string, args ...string) (*launch.Binary, *safeBuffer) {
+	t.Helper()
+	log := &safeBuffer{}
+	binary := launch.NewBinary(launch.Options{
+		Path:      "/bin/sh",
+		Args:      append([]string{"-c", script, "sh"}, args...),
+		Namespace: runNamespace,
+		Env:       env,
+		Log:       log,
+	})
+	t.Cleanup(func() { _ = binary.Stop(context.Background()) })
+	return binary, log
+}
+
+func TestStartSubstitutesNamespace(t *testing.T) {
+	binary, log := newBinaryInNamespace(t, `echo "arg=$1"; echo "env=${WATCH_NAMESPACE} ${K}"; `+forever,
+		map[string]string{"WATCH_NAMESPACE": "$NAMESPACE", "K": "$KUBECONFIG"}, "--namespace=$NAMESPACE")
+
+	kubeconfig := mustStart(t, binary)
+
+	waitForLog(t, log, "arg=--namespace="+runNamespace+"\n")
+	waitForLog(t, log, "env="+runNamespace+" "+kubeconfig+"\n")
+}
+
+func TestEnvOverridesAnInheritedVariable(t *testing.T) {
+	t.Setenv("WATCH_NAMESPACE", "default")
+	t.Setenv("BOTBOX_INHERITED", "kept")
+	binary, log := newBinaryInNamespace(t, `echo "env=${WATCH_NAMESPACE} ${BOTBOX_INHERITED}"; `+forever,
+		map[string]string{"WATCH_NAMESPACE": "$NAMESPACE"})
+
+	mustStart(t, binary)
+
+	waitForLog(t, log, "env="+runNamespace+" kept\n")
+}
+
+func TestEnvDoesNotOverrideKubeconfig(t *testing.T) {
+	binary, log := newBinaryInNamespace(t, `echo "env=${KUBECONFIG}"; `+forever,
+		map[string]string{"KUBECONFIG": "/elsewhere"})
+
+	kubeconfig := mustStart(t, binary)
+
+	waitForLog(t, log, "env="+kubeconfig+"\n")
+}
+
 func TestStopTerminatesGracefully(t *testing.T) {
 	binary, log := newBinary(t, 5*time.Second, `trap 'echo caught SIGTERM; exit 0' TERM; echo pid=$$; `+forever)
 	mustStart(t, binary)
@@ -154,8 +201,12 @@ func TestStopTerminatesGracefully(t *testing.T) {
 }
 
 func TestStopEscalatesToSIGKILL(t *testing.T) {
-	grace := 200 * time.Millisecond
-	binary, log := newBinary(t, grace, `trap "" TERM; echo pid=$$; `+forever)
+	// The reap after SIGKILL waits for the log to close, and Stop gives it the
+	// grace period too. So the grace leaves room for load, and the shell execs
+	// sleep, which keeps SIGTERM ignored, rather than leave a child holding the
+	// log open.
+	grace := time.Second
+	binary, log := newBinary(t, grace, `trap "" TERM; echo pid=$$; exec sleep 60`)
 	mustStart(t, binary)
 	pid := pidFromLog(t, log)
 
@@ -388,13 +439,14 @@ func TestStatusAfterAnExitOfZero(t *testing.T) {
 
 func TestStatusWhileTheTargetRuns(t *testing.T) {
 	binary, log := newBinary(t, 0, "echo started; "+forever)
+	beforeStart := time.Now()
 	mustStart(t, binary)
 	waitForLog(t, log, "started")
 
 	status := binary.Status()
 
-	if !status.Running || status.Exit != nil {
-		t.Errorf("Status reported %+v for a target that is still running.", status)
+	if !status.Running || status.Restarting || status.Exit != nil || status.Started.Before(beforeStart) || status.Started.After(time.Now()) {
+		t.Errorf("Status reported %+v for a target that is still running since after %v.", status, beforeStart)
 	}
 }
 
@@ -527,4 +579,224 @@ func TestExitedWhileTheTargetRestarts(t *testing.T) {
 	}
 	waitForLogCount(t, log, "started", 2)
 	requireOpen(t, binary.Exited(), "the replacement was running")
+}
+
+// exits records what a supervised target's exits reported, in order.
+type exits struct {
+	mu       sync.Mutex
+	seen     []error
+	restarts []time.Time
+}
+
+func (e *exits) record(exit error, restart time.Time) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.seen = append(e.seen, exit)
+	e.restarts = append(e.restarts, restart)
+}
+
+func (e *exits) all() []error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.seen)
+}
+
+func (e *exits) restartsAt() []time.Time {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return slices.Clone(e.restarts)
+}
+
+// newSupervised is newBinary with a restart backoff, and a record of what
+// supervision hears.
+func newSupervised(t *testing.T, backoff time.Duration, script string, args ...string) (*launch.Binary, *safeBuffer, *exits) {
+	t.Helper()
+	log := &safeBuffer{}
+	binary := launch.NewBinary(launch.Options{
+		Path:    "/bin/sh",
+		Args:    append([]string{"-c", script, "sh"}, args...),
+		Log:     log,
+		Backoff: backoff,
+	})
+	t.Cleanup(func() { _ = binary.Stop(context.Background()) })
+	return binary, log, &exits{}
+}
+
+// quitFile makes a script exit once a file appears, so that a test decides when
+// the target exits.
+func quitFile(t *testing.T) (path, script string) {
+	t.Helper()
+	path = filepath.Join(t.TempDir(), "quit")
+	return path, `echo started; until [ -e "$1" ]; do sleep 0.05; done; rm -f "$1"; exit 3`
+}
+
+func touch(t *testing.T, path string) {
+	t.Helper()
+	if err := os.WriteFile(path, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A supervised target that exits on its own starts again at once, as a
+// kubelet restarts a container, and the caller hears why it stopped.
+func TestASupervisedTargetThatExitsStartsAgain(t *testing.T) {
+	quit, script := quitFile(t)
+	binary, log, heard := newSupervised(t, launch.MaxBackoff, script, quit)
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+	binary.Supervise(heard.record)
+	exited := binary.Exited()
+	beforeExit := time.Now()
+
+	touch(t, quit)
+
+	waitForLogCount(t, log, "started", 2)
+	var exit *exec.ExitError
+	if seen := heard.all(); len(seen) != 1 || !errors.As(seen[0], &exit) || exit.ExitCode() != 3 {
+		t.Errorf("The supervisor reported the exits %v, want the one exit status 3.", seen)
+	}
+	requireOpen(t, exited, "the target was restarted")
+	if status := binary.Status(); !status.Running || status.Restarting || status.Exit != nil || status.Started.Before(beforeExit) {
+		t.Errorf("Status reported %+v for a target that was restarted after %v.", status, beforeExit)
+	}
+}
+
+// Every restart after the first waits, so a target that keeps exiting does not
+// spin. The caller hears when each restart comes.
+func TestASupervisedTargetWaitsBeforeItsSecondRestart(t *testing.T) {
+	binary, log, heard := newSupervised(t, launch.MaxBackoff, "echo started; sleep 0.1; exit 3")
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+	supervised := time.Now()
+	binary.Supervise(heard.record)
+
+	waitForLogCount(t, log, "started", 2)
+	deadline := time.Now().Add(10 * time.Second)
+	for len(heard.all()) < 2 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	heardBoth := time.Now()
+	time.Sleep(300 * time.Millisecond)
+
+	if got := strings.Count(log.String(), "started"); got != 2 {
+		t.Errorf("The target started %d times, want 2: the second restart waits minutes.", got)
+	}
+	if status := binary.Status(); !status.Running || !status.Restarting {
+		t.Errorf("Status reported %+v for a target that is waiting to restart.", status)
+	}
+	restarts := heard.restartsAt()
+	if len(restarts) != 2 {
+		t.Fatalf("The supervisor reported %d restarts, want 2.", len(restarts))
+	}
+	if first := restarts[0]; first.Before(supervised) || first.After(heardBoth) {
+		t.Errorf("The first restart is at %v, want it at once, between %v and %v.", first, supervised, heardBoth)
+	}
+	if second := restarts[1]; second.Before(supervised.Add(launch.MaxBackoff)) || second.After(heardBoth.Add(launch.MaxBackoff)) {
+		t.Errorf("The second restart is at %v, want it %v after the exit.", second, launch.MaxBackoff)
+	}
+}
+
+// Stop and Restart end the process themselves, so neither is an exit.
+func TestAStopOrRestartIsNoExit(t *testing.T) {
+	binary, log, heard := newSupervised(t, launch.MaxBackoff, "echo started; "+forever)
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+	binary.Supervise(heard.record)
+
+	if err := binary.Restart(t.Context()); err != nil {
+		t.Fatalf("Restart failed: %v", err)
+	}
+	waitForLogCount(t, log, "started", 2)
+	if err := binary.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+	time.Sleep(300 * time.Millisecond)
+
+	if seen := heard.all(); len(seen) != 0 {
+		t.Errorf("The supervisor reported the exits %v, and botbox ended every process itself.", seen)
+	}
+	waitForLogCount(t, log, "started", 2)
+	if status := binary.Status(); status.Running {
+		t.Errorf("Status reported %+v after Stop.", status)
+	}
+	requireClosed(t, binary.Exited(), "after Stop")
+}
+
+// Stop during the backoff leaves nothing to restart.
+func TestStopCancelsARestartThatIsWaiting(t *testing.T) {
+	binary, log, heard := newSupervised(t, time.Second, "echo started; exit 3")
+	mustStart(t, binary)
+	binary.Supervise(heard.record)
+	for deadline := time.Now().Add(10 * time.Second); len(heard.all()) < 2; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("The target never exited a second time.")
+		}
+	}
+
+	if err := binary.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+	time.Sleep(1500 * time.Millisecond)
+
+	if got := strings.Count(log.String(), "started"); got != 2 {
+		t.Errorf("The target started %d times, want 2: Stop came before the second restart.", got)
+	}
+}
+
+// The caller reads what supervision heard once the target is stopped, so Stop
+// waits for an exit that is being heard.
+func TestStopReturnsOnceTheExitIsHeard(t *testing.T) {
+	quit, script := quitFile(t)
+	binary, log, heard := newSupervised(t, launch.MaxBackoff, script, quit)
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+	binary.Supervise(func(exit error, restart time.Time) {
+		time.Sleep(300 * time.Millisecond)
+		heard.record(exit, restart)
+	})
+	touch(t, quit)
+	for deadline := time.Now().Add(10 * time.Second); fileExists(quit); time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("The target never took the quit file.")
+		}
+	}
+	time.Sleep(50 * time.Millisecond)
+
+	if err := binary.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop failed: %v", err)
+	}
+
+	if seen := heard.all(); len(seen) != 1 {
+		t.Errorf("Stop returned with the exits %v heard, want the one the target made.", seen)
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// A target that cannot start again is gone for good, and says why.
+func TestASupervisedTargetThatCannotStartAgainStops(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "deletes-itself")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\necho started\nrm \"$0\"\nexit 3\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	log := &safeBuffer{}
+	binary := launch.NewBinary(launch.Options{Path: path, Log: log})
+	t.Cleanup(func() { _ = binary.Stop(context.Background()) })
+	heard := &exits{}
+	mustStart(t, binary)
+	binary.Supervise(heard.record)
+
+	requireClosed(t, binary.Exited(), "after the restart failed")
+	status := binary.Status()
+	if status.Running || status.Exit == nil {
+		t.Fatalf("Status reported %+v for a target that could not start again.", status)
+	}
+	for _, want := range []string{"exit status 3", "deletes-itself"} {
+		if !strings.Contains(status.Exit.Error(), want) {
+			t.Errorf("Status reported %q, which does not mention %q.", status.Exit, want)
+		}
+	}
 }

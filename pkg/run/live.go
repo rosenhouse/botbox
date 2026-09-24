@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -79,6 +80,10 @@ func (l *liveRun) clearFaults() { l.h.Proxy.ClearFaults() }
 
 func (l *liveRun) faultWindow(id proxy.FaultID) proxy.FaultWindow { return l.h.Proxy.Window(id) }
 
+func (l *liveRun) servedResources() ([]metav1.APIResource, error) {
+	return cluster.ServedResources(l.h.Config)
+}
+
 // createCR creates the op's object as the primary CR and tells the Observer
 // botbox created it, so that it never counts as managed (DESIGN.md §6).
 func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error) {
@@ -95,7 +100,7 @@ func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) 
 	if err != nil {
 		return "", fmt.Errorf("creating the CR: %w", err)
 	}
-	l.h.Observer.MarkBotboxCreated(l.target.Primary, created.GetName())
+	l.h.Observer.Exclude(l.target.Primary, created.GetName())
 	return created.GetName(), nil
 }
 
@@ -108,7 +113,7 @@ func (l *liveRun) patchCR(ctx context.Context, name string, patch map[string]any
 		if err != nil {
 			return err
 		}
-		patched := &unstructured.Unstructured{Object: mergePatch(current.Object, patch)}
+		patched := &unstructured.Unstructured{Object: MergePatch(current.Object, patch)}
 		_, err = l.crs().Update(ctx, patched, metav1.UpdateOptions{})
 		return err
 	})
@@ -227,6 +232,25 @@ func (l *liveRun) requests() []proxy.Request { return l.h.Proxy.Log() }
 func (l *liveRun) objects() *observe.Store { return l.h.Observer.Store }
 
 func (l *liveRun) targetStatus() launch.Status { return l.h.Launcher.Status() }
+
+// supervise records why the target stopped before the launcher restarts it.
+// Each process writes to one log, so an exit is quoted from what the log
+// gained since the exit before it.
+func (l *liveRun) supervise() {
+	l.h.Launcher.Supervise(func(exit error, restart time.Time) {
+		l.h.mu.Lock()
+		defer l.h.mu.Unlock()
+		said, end := whyItStopped(filepath.Join(l.h.dir, targetLogFile), l.h.logQuoted)
+		l.h.logQuoted = end
+		l.h.exited = append(l.h.exited, Exit{At: time.Now(), Err: exit, Said: said, Restart: restart})
+	})
+}
+
+func (l *liveRun) exits() []Exit {
+	l.h.mu.Lock()
+	defer l.h.mu.Unlock()
+	return slices.Clone(l.h.exited)
+}
 
 func (l *liveRun) stop(ctx context.Context) error { return l.h.Stop(ctx) }
 

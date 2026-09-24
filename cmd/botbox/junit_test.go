@@ -24,16 +24,18 @@ type parsedSuites struct {
 	Tests    int           `xml:"tests,attr"`
 	Failures int           `xml:"failures,attr"`
 	Errors   int           `xml:"errors,attr"`
+	Time     *string       `xml:"time,attr"`
 	Suites   []parsedSuite `xml:"testsuite"`
 }
 
 type parsedSuite struct {
-	Name       string `xml:"name,attr"`
-	Tests      int    `xml:"tests,attr"`
-	Failures   int    `xml:"failures,attr"`
-	Errors     int    `xml:"errors,attr"`
-	Skipped    int    `xml:"skipped,attr"`
-	Timestamp  string `xml:"timestamp,attr"`
+	Name       string  `xml:"name,attr"`
+	Tests      int     `xml:"tests,attr"`
+	Failures   int     `xml:"failures,attr"`
+	Errors     int     `xml:"errors,attr"`
+	Skipped    int     `xml:"skipped,attr"`
+	Time       *string `xml:"time,attr"`
+	Timestamp  string  `xml:"timestamp,attr"`
 	Properties []struct {
 		Name  string `xml:"name,attr"`
 		Value string `xml:"value,attr"`
@@ -76,7 +78,18 @@ func readJUnit(t *testing.T, path string) (parsedSuite, map[string]int) {
 		t.Errorf("The JUnit file's root claims %d tests, %d failures and %d errors, and its testsuite %d, %d and %d.",
 			written.Tests, written.Failures, written.Errors, suite.Tests, suite.Failures, suite.Errors)
 	}
+	if timeOf(written.Time) != timeOf(suite.Time) {
+		t.Errorf("The JUnit file's root takes %s, and its testsuite %s.", timeOf(written.Time), timeOf(suite.Time))
+	}
 	return suite, map[string]int{"tests": suite.Tests, "failures": suite.Failures, "errors": suite.Errors, "skipped": suite.Skipped}
+}
+
+// timeOf says what a time attribute gives.
+func timeOf(attr *string) string {
+	if attr == nil {
+		return "no time"
+	}
+	return *attr + " s"
 }
 
 // counted is what the testcases hold, which the testsuite's counts must say.
@@ -254,6 +267,9 @@ func TestJUnitSaysWhatStoppedAnInvocationBeforeItsRuns(t *testing.T) {
 			if suite.Name != test.suite || suite.Timestamp != "2026-09-24T01:02:03" || len(suite.Properties) != 1 || suite.Properties[0].Name != "botbox" {
 				t.Errorf("The testsuite is %q at %s, with the properties %+v, want %s at 2026-09-24T01:02:03 UTC, with botbox's version alone.",
 					suite.Name, suite.Timestamp, suite.Properties, test.suite)
+			}
+			if timeOf(suite.Time) != "0.000 s" {
+				t.Errorf("The testsuite takes %s, want 0.000 s, since botbox stopped when it started.", timeOf(suite.Time))
 			}
 			if len(suite.Cases) != 1 {
 				t.Fatalf("The testcases are %+v, want one.", suite.Cases)

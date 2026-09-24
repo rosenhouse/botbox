@@ -1010,7 +1010,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   `failure` typed with the check's ID for a violation, an `error` for a run that did not
   finish, `skipped` for a run that never started, and an `error` testcase named `botbox`
   for what stopped the invocation where no run did, or for an invocation that has not
-  finished. An invocation that stops before it has a directory writes that testcase alone.
+  finished. The testsuite of an invocation that has not finished gives no time. An
+  invocation that stops before it has a directory writes that testcase alone.
   botbox replaces each file whole, and warns of one it cannot write.
   `objects.jsonl` writes each value of a Secret's `data` and annotations as a marker such
   as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is drawn per

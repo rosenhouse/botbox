@@ -22,7 +22,7 @@ type junitSuites struct {
 	Tests    int        `xml:"tests,attr"`
 	Failures int        `xml:"failures,attr"`
 	Errors   int        `xml:"errors,attr"`
-	Time     string     `xml:"time,attr"`
+	Time     string     `xml:"time,attr,omitempty"`
 	Suite    junitSuite `xml:"testsuite"`
 }
 
@@ -32,7 +32,7 @@ type junitSuite struct {
 	Failures   int             `xml:"failures,attr"`
 	Errors     int             `xml:"errors,attr"`
 	Skipped    int             `xml:"skipped,attr"`
-	Time       string          `xml:"time,attr"`
+	Time       string          `xml:"time,attr,omitempty"`
 	Timestamp  string          `xml:"timestamp,attr"`
 	Properties []junitProperty `xml:"properties>property"`
 	Cases      []junitCase     `xml:"testcase"`
@@ -65,9 +65,11 @@ type junitProblem struct {
 func (s *summary) junit(dir string) ([]byte, error) {
 	suite := junitSuite{
 		Name:       s.Target.Name,
-		Time:       seconds(s.Finish.Sub(s.Start)),
 		Timestamp:  s.Start.Format(junitTimestamp),
 		Properties: []junitProperty{{Name: "botbox", Value: s.Botbox}},
+	}
+	if !s.Finish.IsZero() {
+		suite.Time = seconds(s.Finish.Sub(s.Start))
 	}
 	if dir != "" {
 		suite.Properties = append(suite.Properties,

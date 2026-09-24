@@ -684,6 +684,11 @@ func TestTheSummaryRecordsEachRunAsItStarts(t *testing.T) {
 	if len(suites) != 2 {
 		t.Fatalf("botbox ran %d times, want 2.", len(suites))
 	}
+	for i, suite := range suites {
+		if timeOf(suite.Time) != "no time" {
+			t.Errorf("During run %d, the JUnit testsuite took %s, want no time, since botbox had not finished.", i+1, timeOf(suite.Time))
+		}
+	}
 	var cases []string
 	for _, c := range suites[1].Cases {
 		switch {

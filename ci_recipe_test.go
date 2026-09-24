@@ -501,9 +501,10 @@ func TestTheCIRecipeFixesSeedsOnPullRequestsAndDrawsThemNightly(t *testing.T) {
 	schedule, _ := on["schedule"].([]any)
 	if len(schedule) == 0 || slices.ContainsFunc(schedule, func(entry any) bool {
 		timing, _ := entry.(map[string]any)
-		return timing["cron"] == nil
+		cron, _ := timing["cron"].(string)
+		return len(strings.Fields(cron)) != 5
 	}) {
-		t.Errorf("the recipe's schedule is %v, not a list of crons, and Actions rejects such a workflow", on["schedule"])
+		t.Errorf("the recipe's schedule is %v, not a list of five-field crons, and Actions rejects such a workflow", on["schedule"])
 	}
 	seeded := map[string]bool{}
 	for _, s := range botboxRuns(t, recipeSteps(t)) {

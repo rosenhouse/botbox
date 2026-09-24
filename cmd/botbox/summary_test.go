@@ -704,7 +704,13 @@ func TestTheSummaryRecordsEachRunAsItStarts(t *testing.T) {
 func TestAnInterruptAfterEveryRunPassedRewritesTheSummary(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
-	session := &fakeSession{closing: func() { cancel(interrupt{syscall.SIGTERM}) }}
+	finished := time.Date(2026, 9, 24, 1, 2, 3, 0, time.UTC)
+	clock := finished
+	session := &fakeSession{now: func() time.Time { return clock }}
+	session.closing = func() {
+		clock = clock.Add(time.Minute)
+		cancel(interrupt{syscall.SIGTERM})
+	}
 	out := t.TempDir()
 	junit := filepath.Join(t.TempDir(), "junit.xml")
 
@@ -719,6 +725,9 @@ func TestAnInterruptAfterEveryRunPassedRewritesTheSummary(t *testing.T) {
 	if written.Outcome != "interrupted" || written.ExitCode != want || written.Error != "an interrupt arrived after every run passed" {
 		t.Errorf("The summary says %s, exit %d, on %q, want interrupted, exit %d, after every run passed.",
 			written.Outcome, written.ExitCode, written.Error, want)
+	}
+	if !written.Finish.Equal(finished) {
+		t.Errorf("The summary says the invocation finished at %v, want %v, before the cluster stopped.", written.Finish, finished)
 	}
 	if md, _ := os.ReadFile(filepath.Join(summaryDir(t, out), "summary.md")); !strings.Contains(string(md), fmt.Sprintf("exited %d.", want)) {
 		t.Errorf("summary.md is\n%s\nwant it to say botbox exited %d.", md, want)

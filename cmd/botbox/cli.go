@@ -268,8 +268,7 @@ func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Tar
 func (c *cli) failUnrecorded(opts options, t *target.Target, err error) int {
 	if opts.junit != "" {
 		now := c.now().UTC()
-		record := &summary{Botbox: version(), Target: summaryTarget{Name: "botbox"},
-			Start: now, Finish: now, Outcome: outcomeError, Error: err.Error()}
+		record := &summary{Botbox: version(), Target: summaryTarget{Name: "botbox"}, Start: now, Finish: now, Error: err.Error()}
 		if t != nil {
 			record.Target.Name = t.Name
 		}

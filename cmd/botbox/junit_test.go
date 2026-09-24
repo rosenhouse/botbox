@@ -285,18 +285,38 @@ func TestAJUnitFileThatCannotBeWrittenOnlyWarns(t *testing.T) {
 		t.Fatal(err)
 	}
 	junit := filepath.Join(file, "junit.xml")
-	out := t.TempDir()
+	for _, test := range []struct {
+		name string
+		args []string
+		code int
+	}{
+		{"a run that passed", []string{"replay", "--target", toyTargetYAML, "--out", t.TempDir(), "--junit", junit, writeSequence(t, 1)}, exitOK},
+		{"an invocation that stopped before its runs", []string{"run", "--target", "absent.yaml", "--junit", junit}, exitError},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			code, _, stderr := invoke(t, &fakeSession{}, test.args...)
 
-	code, _, stderr := invoke(t, &fakeSession{}, "replay", "--target", toyTargetYAML, "--out", out, "--junit", junit, writeSequence(t, 1))
+			if code != test.code {
+				t.Errorf("botbox exited %d, want %d.", code, test.code)
+			}
+			if strings.Count(stderr, "botbox: writing "+junit) != 1 || strings.Contains(stderr, ".junit.xml.") {
+				t.Errorf("botbox printed %q on stderr, want it to say once that it could not write %s, and name no temporary file.", stderr, junit)
+			}
+		})
+	}
+}
 
-	if code != exitOK {
-		t.Errorf("botbox replay exited %d, want %d: the run passed.", code, exitOK)
+func TestAnInvocationWithoutJUnitWritesNone(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	_, _, stderr := invoke(t, &fakeSession{}, "run", "--target", "absent.yaml")
+
+	if lines := strings.Count(stderr, "\n"); lines != 1 {
+		t.Errorf("botbox printed\n%s\nwant the one line that says why it stopped.", stderr)
 	}
-	if !strings.Contains(stderr, "botbox: writing "+junit) || strings.Contains(stderr, ".junit.xml.") {
-		t.Errorf("botbox replay printed %q on stderr, want it to say it could not write %s, and name no temporary file.", stderr, junit)
-	}
-	if readSummary(t, out).Outcome != "passed" {
-		t.Error("The summary does not say the run passed.")
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Errorf("botbox wrote %v.", entries)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	apiextensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -84,12 +85,18 @@ func (c *crdRules) defaulted(object map[string]any) map[string]any {
 // in the sample.
 const fieldDraws = 100
 
+const cannotDraw = "botbox cannot draw a value its schema allows; a set longer than its enum, or a pattern nothing matches, does this"
+
 // acceptsADraw is nil once the CRD accepts the sample with a value drawn for
 // the field, and otherwise says why it refused them.
 func (c *crdRules) acceptsADraw(sample *unstructured.Unstructured, f field) (err error) {
 	defer func() {
-		if recover() != nil {
-			err = errors.New("botbox cannot draw a value its schema allows; a set longer than its enum, or a pattern nothing matches, does this")
+		if recovered := recover(); recovered != nil {
+			err = errors.New(cannotDraw)
+			// rapid calls a draw that no value satisfies invalid data.
+			if reason := fmt.Sprint(recovered); !strings.Contains(reason, "invalid data") {
+				err = fmt.Errorf("botbox failed to draw a value: %s", reason)
+			}
 		}
 	}()
 	return rapid.Custom(func(t *rapid.T) error {

@@ -200,7 +200,7 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   configuration error. For each path it may change, the generator draws up to 100 values
   into the sample until the CRD accepts one. A `generate.mutate` path is a configuration
   error too when the generator cannot draw a value for it, such as a set longer than its
-  enum, or when the CRD refuses every value drawn. Without `generate.mutate`, botbox
+  enum or a pattern nothing matches, or when the CRD refuses every value drawn. Without `generate.mutate`, botbox
   prints each spec path it leaves alone, and why: its schema says too little to draw
   from, such as an int-or-string, the generator cannot draw a value for it, or the CRD
   refuses every value drawn for it.

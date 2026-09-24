@@ -56,30 +56,50 @@ func TestAMutatePathTheCRDRefusesInTheSampleIsAConfigurationError(t *testing.T) 
 }
 
 func TestNewReportsAFieldBotboxCannotDraw(t *testing.T) {
-	// No set of three items holds only a and b.
-	overlay := map[string]map[string]any{"spec.tags": {"minItems": 3, "items": map[string]any{"enum": []any{"a", "b"}}}}
-	loaded := loadTarget(t, rulesTarget)
-	loaded.Generate = target.GenerateSpec{Mutate: []string{"spec.tags"}, Overlay: overlay}
-	_, err := New(loaded, Options{})
-	if err == nil {
-		t.Fatal("New accepted generate.mutate spec.tags, which botbox cannot draw.")
-	}
-	for _, want := range []string{"generate.mutate spec.tags", "cannot draw", "a set longer than its enum"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("New reported %q, which does not mention %q.", err, want)
-		}
-	}
-	// rapid's own reason names its internals, not the bound to relax.
-	if strings.Contains(err.Error(), "tries") {
-		t.Errorf("New reported %q, which quotes rapid.", err)
-	}
+	for _, testCase := range []struct {
+		path    string
+		overlay map[string]any
+	}{
+		// No set of three items holds only a and b.
+		{"spec.tags", map[string]any{"minItems": 3, "items": map[string]any{"enum": []any{"a", "b"}}}},
+		{"spec.left", map[string]any{"pattern": "a$b"}},
+	} {
+		t.Run(testCase.path, func(t *testing.T) {
+			loaded := loadTarget(t, rulesTarget)
+			overlay := map[string]map[string]any{testCase.path: testCase.overlay}
+			loaded.Generate = target.GenerateSpec{Mutate: []string{testCase.path}, Overlay: overlay}
+			_, err := New(loaded, Options{})
+			if err == nil {
+				t.Fatalf("New accepted generate.mutate %s, which botbox cannot draw.", testCase.path)
+			}
+			// rapid's own reason names its internals, not the bound to relax.
+			want := "generate.mutate " + testCase.path + ": " + cannotDraw
+			if !strings.HasSuffix(err.Error(), want) {
+				t.Errorf("New reported %q, want it to end %q.", err, want)
+			}
 
-	loaded.Generate.Mutate = nil
+			loaded.Generate.Mutate = nil
+			g := newGenerator(t, loaded, Options{})
+			if !slices.ContainsFunc(g.LeftAlone(), func(note string) bool {
+				return strings.Contains(note, testCase.path) && strings.Contains(note, cannotDraw)
+			}) {
+				t.Errorf("New reports it leaves %q alone, want %s among them.", g.LeftAlone(), testCase.path)
+			}
+		})
+	}
+}
+
+// A panic that is not rapid's failure to draw is a bug, and its reason is
+// what a reader needs.
+func TestACannotDrawErrorQuotesAnyOtherPanic(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
 	g := newGenerator(t, loaded, Options{})
-	if !slices.ContainsFunc(g.LeftAlone(), func(note string) bool {
-		return strings.Contains(note, "spec.tags") && strings.Contains(note, "cannot draw")
-	}) {
-		t.Errorf("New reports it leaves %q alone, want spec.tags among them.", g.LeftAlone())
+	panics := field{path: []string{"spec", "count"}, dotted: "spec.count", values: rapid.Custom(func(*rapid.T) any { panic("boom") })}
+
+	err := g.rules.acceptsADraw(loaded.Sample, panics)
+
+	if err == nil || !strings.Contains(err.Error(), "boom") || strings.Contains(err.Error(), "enum") {
+		t.Errorf("acceptsADraw returned %v, want the panic's reason and no guess at its cause.", err)
 	}
 }
 

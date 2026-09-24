@@ -269,6 +269,10 @@ func TestG7NotesAnObjectAFaultMayHaveKeptAway(t *testing.T) {
 			fault(4*time.Second, 9990*time.Millisecond).
 			checkpoint(12100*time.Millisecond, invariant.Converged).
 			through(12100 * time.Millisecond), wantNote},
+		{"that began as the wait ended", childDeleted().
+			fault(12050*time.Millisecond, 13*time.Second).
+			checkpoint(12100*time.Millisecond, invariant.Converged).
+			through(12100 * time.Millisecond), wantNote},
 		{"after a restart the target had not answered", converged().
 			op(invariant.OpRestart, 9*time.Second).
 			deletedManaged(10*time.Second, "w-0").
@@ -277,6 +281,15 @@ func TestG7NotesAnObjectAFaultMayHaveKeptAway(t *testing.T) {
 			checkpoint(16*time.Second, invariant.Expired).
 			through(16 * time.Second),
 			"G7 is not evaluated for op 2 (deleteManaged): a fault was active"},
+		// The target is owed until 18s.
+		{"that stopped before a restart the target had not answered", converged().
+			fault(4*time.Second, 8500*time.Millisecond).
+			op(invariant.OpRestart, 9*time.Second).
+			deletedManaged(10*time.Second, "w-0").
+			remove(10100*time.Millisecond, child("w-0", "15")).
+			checkpoint(12100*time.Millisecond, invariant.Converged).
+			through(12100 * time.Millisecond),
+			"G7 is not evaluated for op 2 (deleteManaged): a fault was active"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			noted(t, invariant.SelfHealing, c.in, c.want)
@@ -284,12 +297,39 @@ func TestG7NotesAnObjectAFaultMayHaveKeptAway(t *testing.T) {
 	}
 }
 
-// A fault from 3s to 5s leaves the target owed until 12s, where the wait ends.
-func TestG7FiresOnceTheTargetHadRecoveredFromAFault(t *testing.T) {
-	in := childDeleted().
-		fault(3*time.Second, 5*time.Second).
-		checkpoint(12*time.Second, invariant.Converged).
-		through(12 * time.Second)
+// A fault from 4s that stopped as the op began leaves the target owed until
+// 20.98s.
+func TestG7JudgesOnceTheTargetHadRecoveredFromAFault(t *testing.T) {
+	waitEndingAt := func(end time.Duration) invariant.Input {
+		return childDeleted().
+			fault(4*time.Second, 9990*time.Millisecond).
+			checkpoint(end, invariant.Expired).
+			through(end)
+	}
+	t.Run("at 20.98s", func(t *testing.T) {
+		fired(t, invariant.SelfHealing, waitEndingAt(20980*time.Millisecond))
+	})
+	t.Run("just before", func(t *testing.T) {
+		noted(t, invariant.SelfHealing, waitEndingAt(20979*time.Millisecond), "the target was still owed time to recover")
+	})
+}
+
+// A deleted CR holds the settle wait open, until 10.3s here, but owes the
+// target no time to recover.
+func TestG7FiresSoonAfterARecreate(t *testing.T) {
+	in := converged().
+		op(invariant.OpRecreate, 5*time.Second).
+		record(5100*time.Millisecond, widget("15", spec(2), status(2, 1), deleting(5*time.Second), finalizers(cleanup))).
+		remove(5200*time.Millisecond, child("w-0", "16"), child("w-1", "17")).
+		remove(5300*time.Millisecond, widget("18", spec(2), status(2, 1), deleting(5*time.Second))).
+		record(5400*time.Millisecond, widget("20", spec(2), uid("uid-w2"), finalizers(cleanup))).
+		record(5500*time.Millisecond, child("w-0", "21", uid("uid-w-0-2")), child("w-1", "22", uid("uid-w-1-2"))).
+		record(5600*time.Millisecond, widget("23", spec(2), status(2, 1), uid("uid-w2"), finalizers(cleanup))).
+		checkpoint(7600*time.Millisecond, invariant.Converged).
+		deletedManaged(8*time.Second, "w-0").
+		remove(8100*time.Millisecond, child("w-0", "24", uid("uid-w-0-2"))).
+		checkpoint(10100*time.Millisecond, invariant.Converged).
+		through(10100 * time.Millisecond)
 
 	fired(t, invariant.SelfHealing, in)
 }

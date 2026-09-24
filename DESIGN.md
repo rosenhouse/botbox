@@ -966,19 +966,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. The deadline abandons the run under way (§5.5), and the
   shrinker stops there and reports the smallest failing sequence it found. Without
-  `--deadline`, botbox derives the deadline and prints it: what the planned runs' waits
-  (§5.5) can take at their longest, one run after another, plus 4m to minimize a failure
-  where botbox drew the sequences. `botbox matrix` minimizes nothing and gets no 4m.
-  Waits include the start's wait for a kubeconfig cluster's namespace defaults (§5.8),
-  the reap after a `restart`, stopping the target and deleting the namespace. A `delete`
-  gets `T_delete` as a `recreate` does. A fault can keep waits open. A target that exits
-  while a fault excuses it is owed `T_settle` past a restart whose backoff can reach 5 min
-  (§5.1), and faults that stopped are owed as long as they lasted plus `T_settle` (§6). So
-  the deadline allows one such exit per fault op, and each time faults stop it doubles
-  what the run had before its teardown and allows another. Faults with no trigger stop
-  together, at the teardown. A target that exits more than once per fault op while faults
-  are active can outlast the derived deadline. `--launch-arg` appends to `launch.args`
-  (repeatable; a later flag wins), which is how the bug matrix selects `--bug=N`.
+  `--deadline`, botbox prints and uses the longest the planned runs' waits can take at the
+  target's timeouts, plus 4m to minimize a failure where botbox drew the sequences
+  (D@51). `--launch-arg` appends to `launch.args` (repeatable; a later flag wins), which
+  is how the bug matrix selects `--bug=N`.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
   CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
@@ -1590,12 +1581,19 @@ built from source and run as a black-box binary.
   A SIGKILLed botbox still leaves the control plane and the target running.
 - **D@51 Without `--deadline`, botbox derives the deadline from the target's timeouts.** A
   fixed 4m stopped ten runs of a correct controller at §6's timeouts after six, each of
-  which took 32 to 42 s. A larger fixed default fails again when `--runs` grows or the
-  timeouts widen. The derived deadline cuts none of the planned runs the Runner would end
-  on its own, unless a request hangs or a target keeps exiting under an active fault.
-  Minimizing gets what the runs left and 4m, so it may still stop early. Faults whose
-  triggers run out one after another each extend the wait the one before extended, so
-  the deadline doubles each time faults stop. A `delete` gets `T_delete` because #70 lets
-  a wait after it run to the CR's G3 deadline. At §6's timeouts the deadline runs to tens
-  of minutes, so botbox prints it. An explicit `--deadline` must be positive and is used
-  as given.
+  which took 32 to 42 s, and a larger fixed default fails again when `--runs` grows or the
+  timeouts widen. The derived deadline is the longest the planned runs' waits (§5.5) can
+  take, one run after another: the start's wait for a kubeconfig cluster's namespace
+  defaults (§5.8), `T_settle` per settle wait, `T_delete` per `delete` or `recreate`, the
+  reap after a `restart`, the teardown, stopping the target and deleting the namespace. A
+  target that exits while a fault excuses it is owed `T_settle` past a restart whose
+  backoff can reach 5 min (§5.1), so each fault op allows one such exit. Faults that
+  stopped are owed as long as they lasted plus `T_settle` (§6), so each time faults stop,
+  the deadline doubles what the run had and allows another exit. Faults with no trigger
+  stop together, at the teardown. Minimizing gets what the runs left plus 4m, so it may
+  still stop early. At §6's timeouts the deadline runs to tens of minutes, so botbox
+  prints it. An explicit `--deadline` must be positive and is used as given. The derived
+  deadline ends no run the Runner would end on its own, unless a request hangs or a target
+  exits more than once per fault op while faults are active. The Runner owes each such
+  exit `T_settle` past its restart, so a crash loop under an active fault runs until the
+  deadline and exits 2 rather than failing G4.

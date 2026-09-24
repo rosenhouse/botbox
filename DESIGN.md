@@ -429,7 +429,7 @@ real targets; the toy target sets much shorter ones (§9).
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any change to the spec or a fixture, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). A `Restart` gives the target `T_settle` past its return. A target waiting to restart, or not back since it last started, has not converged. This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
-| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 10) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
+| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 10) times within `T_settle` under an unchanged spec and fixtures, with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
 | **G7** | Self-healing | An object a `DeleteManaged` op deleted exists again, by kind and name, when the settle wait after the op ends: on convergence, or at `T_settle` or later after a fault or a deletion (§5.5). Its content may differ. A kind the target lists in `notRecreated` is exempt (§8.1). | Observer |
 
 **The quiet window.** G1 and G2 judge the `T_stable` that follows a settle wait, which
@@ -491,7 +491,8 @@ creates again under its name, so G3 never counts one as left behind and G7 never
 one back. A fixture op, and the restore of a deleted fixture, is a change of botbox's: G5
 does not judge a restart it falls between, and G7 notes a `DeleteManaged` it precedes
 before the run converged. G4 measures `T_settle` from an update or a restore of a fixture as
-from a spec change. A deletion hands the window before it to the restore, since a target
+from a spec change, and G6 counts failing requests afresh after any fixture op or restore.
+A deletion hands G4's window before it to the restore, since a target
 may rightly not be ready while a fixture it reads is gone. A settle wait that ends while a
 fixture is gone is judged as any other, so generation restores the fixture first (§5.4).
 

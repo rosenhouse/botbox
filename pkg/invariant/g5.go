@@ -41,8 +41,8 @@ func RestartStable(in Input) (Result, error) {
 	return out, nil
 }
 
-// changedBetween returns the first op that changed the CR or a managed object
-// in [from, to).
+// changedBetween returns the first op that changed the CR, a managed object or
+// a fixture in [from, to).
 func (in Input) changedBetween(from, to time.Time) (Op, bool) {
 	for _, op := range in.Ops {
 		if op.changesRun() && !op.Time.Before(from) && op.Time.Before(to) {

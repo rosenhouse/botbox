@@ -104,7 +104,7 @@ func (s *summary) junit(dir string) ([]byte, error) {
 	return append(append([]byte(xml.Header), encoded...), '\n'), nil
 }
 
-// botboxCase is what stopped the invocation where no run did.
+// botboxCase is the testcase of the invocation itself.
 func (s *summary) botboxCase(kind outcome, message string) junitCase {
 	return junitCase{Name: "botbox", Classname: s.Target.Name, Error: &junitProblem{Type: string(kind), Message: message}}
 }

@@ -74,8 +74,9 @@ func rapidGenerator(t *target.Target) (Generator, []string, error) {
 	return g.Draw, g.LeftAlone(), nil
 }
 
-// cli is one invocation. Its writers, its generator, its test cluster and its
-// clock are injected, so the unit tier needs no API server.
+// cli is one invocation. Its writers, its generator, its test cluster, its
+// clock and what discards a passing run are injected, so the unit tier needs
+// no API server.
 type cli struct {
 	stdout, stderr io.Writer
 	open           func(options, *target.Target) (session, error)

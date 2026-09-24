@@ -44,6 +44,9 @@ type fakeSession struct {
 	fails func(sequence run.Sequence, dir string) *run.Violation
 	// notes are what a run fails answers for notes.
 	notes []string
+	// applies is how many ops a run fails answers for applied. Nil applies
+	// none.
+	applies func(sequence run.Sequence) int
 	// after runs once a sequence has executed, which is where a test expires
 	// the deadline.
 	after func()
@@ -86,7 +89,11 @@ func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.
 		return s.results[n], failure
 	}
 	if s.fails != nil {
-		return run.Result{Violation: s.fails(sequence, dir), Notes: s.notes}, failure
+		result := run.Result{Violation: s.fails(sequence, dir), Notes: s.notes}
+		if s.applies != nil {
+			result.Timeline.Ops = make([]run.AppliedOp, s.applies(sequence))
+		}
+		return result, failure
 	}
 	return run.Result{}, failure
 }
@@ -883,13 +890,19 @@ func TestAnUnfinishedRunOfTheMinimizedSequenceIsNoPass(t *testing.T) {
 			session.failures[len(session.sequences)-1] = fmt.Errorf("op 1 (settle): %w", context.Canceled)
 		}
 	}
-	session.fails = func(run.Sequence, string) *run.Violation {
-		if rerun() {
+	session.fails = func(sequence run.Sequence, _ string) *run.Violation {
+		if rerun() || len(sequence.Ops) < 2 {
 			return nil
 		}
 		return &violation
 	}
-	generate := countingGenerator(nil, run.OpSettle, run.OpSettle)
+	session.applies = func(sequence run.Sequence) int {
+		if rerun() {
+			return 1
+		}
+		return len(sequence.Ops)
+	}
+	generate := countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle)
 
 	_, _, stderr := invokeCtx(t, ctx, session, generate,
 		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
@@ -900,6 +913,17 @@ func TestAnUnfinishedRunOfTheMinimizedSequenceIsNoPass(t *testing.T) {
 	}
 	if said := string(written) + stderr; strings.Contains(said, "passed when it ran again") || !strings.Contains(said, "did not finish when it ran again") {
 		t.Errorf("botbox run printed %q and the report\n%s\nwant them to say the run did not finish.", stderr, written)
+	}
+	encoded, err := os.ReadFile(filepath.Join(session.dirs[0], report.JSONFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var carried struct{ Applied, Ops int }
+	if err := json.Unmarshal(encoded, &carried); err != nil {
+		t.Fatal(err)
+	}
+	if carried.Applied != 1 || carried.Ops != 2 {
+		t.Errorf("The report says the run applied %d of %d ops, want the 1 of 2 the unfinished run applied.", carried.Applied, carried.Ops)
 	}
 }
 

@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
@@ -147,6 +148,7 @@ func TestReportQuotesTheRequestsAndVersionsTheViolationNamed(t *testing.T) {
 		Generation:         4,
 		ObservedGeneration: ptr(int64(3)),
 		Finalizers:         []string{"widget.botbox/cleanup"},
+		DeletionTimestamp:  &metav1.Time{Time: time.Date(2026, 9, 21, 5, 59, 8, 0, time.UTC)},
 		Deleted:            true,
 	}, {
 		Key:             observe.Key{GVK: schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, Name: "widget-0-0"},
@@ -164,8 +166,9 @@ func TestReportQuotesTheRequestsAndVersionsTheViolationNamed(t *testing.T) {
 			"| start | verb | path | status | fault |\n| --- | --- | --- | --- | --- |\n",
 			"| 2026-09-21T05:59:08.980624165Z | create | /api/v1/namespaces/botbox-run-x/configmaps | 500 | error(500) |"}},
 		{"Object versions", []string{"The violation quotes 2 versions.", "objects.jsonl",
-			"| 2026-09-21T05:59:09Z | cert-manager.io/v1/CertificateRequest | widget-0 | 812 | 4 | 3 | widget.botbox/cleanup | yes |",
-			"| 2026-09-21T05:59:10Z | v1/ConfigMap | widget-0-0 | 813 | 0 |  |  |  |"}},
+			"| time | kind | name | resourceVersion | generation | observed | finalizers | deletionTimestamp | deleted |",
+			"| 2026-09-21T05:59:09Z | cert-manager.io/v1/CertificateRequest | widget-0 | 812 | 4 | 3 | widget.botbox/cleanup | 2026-09-21T05:59:08Z | yes |",
+			"| 2026-09-21T05:59:10Z | v1/ConfigMap | widget-0-0 | 813 | 0 |  |  |  |  |"}},
 	} {
 		body := section(md, excerpt.heading)
 		for _, want := range excerpt.wants {

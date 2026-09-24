@@ -96,6 +96,7 @@ examples/cert-manager/quickstart.sh --seed 23
 ```
 
 ```
+the deadline is 24m50s: these 5 runs can take 20m50s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.
 run 1: seed 23, generated
 run 2: seed 24, generated
 run 3: seed 25, generated
@@ -103,6 +104,9 @@ run 4: seed 26, generated
 run 5: seed 27, generated
 every run passed.
 ```
+
+botbox derives the deadline from the `timeouts` your target declares, or their defaults: it is
+the longest the runs' waits can take. A correct controller finishes well inside it.
 
 ### The negative control
 
@@ -112,10 +116,11 @@ cert-manager leaves the issued Secret behind, as upstream documents. The target 
 `v1/Secret` as managed, so G3 has to report it:
 
 ```sh
-examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 5m --launch-arg --enable-certificate-owner-ref=false
+examples/cert-manager/quickstart.sh --seed 23 --runs 1 --launch-arg --enable-certificate-owner-ref=false
 ```
 
 ```
+the deadline is 7m20s: this run can take 3m20s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.
 run 1: seed 23, generated
 run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-21T05:59:08.980624165Z; 1 version, the first v1/Secret example-tls
@@ -124,10 +129,11 @@ run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was delete
 ```
 
 Seed 23 draws a single op, so there is nothing to minimize. A longer sequence is cut to the ops
-the failure needs before it is reported, which costs a replay each: give `--deadline` room for
-that. `make test-example` runs this same control. It fails unless the default configuration
-passes, the control fails on G3 naming that Secret, and the control's evidence hides the
-Secret's private key. A nightly workflow draws its own seeds.
+the failure needs before it is reported, which costs a replay each. The deadline gives that at
+least 4 minutes, and a longer `--deadline` gives it more. `make test-example` runs this same
+control. It fails unless the default configuration passes, the control fails on G3 naming that
+Secret, and the control's evidence hides the Secret's private key. A nightly workflow draws its
+own seeds.
 
 ## A second example: external-secrets
 
@@ -435,11 +441,12 @@ Exit 2 means botbox could not test your controller, and the message says what to
 - run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m
 ```
 
-`$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not. Give
-`--deadline` room for your controller, because a run that overruns it, or an invocation it stops
-before the last run, exits 2 rather than reporting a find. botbox stops within seconds of the
-deadline. Cache the control plane and the target as
-[.github/workflows/ci.yml](.github/workflows/ci.yml) does. The job needs no cluster and no registry.
+`$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not.
+`--deadline` caps the job, which botbox otherwise lets run as long as its runs can take. Give it
+room for your controller, because a run that overruns it, or an invocation it stops before the
+last run, exits 2 rather than reporting a find. botbox stops within seconds of the deadline.
+Cache the control plane and the target as [.github/workflows/ci.yml](.github/workflows/ci.yml)
+does. The job needs no cluster and no registry.
 
 SIGINT, SIGTERM, SIGHUP and a terminal's Ctrl-C all stop botbox cleanly. It abandons the run
 under way, stops your controller and the control plane, and deletes the run namespace.

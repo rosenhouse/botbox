@@ -138,7 +138,7 @@ func (c *cli) dispatch(ctx context.Context, args []string) int {
 		return exitOK
 	}
 	if err != nil {
-		return c.fail(err)
+		return c.failUnrecorded(opts, nil, err)
 	}
 	switch opts.command {
 	case "version":
@@ -156,7 +156,7 @@ func (c *cli) dispatch(ctx context.Context, args []string) int {
 func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	exercised, err := target.Load(opts.target)
 	if err != nil {
-		return c.fail(err)
+		return c.failUnrecorded(opts, nil, err)
 	}
 	exercised.Launch.Args = append(exercised.Launch.Args, opts.launchArgs...)
 	if len(paths) == 0 && !opts.seedGiven {
@@ -164,12 +164,12 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	}
 	runs, err := c.plan(opts, exercised, paths)
 	if err != nil {
-		return c.fail(err)
+		return c.failUnrecorded(opts, exercised, err)
 	}
 	start := c.now()
 	out, err := run.OpenOutput(opts.out, opts.invocationSeed(runs[0].sequence), start)
 	if err != nil {
-		return c.fail(err)
+		return c.failUnrecorded(opts, exercised, err)
 	}
 
 	record := newSummary(opts, exercised, runs, start)
@@ -261,6 +261,21 @@ func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Tar
 	}
 	fmt.Fprintln(c.stdout, "every run passed.")
 	return exitOK
+}
+
+// failUnrecorded ends an invocation that has no directory to write its summary
+// in. Its JUnit file still says what stopped it.
+func (c *cli) failUnrecorded(opts options, t *target.Target, err error) int {
+	if opts.junit != "" {
+		now := c.now().UTC()
+		record := &summary{Botbox: version(), Target: summaryTarget{Name: "botbox"},
+			Start: now, Finish: now, Outcome: outcomeError, Error: err.Error()}
+		if t != nil {
+			record.Target.Name = t.Name
+		}
+		c.warn(record.writeJUnit(opts.junit, ""))
+	}
+	return c.fail(err)
 }
 
 // stop ends the invocation on an error no run carries.

@@ -12,23 +12,33 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/rosenhouse/botbox/pkg/run"
+	"github.com/rosenhouse/botbox/pkg/target"
 )
 
 // parsedSuites is a JUnit XML file as a CI server reads it.
 type parsedSuites struct {
-	XMLName xml.Name      `xml:"testsuites"`
-	Suites  []parsedSuite `xml:"testsuite"`
+	XMLName  xml.Name      `xml:"testsuites"`
+	Tests    int           `xml:"tests,attr"`
+	Failures int           `xml:"failures,attr"`
+	Errors   int           `xml:"errors,attr"`
+	Suites   []parsedSuite `xml:"testsuite"`
 }
 
 type parsedSuite struct {
-	Name     string       `xml:"name,attr"`
-	Tests    int          `xml:"tests,attr"`
-	Failures int          `xml:"failures,attr"`
-	Errors   int          `xml:"errors,attr"`
-	Skipped  int          `xml:"skipped,attr"`
-	Cases    []parsedCase `xml:"testcase"`
+	Name       string `xml:"name,attr"`
+	Tests      int    `xml:"tests,attr"`
+	Failures   int    `xml:"failures,attr"`
+	Errors     int    `xml:"errors,attr"`
+	Skipped    int    `xml:"skipped,attr"`
+	Timestamp  string `xml:"timestamp,attr"`
+	Properties []struct {
+		Name  string `xml:"name,attr"`
+		Value string `xml:"value,attr"`
+	} `xml:"properties>property"`
+	Cases []parsedCase `xml:"testcase"`
 }
 
 type parsedCase struct {
@@ -46,7 +56,8 @@ type parsedProblem struct {
 	Body    string `xml:",chardata"`
 }
 
-// readJUnit reads the file's one testsuite and the counts it claims.
+// readJUnit reads the file's one testsuite and the counts it claims, which
+// the file's root claims too.
 func readJUnit(t *testing.T, path string) (parsedSuite, map[string]int) {
 	t.Helper()
 	encoded, err := os.ReadFile(path)
@@ -61,6 +72,10 @@ func readJUnit(t *testing.T, path string) (parsedSuite, map[string]int) {
 		t.Fatalf("The JUnit file holds %d testsuites, want one:\n%s", len(written.Suites), encoded)
 	}
 	suite := written.Suites[0]
+	if written.Tests != suite.Tests || written.Failures != suite.Failures || written.Errors != suite.Errors {
+		t.Errorf("The JUnit file's root claims %d tests, %d failures and %d errors, and its testsuite %d, %d and %d.",
+			written.Tests, written.Failures, written.Errors, suite.Tests, suite.Failures, suite.Errors)
+	}
 	return suite, map[string]int{"tests": suite.Tests, "failures": suite.Failures, "errors": suite.Errors, "skipped": suite.Skipped}
 }
 
@@ -188,8 +203,88 @@ func TestJUnitCountsWhatStoppedTheInvocationAsAnError(t *testing.T) {
 	}
 }
 
+// A JUnit file an earlier invocation left would otherwise read as this one's.
+func TestJUnitSaysWhatStoppedAnInvocationBeforeItsRuns(t *testing.T) {
+	bogus := filepath.Join(t.TempDir(), "bogus.json")
+	if err := os.WriteFile(bogus, []byte(`{"seed": 1, "target": "toy-widget", "ops": [{"type": "bogus"}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	taken := filepath.Join(t.TempDir(), "taken")
+	if err := os.WriteFile(taken, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	undrawable := func(*target.Target) (Generator, []string, error) {
+		return nil, nil, errors.New("the CRD has no schema")
+	}
+	for _, test := range []struct {
+		name, suite, message string
+		generator            func(*target.Target) (Generator, []string, error)
+		args                 []string
+	}{
+		{name: "a flag botbox refuses", suite: "botbox", message: "--runs is 0",
+			args: []string{"run", "--target", toyTargetYAML, "--runs", "0"}},
+		{name: "a target botbox cannot read", suite: "botbox", message: "absent.yaml",
+			args: []string{"run", "--target", "absent.yaml"}},
+		{name: "a sequence botbox cannot read", suite: "toy-widget", message: "bogus",
+			args: []string{"replay", "--target", toyTargetYAML, bogus}},
+		{name: "a sequence botbox cannot draw", suite: "toy-widget", message: "the CRD has no schema", generator: undrawable,
+			args: []string{"run", "--target", toyTargetYAML}},
+		{name: "an output directory botbox cannot make", suite: "toy-widget", message: "creating the output directory",
+			args: []string{"run", "--target", toyTargetYAML, "--out", taken}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			junit := filepath.Join(t.TempDir(), "junit.xml")
+			if err := os.WriteFile(junit, []byte("<testsuites></testsuites>\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			berlin := time.FixedZone("CEST", 2*60*60)
+			now := time.Date(2026, 9, 24, 3, 2, 3, 0, berlin)
+			session := &fakeSession{now: func() time.Time { return now }}
+			generator := countingGenerator(nil)
+			if test.generator != nil {
+				generator = test.generator
+			}
+
+			code, _, stderr := invokeWith(t, session, generator, slices.Concat(test.args[:1], []string{"--junit", junit}, test.args[1:])...)
+
+			if code != exitError {
+				t.Fatalf("botbox exited %d, want %d: %s", code, exitError, stderr)
+			}
+			suite, _ := readJUnit(t, junit)
+			if suite.Name != test.suite || suite.Timestamp != "2026-09-24T01:02:03" || len(suite.Properties) != 1 || suite.Properties[0].Name != "botbox" {
+				t.Errorf("The testsuite is %q at %s, with the properties %+v, want %s at 2026-09-24T01:02:03 UTC, with botbox's version alone.",
+					suite.Name, suite.Timestamp, suite.Properties, test.suite)
+			}
+			if len(suite.Cases) != 1 {
+				t.Fatalf("The testcases are %+v, want one.", suite.Cases)
+			}
+			if c := suite.Cases[0]; c.Name != "botbox" || c.Classname != test.suite || c.Error == nil || c.Error.Type != "error" ||
+				!strings.Contains(c.Error.Message, test.message) {
+				t.Errorf("The testcase is %+v, want botbox of %s erring with %q.", c, test.suite, test.message)
+			}
+		})
+	}
+}
+
+func TestAJUnitFileGoesWhereItsNameSays(t *testing.T) {
+	junit := filepath.Join(t.TempDir(), "reports", "botbox.xml")
+
+	code, _, stderr := invoke(t, &fakeSession{}, "replay", "--target", toyTargetYAML, "--out", t.TempDir(), "--junit", junit, writeSequence(t, 1))
+
+	if code != exitOK {
+		t.Fatalf("botbox replay exited %d: %s", code, stderr)
+	}
+	if suite, _ := readJUnit(t, junit); len(suite.Cases) != 1 {
+		t.Errorf("The testcases are %+v, want the one run.", suite.Cases)
+	}
+}
+
 func TestAJUnitFileThatCannotBeWrittenOnlyWarns(t *testing.T) {
-	junit := filepath.Join(t.TempDir(), "absent", "junit.xml")
+	file := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(file, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	junit := filepath.Join(file, "junit.xml")
 	out := t.TempDir()
 
 	code, _, stderr := invoke(t, &fakeSession{}, "replay", "--target", toyTargetYAML, "--out", out, "--junit", junit, writeSequence(t, 1))
@@ -197,8 +292,8 @@ func TestAJUnitFileThatCannotBeWrittenOnlyWarns(t *testing.T) {
 	if code != exitOK {
 		t.Errorf("botbox replay exited %d, want %d: the run passed.", code, exitOK)
 	}
-	if !strings.Contains(stderr, "botbox: writing "+junit) {
-		t.Errorf("botbox replay printed %q on stderr, want it to say it could not write %s.", stderr, junit)
+	if !strings.Contains(stderr, "botbox: writing "+junit) || strings.Contains(stderr, ".junit.xml.") {
+		t.Errorf("botbox replay printed %q on stderr, want it to say it could not write %s, and name no temporary file.", stderr, junit)
 	}
 	if readSummary(t, out).Outcome != "passed" {
 		t.Error("The summary does not say the run passed.")

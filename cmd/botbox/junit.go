@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/xml"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -60,17 +61,18 @@ type junitProblem struct {
 
 // junit renders the summary as JUnit XML: a testcase per planned run, and one
 // named botbox for what stopped the invocation where no run did. dir is the
-// invocation's directory.
+// invocation's directory, if it has one.
 func (s *summary) junit(dir string) ([]byte, error) {
 	suite := junitSuite{
-		Name:      s.Target.Name,
-		Time:      seconds(s.Finish.Sub(s.Start)),
-		Timestamp: s.Start.UTC().Format(junitTimestamp),
-		Properties: []junitProperty{
-			{Name: "botbox", Value: s.Botbox},
-			{Name: "seed", Value: strconv.FormatInt(s.Seed, 10)},
-			{Name: "summary", Value: filepath.Join(dir, summaryJSONFile)},
-		},
+		Name:       s.Target.Name,
+		Time:       seconds(s.Finish.Sub(s.Start)),
+		Timestamp:  s.Start.Format(junitTimestamp),
+		Properties: []junitProperty{{Name: "botbox", Value: s.Botbox}},
+	}
+	if dir != "" {
+		suite.Properties = append(suite.Properties,
+			junitProperty{Name: "seed", Value: strconv.FormatInt(s.Seed, 10)},
+			junitProperty{Name: "summary", Value: filepath.Join(dir, summaryJSONFile)})
 	}
 	for _, r := range s.Runs {
 		suite.Cases = append(suite.Cases, r.junit(s.Target.Name, dir))
@@ -141,6 +143,9 @@ func (s *summary) writeJUnit(path, dir string) error {
 	encoded, err := s.junit(dir)
 	if err != nil {
 		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
 	}
 	return run.WriteAtomic(path, encoded)
 }

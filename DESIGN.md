@@ -786,6 +786,10 @@ generate:
         - data.token
 ```
 
+Name only strings in which the target accepts any word §5.4 draws. G4 requires `Ready` after
+each update, so a word the target rightly rejects fails a correct controller. A Secret's
+`data` decodes the word to 3, 6 or 9 arbitrary bytes.
+
 `notRecreated` lists managed kinds the target leaves deleted by design, or recreates under
 a new name, which G7 does not require back (§6). Each must appear in `manages`.
 cert-manager lists CertificateRequest: a request records one issuance, and a Ready
@@ -1781,21 +1785,23 @@ built from source and run as a black-box binary.
   startup and `T_stable` outlast the wait. Such a wait converged before, while the target
   was not back. Leaving G1 and G2 unjudged in the window after an op G7 notes was rejected,
   because it judges less.
-- **D@47 A sequence changes and deletes fixtures.** No op touched a fixture, so botbox never
-  tried a referenced Secret that changes or an Issuer that disappears, and a controller that
-  reads such an object without watching it passed. `updateFixture` merge-patches a fixture,
-  and `deleteFixture` deletes one until the op its `until` names. It waits for the fixture to
-  go, since a target may hold it with a finalizer, as external-secrets does its SecretStore,
-  and botbox cannot create it again until it has gone. A target names in
-  `generate.fixtures` the fixtures generation may delete and the strings it may set, since
-  built-in kinds carry no schema botbox reads. A drawn value is a short word a Secret's
-  `data` also reads as base64. Generation restores a deleted fixture before the next op that
+- **D@47 A sequence changes and deletes fixtures.** No op touched a fixture, so botbox
+  never tried a referenced Secret that changes or an Issuer that disappears, and a
+  controller that reads such an object without watching it passed. `updateFixture`
+  merge-patches a fixture, and `deleteFixture` deletes one until the op its `until` names.
+  It waits for the fixture to go, since a target may hold it with a finalizer, as
+  external-secrets does its SecretStore, and botbox cannot create it again until it has
+  gone. A target names in `generate.fixtures` the fixtures generation may delete and the
+  strings it may set, since built-in kinds carry no schema botbox reads. A drawn value is
+  a short word a Secret's `data` also reads as base64, so a target names only strings that
+  take any such word. Generation restores a deleted fixture before the next op that
   settles, because a target may rightly not be ready while a dependency is gone. Excusing
   every check while a fixture is gone, as for a fault, was rejected: it judges less and
   touches every check. A fixture stays botbox's, so G3 and G7 never ask anything of it. A
   fixture op is botbox's change for G5 and G7, and G4 and G6 treat an update or a restore
   of a fixture as a spec change. The Runner stamps the op a restore precedes before it
   restores, so the target's reply falls in that op's window. The toy's B14 copies a label
-  from a ConfigMap fixture it does not watch, and G5 finds it once a restart reconciles the
-  Widget. A target without `generate.fixtures` draws what it drew before, which the golden
-  draws pin.
+  from a ConfigMap fixture it does not watch, and G5 finds it once a restart reconciles
+  the Widget. A generated sequence finds it too, and the correct toy passes every seed up
+  to 60 that draws a fixture op. A target without `generate.fixtures` draws what it drew
+  before, which the golden draws pin.

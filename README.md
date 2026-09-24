@@ -276,11 +276,13 @@ generate:
         - data.token
 ```
 
-Generation then also draws `updateFixture`, which sets one of those strings to a short word
-of letters and digits, and `deleteFixture`, which deletes the fixture until the next op that
-settles and then creates it again. botbox waits up to `timeouts.delete` for a deleted fixture
-to go, so a finalizer your controller puts on it may hold it that long. Your `ready` may fail
-while the fixture is gone, so no settle wait runs without it. A controller that reads the
+Generation then also draws `updateFixture`, which sets one of those strings to a short word of
+letters and digits, and `deleteFixture`, which deletes the fixture until the next op that
+settles and then creates it again. Name only strings in which your controller accepts any such
+word, because `ready` must hold after each change. A Secret's `data` decodes the word to
+arbitrary bytes. botbox waits up to `timeouts.delete` for a deleted fixture to go, so a
+finalizer your controller puts on it may hold it that long. Your `ready` may fail while the
+fixture is gone, so generation runs no settle wait without it. A controller that reads the
 fixture without watching it misses the change until something else reconciles its CR, and G5
 reports what a restart then changes. G7 never asks your controller to recreate a fixture. A
 sequence you write names the op before which botbox creates a deleted fixture again:

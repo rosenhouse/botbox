@@ -35,7 +35,7 @@ type liveRun struct {
 	target    *target.Target
 	client    dynamic.Interface
 	resources map[schema.GroupVersionKind]schema.GroupVersionResource
-	// emptied are the kinds the teardown forces finalizers off and deletes:
+	// emptied are the kinds the teardown deletes and forces finalizers off:
 	// the target's and its fixtures'.
 	emptied []schema.GroupVersionKind
 }

@@ -226,13 +226,14 @@ The Runner executes one sequence:
    window (§6). Delete the primary CR if it still exists and wait for the G3 window. A
    target that stopped cleaned nothing up, so the run ends as that harness error rather
    than at a verdict on the deletion. A run that ended at a harness error judges no
-   deletion either, because its ops did not all run. Then force-remove any finalizer still
-   present on an object in the namespace of a kind the target declares or a fixture has;
-   the report notes each one (D37). G3 judged the deletion window, which closed before
-   this. Delete every remaining object of those kinds, because a later run's target may
-   watch every namespace. Stop the target if it was started for this run. Delete the
-   namespace. Namespace names are never reused, so a namespace that never finishes
-   terminating (envtest, §5.8) is harmless.
+   deletion either, because its ops did not all run. Then delete every remaining object in
+   the namespace of a kind the target declares or a fixture has, because a later run's
+   target may watch every namespace. Then force-remove any finalizer still on one, which
+   the report notes (D37). G3 judged the deletion window, which closed before this. The
+   deletion comes first because the API server refuses a finalizer new to an object being
+   deleted, so a running target cannot put back one it owns. Stop the target if it was
+   started for this run. Delete the namespace. Namespace names are never reused, so a
+   namespace that never finishes terminating (envtest, §5.8) is harmless.
 
 Cleanup between runs never restarts the API server, because rapid's shrinker re-invokes
 the test function many times.

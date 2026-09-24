@@ -16,6 +16,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
@@ -358,11 +359,20 @@ func TestRunner(t *testing.T) {
 		})
 	}
 
-	t.Run("forces a fixture's finalizer off and notes it", func(t *testing.T) {
+	// The target stands in for one that owns the fixture's finalizer, such as
+	// external-secrets on its SecretStore.
+	t.Run("forces a fixture's finalizer off, though the target puts it back, and notes it", func(t *testing.T) {
+		const hold = "example.com/hold"
 		toy := loadTarget(t, binary)
 		held := fixtureSecret()
-		held.SetFinalizers([]string{"example.com/hold"})
+		held.SetFinalizers([]string{hold})
 		toy.Fixtures = append(toy.Fixtures, held)
+		client, err := dynamic.NewForConfig(testCluster.Config())
+		if err != nil {
+			t.Fatalf("Building a client failed: %v", err)
+		}
+		secrets := client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "secrets"})
+		putBackFinalizer(t, secrets, fixtureName, hold)
 
 		result, err := run.Run(ctx, toy, readSequence(t, oneCreate), run.Options{
 			Dir: t.TempDir(), Config: testCluster.Config(), Check: &recordingChecker{},
@@ -379,13 +389,12 @@ func TestRunner(t *testing.T) {
 		}) {
 			t.Errorf("The run carried the notes %q, want one saying %q.", result.Notes, want)
 		}
-		client, err := dynamic.NewForConfig(testCluster.Config())
-		if err != nil {
-			t.Fatalf("Building a client failed: %v", err)
-		}
-		secrets := client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "secrets"}).Namespace(result.Timeline.Namespace)
-		if _, err := secrets.Get(ctx, fixtureName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
-			t.Errorf("Reading the fixture after the run returned %v, want it gone.", err)
+		left, err := secrets.Namespace(result.Timeline.Namespace).Get(ctx, fixtureName, metav1.GetOptions{})
+		switch {
+		case err == nil:
+			t.Errorf("The fixture outlived the run with the finalizers %v, want it gone.", left.GetFinalizers())
+		case !apierrors.IsNotFound(err):
+			t.Errorf("Reading the fixture after the run returned %v, want NotFound.", err)
 		}
 	})
 
@@ -456,6 +465,35 @@ func diesAfter(t *testing.T, d time.Duration, says string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// putBackFinalizer adds the finalizer back to every live object of that name
+// that lacks it, until the test ends.
+func putBackFinalizer(t *testing.T, resource dynamic.NamespaceableResourceInterface, name, finalizer string) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	watcher, err := resource.Watch(ctx, metav1.ListOptions{FieldSelector: "metadata.name=" + name})
+	if err != nil {
+		t.Fatalf("Watching for %s failed: %v", name, err)
+	}
+	patch := fmt.Appendf(nil, `{"metadata":{"finalizers":[%q]}}`, finalizer)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for event := range watcher.ResultChan() {
+			object, ok := event.Object.(*unstructured.Unstructured)
+			if !ok || object.GetDeletionTimestamp() != nil || slices.Contains(object.GetFinalizers(), finalizer) {
+				continue
+			}
+			// The API server refuses a finalizer new to an object being deleted.
+			_, _ = resource.Namespace(object.GetNamespace()).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		watcher.Stop()
+		<-done
+	})
 }
 
 // requireCheckpointsOfSection4 asserts a checkpoint where each settle wait

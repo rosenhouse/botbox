@@ -1093,8 +1093,8 @@ func TestTheTeardownWaitsForTheTargetToRecoverFromAFaultItCleared(t *testing.T) 
 		"sleep " + testTimeouts.Stable.String(),
 		"deleteCR widget",
 		"awaitClean " + (testTimeouts.Delete + deletionMargin).String(),
-		"forceFinalizers",
 		"empty",
+		"forceFinalizers",
 		"stop",
 	}
 	if got := h.teardownCalls(); !slices.Equal(got, want) {
@@ -1302,8 +1302,8 @@ func TestRunTearsDownInTheOrderTheDesignGives(t *testing.T) {
 		"sleep " + testTimeouts.Stable.String(),
 		"deleteCR widget",
 		"awaitClean " + (testTimeouts.Delete + deletionMargin).String(),
-		"forceFinalizers",
 		"empty",
+		"forceFinalizers",
 		"stop",
 	}
 	if got := h.teardownCalls(); !slices.Equal(got, want) {

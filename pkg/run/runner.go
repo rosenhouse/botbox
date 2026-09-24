@@ -744,6 +744,9 @@ func (r *runner) teardown(ctx context.Context) error {
 		failures = append(failures, r.teardownCheckpoint(clean))
 	}
 
+	// Deleting first keeps a running target from putting back a finalizer it
+	// owns, since the API server refuses one new to an object being deleted.
+	failures = append(failures, r.h.empty(ctx))
 	forced, err := r.h.forceFinalizers(ctx)
 	r.timeline.Forced = forced
 	if len(forced) > 0 {
@@ -753,7 +756,7 @@ func (r *runner) teardown(ctx context.Context) error {
 		r.skipped = append(r.skipped, fmt.Sprintf("the teardown force-removed the finalizers of %s, so the run namespace did not empty on its own",
 			strings.Join(forced, ", ")))
 	}
-	failures = append(failures, err, r.h.empty(ctx), r.h.stop(ctx))
+	failures = append(failures, err, r.h.stop(ctx))
 	for _, owner := range r.h.unresolvedOwners() {
 		r.skipped = append(r.skipped, unresolvedNote(owner))
 	}

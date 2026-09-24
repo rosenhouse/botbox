@@ -60,6 +60,8 @@ func TestWaitOwedRunsPastTheReturnFromARestartOp(t *testing.T) {
 			at: 8 * time.Second, want: 11500 * time.Millisecond},
 		{name: "two restarts", run: restarted().running(3500*time.Millisecond).op(invariant.OpRestart, 5*time.Second).running(9 * time.Second),
 			at: 10 * time.Second, want: 14 * time.Second},
+		{name: "an exit no fault excused", run: newRun().running(time.Second).exit(3*time.Second, 3*time.Second).running(3500 * time.Millisecond),
+			at: 4 * time.Second},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := test.run.through(20 * time.Second).WaitOwed(at(test.at))

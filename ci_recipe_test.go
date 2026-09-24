@@ -29,11 +29,12 @@ type workflow struct {
 }
 
 type job struct {
-	If              string `yaml:"if"`
-	RunsOn          any    `yaml:"runs-on"`
-	ContinueOnError any    `yaml:"continue-on-error"`
-	TimeoutMinutes  any    `yaml:"timeout-minutes"`
-	Steps           []step `yaml:"steps"`
+	If              string            `yaml:"if"`
+	RunsOn          any               `yaml:"runs-on"`
+	Env             map[string]string `yaml:"env"`
+	ContinueOnError any               `yaml:"continue-on-error"`
+	TimeoutMinutes  any               `yaml:"timeout-minutes"`
+	Steps           []step            `yaml:"steps"`
 }
 
 type step struct {
@@ -544,6 +545,22 @@ func TestTheCIRecipeSetsEveryVariableItReads(t *testing.T) {
 		for _, name := range read {
 			if _, ok := set[name]; !ok {
 				t.Errorf("a step reads %s, and the recipe's env does not set it", name)
+			}
+		}
+	}
+}
+
+func TestTheCIRecipeSetsEachPinForEveryStep(t *testing.T) {
+	pins := readWorkflow(t, ciRecipe).Env
+	recipe := recipeJob(t)
+	envs := map[string]map[string]string{"the job": recipe.Env}
+	for i, s := range recipe.Steps {
+		envs[fmt.Sprintf("step %d", i)] = s.Env
+	}
+	for where, env := range envs {
+		for name := range env {
+			if _, ok := pins[name]; ok {
+				t.Errorf("%s sets %s over the pin in the workflow's env", where, name)
 			}
 		}
 	}

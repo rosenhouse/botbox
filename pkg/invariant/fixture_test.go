@@ -109,11 +109,23 @@ func (r *run) fixture(obj *unstructured.Unstructured) *run {
 
 // op is an op of the type given, which writes the CR w if it is a CR op.
 func (r *run) op(opType invariant.OpType, when time.Duration) *run {
+	return r.opOn(opType, when, widgetName)
+}
+
+// opOn is an op of the type given, which writes the CR named if it is a CR op.
+func (r *run) opOn(opType invariant.OpType, when time.Duration, cr string) *run {
 	op := invariant.Op{Index: len(r.in.Ops), Type: opType, Time: at(when)}
 	if slices.Contains([]invariant.OpType{invariant.OpCreate, invariant.OpUpdate, invariant.OpDelete, invariant.OpRecreate}, opType) {
-		op.CR = observe.Key{GVK: widgetGVK, Namespace: namespace, Name: widgetName}
+		op.CR = observe.Key{GVK: widgetGVK, Namespace: namespace, Name: cr}
 	}
 	r.in.Ops = append(r.in.Ops, op)
+	return r
+}
+
+// withSecondWidget has botbox create the Widget w2 too, so that it is never
+// managed either.
+func (r *run) withSecondWidget() *run {
+	r.store.Exclude(widgetGVK, secondName)
 	return r
 }
 
@@ -238,6 +250,39 @@ func child(name, resourceVersion string, opts ...option) *unstructured.Unstructu
 	return object(configMapGVK, name, resourceVersion, append([]option{ownedByWidget}, opts...)...)
 }
 
+// The second Widget of a run that creates two.
+const (
+	secondName = "w2"
+	secondUID  = "uid-w2"
+)
+
+func secondWidget(resourceVersion string, opts ...option) *unstructured.Unstructured {
+	defaults := []option{uid(secondUID), generation(1)}
+	return object(widgetGVK, secondName, resourceVersion, append(defaults, opts...)...)
+}
+
+// secondChild is a ConfigMap of the second Widget.
+func secondChild(name, resourceVersion string, opts ...option) *unstructured.Unstructured {
+	return object(configMapGVK, name, resourceVersion, append([]option{ownedBySecond}, opts...)...)
+}
+
+func ownedBySecond(u *unstructured.Unstructured) {
+	u.SetOwnerReferences([]metav1.OwnerReference{{
+		APIVersion: widgetGVK.GroupVersion().String(),
+		Kind:       widgetGVK.Kind,
+		Name:       secondName,
+		UID:        secondUID,
+	}})
+}
+
+// ownedByBoth names both Widgets as owners.
+func ownedByBoth(u *unstructured.Unstructured) {
+	ownedByWidget(u)
+	first := u.GetOwnerReferences()
+	ownedBySecond(u)
+	u.SetOwnerReferences(append(first, u.GetOwnerReferences()...))
+}
+
 // secret is a Secret of the Widget, a second managed kind.
 func secret(name, resourceVersion string, opts ...option) *unstructured.Unstructured {
 	return object(secretGVK, name, resourceVersion, append([]option{ownedByWidget}, opts...)...)
@@ -294,6 +339,14 @@ func ownedByWidget(u *unstructured.Unstructured) {
 		Name:       widgetName,
 		UID:        widgetUID,
 	}})
+}
+
+// ownedByRecreated names the Widget w that a recreate made, under a new UID.
+func ownedByRecreated(u *unstructured.Unstructured) {
+	ownedByWidget(u)
+	refs := u.GetOwnerReferences()
+	refs[0].UID = "uid-w-again"
+	u.SetOwnerReferences(refs)
 }
 
 func orphaned(u *unstructured.Unstructured) { u.SetOwnerReferences(nil) }

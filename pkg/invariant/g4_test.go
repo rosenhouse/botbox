@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
@@ -653,5 +654,30 @@ func TestG4QuotesNoVersionRecordedAfterTheVerdict(t *testing.T) {
 		if v.Time.After(violation.At) {
 			t.Errorf("The evidence quotes %s at %s, after the verdict at %s.", v.Name, v.Time, violation.At)
 		}
+	}
+}
+
+func TestG4JudgesEveryCR(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		first *unstructured.Unstructured
+	}{
+		{"beside a ready one", widget("10", spec(1), status(1, 1))},
+		{"beside one under deletion", widget("10", spec(1), finalizers(cleanup), deleting(500*time.Millisecond))},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := newRun().withSecondWidget().
+				op(invariant.OpCreate, 0).
+				record(100*time.Millisecond, c.first).
+				opOn(invariant.OpCreate, time.Second, secondName).
+				record(1100*time.Millisecond, secondWidget("20", spec(2))).
+				through(7 * time.Second)
+
+			violation := fired(t, invariant.Convergence, in)
+
+			if !strings.Contains(violation.Statement, "the CR w2 was not ready") {
+				t.Errorf("The statement is %q, want it to name w2.", violation.Statement)
+			}
+		})
 	}
 }

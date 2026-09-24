@@ -309,6 +309,21 @@ func TestAPropertyThatFoundNoCRQuotesTheStateAlone(t *testing.T) {
 	}
 }
 
+func TestAPropertyHoldsForEveryCR(t *testing.T) {
+	in := newRun().withSecondWidget().
+		op(invariant.OpCreate, 0).
+		record(100*time.Millisecond, widget("10", spec(1), status(1, 1)), secondWidget("20", spec(3), status(3, 1))).
+		record(200*time.Millisecond, child("w-0", "11"), secondChild("w2-0", "21")).
+		checkpoint(2*time.Second, invariant.Converged).
+		through(2 * time.Second)
+
+	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
+
+	if want := timelineOf(widgetGVK, secondName); violation.VersionsOf != want {
+		t.Errorf("The timeline is of %q, want %q, the CR the property failed on.", violation.VersionsOf, want)
+	}
+}
+
 // crExists is a property of the CR itself, which a run that has none breaks.
 func crExists(cr *unstructured.Unstructured, _ []*unstructured.Unstructured) (bool, error) {
 	return cr != nil, nil

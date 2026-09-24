@@ -881,6 +881,40 @@ func TestG5LeavesARestartUnjudgedWhereAFaultReachedBetweenTheStatesItCompares(t 
 	}
 }
 
+// An op on one CR leaves the other CRs and what they own judged. An object
+// that names no CR may be the changed CR's.
+func TestG5JudgesWhatTheOpsBetweenItsStatesLeftAlone(t *testing.T) {
+	for _, c := range []struct {
+		name          string
+		before, after *unstructured.Unstructured
+		fires         bool
+	}{
+		{"w's child", child("w-0", "11", data("0")), child("w-0", "21", data("1")), true},
+		{"w2's child", secondChild("w2-0", "12", data("0")), secondChild("w2-0", "22", data("1")), false},
+		{"an object that names no CR", child("kept", "13", data("0"), orphaned), child("kept", "23", data("1"), orphaned), false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := newRun().withSecondWidget().
+				record(time.Second, widget("10", spec(1), status(1, 1)), secondWidget("30", spec(1), status(1, 1)), c.before).
+				checkpoint(5*time.Second, invariant.Converged).
+				op(invariant.OpRestart, 10*time.Second).
+				opOn(invariant.OpUpdate, 11*time.Second, secondName).
+				record(12*time.Second, secondWidget("31", spec(2), generation(2), status(2, 2)), c.after).
+				checkpoint(15*time.Second, invariant.Converged).
+				through(20 * time.Second)
+
+			result := evaluate(t, invariant.RestartStable, in)
+
+			if fired := len(result.Violations) > 0; fired != c.fires {
+				t.Errorf("G5 reported %v, want a violation: %t.", statements(result), c.fires)
+			}
+			if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], "op 1 (update)") {
+				t.Errorf("G5 noted %v, want one note naming the update to w2.", result.Notes)
+			}
+		})
+	}
+}
+
 func TestG5ComparesTheMetadataSection6DoesNotIgnore(t *testing.T) {
 	in := restarted(child("w-0", "11", data("0")), child("w-0", "21", data("0"), deleting(12*time.Second)))
 

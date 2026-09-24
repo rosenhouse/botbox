@@ -51,7 +51,8 @@ func (out *Result) noteWhatBotboxTook(in Input, deleted deletion, deadline time.
 		}
 		// An object the run recreated carries the same name and a new UID, so
 		// botbox took the one that came after and not the one this CR left.
-		if took, found := in.versionAt(op.Deleted, op.Time); !found || took.UID != was.UID {
+		if took, found := in.versionAt(op.Deleted, op.Time); !found || took.UID != was.UID ||
+			!in.leftBy(deleted, took, had, in.stateAt(op.Time)) {
 			continue
 		}
 		out.note("for the deletion of %s: %s deleted %s %s inside its %s window, so the target never got the chance to clean it up",
@@ -128,7 +129,7 @@ func (out *Result) reportLeftovers(in Input, deleted deletion, deadline time.Tim
 		had[object.Key] = object.UID
 	}
 	for _, left := range since.managed(in) {
-		if uid, was := had[left.Key]; !was || uid != left.UID {
+		if uid, was := had[left.Key]; !was || uid != left.UID || !in.leftBy(deleted, left, when, since) {
 			continue
 		}
 		out.violate(Violation{

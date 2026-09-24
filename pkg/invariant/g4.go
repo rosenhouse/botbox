@@ -23,28 +23,26 @@ func Convergence(in Input) (Result, error) {
 			continue
 		}
 		seen := in.stateAt(deadline)
-		cr, found := seen.cr(in.Target.Primary)
-		if !found {
-			continue // The run has no CR to be ready: it deleted it.
+		for _, cr := range seen.crs(in.Target.Primary) {
+			if cr.DeletionTimestamp != nil {
+				continue // A CR under deletion need not be ready; G3 judges it (§6).
+			}
+			ready, err := in.Target.Ready(cr.Object)
+			if errors.Is(err, target.ErrNotBool) {
+				return out, err
+			}
+			if ready && err == nil {
+				continue
+			}
+			violation := Violation{
+				Statement: fmt.Sprintf("the CR %s was not ready %s after %s%s%s",
+					cr.Name, deadline.Sub(from.at).Round(time.Millisecond), from.what, quoted(err), in.repeated(from.at, deadline)),
+				At: deadline,
+			}.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), deadline))).
+				quotingManaged(Sample(seen.managed(in)))
+			violation.Ready = in.readiness(cr, err)
+			out.violate(violation)
 		}
-		if cr.DeletionTimestamp != nil {
-			continue // A CR under deletion need not be ready; G3 judges it (§6).
-		}
-		ready, err := in.Target.Ready(cr.Object)
-		if errors.Is(err, target.ErrNotBool) {
-			return out, err
-		}
-		if ready && err == nil {
-			continue
-		}
-		violation := Violation{
-			Statement: fmt.Sprintf("the CR %s was not ready %s after %s%s%s",
-				cr.Name, deadline.Sub(from.at).Round(time.Millisecond), from.what, quoted(err), in.repeated(from.at, deadline)),
-			At: deadline,
-		}.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), deadline))).
-			quotingManaged(Sample(seen.managed(in)))
-		violation.Ready = in.readiness(cr, err)
-		out.violate(violation)
 	}
 	return out, out.reportExpiredWaits(in)
 }

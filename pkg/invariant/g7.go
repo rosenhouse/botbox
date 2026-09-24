@@ -25,7 +25,7 @@ func SelfHealing(in Input) (Result, error) {
 		if _, back := seen.version(deleted); back {
 			continue
 		}
-		if cr, found := seen.cr(in.Target.Primary); !found || cr.DeletionTimestamp != nil {
+		if took, _ := in.versionAt(deleted, op.Time); !in.askedFor(took, seen) {
 			continue // No CR asks for the object back.
 		}
 		object := kindName(deleted.GVK) + " " + deleted.Name

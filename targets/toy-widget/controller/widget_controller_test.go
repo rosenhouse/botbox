@@ -150,14 +150,15 @@ func TestAChangeToTheConfigMapReconcilesEveryWidgetInItsNamespace(t *testing.T) 
 	r.LabelFrom = "config"
 
 	for _, test := range []struct {
-		name string
-		want []string
+		namespace, name string
+		want            []string
 	}{
-		{"config", []string{"ns/v", "ns/w"}},
-		{"unrelated", nil},
+		{"ns", "config", []string{"ns/v", "ns/w"}},
+		{"elsewhere", "config", []string{"elsewhere/w"}},
+		{"ns", "unrelated", nil},
 	} {
 		changed := labelConfig("blue")
-		changed.Name = test.name
+		changed.Namespace, changed.Name = test.namespace, test.name
 
 		var woken []string
 		for _, request := range r.widgetsCopying(t.Context(), changed) {

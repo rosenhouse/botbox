@@ -3,8 +3,10 @@ package run
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -93,11 +95,46 @@ func TestAFailedWriteAtomicLeavesNothingBehind(t *testing.T) {
 
 	err := WriteAtomic(taken, []byte("new\n"))
 
-	if err == nil || !strings.Contains(err.Error(), taken) {
+	if err == nil || !strings.HasPrefix(err.Error(), "writing "+taken+": ") {
 		t.Errorf("WriteAtomic returned %v, want an error naming %s.", err, taken)
 	}
 	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
 		t.Errorf("The directory holds %v, want only what was there.", entries)
+	}
+}
+
+// underFileSizeLimit is where the test binary, run again under a file size
+// limit, writes.
+const underFileSizeLimit = "BOTBOX_TEST_UNDER_FILE_SIZE_LIMIT"
+
+// A write that runs out of room, as on a full disk, keeps the old file.
+func TestAWriteThatFailsKeepsTheOldFile(t *testing.T) {
+	if path := os.Getenv(underFileSizeLimit); path != "" {
+		if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 4, Max: 4}); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteAtomic(path, []byte("longer than the limit\n")); err == nil {
+			t.Fatal("WriteAtomic wrote past the file size limit and returned no error.")
+		}
+		return
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "summary.json")
+	if err := WriteAtomic(path, []byte("old\n")); err != nil {
+		t.Fatal(err)
+	}
+	limited := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
+	limited.Env = append(os.Environ(), underFileSizeLimit+"="+path)
+
+	if out, err := limited.CombinedOutput(); err != nil {
+		t.Fatalf("The write under a file size limit failed the test: %v\n%s", err, out)
+	}
+
+	if held, _ := os.ReadFile(path); string(held) != "old\n" {
+		t.Errorf("The file holds %q, want the old file whole.", held)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("The directory holds %v, want the file alone.", entries)
 	}
 }
 

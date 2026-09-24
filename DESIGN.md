@@ -1055,7 +1055,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   shrinker stops there and reports the smallest failing sequence it found. Without
   `--deadline`, botbox prints and uses the longest the planned runs' waits can take at the
   target's timeouts, plus 4m to minimize a failure where botbox drew the sequences
-  (D@51a). `--launch-arg` appends to `launch.args` (repeatable; a later flag wins), which
+  (D64). `--launch-arg` appends to `launch.args` (repeatable; a later flag wins), which
   is how the bug matrix selects `--bug=N`.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
   CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
@@ -1757,7 +1757,7 @@ built from source and run as a black-box binary.
   that wait ends is judged there. A harness error there hid B13 from G3 on generated runs.
   The op cannot create its CR while the old one stays, so one that no check reports stays a
   harness error.
-- **D@53 An interrupt abandons the run under way, and botbox dies of the signal once it
+- **D63 An interrupt abandons the run under way, and botbox dies of the signal once it
   has stopped what it started.** Only botbox takes back what it started: etcd,
   kube-apiserver, the target, the run namespace and envtest's directories in `TMPDIR`.
   envtest starts etcd and kube-apiserver in process groups of their own, so a terminal's
@@ -1775,7 +1775,7 @@ built from source and run as a black-box binary.
   ignores SIGPIPE once interrupted. `signal.Notify` would undo `nohup`, so botbox leaves
   alone a SIGHUP or SIGINT it was started ignoring. Go keeps no other inherited SIG_IGN.
   A SIGKILLed botbox still leaves the control plane and the target running.
-- **D@51a Without `--deadline`, botbox derives the deadline from the target's timeouts.** A
+- **D64 Without `--deadline`, botbox derives the deadline from the target's timeouts.** A
   fixed 4m stopped ten runs of a correct controller at §6's timeouts after six, each of
   which took 32 to 42 s, and a larger fixed default fails again when `--runs` grows or the
   timeouts widen. The derived deadline is the longest the planned runs' waits (§5.5) can
@@ -1796,7 +1796,7 @@ built from source and run as a black-box binary.
   a target exits more than once per fault op while faults are active. The Runner owes
   each such exit `T_settle` past its restart, so a crash loop under an active fault runs
   until the deadline and exits 2 rather than failing G4.
-- **D@51b G6 counts each namespace's requests apart.** Ten runs of external-secrets with
+- **D65 G6 counts each namespace's requests apart.** Ten runs of external-secrets with
   no flags failed G6 at run 8: the controller repeated `create events` 34 times in 30 s.
   None went to the run namespace. envtest never finishes deleting a namespace, so each
   earlier run's objects stay, and the controller wrote two events into each of 17 such
@@ -1804,7 +1804,7 @@ built from source and run as a black-box binary.
   namespace, so the count grew with every run. A request into another namespace is a
   request for another object, so G6 now tells them apart. Judging only the run namespace
   was rejected: G6 would then miss a failing cluster-wide watch, which D27 counts.
-- **D@57 Every invocation that planned its runs leaves a summary, and `--junit` writes
+- **D66 Every invocation that planned its runs leaves a summary, and `--junit` writes
   JUnit XML.** A passing invocation deleted each run directory and printed `every run
   passed.`, so nothing recorded what a nightly exercised. A seed is no such record, because
   it names a sequence for one build and one target declaration only (D54). The summary
@@ -1829,7 +1829,7 @@ built from source and run as a black-box binary.
   invocation's file as this one's. botbox detects no CI vendor. `$GITHUB_STEP_SUMMARY`
   takes `summary.md` as it is, and GitLab and Jenkins read JUnit XML. A file botbox cannot
   write leaves the exit code alone, since the code already says what the runs found.
-- **D@68 A matrix run that errs keeps its files.** The matrix deleted its temporary
+- **D67 A matrix run that errs keeps its files.** The matrix deleted its temporary
   directory on every exit, so a harness error named a `target.log` that was gone. A run
   that errs now keeps its directory, and every other run's is deleted once the checks
   have read it. The directory stays under the system's temporary directory, because the
@@ -1837,7 +1837,7 @@ built from source and run as a black-box binary.
   bug-matrix job points `TMPDIR` at a directory it uploads when the job fails. The error
   also prints a replay command with the run's `--bug`, because the runner's hint names
   only the run's `sequence.json`.
-- **D@56 The CI recipe is a workflow that runs in any repository, caches what it installs and
+- **D68 The CI recipe is a workflow that runs in any repository, caches what it installs and
   keeps a failing run's evidence.** The README's recipe read Go's version from a go.mod, which
   a Rust operator's repository lacks. It said to cache the control plane as ci.yml does, but
   its setup-envtest wrote to the OS data directory. It uploaded nothing. The recipe is now
@@ -1846,5 +1846,5 @@ built from source and run as a black-box binary.
   four CPUs and the 175 MB control plane took 3 s to fetch. It saves the cache before botbox
   runs. `actions/cache` saves only when the job passes, so a nightly that kept finding
   something would never fill the cache that pull requests read. It uploads its `--out` however
-  botbox ends, which keeps the summary too (D@57). Its download command restores the paths that
+  botbox ends, which keeps the summary too (D66). Its download command restores the paths that
   the replay command in `report.md` names. The nightly's issues give the same command.

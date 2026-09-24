@@ -443,10 +443,11 @@ deadline. Cache the control plane and the target as
 
 SIGINT, SIGTERM, SIGHUP and a terminal's Ctrl-C all stop botbox cleanly. It abandons the run
 under way, stops your controller and the control plane, and deletes the run namespace.
-`botbox run` and `botbox replay` name the unfinished run's directory. Then botbox dies of the
-signal. That takes a few seconds. A second signal kills botbox at once and leaves those processes
-running, as SIGKILL does. GitHub Actions cancels a job by sending the step's shell SIGINT and,
-7.5 s later, SIGTERM. The shell passes neither on, so the step above runs botbox with `exec`.
+`botbox run` and `botbox replay` name the unfinished run's directory. A run that failed before
+the interrupt still says why. Then botbox dies of the signal. That takes a few seconds. A second
+signal kills botbox at once and leaves those processes running, as SIGKILL does. GitHub Actions
+cancels a job by sending the step's shell SIGINT and, 7.5 s later, SIGTERM. The shell passes
+neither on, so the step above runs botbox with `exec`.
 
 Pin botbox to a commit, because `@latest` tracks main. Fix the seed on pull requests, and draw
 fresh seeds on a schedule, as [nightly.yml](.github/workflows/nightly.yml) does. A seed names a

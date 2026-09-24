@@ -783,7 +783,7 @@ func TestAnInterruptDuringARunStopsTheInvocation(t *testing.T) {
 		err  error
 	}{
 		{"ending a wait", fmt.Errorf("op 0 (settle): %w", context.Canceled)},
-		{"stopping the target", fmt.Errorf("op 0 (settle): %w: signal: interrupt", run.ErrTargetStopped)},
+		{"stopping the target", fmt.Errorf("op 0 (settle): %w: %w: signal: interrupt", context.Canceled, run.ErrTargetStopped)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(t.Context())
@@ -818,21 +818,36 @@ func TestAnInterruptDuringARunStopsTheInvocation(t *testing.T) {
 
 // A run that failed on its own before the interrupt says why.
 func TestAnInterruptKeepsARunsOwnError(t *testing.T) {
-	ctx, cancel := context.WithCancelCause(t.Context())
-	refusal := &run.Refused{Op: run.Op{Index: 0, Type: run.OpCreate}, Reason: errors.New("spec.count: must be at most 10")}
-	session := &fakeSession{failures: []error{refusal}}
-	session.after = func() { cancel(interrupt{syscall.SIGTERM}) }
+	for _, test := range []struct {
+		name string
+		err  error
+		// then is where botbox points next, given the run's directory.
+		then func(dir string) string
+	}{
+		{"a refusal",
+			&run.Refused{Op: run.Op{Index: 0, Type: run.OpCreate}, Reason: errors.New("spec.count: must be at most 10")},
+			func(dir string) string { return "the op is in " + filepath.Join(dir, "sequence.json") }},
+		{"a target that stopped", fmt.Errorf("op 0 (create): %w: exit status 1; it wrote %q", run.ErrTargetStopped,
+			"toy-widget: flag provided but not defined: -no-such-flag"),
+			func(dir string) string { return "the run's files are in " + dir }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(t.Context())
+			session := &fakeSession{failures: []error{test.err}}
+			session.after = func() { cancel(interrupt{syscall.SIGTERM}) }
 
-	code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
-		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
+			code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
+				"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
 
-	if code != 128+int(syscall.SIGTERM) {
-		t.Errorf("botbox run exited %d, want %d.", code, 128+int(syscall.SIGTERM))
-	}
-	for _, want := range []string{"run 1: " + refusal.Error(), "the op is in " + filepath.Join(session.dirs[0], "sequence.json")} {
-		if !strings.Contains(stderr, want) {
-			t.Errorf("botbox run printed %q on stderr, which does not say %q.", stderr, want)
-		}
+			if code != 128+int(syscall.SIGTERM) {
+				t.Errorf("botbox run exited %d, want %d.", code, 128+int(syscall.SIGTERM))
+			}
+			for _, want := range []string{"run 1: " + test.err.Error(), test.then(session.dirs[0])} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("botbox run printed %q on stderr, which does not say %q.", stderr, want)
+				}
+			}
+		})
 	}
 }
 

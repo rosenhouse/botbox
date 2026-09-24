@@ -150,7 +150,14 @@ func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time) (bool, 
 	if f.waits++; f.waits == f.exitsInWait {
 		f.exit()
 	}
-	if err := errors.Join(f.record("settle"), ctx.Err()); err != nil {
+	if err := f.record("settle"); err != nil {
+		return false, err
+	}
+	// The live wait sees a stopped target before it sleeps on ctx.
+	if f.targetGone {
+		return false, nil
+	}
+	if err := ctx.Err(); err != nil {
 		return false, err
 	}
 	if f.waits <= len(f.settles) {
@@ -1262,6 +1269,46 @@ func TestTheRunSupervisesTheTargetUnderItsContext(t *testing.T) {
 	}
 	if h.supervising == nil || h.supervising.Err() == nil {
 		t.Error("The run supervised the target under a context its own did not end.")
+	}
+}
+
+// A terminal's Ctrl-C stops the target as it ends the run's context. A target
+// found stopped after that may be the context's doing, and one found stopped
+// before is not.
+func TestATargetFoundStoppedOnceTheContextEndedCarriesTheContextsError(t *testing.T) {
+	quiet := "sleep " + testTimeouts.Stable.String()
+	deletion := "awaitClean " + (testTimeouts.Delete + deletionMargin).String()
+	create := Op{Type: OpCreate, Obj: widget("widget"), NoSettle: true}
+	for _, test := range []struct {
+		name string
+		h    *fakeHarness
+		ops  []Op
+		// cancelsAfter is the call the context ends at.
+		cancelsAfter string
+		canceled     bool
+	}{
+		{name: "at an op", h: &fakeHarness{clean: true, stopsAfter: "createCR widget"},
+			ops: []Op{create, {Type: OpSettle}}, cancelsAfter: "createCR widget", canceled: true},
+		{name: "at the end of a settle wait", h: &fakeHarness{clean: true, stopsAfter: "settle"},
+			ops: []Op{{Type: OpSettle}}, cancelsAfter: "settle", canceled: true},
+		{name: "in the teardown", h: &fakeHarness{converged: true, clean: true, restartFails: true, stopsAfter: deletion},
+			ops: []Op{{Type: OpSettle}}, cancelsAfter: deletion, canceled: true},
+		{name: "before the context ended", h: &fakeHarness{clean: true, stopsAfter: "createCR widget"},
+			ops: []Op{create, {Type: OpSettle}}, cancelsAfter: quiet, canceled: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			test.h.cancel, test.h.cancelsAfter = cancel, test.cancelsAfter
+
+			_, err := runSequence(ctx, toyTarget, sequenceOf(test.ops...), Options{Check: &fakeChecker{}, Dir: t.TempDir()}, test.h)
+
+			if !errors.Is(err, ErrTargetStopped) {
+				t.Fatalf("The run returned %v, want the target stopped.", err)
+			}
+			if canceled := errors.Is(err, context.Canceled); canceled != test.canceled {
+				t.Errorf("The run returned %q, which wraps context.Canceled: %t, want %t.", err, canceled, test.canceled)
+			}
+		})
 	}
 }
 

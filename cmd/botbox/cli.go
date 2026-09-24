@@ -492,9 +492,9 @@ func exitCode(result run.Result, err error) int {
 // short. §11 makes the deadline exit 2, which a reader has to be able to tell
 // from a broken target. The context botbox built from the flag is what it
 // asks. The teardown's cleanup runs on a budget of its own, which is nobody's
-// flag. A terminal's interrupt stops the target too.
+// flag.
 func (o options) named(ctx context.Context, err error) error {
-	if _, ok := interruption(ctx); ok && (errors.Is(err, context.Canceled) || errors.Is(err, run.ErrTargetStopped)) {
+	if _, ok := interruption(ctx); ok && errors.Is(err, context.Canceled) {
 		return errors.New("an interrupt stopped the run")
 	}
 	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(ctx.Err(), context.DeadlineExceeded) {

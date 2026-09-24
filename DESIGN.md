@@ -1570,7 +1570,8 @@ built from source and run as a black-box binary.
   deadline has passed cannot report a later interrupt, so the deadline ends the
   teardown's waits too, and a run it cuts there exits 2 (§11). A Ctrl-C also reaches the
   target, so supervision ends with the context. botbox blames the interrupt only for a
-  wait it ended and a target that stopped, so a run that failed on its own says why.
+  wait it ended and a target the Runner found stopped after it. A run that failed on its
+  own says why, even when the interrupt comes during its teardown.
   botbox dies of the signal rather than exit 2, so that a shell loop, make and `timeout`
   see an interrupt. A Ctrl-C also kills a `tee` that reads botbox's output, so botbox
   ignores SIGPIPE once interrupted. `signal.Notify` would undo `nohup`, so botbox leaves

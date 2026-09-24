@@ -447,13 +447,13 @@ func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 		applied.CR, err = r.create(ctx, op)
 		return applied, err
 	case OpUpdate:
-		applied.CR = op.crOr(r.target.Sample.GetName())
+		applied.CR = op.crName(r.target.Sample.GetName())
 		return applied, refusal(op, r.h.patchCR(ctx, applied.CR, op.Patch))
 	case OpDelete:
-		applied.CR = op.crOr(r.target.Sample.GetName())
+		applied.CR = op.crName(r.target.Sample.GetName())
 		return applied, r.h.deleteCR(ctx, applied.CR)
 	case OpRecreate:
-		applied.CR, err = r.recreate(ctx, op, op.crOr(r.target.Sample.GetName()))
+		applied.CR, err = r.recreate(ctx, op, op.crName(r.target.Sample.GetName()))
 		return applied, err
 	case OpRestart:
 		return applied, r.h.restart(ctx)

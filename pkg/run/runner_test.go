@@ -429,6 +429,13 @@ func widget(name string) *unstructured.Unstructured {
 	return object
 }
 
+// generated is a Widget the API server would name from the prefix.
+func generated(prefix string) *unstructured.Unstructured {
+	object := widget("")
+	object.SetGenerateName(prefix)
+	return object
+}
+
 // sequenceOf numbers the ops, as the format requires.
 func sequenceOf(ops ...Op) Sequence {
 	for i := range ops {
@@ -1825,6 +1832,53 @@ func TestRunValidatesTheSequenceAgainstTheTarget(t *testing.T) {
 			check: &fakeChecker{},
 			want:  "op 1 (recreate) acts on the CR widget-2, which no op before it creates",
 		},
+		{
+			name: "a create of a CR a recreate made again",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpDelete},
+				Op{Type: OpRecreate, Obj: widget("widget")},
+				Op{Type: OpCreate, Obj: widget("widget")},
+			),
+			check: &fakeChecker{},
+			want:  "op 3 (create) creates the CR widget, which op 2 created and no op since deleted",
+		},
+		{
+			name: "an update of a deleted CR",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpCreate, Obj: widget("widget-2")},
+				Op{Type: OpDelete},
+				Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
+			),
+			check: &fakeChecker{},
+			want:  "op 3 (update) acts on the CR widget, which op 2 deleted",
+		},
+		{
+			name: "a delete of a deleted CR",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpDelete},
+				Op{Type: OpDelete},
+			),
+			check: &fakeChecker{},
+			want:  "op 2 (delete) acts on the CR widget, which op 1 deleted",
+		},
+		{
+			name:     "a create of a CR with no name",
+			sequence: sequenceOf(Op{Type: OpCreate, Obj: generated("w-")}),
+			check:    &fakeChecker{},
+			want:     "op 0 (create) writes a CR with no metadata.name",
+		},
+		{
+			name: "a recreate of a CR with no name",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpRecreate, Obj: generated("widget-")},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (recreate) writes a CR with no metadata.name",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := validateRun(toyTarget, test.sequence, Options{Dir: "out", Check: test.check})
@@ -1845,6 +1899,7 @@ func TestRunAcceptsOpsOnTheCRsEarlierOpsCreate(t *testing.T) {
 		Op{Type: OpDelete, CR: "widget-2"},
 		Op{Type: OpCreate, Obj: widget("widget-2")},
 		Op{Type: OpDelete},
+		Op{Type: OpSettle},
 	)
 
 	if err := validateRun(toyTarget, sequence, Options{Dir: "out", Check: &fakeChecker{}}); err != nil {

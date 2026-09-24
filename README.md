@@ -300,7 +300,8 @@ A settle wait expired. What follows `expired with no fault active` says why:
 - `ready held until …` means `ready` held and then stopped holding.
 
 After a `delete`, the run waits up to `timeouts.delete` for the CR to go and then up to
-`settle` for the rest to settle, so a slow cleanup needs no wider `settle`. A CR still there
+`settle` for the rest to settle, so a slow cleanup needs no wider `settle`. A `recreate`
+waits as long for the old CR to go before it creates the new one. A CR still there
 `timeouts.delete` after its deletion fails G3, which names the finalizers still on it.
 Where a fault reached into the deletion, G3 cannot judge it, and `the CR … was still being
 deleted, held by the finalizers …` names them instead. `no CR was left to be ready, but the

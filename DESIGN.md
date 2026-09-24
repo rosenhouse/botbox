@@ -200,16 +200,18 @@ The Runner executes one sequence:
    the CR nor a managed object has changed for `T_stable`, so a checkpoint lands after the
    target's reaction, not before it. After a deletion of the primary CR, the wait may run
    until the deletion's G3 deadline, or `T_settle` past the instant the CR went if it went
-   by then. A wait in which a CR outlived a G3 deadline that no fault reached into is G3's
-   to judge (§6). Any other wait
-   that expires while no fault excuses it records a G4 violation, which says why from the
-   Observer's history of the wait: `Ready` never held, held and then stopped, or held while
-   the namespace kept changing within `T_stable`; a CR was still being deleted; or no CR
-   was left to be ready. Where
+   by then. A `recreate` waits for its old CR to go for `T_delete`, or as long as a settle
+   wait may run if that is later. A CR still there where that wait ends is judged there,
+   as an expired settle wait is. A wait in which a CR outlived a G3 deadline that no fault
+   reached into is G3's to judge (§6). Any other wait that expires while no fault excuses
+   it records a G4 violation, which says why from the Observer's history of the wait:
+   `Ready` never held, held and then stopped, or held while the namespace kept changing
+   within `T_stable`; a CR was still being deleted; or no CR was left to be ready. Where
    `Ready` held and nothing changed within `T_stable`, it says that. The Runner and the
    engine raise it with one function, so they agree. A fault excuses it while active, which
    is once the proxy has applied it and until the proxy stops (D36), and while the target
-   is still owed time to recover from it (§6). A wait also ends
+   is still owed time to recover from it (§6). A `recreate` whose old CR stays where no
+   check reports it cannot go on, so the run ends as a harness error. A wait also ends
    where the target's process exits, and the Runner checks the target is running before it
    applies each op. A target that stopped ends the run as a harness error naming the op it
    was at (§11), because the ops behind it would run against nothing.
@@ -324,13 +326,13 @@ real targets; the toy target sets much shorter ones (§9).
 
 | ID | Name | Statement | Signal |
 |---|---|---|---|
-| **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault (§5.5), the target makes no further API request for `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io`, whose leases and lease candidates leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
+| **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault or a deletion (§5.5), the target makes no further API request for `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io`, whose leases and lease candidates leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
 | **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
 | **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
-| **G7** | Self-healing | An object a `DeleteManaged` op deleted exists again, by kind and name, when the settle wait after the op ends: on convergence, or at `T_settle` or later after a fault (§5.5). Its content may differ. A kind the target lists in `notRecreated` is exempt (§8.1). | Observer |
+| **G7** | Self-healing | An object a `DeleteManaged` op deleted exists again, by kind and name, when the settle wait after the op ends: on convergence, or at `T_settle` or later after a fault or a deletion (§5.5). Its content may differ. A kind the target lists in `notRecreated` is exempt (§8.1). | Observer |
 
 **The quiet window.** G1 and G2 judge the `T_stable` that follows a settle wait, which
 ends where the run converged or where the wait gave up (§5.5). Measuring
@@ -378,11 +380,11 @@ selector refine attribution to a particular CR; they are not required for it.
 emulated on envtest, §5.8). G3 therefore fails on orphans, meaning children with no
 ownerReference to the CR, and on finalizers that never clear. The teardown watches the
 namespace until it is clean or `T_delete` expires (§5.5 step 4). The settle wait after a
-`delete` op waits for the CR to go (§5.5 step 2), so G3 judges that deletion where the
-wait ends if the CR outlived `T_delete`. A namespace that came
-clean satisfies G3 at that instant, which is how a target that cleans up promptly is
-judged rather than left unjudged: the run stops watching long before `T_delete` is up. An
-object a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (D38).
+`delete` op and a `recreate`'s wait wait for the CR to go (§5.5 step 2), so G3 judges that
+deletion where the wait ends if the CR outlived `T_delete`. A namespace that came clean
+satisfies G3 at that instant, which is how a target that cleans up promptly is judged
+rather than left unjudged: the run stops watching long before `T_delete` is up. An object
+a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (D38).
 
 **What the proxy cannot see.** G1 and G6 observe only requests that leave the target
 process. Reads served from a client-side cache are invisible, so a reconcile loop that
@@ -439,8 +441,8 @@ equal. An item that `[*]` names stays even when left empty, so the items still c
 
 **G7 evaluation.** G7 is evaluated once per `DeleteManaged` op that deleted something,
 where the settle wait after it ends, which is always before the teardown boundary. Its
-window is that wait: up to `T_settle`, closing once `Ready` holds with `T_stable` of quiet
-behind it (§5.5). Where `Ready` holds without the object, the target therefore has
+window is that wait: up to `T_settle` or later after a fault or a deletion, closing once
+`Ready` holds with `T_stable` of quiet behind it (§5.5). Where `Ready` holds without the object, the target therefore has
 `T_stable` to recreate it. An object of the deleted one's kind and name satisfies G7,
 whatever its UID and content, since a recreated object carries a new UID. Where none
 exists, G7 does not judge an op where no primary CR is live, or where the CR is being
@@ -489,7 +491,9 @@ Details the example does not show:
   tries faults in op order, the first that applies to a request wins, and each runs out on
   its own `until`.
 - `update` applies `patch` as a JSON merge patch (RFC 7386).
-- `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
+- `recreate` is a delete, a wait for the object to disappear, and a create of `obj`. An
+  object still there where the wait ends is judged there, and the op creates nothing
+  (§5.5).
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
   then name. The index is resolved at execution time and the chosen object is recorded by
   name in the report. An index that resolves to nothing is skipped and reported as a note,
@@ -561,8 +565,8 @@ thresholds:                                   # optional; defaults in §6
 ```
 
 A settle wait ends once the Ready predicate holds and nothing has changed for `stable`,
-within `settle` (§5.5), so the target has `settle - stable` to react before the quiet
-window has to open. A `stable` at least as wide as `settle` leaves it none, and every op
+within `settle` or later after a fault or a deletion (§5.5), so the target has
+`settle - stable` to react before the quiet window has to open. A `stable` at least as wide as `settle` leaves it none, and every op
 that writes then expires. Loading such a target is a configuration error rather than a run
 that reports G4 against a target that did nothing wrong.
 
@@ -1354,4 +1358,7 @@ built from source and run as a black-box binary.
   under deletion is not ready, whatever `Ready` says, because a wait that converged
   mid-cleanup would put the rest of the cleanup in the quiet window. The toy proves both:
   with a `--cleanup-delay` past `T_settle` it passes a `create` and a `delete`, and B12
-  fails G3 alone.
+  fails G3 alone. A `recreate` waits as long for its old CR, and a CR still there where
+  that wait ends is judged there. A harness error there hid B12 from G3 on generated runs.
+  The op cannot create its CR while the old one stays, so one that no check reports stays a
+  harness error.

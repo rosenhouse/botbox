@@ -251,7 +251,9 @@ type harness interface {
 	createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error)
 	patchCR(ctx context.Context, name string, patch map[string]any) error
 	deleteCR(ctx context.Context, name string) error
-	awaitCRGone(ctx context.Context, name string) error
+	// awaitCRGone waits for the CR to go until the instant until returns has
+	// passed, and reports whether it went.
+	awaitCRGone(ctx context.Context, name string, until func() time.Time) (bool, error)
 	// managedObjects names the managed objects of one kind, ordered by
 	// creationTimestamp then name (DESIGN.md §7).
 	managedObjects(gvk schema.GroupVersionKind) []string
@@ -357,6 +359,9 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 		applied.CR = r.cr
 	}
 	r.timeline.Ops = append(r.timeline.Ops, applied)
+	if stayed := (*crStayed)(nil); errors.As(err, &stayed) {
+		return r.judgeStayed(op, stayed)
+	}
 	if err != nil {
 		return err
 	}
@@ -407,19 +412,52 @@ func (r *runner) create(ctx context.Context, op Op) error {
 	return nil
 }
 
-// recreate deletes the CR, waits for it to disappear and creates the op's
-// object (DESIGN.md §7).
+// recreate deletes the CR, waits for it to go and creates the op's object. The
+// wait lasts T_delete, or longer while the run is owed time. A CR still there
+// where the wait ends is judged there.
 func (r *runner) recreate(ctx context.Context, op Op) error {
 	if err := r.haveCR(); err != nil {
 		return err
 	}
+	deleted := r.now()
 	if err := r.h.deleteCR(ctx, r.cr); err != nil {
 		return err
 	}
-	if err := r.h.awaitCRGone(ctx, r.cr); err != nil {
+	wait := Wait{Window: Window{Start: r.now()}}
+	gone, err := r.h.awaitCRGone(ctx, r.cr, func() time.Time {
+		if owed := r.owed(); owed.After(deleted.Add(r.target.Timeouts.Delete)) {
+			return owed
+		}
+		return deleted.Add(r.target.Timeouts.Delete)
+	})
+	switch {
+	case err != nil:
+		return err
+	case gone:
+		return r.create(ctx, op)
+	}
+	wait.Window.End = r.now()
+	return &crStayed{cr: r.cr, wait: wait}
+}
+
+// crStayed is a recreate whose CR was still there where the wait for it to go
+// ended.
+type crStayed struct {
+	cr   string
+	wait Wait
+}
+
+func (s *crStayed) Error() string {
+	return fmt.Sprintf("the CR %s was still there %v after its delete", s.cr, s.wait.Window.End.Sub(s.wait.Window.Start).Round(time.Second))
+}
+
+// judgeStayed checkpoints where a recreate's wait for its CR ended. A CR that
+// no check reports there is a harness error, since the op cannot go on.
+func (r *runner) judgeStayed(op Op, stayed *crStayed) error {
+	if err := r.judge(op.Index, stayed.wait, invariant.Input.Excused); err != nil || r.violation != nil {
 		return err
 	}
-	return r.create(ctx, op)
+	return stayed
 }
 
 func (r *runner) haveCR() error {

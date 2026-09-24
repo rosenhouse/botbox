@@ -55,6 +55,15 @@ const createThenDelete = `{
   ]
 }`
 
+const createThenRecreate = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}}
+  ]
+}`
+
 // checkpointState is what a check saw when it ran.
 type checkpointState struct {
 	op          int
@@ -301,28 +310,50 @@ func TestRunner(t *testing.T) {
 		}
 	})
 
-	t.Run("fails G3, not G4, on a finalizer that never clears", func(t *testing.T) {
+	t.Run("passes a recreate whose cleanup outlasts T_settle", func(t *testing.T) {
 		toy := loadTarget(t, binary)
-		toy.Timeouts = target.Timeouts{Settle: 2 * time.Second, Stable: time.Second, Delete: 4 * time.Second}
-		toy.Launch.Args = append(toy.Launch.Args, "--bug=12")
+		toy.Timeouts = target.Timeouts{Settle: 2 * time.Second, Stable: time.Second, Delete: 6 * time.Second}
+		toy.Launch.Args = append(toy.Launch.Args, "--cleanup-delay=4s")
 
-		result, err := run.Run(ctx, toy, readSequence(t, createThenDelete), run.Options{
+		result, err := run.Run(ctx, toy, readSequence(t, createThenRecreate), run.Options{
 			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
 		})
 
 		if err != nil {
 			t.Fatalf("The run failed: %v", err)
 		}
-		if result.Violation == nil || result.Violation.ID != "G3" {
-			t.Fatalf("The run reported %v, want G3.", result.Violation)
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy cleaned up within T_delete.", result.Violation)
 		}
-		if want := "the CR widget still carried the finalizers [widget.botbox/cleanup] 4s after its deletion"; result.Violation.Statement != want {
-			t.Errorf("G3 says %q, want %q.", result.Violation.Statement, want)
-		}
-		if want := "toy.botbox/v1/Widget widget"; result.Violation.VersionsOf != want || len(result.Violation.Versions) == 0 {
-			t.Errorf("G3 quotes %d versions of %q, want the history of %s.", len(result.Violation.Versions), result.Violation.VersionsOf, want)
+		if wait := result.Timeline.Ops[1].Settled; wait == nil || !wait.Converged {
+			t.Errorf("The recreate's settle wait was %+v, want one that converged.", wait)
 		}
 	})
+
+	for op, sequence := range map[string]string{"delete": createThenDelete, "recreate": createThenRecreate} {
+		t.Run("fails G3 on a finalizer that never clears, under a "+op, func(t *testing.T) {
+			toy := loadTarget(t, binary)
+			toy.Timeouts = target.Timeouts{Settle: 2 * time.Second, Stable: time.Second, Delete: 4 * time.Second}
+			toy.Launch.Args = append(toy.Launch.Args, "--bug=12")
+
+			result, err := run.Run(ctx, toy, readSequence(t, sequence), run.Options{
+				Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+			})
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if result.Violation == nil || result.Violation.ID != "G3" {
+				t.Fatalf("The run reported %v, want G3.", result.Violation)
+			}
+			if want := "the CR widget still carried the finalizers [widget.botbox/cleanup] 4s after its deletion"; result.Violation.Statement != want {
+				t.Errorf("G3 says %q, want %q.", result.Violation.Statement, want)
+			}
+			if want := "toy.botbox/v1/Widget widget"; result.Violation.VersionsOf != want || len(result.Violation.Versions) == 0 {
+				t.Errorf("G3 quotes %d versions of %q, want the history of %s.", len(result.Violation.Versions), result.Violation.VersionsOf, want)
+			}
+		})
+	}
 
 	t.Run("notes an owner the collector cannot resolve", func(t *testing.T) {
 		toy := loadTarget(t, binary)

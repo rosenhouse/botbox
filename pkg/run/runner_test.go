@@ -68,6 +68,10 @@ type fakeHarness struct {
 	deletedCRAt   time.Time
 	// finalizerStays has the Observer record a deleted CR still under deletion.
 	finalizerStays bool
+	// crStays has a recreate's wait for the CR to go end with it still there,
+	// and awaitedUntil is when each such wait was told to give up.
+	crStays      bool
+	awaitedUntil []time.Time
 
 	// targetGone makes the harness report a target that has stopped, and
 	// stopsAfter is the call it stops at.
@@ -228,8 +232,9 @@ func (f *fakeHarness) deleteCR(_ context.Context, name string) error {
 	return f.record("deleteCR " + name)
 }
 
-func (f *fakeHarness) awaitCRGone(_ context.Context, name string) error {
-	return f.record("awaitCRGone " + name)
+func (f *fakeHarness) awaitCRGone(_ context.Context, name string, until func() time.Time) (bool, error) {
+	f.awaitedUntil = append(f.awaitedUntil, until())
+	return !f.crStays, f.record("awaitCRGone " + name)
 }
 
 func (f *fakeHarness) managedObjects(gvk schema.GroupVersionKind) []string {
@@ -934,6 +939,97 @@ func TestRunLeavesToG3AWaitThatEndedOnACRPastItsDeletionDeadline(t *testing.T) {
 			}
 			if got := checkpointsAt(result.Timeline); !slices.Equal(got, test.want) {
 				t.Errorf("The run checkpointed at %v, want %v.", got, test.want)
+			}
+		})
+	}
+}
+
+func TestRunGivesTheCRARecreateDeletesUntilItsDeadline(t *testing.T) {
+	sequence := sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}, Op{Type: OpRecreate, Obj: widget("widget")})
+
+	t.Run("once the Observer has seen the deletion", func(t *testing.T) {
+		h := newFakeHarness()
+		h.finalizerStays = true
+
+		if _, err := runFake(t, h, nil, sequence); err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		deleted := h.store.HistoryOf(widgetKind, "widget")[0].Time
+		if want := []time.Time{deleted.Add(testTimeouts.Delete)}; !slices.EqualFunc(h.awaitedUntil, want, time.Time.Equal) {
+			t.Errorf("The recreate waited for the CR until %v, want %v.", h.awaitedUntil, want)
+		}
+	})
+
+	t.Run("before the Observer has seen it", func(t *testing.T) {
+		h := newFakeHarness()
+		began := time.Now()
+
+		_, err := runFake(t, h, nil, sequence)
+
+		ended := time.Now()
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if len(h.awaitedUntil) != 1 || h.awaitedUntil[0].Before(began.Add(testTimeouts.Delete)) || h.awaitedUntil[0].After(ended.Add(testTimeouts.Delete)) {
+			t.Errorf("The recreate waited for the CR until %v, want %v after the delete.", h.awaitedUntil, testTimeouts.Delete)
+		}
+	})
+}
+
+// A recreate cannot create a CR while the old one stays, so the wait for it is
+// judged where it ends.
+func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		// fault is the fault op's window, placed from the deletion.
+		fault   func(deleted time.Time) proxy.FaultWindow
+		found   []Violation
+		want    string
+		wantErr string
+	}{
+		{name: "a check reports it", found: []Violation{{ID: "G3"}}, want: "G3"},
+		{name: "a fault reached into its deletion", fault: func(deleted time.Time) proxy.FaultWindow {
+			return proxy.FaultWindow{First: deleted.Add(time.Second), Retired: deleted.Add(2 * time.Second)}
+		}, want: "G4"},
+		{name: "a fault is still active", fault: func(deleted time.Time) proxy.FaultWindow {
+			return proxy.FaultWindow{First: deleted.Add(time.Second)}
+		}, wantErr: "op 2 (recreate): the CR widget was still there"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newFakeHarness()
+			h.crStays = true
+			deleted := time.Now().Add(-testTimeouts.Delete - time.Second)
+			h.recordDeletingCR("widget", "11", deleted)
+			if test.fault != nil {
+				h.applying = []proxy.FaultWindow{test.fault(deleted)}
+			}
+			check := &fakeChecker{violations: [][]Violation{nil, test.found}}
+			sequence := sequenceOf(
+				Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}},
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpRecreate, Obj: widget("widget")},
+			)
+
+			result, err := runFake(t, h, check, sequence)
+
+			if test.wantErr == "" && err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)) {
+				t.Fatalf("The run returned %v, want %q.", err, test.wantErr)
+			}
+			if got := result.Violation; test.want != "" && (got == nil || got.ID != test.want) {
+				t.Errorf("The run reported %v, want %s.", got, test.want)
+			}
+			if got, want := checkpointsAt(result.Timeline), []int{1, 2}; !slices.Equal(got, want) {
+				t.Errorf("The run checkpointed at %v, want %v.", got, want)
+			}
+			if ops := check.inputs[len(check.inputs)-1].Timeline.Ops; len(ops) != 3 || ops[2].CR != "widget" {
+				t.Errorf("The checks at the recreate's checkpoint read the ops %+v, want the recreate of widget last.", ops)
+			}
+			want := []string{"addFault 0", "createCR widget", "settle", "deleteCR widget", "awaitCRGone widget"}
+			if got := h.opCalls(); !slices.Equal(got, want) {
+				t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
 			}
 		})
 	}

@@ -12,13 +12,16 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -54,10 +57,13 @@ type Options struct {
 	// one, because the shrinker replays a sequence many times (DESIGN.md §5.5).
 	// A nil Config starts an envtest cluster for this run alone.
 	Config *rest.Config
-	// GarbageCollected says the cluster deletes owned objects itself. envtest
-	// does not, so botbox emulates the collector unless this is set
-	// (DESIGN.md §5.8).
-	GarbageCollected bool
+	// ControllerManager says the cluster runs kube-controller-manager, as kind
+	// does and envtest does not. Its garbage collector replaces botbox's
+	// emulation, and botbox waits for what it adds to every namespace.
+	ControllerManager bool
+	// NamespaceDefaultsWithin bounds the wait for what the controller manager
+	// adds to the run namespace. Zero takes 30 s.
+	NamespaceDefaultsWithin time.Duration
 	// Check evaluates the invariants and properties at each checkpoint. Run
 	// requires it; Start does not use it.
 	Check Checker
@@ -72,6 +78,13 @@ func (o Options) maxManaged() int {
 		return o.MaxManaged
 	}
 	return defaultMaxManaged
+}
+
+func (o Options) namespaceDefaultsWithin() time.Duration {
+	if o.NamespaceDefaultsWithin > 0 {
+		return o.NamespaceDefaultsWithin
+	}
+	return defaultNamespaceDefaultsWithin
 }
 
 // Harness is one run's machinery.
@@ -122,8 +135,8 @@ func validate(t *target.Target, opts Options) error {
 	if opts.Dir == "" {
 		return errors.New("an output directory is required")
 	}
-	if opts.GarbageCollected && opts.Config == nil {
-		return errors.New("a garbage-collected cluster must come with a Config: botbox starts envtest, which collects nothing")
+	if opts.ControllerManager && opts.Config == nil {
+		return errors.New("a cluster with a controller manager must come with a Config: botbox starts envtest, which runs none")
 	}
 	return nil
 }
@@ -178,8 +191,15 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 	if err := h.Observer.WaitForSync(ctx); err != nil {
 		return err
 	}
+	if opts.ControllerManager {
+		err := awaitNamespaceDefaults(ctx, h.Observer.Store, h.target.WatchedKinds(), opts.namespaceDefaultsWithin(), sleep)
+		if err != nil {
+			return err
+		}
+	}
+	excludePresent(h.Observer.Store, h.target.WatchedKinds())
 
-	if !opts.GarbageCollected {
+	if !opts.ControllerManager {
 		collector, err := cluster.StartCollector(h.Config, cluster.CollectorOptions{
 			Namespace: h.Namespace,
 			Kinds:     h.target.WatchedKinds(),
@@ -282,7 +302,7 @@ func (h *Harness) applyFixtures(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("creating the fixture %s %s: %w", gvk.Kind, fixture.GetName(), err)
 		}
-		h.Observer.MarkBotboxCreated(gvk, created.GetName())
+		h.Observer.Exclude(gvk, created.GetName())
 	}
 	return nil
 }
@@ -292,6 +312,51 @@ func (h *Harness) writeRecordings() error {
 		writeFile(filepath.Join(h.dir, requestsFile), h.Proxy.WriteLog),
 		writeFile(filepath.Join(h.dir, objectsFile), h.Observer.WriteHistory),
 	)
+}
+
+// namespaceDefaults are what kube-controller-manager adds to every namespace.
+// Kubernetes' own e2e framework waits for the same two.
+var namespaceDefaults = []struct {
+	gvk  schema.GroupVersionKind
+	name string
+}{
+	{schema.GroupVersionKind{Version: "v1", Kind: "ServiceAccount"}, "default"},
+	{schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}, "kube-root-ca.crt"},
+}
+
+const defaultNamespaceDefaultsWithin = 30 * time.Second
+
+// awaitNamespaceDefaults waits for the store to hold each namespace default
+// of a kind the run watches.
+func awaitNamespaceDefaults(ctx context.Context, store *observe.Store, watched []schema.GroupVersionKind,
+	within time.Duration, sleep func(context.Context, time.Duration) error) error {
+	deadline := time.Now().Add(within)
+	for _, object := range namespaceDefaults {
+		if !slices.Contains(watched, object.gvk) {
+			continue
+		}
+		for len(store.HistoryOf(object.gvk, object.name)) == 0 {
+			if !time.Now().Before(deadline) {
+				return fmt.Errorf("the cluster created no %s %s in the run namespace within %v. "+
+					"kube-controller-manager creates one in every namespace, and botbox waits for it so as not to count it as the target's",
+					kindName(object.gvk), object.name, within)
+			}
+			if err := sleep(ctx, settlePoll); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// excludePresent excludes every object already in the run namespace. The
+// target has not started, so none of them is its.
+func excludePresent(store *observe.Store, watched []schema.GroupVersionKind) {
+	for _, gvk := range watched {
+		for _, version := range store.Current(gvk) {
+			store.Exclude(gvk, version.Name)
+		}
+	}
 }
 
 func writeFile(path string, write func(io.Writer) error) error {

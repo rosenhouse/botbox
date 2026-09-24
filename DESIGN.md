@@ -59,7 +59,7 @@ external-secrets, upstream open-source projects, unmodified and pinned by versio
 | **Test cluster** | The API server a run executes against: an envtest control plane that botbox starts (default), or an existing cluster given by kubeconfig (§5.8). |
 | **Primary CR** | The one custom resource that a sequence's CR ops act on. Declared by the target. |
 | **Fixture** | An object botbox applies to the run namespace before op 0, such as an Issuer. Never mutated; not a managed object. |
-| **Managed object** | An object of a kind the target declares it manages, in the run namespace, that is neither a fixture nor created by botbox (§6). |
+| **Managed object** | An object of a kind the target declares it manages, in the run namespace, that neither botbox nor the cluster created (§6). |
 | **Op** | One step in a test sequence. The ops on the primary CR are `Create`, `Update`, `Delete` and `Recreate`; the control ops are `Restart`, `Fault`, `Settle` and `DeleteManaged` (§5.4). A CR op may set `noSettle` to skip the Runner's implicit settle wait (§5.5). |
 | **Sequence** | An ordered list of ops plus a seed. The unit of generation, replay, and shrinking. |
 | **Invariant** | A generic check that applies to every target. IDs `G1..Gn`. |
@@ -184,21 +184,41 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   `DeleteManaged{kind, index}` (delete one managed object behind the target's back, §7).
   The Runner issues `DeleteManaged` directly to the API server, as it does the CR ops.
 - **Schema-driven mutation** from the CRD's OpenAPI v3 schema: numeric ranges, enums,
-  string patterns, optional-field presence, list length. Generic and works on any CRD.
+  string patterns, optional-field presence, list length, map size. Generic and works on
+  any CRD.
+- **Valid by the CRD's own rules.** Every create, recreate and update the generator draws
+  passes the CRD as the API server judges the CR botbox wrote: defaults, value
+  validations, list types and `x-kubernetes-validations` rules, transition rules included.
+  The check does not see the status the controller writes, so a CRD rule that reads status
+  can still refuse a draw. The generator runs the API server's own code for this (D@48). A
+  create keeps a drawn field only if the CRD accepts it. A refused update is drawn again up
+  to eight times, then becomes a `Settle`. Judging consumes no randomness. The sample must
+  pass its CRD.
 - Generation starts from the target's `sample` object. When the target declares
   `generate.mutate`, only those paths are mutated, and `generate.overlay` tightens the
-  schema for a path (§8.3).
+  schema for a path (§8.3). An overlay keyword the generator does not read is a
+  configuration error. For each path it may change, the generator draws up to 100 values
+  into the sample until the CRD accepts one. A `generate.mutate` path is a configuration
+  error too when the generator cannot draw a value for it, such as a set longer than its
+  enum, or when the CRD refuses every value drawn. Without `generate.mutate`, botbox
+  prints each spec path it leaves alone, and why: its schema says too little to draw
+  from, such as an int-or-string, the generator cannot draw a value for it, or the CRD
+  refuses every value drawn for it.
 - **Hand-written generators** per target override schema-driven ones for fields with
   semantics the schema does not capture. In-repo targets only.
 
-Every sequence is serializable to JSON (§7) so it can be replayed without rapid.
+Every sequence is serializable to JSON (§7) so it can be replayed without rapid. A seed
+names a sequence for one build of botbox and one target declaration. A golden test records
+what the seeds the repository runs by number draw, so a change to a draw is deliberate
+(D@55).
 
 ### 5.5 Runner
 
 The Runner executes one sequence:
 
-1. Create a fresh namespace. Apply the target's fixtures. Start the target via the
-   Launcher.
+1. Create a fresh namespace. On a kubeconfig cluster, wait for what its controller
+   manager adds to the namespace (§5.8). Exclude what the namespace holds from the
+   managed objects (§6). Apply the target's fixtures. Start the target via the Launcher.
 2. Apply ops in order. After each op that mutates the CR or a managed object, wait up to
    `T_settle` for convergence unless the op sets `noSettle`, and longer while the target is
    still owed time to recover from a fault that stopped (§6). The wait ends once the
@@ -315,17 +335,26 @@ botbox owns the API server a run executes against.
 - **envtest** (default). botbox starts `kube-apiserver` and `etcd` from
   `KUBEBUILDER_ASSETS` (installed by `setup-envtest`) using
   `sigs.k8s.io/controller-runtime/pkg/envtest` inside `pkg/cluster`. This is the one
-  harness package allowed to import controller-runtime (§11). Before it starts them,
-  botbox looks for both binaries where envtest does: `TEST_ASSET_ETCD` and
-  `TEST_ASSET_KUBE_APISERVER`, then `KUBEBUILDER_ASSETS`, then `/usr/local/kubebuilder/bin`.
-  botbox looks up a bare name on `PATH`, as envtest does. An empty `KUBEBUILDER_ASSETS`
-  leaves one. botbox names the variable and the path when a binary is missing.
-- **kubeconfig**. An existing cluster, normally kind. Used by the nightly tier and, in
-  phase 2, by `Image` targets.
+  harness package allowed to import controller-runtime (§11). It starts its own control
+  plane even where `USE_EXISTING_CLUSTER` is set. Before it starts them, botbox looks for
+  both binaries where envtest does: `TEST_ASSET_ETCD` and `TEST_ASSET_KUBE_APISERVER`,
+  then `KUBEBUILDER_ASSETS`, then `/usr/local/kubebuilder/bin`. botbox looks up a bare
+  name on `PATH`, as envtest does. An empty `KUBEBUILDER_ASSETS` leaves one. botbox names
+  the variable and the path when a binary is missing.
+- **kubeconfig**. An existing cluster, normally kind. Used by `make test-kind` and, in
+  phase 2, by `Image` targets. botbox installs the target's CRDs there, creating or
+  replacing each one, and leaves them installed. The cluster runs
+  `kube-controller-manager`, whose garbage collector replaces the emulation below. It also
+  adds the `default` ServiceAccount and the `kube-root-ca.crt` ConfigMap to every
+  namespace. A run waits up to 30 s for those of a kind it watches, and a missing one is a
+  harness error. The cluster serves one botbox invocation at a time: a target that watches
+  every namespace acts in another invocation's run namespace too, and each invocation
+  would count that work as its own target's.
 
-envtest runs only the API server and etcd. There is no `kube-controller-manager`, so
-nothing garbage-collects owned objects, namespaces never finish terminating, no default
-service accounts appear, and no pods run. Consequences:
+envtest runs only the API server and etcd. There is no `kube-controller-manager` and no
+kubelet, so nothing garbage-collects owned objects, namespaces never finish terminating, no
+default service accounts appear, no pods run, and no workload's status changes.
+Consequences:
 
 - **Garbage-collector emulation.** In envtest mode botbox runs a minimal collector over
   the run namespace: it deletes a managed object that has at least one ownerReference
@@ -342,6 +371,23 @@ service accounts appear, and no pods run. Consequences:
   not modelled. Its writes bypass the proxy and never count as target traffic. On a
   kubeconfig cluster it is off.
 - **Self-cleanup.** The Runner empties the run namespace itself (§5.5, step 4).
+- **No workloads.** A kind that runs Pods, and a claim Pods mount, keep the status they
+  were created with: Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob,
+  ReplicationController, Pod and PersistentVolumeClaim. No ReplicaSet or Pod appears for
+  them. A `ready` that waits on that status never holds, and a target that requeues while
+  it waits can hide a missed watch. A Pod bound to a node never finishes deleting, since
+  only its kubelet confirms the delete, so G3 fails on one the target manages. When
+  `manages` names one of these kinds, an envtest invocation says so once, before the
+  control plane starts, and names `--kubeconfig` and kind. A G4 report repeats it among
+  its notes. botbox does not emulate these controllers (D@35).
+- **No finalizers that only `kube-controller-manager` removes.** botbox starts the API
+  server with its garbage collector off, and with the `StorageObjectInUseProtection`
+  admission plugin disabled beside envtest's own `ServiceAccount`. A delete of anything
+  but a Namespace therefore adds no `orphan` or `foregroundDeletion` finalizer, whatever
+  its propagation policy. No PersistentVolumeClaim carries `kubernetes.io/pvc-protection`,
+  and no PersistentVolume carries `kubernetes.io/pv-protection`. On a kubeconfig cluster a
+  Job or ReplicationController deleted without a policy orphans its Pods, and a claim
+  keeps its finalizer until no Pod uses it.
 - **No admission webhooks.** See §8.3.
 
 ## 6. Generic invariants
@@ -399,9 +445,16 @@ for `Ready`, so a wait can expire on such a CR, and its G4 then blames the CR's
 finalizers, not `Ready`.
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
-namespace that is neither a fixture nor created by botbox. The namespace is private to one
-run, so everything else in it came from the target. ownerReferences and the optional
-selector refine attribution to a particular CR; they are not required for it.
+namespace that neither botbox nor the cluster created. Fixtures and the primary CR are
+botbox's. The cluster's are what the namespace holds before the fixtures and the target,
+once §5.8's wait is over. Both are excluded by name, so an object the cluster recreates
+stays excluded. The namespace is private to one run, since a kubeconfig cluster serves one
+invocation at a time (§5.8). Everything else in it came from the target, except what a
+cluster adds later: the optional selector leaves that out. A change a cluster makes to a
+managed object still counts as the target's. On a kubeconfig cluster G2 therefore fails
+where the garbage collector deletes a child after `T_stable` of quiet (§14, question 5).
+ownerReferences and the selector refine attribution to a particular CR; they are not
+required for it.
 
 **Deletion.** Owned children are removed by the cluster's garbage collector (real on kind,
 emulated on envtest, §5.8). G3 therefore fails on orphans, meaning children with no
@@ -434,6 +487,9 @@ each ownerReference the collector could not resolve (§5.8), since the object th
 it stays, and G3 would report it without saying why. It notes each fault op whose fault
 the proxy applied to no request, since that fault tested nothing (D36). It notes each
 exit of the target it restarted (§5.5), since a run that passes shows no other sign of it.
+A G4 report on envtest also notes the managed kinds whose status envtest never changes
+(§5.8), since G4 may fail for that alone. botbox prints that note once, when the
+invocation starts, rather than with a run's notes.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
@@ -688,16 +744,19 @@ against its predecessor.
 
 ### 8.3 Generation constraints and admission webhooks
 
-botbox generates from the CRD's OpenAPI v3 schema, and phase 1 does not install the
-target's admission webhooks. Rules that only a webhook enforces are therefore invisible to
-the generator. For cert-manager these include: a Certificate needs at least one of
+botbox generates from the CRD's OpenAPI v3 schema and keeps the rules the CRD states,
+`x-kubernetes-validations` included, on the CR botbox writes. It cannot keep a rule that
+reads the status the controller writes (§5.4). Phase 1 does not install the target's
+admission webhooks. Rules that only a webhook enforces are therefore invisible to the
+generator. For cert-manager these include: a Certificate needs at least one of
 `commonName`, `dnsNames`, `ipAddresses`, `uris` or `emailAddresses`; `duration` must
 parse as a Go duration; `renewBefore` must be shorter than `duration`; a `dnsNames` entry
 must be a DNS name, which neither the CRD schema nor the API server checks, so the
 overlay spells out an RFC 1123 label. The target keeps generation inside the valid subset
 with `sample`, `generate.mutate` and `generate.overlay`. A generated spec that the target rejects or ignores because it
 violates such a rule is a target-declaration bug, not a finding; the journal records each
-rule that had to be encoded this way.
+rule that had to be encoded this way. A CR op the API server refuses ends the invocation as
+a configuration error that names the run and the sequence file holding the op.
 
 ### 8.4 Predicates
 
@@ -874,11 +933,13 @@ the proxy; the `Image` launcher. Separate design addendum.
 
 - **Language and pins.** Go `1.26.0` in `go.mod` (cert-manager v1.21.2 and the
   Kubernetes 0.37 libraries require it); CI uses `go-version-file: go.mod`. Library pins
-  live in `go.mod` only: `k8s.io/{api,apimachinery,client-go}` v0.37.x,
+  live in `go.mod` only: `k8s.io/{api,apimachinery,client-go,apiextensions-apiserver,apiserver}`
+  v0.37.x,
   `sigs.k8s.io/controller-runtime` v0.25.x, `pgregory.net/rapid` v1.3.x,
   `github.com/google/cel-go` v0.30.x. Tool and target pins live in one Makefile variable
   each: `ENVTEST_K8S_VERSION`, `SETUP_ENVTEST_VERSION`, `CONTROLLER_GEN_VERSION` (which
-  also pins the envtest release index), and one trio per adopted example:
+  also pins the envtest release index), `KIND_VERSION`, `KIND_NODE_IMAGE` (by digest),
+  and one trio per adopted example:
   `CERT_MANAGER_VERSION` and `EXTERNAL_SECRETS_VERSION`, each with the `_COMMIT` the tag
   must name and the `_CRDS_SHA256` of its checked-in CRDs, so a moved tag or an edited
   asset fails rather than passing quietly. Values live in the Makefile only. Bumps are
@@ -898,8 +959,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   says how many to draw. `--deadline` defaults to 4m, and the shrinker stops there and
   reports the smallest failing sequence it found. `--launch-arg` appends to `launch.args`
   (repeatable; a later flag wins), which is how the bug matrix selects `--bug=N`.
-  `--kubeconfig` selects an existing cluster instead of envtest; `KUBEBUILDER_ASSETS`
-  locates the envtest binaries. Exit codes: 0, all runs
+  `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
+  CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
   harness error, or a deadline that stopped the invocation before its last run.
 - **Output.** `--out` defaults to `botbox-out/`. Each invocation writes
@@ -921,8 +982,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
   binary (cached). All four run on every PR. The `-nightly` target beside each example
-  runs it on seeds botbox draws, with the negative control. `make test-kind` = kind,
-  nightly or on demand.
+  runs it on seeds botbox draws, with the negative control. `make test-kind` = the toy
+  through `--kubeconfig` against a kind cluster it creates and deletes, nightly or on
+  demand. It passes `b0.json` and fixed seeds, and fails B3 on G3 and B8 on P1 as its
+  negative controls. It installs the pinned kind into `bin/` and needs Docker.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
@@ -943,7 +1006,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   milestone and the invariant/property IDs it touches, and carries a "Design change"
   section whenever it edits this document.
 - **No flaky-test retries in CI.** A flaky harness test is a P0 bug in the harness.
-- **Seeds are always printed.** Every failure is reproducible from seed + sequence.
+- **Seeds are always printed.** Every failure is reproducible from its sequence, and from
+  its seed with the same botbox build and target declaration (§5.4).
 
 ## 12. How agents work in this repo
 
@@ -1020,6 +1084,10 @@ the proxy; the `Image` launcher. Separate design addendum.
 3. Should a later phase run the target's admission webhook in envtest, so that generation
    can widen beyond `generate.mutate`?
 4. Is `InProcess` worth reviving for speed once envtest run time is measured?
+5. Should G2 leave out a change to a managed object that no request of the target's
+   explains? On kind, just after the owner's CRD was installed, the garbage collector
+   deleted an owned Deployment 2.3 s after its owner. With a `T_stable` of 2 s, that delete
+   landed in the quiet window, and G2 counted it as the target's.
 
 ## 15. Decision log
 
@@ -1041,7 +1109,8 @@ built from source and run as a black-box binary.
   Certificate was deleted, its Secret and CertificateRequest were still present despite
   ownerReferences, and the namespace stayed `Terminating`.
 - **D6 Attribution by namespace.** Everything in the run namespace that botbox or a
-  fixture did not create is the target's.
+  fixture did not create is the target's. Amended by D@36 for a cluster with a controller
+  manager.
 - **D7 G2 covers the set of managed objects; G5 is measured within one run.** G2 as
   first written missed new objects appearing (B2). G5 as first written compared two runs,
   which random `generateName` suffixes make incomparable.
@@ -1400,3 +1469,75 @@ built from source and run as a black-box binary.
   restart gives the target no more time, and its startup requests count toward G1 in a
   quiet window. Excusing them would need a recovery window of their own, and a correct
   controller rarely exits with no fault active.
+- **D@55 A golden test pins what fixed seeds draw.** Draws come from rapid's
+  `Example(seed)`, which rapid documents as fit only for examples and which promises nothing
+  across versions. A draw also depends on the CRD schema, the sample, `generate` and
+  `manages`. The Makefile, the README and the envtest tier rely on what particular seeds
+  draw. `pkg/generate` records the draws of those seeds for the toy, cert-manager and
+  external-secrets. A change to generation or to rapid that moves a draw fails until the
+  test is rerun with `-update`. The README tells CI to pin botbox to a commit and to replay
+  a failing `sequence.json` against the base branch.
+- **D@48 Generation keeps the CRD's own rules, judged by the API server's code.** The
+  generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
+  rule `self.maxUnavailable <= self.count`, 15 of 100 drawn sequences broke it, and the
+  first refusal ended the invocation with exit 2 and no word of where the sequence was.
+  Real CRDs carry such rules: the external-secrets bundle holds 50, and cert-manager's
+  Issuer states "exactly one of" in CEL. The generator now judges each drawn CR op with
+  `k8s.io/apiextensions-apiserver`, as the API server does, and undoes or redraws what the
+  CRD refuses. Reimplementing the rules on cel-go alone was rejected. Kubernetes CEL types
+  each rule against the structural schema, escapes property names, adds its own libraries
+  and sees defaults first. Each divergence would undo a valid draw or pass one the API
+  server refuses. The API server's code moves no selected module version, because
+  controller-runtime v0.25.1 already requires `k8s.io/apiserver` and
+  `k8s.io/component-base` at v0.37.0. Naming them in `go.mod` adds seven modules to the
+  module graph, none of them built, and the binary grows by 4.6 MB. An
+  envtest test applies 200 drawn sequences per target to a real API server with no
+  controller, so the two cannot drift apart unseen on a CR without status. With a
+  controller, the API server judges an update with the stored status copied in, which the
+  generator never sees. A CRD rule that reads status can therefore still refuse a draw. A
+  refusal still exits 2, since a rule botbox cannot keep belongs in the target declaration
+  (§8.3). The message names the run and its `sequence.json`, and names a status rule as a
+  possible cause. Undoing a refused field biases draws away from a rule's boundary: a
+  sample that sets one of two exclusive fields never switches to the other. When the CRD
+  refuses all 100 values drawn for a field into the sample, the field would never move, so
+  New reports it instead of skipping it silently. Each value is judged against the sample
+  alone, so New also reports a field that only another field's change makes valid. A
+  sample that accepts the field fixes that. No sample accepts both of two exclusive
+  fields, so `generate.mutate` names only one of them.
+- **D@36 A kubeconfig cluster gets the CRDs, and a run excludes what the cluster put in its
+  namespace.** On kind, `--kubeconfig` installed no CRDs, so the first run failed to
+  resolve the primary kind. With the CRD applied by hand, the toy with no bug failed G3 on
+  `kube-root-ca.crt`: `deleteManaged` took that ConfigMap as the oldest, and
+  kube-controller-manager recreated it. D6 assumed that only botbox and the target write
+  to the namespace. Kubernetes' e2e framework waits for the `default` ServiceAccount and
+  `kube-root-ca.crt` in each test namespace, so a run waits for those of a kind it
+  watches. It then excludes, by name, everything the namespace holds, before fixtures and
+  the target. Without the wait, a root CA published late counts as the target's. Objects
+  a cluster adds later stay attributed to the target, and `selector` leaves them out.
+  botbox installs the CRDs with envtest's `InstallCRDs`, which creates or replaces each
+  one and waits until it is served. It leaves them, because deleting a CRD deletes every
+  object of that kind in the cluster. A kubeconfig cluster serves one invocation at a time:
+  two invocations on one kind cluster failed the correct toy on G1 and G6, because each toy
+  reconciled the other's Widget.
+  envtest also read `USE_EXISTING_CLUSTER`, which pointed botbox's default mode, collector
+  emulation and all, at whatever `KUBECONFIG` named. `cluster.Start` now turns that off.
+  `make test-kind` runs on kind v0.33.0 and its default node image, Kubernetes 1.37.0.
+- **D@35 botbox names the kinds envtest never moves, and envtest adds no finalizer that
+  only the controller manager removes.** An operator whose `ready` waited on its
+  Deployment's `availableReplicas` failed G4 on every envtest run, and botbox said nothing
+  about why. envtest runs no `kube-controller-manager` and no kubelet, so the Deployment's
+  status stayed empty and no ReplicaSet or Pod appeared. Under the default
+  `observedGeneration` predicate the same operator passed, but it requeued every 5 s while
+  it waited, and so recreated a child it never watched. A seeded missed-watch bug passed.
+  botbox therefore names these kinds and points to kind, rather than suggest a weaker
+  `ready`. The list is explicit and short: the kinds that run Pods, and
+  PersistentVolumeClaim. It matches by group and kind, at any version. Running
+  `kube-controller-manager` beside envtest was rejected: setup-envtest ships no such
+  binary, and no Pod would run without a kubelet anyway. A claim also carried
+  `kubernetes.io/pvc-protection`, which nothing on envtest removes, so a correctly owned
+  claim failed G3. Removing that finalizer in the collector was rejected, because it adds
+  code and timing, and on envtest no Pod ever uses a claim. botbox disables the admission
+  plugin instead. A Job or a ReplicationController, which a delete orphans by default, and
+  any foreground delete likewise carried a finalizer that only the garbage collector
+  removes, so a correctly owned Job failed G3 too. botbox therefore also turns off the API
+  server's garbage collector, which adds those finalizers.

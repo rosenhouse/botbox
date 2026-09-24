@@ -100,7 +100,7 @@ func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) 
 	if err != nil {
 		return "", fmt.Errorf("creating the CR: %w", err)
 	}
-	l.h.Observer.MarkBotboxCreated(l.target.Primary, created.GetName())
+	l.h.Observer.Exclude(l.target.Primary, created.GetName())
 	return created.GetName(), nil
 }
 
@@ -113,7 +113,7 @@ func (l *liveRun) patchCR(ctx context.Context, name string, patch map[string]any
 		if err != nil {
 			return err
 		}
-		patched := &unstructured.Unstructured{Object: mergePatch(current.Object, patch)}
+		patched := &unstructured.Unstructured{Object: MergePatch(current.Object, patch)}
 		_, err = l.crs().Update(ctx, patched, metav1.UpdateOptions{})
 		return err
 	})

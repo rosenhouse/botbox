@@ -12,6 +12,7 @@ import (
 const (
 	toyTarget         = "../../targets/toy-widget/target.yaml"
 	certManagerTarget = "../../examples/cert-manager/target.yaml"
+	rulesTarget       = "testdata/rules/target.yaml"
 )
 
 func loadTarget(t *testing.T, path string) *target.Target {
@@ -21,6 +22,15 @@ func loadTarget(t *testing.T, path string) *target.Target {
 		t.Fatalf("Load(%s) failed: %v.", path, err)
 	}
 	return loaded
+}
+
+// primarySchema reads the primary CR's schema with generate.overlay applied.
+func primarySchema(t *target.Target) (*schema, error) {
+	root, err := openAPISchema(t)
+	if err != nil {
+		return nil, err
+	}
+	return overlaid(root, t.Generate.Overlay)
 }
 
 func primarySchemaOf(t *testing.T, path string) *schema {
@@ -125,7 +135,7 @@ func TestMutateRestrictsThePathsThatMove(t *testing.T) {
 	} {
 		t.Run(testCase.path, func(t *testing.T) {
 			loaded := loadTarget(t, testCase.path)
-			fields, err := mutableFields(loaded, primarySchemaOf(t, testCase.path))
+			fields, _, err := mutableFields(loaded, primarySchemaOf(t, testCase.path))
 			if err != nil {
 				t.Fatalf("mutableFields failed: %v.", err)
 			}
@@ -164,10 +174,84 @@ func TestPathsTheSchemaDoesNotDescribeAreConfigurationErrors(t *testing.T) {
 	}
 }
 
+func TestAnOverlayKeywordBotboxDoesNotReadIsAConfigurationError(t *testing.T) {
+	for _, testCase := range []struct {
+		path, dotted string
+		overlay      map[string]any
+		unread       string
+	}{
+		{toyTarget, "spec.count", map[string]any{"maximun": 0}, "maximun"},
+		{certManagerTarget, "spec.dnsNames", map[string]any{"items": map[string]any{"patern": "^a$"}}, "items.patern"},
+		{certManagerTarget, "spec.privateKey",
+			map[string]any{"properties": map[string]any{"algorithm": map[string]any{"enumm": []any{"RSA"}}}},
+			"properties.algorithm.enumm"},
+		{rulesTarget, "spec.config", map[string]any{"additionalProperties": map[string]any{"maxLenght": 3}},
+			"additionalProperties.maxLenght"},
+	} {
+		t.Run(testCase.unread, func(t *testing.T) {
+			loaded := loadTarget(t, testCase.path)
+			loaded.Generate.Overlay = map[string]map[string]any{testCase.dotted: testCase.overlay}
+			_, err := New(loaded, Options{})
+			if err == nil {
+				t.Fatalf("New accepted the overlay %v, whose %s botbox does not read.", testCase.overlay, testCase.unread)
+			}
+			for _, want := range []string{testCase.dotted, testCase.unread, "maximum", "pattern"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("New reported %q, which does not mention %q.", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestWithoutMutateEverySpecPathTheSchemaDescribesMoves(t *testing.T) {
+	fields, _, err := mutableFields(loadTarget(t, rulesTarget), primarySchemaOf(t, rulesTarget))
+	if err != nil {
+		t.Fatalf("mutableFields failed: %v.", err)
+	}
+	var paths []string
+	for _, field := range fields {
+		paths = append(paths, field.dotted)
+	}
+	want := []string{"spec.config", "spec.count", "spec.left", "spec.maxUnavailable", "spec.minCount", "spec.mode",
+		"spec.right", "spec.tags"}
+	if !slices.Equal(paths, want) {
+		t.Errorf("The generator mutates %v, want %v.", paths, want)
+	}
+}
+
+func TestNewReportsTheSpecPathsItLeavesAlone(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	g := newGenerator(t, loaded, Options{})
+	leftAlone := g.LeftAlone()
+	want := [][]string{
+		{"spec.right", "the CRD refuses every value botbox drew for it in the sample", "exactly one of left and right"},
+		{"spec.surge", "x-kubernetes-int-or-string"},
+	}
+	if len(leftAlone) != len(want) {
+		t.Fatalf("New reports it leaves %q alone, want spec.right and spec.surge.", leftAlone)
+	}
+	for i, says := range want {
+		for _, part := range says {
+			if !strings.Contains(leftAlone[i], part) {
+				t.Errorf("New reports %q, which does not say %q.", leftAlone[i], part)
+			}
+		}
+		if slices.ContainsFunc(g.fields, func(f field) bool { return f.dotted == says[0] }) {
+			t.Errorf("New leaves %s alone and still draws it.", says[0])
+		}
+	}
+
+	loaded.Generate.Mutate = []string{"spec.count"}
+	if leftAlone := newGenerator(t, loaded, Options{}).LeftAlone(); len(leftAlone) != 0 {
+		t.Errorf("New reports it leaves %q alone, and generate.mutate names every path that moves.", leftAlone)
+	}
+}
+
 func TestMutateIsAnAllowlistOfSchemaPaths(t *testing.T) {
 	loaded := loadTarget(t, certManagerTarget)
 	loaded.Generate.Mutate = []string{"spec.privateKey.algorithm"}
-	fields, err := mutableFields(loaded, primarySchemaOf(t, certManagerTarget))
+	fields, _, err := mutableFields(loaded, primarySchemaOf(t, certManagerTarget))
 	if err != nil {
 		t.Fatalf("mutableFields failed: %v.", err)
 	}

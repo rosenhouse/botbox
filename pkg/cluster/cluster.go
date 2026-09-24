@@ -1,6 +1,6 @@
-// Package cluster starts and stops the envtest control plane a botbox run
-// executes against (DESIGN.md §5.8). envtest reads KUBEBUILDER_ASSETS itself;
-// `make setup` installs the binaries.
+// Package cluster provides the test cluster a botbox run executes against: an
+// envtest control plane it starts, or an existing cluster a kubeconfig names.
+// envtest reads KUBEBUILDER_ASSETS itself; `make setup` installs the binaries.
 //
 // This is the one harness package allowed to import controller-runtime
 // (DESIGN.md §11).
@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
 )
 
@@ -88,6 +89,7 @@ func cannotRun(name, path string) string {
 
 // Cluster is a running test cluster.
 type Cluster struct {
+	// env is nil for a cluster botbox did not start.
 	env    *envtest.Environment
 	config *rest.Config
 }
@@ -98,7 +100,15 @@ func Start(opts Options) (*Cluster, error) {
 	if err := opts.Validate(); err != nil {
 		return nil, fmt.Errorf("starting the test cluster: %w", err)
 	}
-	env := &envtest.Environment{CRDDirectoryPaths: opts.CRDPaths}
+	// envtest would otherwise read USE_EXISTING_CLUSTER and reach whatever
+	// cluster KUBECONFIG names.
+	existing := false
+	env := &envtest.Environment{CRDDirectoryPaths: opts.CRDPaths, UseExistingCluster: &existing}
+	// Only kube-controller-manager removes the finalizers these add. Append
+	// keeps envtest's own entry, which disables ServiceAccount.
+	apiServer := env.ControlPlane.GetAPIServer().Configure()
+	apiServer.Append("disable-admission-plugins", "StorageObjectInUseProtection")
+	apiServer.Set("enable-garbage-collector", "false")
 	config, err := env.Start()
 	if err != nil {
 		return nil, fmt.Errorf("starting the envtest control plane: %w", err)
@@ -106,11 +116,32 @@ func Start(opts Options) (*Cluster, error) {
 	return &Cluster{env: env, config: config}, nil
 }
 
+// Connect reaches the cluster a kubeconfig names and installs the CRDs in
+// opts there. It creates or replaces each CRD, waits until the API server
+// serves it, and leaves it installed.
+func Connect(kubeconfig string, opts Options) (*Cluster, error) {
+	if err := opts.Validate(); err != nil {
+		return nil, fmt.Errorf("connecting to the test cluster: %w", err)
+	}
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		return nil, fmt.Errorf("reading the kubeconfig %s: %w", kubeconfig, err)
+	}
+	if _, err := envtest.InstallCRDs(config, envtest.CRDInstallOptions{Paths: opts.CRDPaths}); err != nil {
+		return nil, fmt.Errorf("installing the CRDs on the cluster %s names: %w", kubeconfig, err)
+	}
+	return &Cluster{config: config}, nil
+}
+
 // Config returns the admin client configuration for the API server.
 func (c *Cluster) Config() *rest.Config { return c.config }
 
-// Stop shuts the control plane down.
+// Stop shuts down a control plane Start brought up, and leaves any other
+// cluster running.
 func (c *Cluster) Stop() error {
+	if c.env == nil {
+		return nil
+	}
 	if err := c.env.Stop(); err != nil {
 		return fmt.Errorf("stopping the envtest control plane: %w", err)
 	}

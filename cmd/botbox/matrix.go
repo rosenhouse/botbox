@@ -58,7 +58,7 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 		return c.fail(err)
 	}
 
-	s, err := c.open(opts, exercised)
+	s, err := c.startSession(opts, exercised)
 	if err != nil {
 		return c.fail(err)
 	}

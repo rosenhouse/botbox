@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -367,6 +368,27 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 	return result, errors.Join(failure, teardown)
 }
 
+// Refused is the API server turning away the CR an op wrote. The CRD's schema
+// or rules refused it, or an admission webhook did.
+type Refused struct {
+	Op     Op
+	Reason error
+}
+
+func (r *Refused) Error() string {
+	return fmt.Sprintf("the API server refused op %d (%s): %v", r.Op.Index, r.Op.Type, r.Reason)
+}
+
+// refusal is err as a Refused when the API server turned the op's write away
+// for what it carried: 422 from validation, and 400 or 403 from an admission
+// webhook.
+func refusal(op Op, err error) error {
+	if apierrors.IsInvalid(err) || apierrors.IsBadRequest(err) || apierrors.IsForbidden(err) {
+		return &Refused{Op: op, Reason: err}
+	}
+	return err
+}
+
 // applyOps applies the sequence in order and stops at the first violation
 // (DESIGN.md §5.5).
 func (r *runner) applyOps(ctx context.Context) error {
@@ -375,6 +397,9 @@ func (r *runner) applyOps(ctx context.Context) error {
 			return nil
 		}
 		if err := r.applyOp(ctx, op); err != nil {
+			if refused := (*Refused)(nil); errors.As(err, &refused) {
+				return err
+			}
 			return fmt.Errorf("op %d (%s): %w", op.Index, op.Type, err)
 		}
 	}
@@ -412,7 +437,7 @@ func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 		if err := r.haveCR(); err != nil {
 			return applied, err
 		}
-		return applied, r.h.patchCR(ctx, r.cr, op.Patch)
+		return applied, refusal(op, r.h.patchCR(ctx, r.cr, op.Patch))
 	case OpDelete:
 		if err := r.haveCR(); err != nil {
 			return applied, err
@@ -441,7 +466,7 @@ func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 func (r *runner) create(ctx context.Context, op Op) error {
 	name, err := r.h.createCR(ctx, op.Obj)
 	if err != nil {
-		return err
+		return refusal(op, err)
 	}
 	r.cr = name
 	return nil

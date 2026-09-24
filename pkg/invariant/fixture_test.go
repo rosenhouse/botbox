@@ -97,13 +97,13 @@ func newRunManaging(kinds ...schema.GroupVersionKind) *run {
 	t := toyTarget()
 	t.Manages = kinds
 	store := observe.NewStore(observe.Options{Namespace: namespace, Manages: kinds})
-	store.MarkBotboxCreated(widgetGVK, widgetName)
+	store.Exclude(widgetGVK, widgetName)
 	return &run{in: invariant.Input{Target: t, History: store}, store: store}
 }
 
 // fixture marks an object as botbox's, so that it is never managed (§6).
 func (r *run) fixture(obj *unstructured.Unstructured) *run {
-	r.store.MarkBotboxCreated(obj.GroupVersionKind(), obj.GetName())
+	r.store.Exclude(obj.GroupVersionKind(), obj.GetName())
 	return r
 }
 

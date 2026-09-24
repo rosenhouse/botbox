@@ -6,6 +6,9 @@ import (
 	"strings"
 	"testing"
 
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+
 	"github.com/rosenhouse/botbox/pkg/cluster"
 )
 
@@ -180,6 +183,45 @@ func TestValidateSaysToFixAnOverrideItCannotRun(t *testing.T) {
 // the unit tier, which runs no API server (DESIGN.md §11).
 func pointAssetsNowhere(t *testing.T) {
 	t.Setenv("KUBEBUILDER_ASSETS", filepath.Join(t.TempDir(), "no-such-assets"))
+}
+
+func TestConnectValidatesBeforeReadingTheKubeconfig(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "no-such-dir")
+
+	c, err := cluster.Connect(filepath.Join(t.TempDir(), "no-such-kubeconfig"), cluster.Options{CRDPaths: []string{missing}})
+	if err == nil {
+		_ = c.Stop()
+		t.Fatal("Connect accepted a CRD path that does not exist.")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("Connect returned %q, which does not name the missing path %q.", err, missing)
+	}
+}
+
+func TestConnectNamesAKubeconfigItCannotRead(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "no-such-kubeconfig")
+
+	_, err := cluster.Connect(kubeconfig, cluster.Options{})
+	if want := "reading the kubeconfig " + kubeconfig; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("Connect returned %v, want an error saying %q.", err, want)
+	}
+}
+
+func TestConnectReportsCRDsItCouldNotInstall(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
+	unreachable := clientcmdapi.Config{
+		Clusters:       map[string]*clientcmdapi.Cluster{"nowhere": {Server: "http://127.0.0.1:1"}},
+		Contexts:       map[string]*clientcmdapi.Context{"nowhere": {Cluster: "nowhere"}},
+		CurrentContext: "nowhere",
+	}
+	if err := clientcmd.WriteToFile(unreachable, kubeconfig); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := cluster.Connect(kubeconfig, cluster.Options{CRDPaths: []string{"../../targets/toy-widget/crds"}})
+	if err == nil || !strings.Contains(err.Error(), "installing the CRDs") {
+		t.Errorf("Connect returned %v, want an error saying it could not install the CRDs.", err)
+	}
 }
 
 func TestStartValidatesBeforeStartingEnvtest(t *testing.T) {

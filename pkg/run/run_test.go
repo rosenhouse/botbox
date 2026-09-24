@@ -56,15 +56,15 @@ func TestValidateOptions(t *testing.T) {
 		{name: "no target", opts: Options{Dir: "out"}, want: "target"},
 		{name: "no output directory", target: toy, want: "output directory"},
 		{
-			name:   "a garbage-collected cluster without a config",
+			name:   "a cluster with a controller manager and no config",
 			target: toy,
-			opts:   Options{Dir: "out", GarbageCollected: true},
-			want:   "garbage",
+			opts:   Options{Dir: "out", ControllerManager: true},
+			want:   "controller manager",
 		},
 		{
-			name:   "a garbage-collected cluster with a config",
+			name:   "a cluster with a controller manager and a config",
 			target: toy,
-			opts:   Options{Dir: "out", GarbageCollected: true, Config: &rest.Config{}},
+			opts:   Options{Dir: "out", ControllerManager: true, Config: &rest.Config{}},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -78,6 +78,87 @@ func TestValidateOptions(t *testing.T) {
 				t.Errorf("validate returned %q, want it to name %q.", err, test.want)
 			}
 		})
+	}
+}
+
+var serviceAccountKind = schema.GroupVersionKind{Version: "v1", Kind: "ServiceAccount"}
+
+func inRunNamespace(gvk schema.GroupVersionKind, name string) *unstructured.Unstructured {
+	u := &unstructured.Unstructured{}
+	u.SetGroupVersionKind(gvk)
+	u.SetNamespace("botbox-run-1")
+	u.SetName(name)
+	return u
+}
+
+func TestAwaitNamespaceDefaults(t *testing.T) {
+	serviceAccount := inRunNamespace(serviceAccountKind, "default")
+	rootCA := inRunNamespace(configMapKind, "kube-root-ca.crt")
+	both := []schema.GroupVersionKind{widgetKind, serviceAccountKind, configMapKind}
+	for _, test := range []struct {
+		name    string
+		watched []schema.GroupVersionKind
+		made    []*unstructured.Unstructured
+		// later is what the cluster makes while the wait sleeps.
+		later  []*unstructured.Unstructured
+		within time.Duration
+		want   string
+	}{
+		{name: "both made", watched: both, made: []*unstructured.Unstructured{serviceAccount, rootCA}},
+		{
+			name: "one made while it waits", watched: both, within: time.Minute,
+			made: []*unstructured.Unstructured{serviceAccount}, later: []*unstructured.Unstructured{rootCA},
+		},
+		{
+			name: "the ConfigMap never made", watched: both,
+			made: []*unstructured.Unstructured{serviceAccount}, want: "v1/ConfigMap kube-root-ca.crt",
+		},
+		{
+			name: "the ServiceAccount never made", watched: both,
+			made: []*unstructured.Unstructured{rootCA}, want: "v1/ServiceAccount default",
+		},
+		{
+			name: "an unwatched kind never made", watched: []schema.GroupVersionKind{widgetKind, configMapKind},
+			made: []*unstructured.Unstructured{rootCA},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := observe.NewStore(observe.Options{Namespace: "botbox-run-1"})
+			for _, made := range test.made {
+				store.Record(made.GroupVersionKind(), made, time.Now())
+			}
+			sleep := func(context.Context, time.Duration) error {
+				for _, made := range test.later {
+					store.Record(made.GroupVersionKind(), made, time.Now())
+				}
+				return nil
+			}
+
+			err := awaitNamespaceDefaults(t.Context(), store, test.watched, test.within, sleep)
+
+			switch {
+			case test.want == "" && err != nil:
+				t.Errorf("awaitNamespaceDefaults returned %v, want nil.", err)
+			case test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)):
+				t.Errorf("awaitNamespaceDefaults returned %v, want an error naming %q.", err, test.want)
+			}
+		})
+	}
+}
+
+func TestExcludePresentLeavesWhatComesLaterManaged(t *testing.T) {
+	store := observe.NewStore(observe.Options{Namespace: "botbox-run-1", Manages: []schema.GroupVersionKind{configMapKind}})
+	store.Record(configMapKind, inRunNamespace(configMapKind, "kube-root-ca.crt"), time.Now())
+
+	excludePresent(store, []schema.GroupVersionKind{widgetKind, configMapKind})
+	store.Record(configMapKind, inRunNamespace(configMapKind, "widget-0"), time.Now())
+
+	var managed []string
+	for _, v := range store.Managed() {
+		managed = append(managed, v.Name)
+	}
+	if !slices.Equal(managed, []string{"widget-0"}) {
+		t.Errorf("The managed objects are %v, want only widget-0.", managed)
 	}
 }
 

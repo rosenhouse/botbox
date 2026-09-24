@@ -492,9 +492,9 @@ one back. A fixture op, and the restore of a deleted fixture, is a change of bot
 does not judge a restart it falls between, and G7 notes a `DeleteManaged` it precedes
 before the run converged. G4 measures `T_settle` from an update or a restore of a fixture as
 from a spec change, and G6 counts failing requests afresh after any fixture op or restore.
-A deletion hands G4's window before it to the restore, since a target
-may rightly not be ready while a fixture it reads is gone. A settle wait that ends while a
-fixture is gone is judged as any other, so generation restores the fixture first (§5.4).
+A deletion hands G4's window before it to the restore, since a target may rightly not be
+ready while a fixture it reads is gone. A settle wait that ends while a fixture is gone is
+judged as any other, so generation restores the fixture first (§5.4).
 
 **Deletion.** Owned children are removed by the cluster's garbage collector (real on kind,
 emulated on envtest, §5.8). G3 therefore fails on orphans, meaning children with no
@@ -1794,8 +1794,8 @@ built from source and run as a black-box binary.
   settles, because a target may rightly not be ready while a dependency is gone. Excusing
   every check while a fixture is gone, as for a fault, was rejected: it judges less and
   touches every check. A fixture stays botbox's, so G3 and G7 never ask anything of it. A
-  fixture op is botbox's change for G5 and G7, and G4 measures from an update or a restore
-  of a fixture as from a spec change. The Runner stamps the op a restore precedes before it
+  fixture op is botbox's change for G5 and G7, and G4 and G6 treat an update or a restore
+  of a fixture as a spec change. The Runner stamps the op a restore precedes before it
   restores, so the target's reply falls in that op's window. The toy's B14 copies a label
   from a ConfigMap fixture it does not watch, and G5 finds it once a restart reconciles the
   Widget. A target without `generate.fixtures` draws what it drew before, which the golden

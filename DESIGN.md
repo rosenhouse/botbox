@@ -966,18 +966,18 @@ the proxy; the `Image` launcher. Separate design addendum.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. The deadline abandons the run under way (§5.5), and the
   shrinker stops there and reports the smallest failing sequence it found. Without
-  `--deadline`, botbox derives the deadline and prints it: what each run's waits (§5.5)
-  can take at their longest, one run after another, plus 4m to minimize a failure where
-  botbox drew the sequences. `botbox matrix` minimizes nothing and gets no 4m. A run's
-  start gets the 30 s a kubeconfig cluster's namespace defaults may take (§5.8), a
-  `restart` gets 5 s for the reap, and a `delete` that settles gets `T_delete` beside
-  `T_settle`. The teardown gets 30 s for its steps beyond its waits, two 5 s grace periods
-  to stop the target, and 30 s to delete the namespace. After a fault, a target that exits
-  restarts after a backoff of up to 5 min (§5.1) and is owed `T_settle` past the restart,
-  and the faults are owed as long as they lasted plus `T_settle` (§6). So each fault op
-  allows an exit, doubles what the run gets before its teardown, and allows another exit.
-  A target that exits more than once while a fault is active can outlast the derived
-  deadline. `--launch-arg` appends to `launch.args`
+  `--deadline`, botbox derives the deadline and prints it: what the planned runs' waits
+  (§5.5) can take at their longest, one run after another, plus 4m to minimize a failure
+  where botbox drew the sequences. `botbox matrix` minimizes nothing and gets no 4m.
+  Waits include the start's wait for a kubeconfig cluster's namespace defaults (§5.8),
+  the reap after a `restart`, stopping the target and deleting the namespace. A `delete`
+  gets `T_delete` as a `recreate` does. A fault can keep waits open. A target that exits
+  while a fault excuses it is owed `T_settle` past a restart whose backoff can reach 5 min
+  (§5.1), and faults that stopped are owed as long as they lasted plus `T_settle` (§6). So
+  the deadline allows one such exit per fault op, and each time faults stop it doubles
+  what the run had before its teardown and allows another. Faults with no trigger stop
+  together, at the teardown. A target that exits more than once per fault op while faults
+  are active can outlast the derived deadline. `--launch-arg` appends to `launch.args`
   (repeatable; a later flag wins), which is how the bug matrix selects `--bug=N`.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
   CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
@@ -1589,11 +1589,13 @@ built from source and run as a black-box binary.
   alone a SIGHUP or SIGINT it was started ignoring. Go keeps no other inherited SIG_IGN.
   A SIGKILLed botbox still leaves the control plane and the target running.
 - **D@51 Without `--deadline`, botbox derives the deadline from the target's timeouts.** A
-  fixed 4m stopped ten runs of a correct controller at §6's timeouts after six, since each
-  run waits at least `2·T_stable` in quiet windows. A larger fixed default fails again when
-  `--runs` grows or the timeouts widen. The derived deadline cuts no run the Runner would
-  end on its own, unless a request hangs or a target keeps exiting under an active fault.
-  Faults can stop one after another, each extending the wait the one before extended, so
-  each fault op doubles the bound. At §6's timeouts the deadline runs to tens of minutes,
-  so botbox prints it. The old 4m is what minimizing gets beyond the runs. An explicit
-  `--deadline` is used as given.
+  fixed 4m stopped ten runs of a correct controller at §6's timeouts after six, each of
+  which took 32 to 42 s. A larger fixed default fails again when `--runs` grows or the
+  timeouts widen. The derived deadline cuts none of the planned runs the Runner would end
+  on its own, unless a request hangs or a target keeps exiting under an active fault.
+  Minimizing gets what the runs left and 4m, so it may still stop early. Faults whose
+  triggers run out one after another each extend the wait the one before extended, so
+  the deadline doubles each time faults stop. A `delete` gets `T_delete` because #70 lets
+  a wait after it run to the CR's G3 deadline. At §6's timeouts the deadline runs to tens
+  of minutes, so botbox prints it. An explicit `--deadline` must be positive
+  and is used as given.

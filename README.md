@@ -105,8 +105,9 @@ run 5: seed 27, generated
 every run passed.
 ```
 
-botbox derives the deadline from the `timeouts` your target declares, or their defaults: it is
-the longest the runs' waits can take. A correct controller finishes well inside it.
+botbox derives the deadline from the `timeouts` your target declares, or their defaults: the
+longest the runs' waits can take, and 4 minutes to minimize a failure. A correct controller
+finishes well inside it.
 
 ### The negative control
 
@@ -116,11 +117,10 @@ cert-manager leaves the issued Secret behind, as upstream documents. The target 
 `v1/Secret` as managed, so G3 has to report it:
 
 ```sh
-examples/cert-manager/quickstart.sh --seed 23 --runs 1 --launch-arg --enable-certificate-owner-ref=false
+examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 5m --launch-arg --enable-certificate-owner-ref=false
 ```
 
 ```
-the deadline is 7m20s: this run can take 3m20s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.
 run 1: seed 23, generated
 run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-21T05:59:08.980624165Z; 1 version, the first v1/Secret example-tls
@@ -129,11 +129,11 @@ run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was delete
 ```
 
 Seed 23 draws a single op, so there is nothing to minimize. A longer sequence is cut to the ops
-the failure needs before it is reported, which costs a replay each. The deadline gives that at
-least 4 minutes, and a longer `--deadline` gives it more. `make test-example` runs this same
-control. It fails unless the default configuration passes, the control fails on G3 naming that
-Secret, and the control's evidence hides the Secret's private key. A nightly workflow draws its
-own seeds.
+the failure needs before it is reported, which costs a replay each. A derived deadline gives
+that at least 4 minutes, and a longer `--deadline` gives it more. `make test-example` runs this
+same control. It fails unless the default configuration passes, the control fails on G3 naming
+that Secret, and the control's evidence hides the Secret's private key. A nightly workflow draws
+its own seeds.
 
 ## A second example: external-secrets
 

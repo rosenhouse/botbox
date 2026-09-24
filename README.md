@@ -457,7 +457,9 @@ jobs:
         run: |
           go install github.com/rosenhouse/botbox/cmd/botbox@$BOTBOX_VERSION
           go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$SETUP_ENVTEST_VERSION
-      - run: echo "KUBEBUILDER_ASSETS=$(setup-envtest use $ENVTEST_K8S_VERSION --index $ENVTEST_INDEX_URL --bin-dir bin/envtest -p path)" >>"$GITHUB_ENV"
+      - run: |
+          assets=$(setup-envtest use $ENVTEST_K8S_VERSION --index $ENVTEST_INDEX_URL --bin-dir bin/envtest -p path)
+          echo "KUBEBUILDER_ASSETS=$assets" >>"$GITHUB_ENV"
       # Saving before botbox runs fills the cache even when botbox fails.
       - if: steps.tools.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4

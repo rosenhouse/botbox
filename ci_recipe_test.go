@@ -3,6 +3,8 @@ package botbox_test
 import (
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -192,6 +194,41 @@ func TestTheCIRecipeCachesWhatItInstalls(t *testing.T) {
 		case strings.Contains(s.Run, "botbox run") && i < saved:
 			t.Errorf("step %d runs botbox before the cache is saved, so a find would leave it unsaved: %q", i, s.Run)
 		}
+	}
+}
+
+func TestTheCIRecipeExportsTheControlPlaneOrFails(t *testing.T) {
+	steps := recipeSteps(t)
+	i := slices.IndexFunc(steps, func(s step) bool { return strings.Contains(s.Run, "KUBEBUILDER_ASSETS=") })
+	if i < 0 {
+		t.Fatal("no step exports KUBEBUILDER_ASSETS")
+	}
+	script := steps[i].Run
+
+	for _, test := range []struct {
+		name, setupEnvtest, wantEnv string
+		wantErr                     bool
+	}{
+		{name: "setup-envtest prints the path", setupEnvtest: "echo /assets", wantEnv: "KUBEBUILDER_ASSETS=/assets\n"},
+		{name: "setup-envtest fails", setupEnvtest: "exit 1", wantErr: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, "setup-envtest"), []byte("#!/bin/sh\n"+test.setupEnvtest+"\n"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			githubEnv := filepath.Join(dir, "github-env")
+			// Actions runs a step with no shell key as bash -e.
+			step := exec.Command("bash", "-e", "-c", script)
+			step.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv)
+			output, err := step.CombinedOutput()
+			if (err != nil) != test.wantErr {
+				t.Fatalf("the step returned %v, and wanted an error: %t\n%s", err, test.wantErr, output)
+			}
+			if exported, _ := os.ReadFile(githubEnv); string(exported) != test.wantEnv {
+				t.Errorf("the step exported %q, not %q", exported, test.wantEnv)
+			}
+		})
 	}
 }
 

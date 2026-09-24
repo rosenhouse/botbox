@@ -426,12 +426,42 @@ func TestTheCIRecipeSetsEveryVariableItReads(t *testing.T) {
 	}
 }
 
+func TestTheCIRecipeRunsWhereThisRepositorysWorkflowsRun(t *testing.T) {
+	paths, err := filepath.Glob(".github/workflows/*.yml")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("found workflows %v: %v", paths, err)
+	}
+	runners, releases := map[string]bool{}, map[string]bool{}
+	for _, path := range paths {
+		for _, j := range readWorkflow(t, path).Jobs {
+			runners[j.RunsOn] = true
+			for _, s := range j.Steps {
+				releases[actionRelease(s.Uses)] = true
+			}
+		}
+	}
+	recipe := recipeJob(t)
+	if !runners[recipe.RunsOn] {
+		t.Errorf("the recipe runs its bash steps on %q, and this repository's workflows run only on %v", recipe.RunsOn, slices.Sorted(maps.Keys(runners)))
+	}
+	for _, s := range recipe.Steps {
+		if s.Uses != "" && !releases[actionRelease(s.Uses)] {
+			t.Errorf("the recipe uses %s, a release this repository's workflows do not run", s.Uses)
+		}
+	}
+}
+
+// actionRelease names an action's repository and version, so that
+// actions/cache/restore@v4 is actions/cache@v4.
+func actionRelease(uses string) string {
+	name, version, _ := strings.Cut(uses, "@")
+	parts := strings.SplitN(name, "/", 3)
+	return strings.Join(parts[:min(len(parts), 2)], "/") + "@" + version
+}
+
 func TestTheCIRecipeChecksOutTheRepositoryWithAReadOnlyToken(t *testing.T) {
 	recipe := recipeJob(t)
-	if recipe.RunsOn == "" {
-		t.Error("the job names no runner")
-	}
-	if len(recipe.Steps) == 0 || !strings.HasPrefix(recipe.Steps[0].Uses, "actions/checkout@") {
+	if len(recipe.Steps) == 0|| !strings.HasPrefix(recipe.Steps[0].Uses, "actions/checkout@") {
 		t.Error("the job's first step does not check out the repository")
 	}
 	if permissions := readWorkflow(t, ciRecipe).Permissions; !maps.Equal(permissions, map[string]string{"contents": "read"}) {

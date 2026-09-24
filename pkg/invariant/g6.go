@@ -12,8 +12,8 @@ import (
 )
 
 // NoErrorLoop is G6: the target does not make the same failing request, same
-// verb, resource and name, more than N_errloop times within T_settle under a
-// stable spec with no faults (DESIGN.md §6).
+// verb, resource, namespace and name, more than N_errloop times within
+// T_settle under a stable spec with no faults (DESIGN.md §6).
 func NoErrorLoop(in Input) (Result, error) {
 	threshold := in.errLoop()
 	out := Result{ID: "G6"}
@@ -31,14 +31,14 @@ func NoErrorLoop(in Input) (Result, error) {
 	return out, nil
 }
 
-// failure is the failing requests of one verb, resource and name in one
-// stretch of unchanged spec.
+// failure is the failing requests of one verb, resource, namespace and name in
+// one stretch of unchanged spec.
 type failure struct {
 	key      requestKey
 	requests []proxy.Request
 }
 
-type requestKey struct{ verb, group, resource, name string }
+type requestKey struct{ verb, group, resource, namespace, name string }
 
 func (k requestKey) String() string {
 	resource := k.resource
@@ -80,7 +80,7 @@ func (in Input) repeatedFailures() []failure {
 }
 
 func keyOf(r proxy.Request) requestKey {
-	return requestKey{verb: r.Verb, group: r.Group, resource: r.Resource, name: r.Name}
+	return requestKey{verb: r.Verb, group: r.Group, resource: r.Resource, namespace: r.Namespace, name: r.Name}
 }
 
 // failed reports whether the API server refused the target, rather than the

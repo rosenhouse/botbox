@@ -410,7 +410,7 @@ real targets; the toy target sets much shorter ones (§9).
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
-| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
+| **G6** | No error loop | The target does not make the same failing request (same verb, resource, namespace and name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
 
 **The quiet window.** G1 and G2 judge the `T_stable` that follows a settle wait, which
 ends where the run converged or where the wait gave up (§5.5). Measuring
@@ -1597,3 +1597,11 @@ built from source and run as a black-box binary.
   exits more than once per fault op while faults are active. The Runner owes each such
   exit `T_settle` past its restart, so a crash loop under an active fault runs until the
   deadline and exits 2 rather than failing G4.
+- **D@51 G6 counts each namespace's requests apart.** Ten runs of external-secrets with
+  no flags failed G6 at run 8: the controller repeated `create events` 34 times in 30 s.
+  None went to the run namespace. envtest never finishes deleting a namespace, so each
+  earlier run's objects stay, and the controller wrote two events into each of 17 such
+  namespaces as it started. The API server refused each with 403. G6 ignored the
+  namespace, so the count grew with every run. A request into another namespace is a
+  request for another object, so G6 now tells them apart. Judging only the run namespace
+  was rejected: G6 would then miss a failing cluster-wide watch, which D27 counts.

@@ -85,6 +85,9 @@ func TestG6CountsAFailingWatch(t *testing.T) {
 }
 
 func TestG6CountsOneRequestAtATime(t *testing.T) {
+	// An earlier run's namespace, which the target can still reconcile.
+	elsewhere := failedGet("w-0", 404)
+	elsewhere.Namespace = "botbox-run-0"
 	for _, differs := range []struct {
 		field string
 		other proxy.Request
@@ -92,6 +95,7 @@ func TestG6CountsOneRequestAtATime(t *testing.T) {
 		{"name", failedGet("w-1", 404)},
 		{"verb", failedDelete("w-0", 404)},
 		{"resource", failedWidgetGet(404)},
+		{"namespace", elsewhere},
 	} {
 		t.Run(differs.field, func(t *testing.T) {
 			in := loop(errLoop, failedGet("w-0", 404)).

@@ -298,7 +298,8 @@ func (f *fakeHarness) managedObjects(gvk schema.GroupVersionKind) []string {
 }
 
 func (f *fakeHarness) deleteManaged(_ context.Context, gvk schema.GroupVersionKind, name string) (bool, error) {
-	return !slices.Contains(f.gone, name), f.record("deleteManaged " + kindName(gvk) + " " + name)
+	err := f.record("deleteManaged " + kindName(gvk) + " " + name)
+	return err == nil && !slices.Contains(f.gone, name), err
 }
 
 func (f *fakeHarness) managedCount() int { return f.count }

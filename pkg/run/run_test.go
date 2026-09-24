@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,6 +18,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
 	"github.com/rosenhouse/botbox/pkg/launch"
@@ -448,6 +450,47 @@ func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
 		if down := exit.Restart.Sub(exit.At); down > want.backoff || down < want.backoff-time.Second {
 			t.Errorf("Exit %d restarts %v after it, want %v.", i+1, down, want.backoff)
 		}
+	}
+}
+
+// An interrupt has ended the run's context, and an API server may never answer.
+func TestTheRunNamespaceIsDeletedAfterAnInterruptWithinABound(t *testing.T) {
+	requests := make(chan string, 10)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Method + " " + r.URL.Path
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+	core, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	deleted := make(chan error, 1)
+	go func() { deleted <- deleteNamespace(ended, core, "botbox-run", 100*time.Millisecond) }()
+
+	select {
+	case err := <-deleted:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("Deleting the namespace returned %v, want it to give up.", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Deleting the namespace still waited on the API server after 10s.")
+	}
+	select {
+	case got := <-requests:
+		if want := "DELETE /api/v1/namespaces/botbox-run"; got != want {
+			t.Errorf("The API server got %q, want %q.", got, want)
+		}
+	default:
+		t.Error("The API server got no request to delete the namespace.")
 	}
 }
 

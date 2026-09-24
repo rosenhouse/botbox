@@ -170,11 +170,8 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 	if err := h.createNamespace(ctx, core); err != nil {
 		return err
 	}
-	// The namespace goes even when an interrupt has ended ctx.
 	h.down.push("deleting the run namespace", func(ctx context.Context) error {
-		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownMargin)
-		defer cancel()
-		return deleteNamespace(ctx, core, h.Namespace)
+		return deleteNamespace(ctx, core, h.Namespace, teardownMargin)
 	})
 
 	if h.Proxy, err = proxy.Start(h.Config, proxy.Options{Seed: opts.Seed}); err != nil {
@@ -252,7 +249,11 @@ func (h *Harness) createNamespace(ctx context.Context, core kubernetes.Interface
 	return nil
 }
 
-func deleteNamespace(ctx context.Context, core kubernetes.Interface, name string) error {
+// deleteNamespace deletes the namespace even when an interrupt has ended ctx,
+// and gives up after within.
+func deleteNamespace(ctx context.Context, core kubernetes.Interface, name string, within time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), within)
+	defer cancel()
 	err := core.CoreV1().Namespaces().Delete(ctx, name, metav1.DeleteOptions{})
 	if apierrors.IsNotFound(err) {
 		return nil

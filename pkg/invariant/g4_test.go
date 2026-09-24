@@ -237,9 +237,22 @@ func TestG4GivesARestartedTargetTSettlePastItsReturn(t *testing.T) {
 		return converged().op(invariant.OpUpdate, 4*time.Second).op(invariant.OpRestart, 4100*time.Millisecond)
 	}
 
+	restartAfterConverging := newRun().
+		op(invariant.OpCreate, 0).
+		record(500*time.Millisecond, widget("10", spec(2), status(2, 1))).
+		running(600*time.Millisecond).
+		checkpoint(2500*time.Millisecond, invariant.Converged).
+		op(invariant.OpRestart, 4*time.Second).
+		running(4500*time.Millisecond).
+		checkpoint(6500*time.Millisecond, invariant.Converged).
+		record(8*time.Second, widget("11", spec(2), status(1, 1))).
+		record(11*time.Second, widget("12", spec(2), status(2, 1))).
+		through(14 * time.Second)
+
 	for name, in := range map[string]invariant.Input{
-		"a restart before the change": readyAt(restartThenUpdate(), 8900*time.Millisecond, 10*time.Second),
-		"a restart after the change":  readyAt(updateThenRestart(), 8900*time.Millisecond, 10*time.Second),
+		"a restart before the change":                readyAt(restartThenUpdate(), 8900*time.Millisecond, 10*time.Second),
+		"a restart after the change":                 readyAt(updateThenRestart(), 8900*time.Millisecond, 10*time.Second),
+		"a restart after the target converged on it": restartAfterConverging,
 	} {
 		t.Run(name, func(t *testing.T) { silent(t, invariant.Convergence, in) })
 	}

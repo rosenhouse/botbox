@@ -105,6 +105,8 @@ type fakeHarness struct {
 	supervising   context.Context
 	stoppedAtOnce bool
 	cancelled     []string
+	// clock is the run's clock. Nil is the wall clock.
+	clock func() time.Time
 }
 
 func newFakeHarness() *fakeHarness {
@@ -133,6 +135,13 @@ func (f *fakeHarness) record(call string) error {
 const fakeNamespace = "botbox-run-test"
 
 func (f *fakeHarness) namespace() string { return fakeNamespace }
+
+func (f *fakeHarness) now() time.Time {
+	if f.clock == nil {
+		return time.Now()
+	}
+	return f.clock()
+}
 
 func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time) (bool, error) {
 	if f.applyingInWait != nil {
@@ -173,7 +182,7 @@ func (f *fakeHarness) exit() {
 		if n := len(f.exited); n < len(f.says) {
 			said = f.says[n]
 		}
-		now := time.Now()
+		now := f.now()
 		f.exited = append(f.exited, Exit{At: now, Err: f.targetExit, Said: said, Restart: now.Add(f.restartsIn)})
 		return
 	}
@@ -234,9 +243,9 @@ func (f *fakeHarness) remove(id proxy.FaultID) {
 		return
 	}
 	if _, applied := f.applied[id]; f.faultingAsRemoved && !applied {
-		f.applied[id] = time.Now()
+		f.applied[id] = f.now()
 	}
-	f.removed[id] = time.Now()
+	f.removed[id] = f.now()
 }
 
 // apply has the proxy apply each fault it holds, from now if it has not yet.
@@ -244,7 +253,7 @@ func (f *fakeHarness) apply() {
 	for id := range proxy.FaultID(f.added) {
 		_, removed := f.removed[id]
 		if _, applied := f.applied[id]; !applied && !removed {
-			f.applied[id] = time.Now()
+			f.applied[id] = f.now()
 		}
 	}
 }

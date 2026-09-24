@@ -264,6 +264,7 @@ func WriteRunSequence(dir string, sequence Sequence) error {
 // implements it over a started Harness.
 type harness interface {
 	namespace() string
+	now() time.Time
 	// settle waits for the target to converge, past T_settle while owed
 	// returns a later instant.
 	settle(ctx context.Context, owed func() time.Time) (bool, error)
@@ -359,7 +360,7 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 		h:        h,
 		limit:    opts.maxManaged(),
 		dir:      opts.Dir,
-		now:      time.Now,
+		now:      h.now,
 		timeline: Timeline{Namespace: h.namespace()},
 	}
 	failure := r.applyOps(ctx)

@@ -308,6 +308,15 @@ func TestBoundOfSeveralRunsIsTheirSum(t *testing.T) {
 	}
 }
 
+func TestBoundCountsASumPastHalfTheLongestDuration(t *testing.T) {
+	// Each run takes 3×2^60ns, with 102s of margins beside its settle wait.
+	long := withTimeouts(target.Timeouts{Settle: 3<<60 - 102*time.Second, Stable: time.Second, Delete: time.Second})
+
+	if bound, want := Bound(long, sequenceOf(createOp), sequenceOf(createOp)), time.Duration(3<<61); bound != want {
+		t.Errorf("Bound is %v, want %v.", bound, want)
+	}
+}
+
 func TestBoundSaturatesRatherThanOverflow(t *testing.T) {
 	defaults := withTimeouts(target.DefaultTimeouts)
 	ops := []Op{createOp}

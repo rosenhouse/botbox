@@ -1449,7 +1449,7 @@ func TestParseDefaultsTheOutputDirectoryAndLeavesTheDeadlineToDerive(t *testing.
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)
 	}
-	if opts.deadlineGiven || opts.out != defaultOut {
+	if opts.deadlineGiven || opts.deadline != 0 || opts.out != defaultOut {
 		t.Errorf("parse read a deadline of %v and defaulted to the directory %q, want no deadline and %q.",
 			opts.deadline, opts.out, defaultOut)
 	}

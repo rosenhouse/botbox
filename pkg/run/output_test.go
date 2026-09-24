@@ -1,8 +1,10 @@
 package run
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -48,6 +50,54 @@ func TestOutputNeverSharesADirectoryWithAnotherInvocation(t *testing.T) {
 		if _, err := os.Stat(dir); err != nil {
 			t.Errorf("The invocation directory is missing: %v", err)
 		}
+	}
+}
+
+func TestWriteAtomicReplacesTheFileWhole(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "summary.json")
+	if err := WriteAtomic(path, []byte("old\n")); err != nil {
+		t.Fatalf("WriteAtomic failed: %v", err)
+	}
+	reader, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	if err := WriteAtomic(path, []byte("new\n")); err != nil {
+		t.Fatalf("The second WriteAtomic failed: %v", err)
+	}
+
+	if held, _ := io.ReadAll(reader); string(held) != "old\n" {
+		t.Errorf("A reader that opened the file before the write read %q, want the old file whole.", held)
+	}
+	if now, _ := os.ReadFile(path); string(now) != "new\n" {
+		t.Errorf("The file holds %q, want the new content.", now)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o644 {
+		t.Errorf("The file's mode is %v (%v), want -rw-r--r--.", info.Mode(), err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("The directory holds %v, want the file alone.", entries)
+	}
+}
+
+func TestAFailedWriteAtomicLeavesNothingBehind(t *testing.T) {
+	dir := t.TempDir()
+	// A directory in the way fails the rename, after the content is written.
+	taken := filepath.Join(dir, "summary.json")
+	if err := os.MkdirAll(filepath.Join(taken, "inside"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := WriteAtomic(taken, []byte("new\n"))
+
+	if err == nil || !strings.Contains(err.Error(), taken) {
+		t.Errorf("WriteAtomic returned %v, want an error naming %s.", err, taken)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("The directory holds %v, want only what was there.", entries)
 	}
 }
 

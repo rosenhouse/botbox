@@ -145,7 +145,7 @@ func TestNoTwoCRsShareADistinctValue(t *testing.T) {
 			loaded := loadTarget(t, testCase.path)
 			g := newGenerator(t, loaded, Options{})
 			several := 0
-			// Seed 713 once gave two ExternalSecrets one target.
+			// Without the check, seed 713 gives two ExternalSecrets one target.
 			for seed := int64(1); seed <= 3000; seed++ {
 				follow(sequenceAt(t, g, seed), loaded.Sample.GetName(), func(op run.Op, _ string, crs map[string]*written) {
 					held := map[string]string{}

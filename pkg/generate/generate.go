@@ -94,7 +94,7 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 	}
 	for _, dotted := range t.Generate.Distinct {
 		path := strings.Split(dotted, ".")
-		if _, found, err := unstructured.NestedString(t.Sample.Object, path...); !found || err != nil {
+		if _, found, _ := unstructured.NestedString(t.Sample.Object, path...); !found {
 			return nil, fmt.Errorf("generate.distinct %s: the sample holds no string there, and each CR after the first appends to it", dotted)
 		}
 		g.distinct = append(g.distinct, path)
@@ -155,9 +155,9 @@ func (g *Generator) sequence(t *rapid.T) run.Sequence {
 
 // checkpointed inserts the settle waits that leave the drawn ops judged
 // (DESIGN.md §6). A restart is wrapped in them: G5 compares the converged
-// state either side of a restart, and judges nothing if another op changed the
-// run in between. The last op takes one because nothing else judges the state
-// the run ends in. A noSettle elsewhere is left alone.
+// state either side of a restart, less what another op in between may have
+// changed. The last op takes one because nothing else judges the state the run
+// ends in. A noSettle elsewhere is left alone.
 func checkpointed(ops []run.Op) []run.Op {
 	judged := make([]run.Op, 0, 3*len(ops))
 	settled := false

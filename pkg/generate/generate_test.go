@@ -201,6 +201,10 @@ func TestTheStateFollowsTheCRBotboxLastWrote(t *testing.T) {
 	if !equalJSON(at.crs[0].object, spec(5)) || !equalJSON(at.crs[1].object, spec(1)) {
 		t.Errorf("After an update the state holds %v, want %v and %v.", at.crs, spec(5), spec(1))
 	}
+	at.advance(run.Op{Type: run.OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(6)}}}, 1)
+	if !equalJSON(at.crs[0].object, spec(5)) || !equalJSON(at.crs[1].object, spec(6)) {
+		t.Errorf("After an update of the second CR the state holds %v, want %v and %v.", at.crs, spec(5), spec(6))
+	}
 	at.advance(run.Op{Type: run.OpDelete}, 0)
 	if at.crs[0].live || !equalJSON(at.crs[0].object, spec(5)) || len(at.live()) != 1 {
 		t.Errorf("After a delete the state holds %v, want the first CR deleted and still known.", at.crs)

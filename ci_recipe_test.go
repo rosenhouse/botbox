@@ -477,6 +477,25 @@ func runText(steps []step) string {
 	return strings.Join(commands, "\n")
 }
 
+func TestTheCIRecipeSetsUpGoBeforeItRunsGo(t *testing.T) {
+	steps := recipeSteps(t)
+	setupGo := slices.IndexFunc(steps, func(s step) bool { return strings.HasPrefix(s.Uses, "actions/setup-go@") })
+	for i, s := range steps {
+		if regexp.MustCompile(`(?m)^\s*go `).MatchString(s.Run) && i < setupGo {
+			t.Errorf("step %d runs go before setup-go installs it: %q", i, s.Run)
+		}
+	}
+}
+
+func TestTheCIRecipeBuildsTheControllerBeforeBotboxRuns(t *testing.T) {
+	steps := recipeSteps(t)
+	build := slices.IndexFunc(steps, func(s step) bool { return strings.Contains(s.Run, "go build -o ") })
+	run := slices.IndexFunc(steps, func(s step) bool { return strings.Contains(s.Run, "botbox run") })
+	if build < 0 || build > run {
+		t.Error("the recipe does not build the controller before botbox launches it")
+	}
+}
+
 func TestTheCIRecipeNeedsNoGoMod(t *testing.T) {
 	setupGo := stepUsing(t, recipeSteps(t), "actions/setup-go")
 	if file, ok := setupGo.With["go-version-file"]; ok {

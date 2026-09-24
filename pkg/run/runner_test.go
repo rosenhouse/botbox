@@ -1279,34 +1279,45 @@ func TestATargetFoundStoppedOnceTheContextEndedCarriesTheContextsError(t *testin
 	quiet := "sleep " + testTimeouts.Stable.String()
 	deletion := "awaitClean " + (testTimeouts.Delete + deletionMargin).String()
 	create := Op{Type: OpCreate, Obj: widget("widget"), NoSettle: true}
+	fault := Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}}
+	settle := Op{Type: OpSettle}
 	for _, test := range []struct {
 		name string
-		h    *fakeHarness
 		ops  []Op
-		// cancelsAfter is the call the context ends at.
-		cancelsAfter string
-		canceled     bool
+		// The target stops at the call stopsAfter names, and the context ends
+		// with ending at the call endsAfter names.
+		stopsAfter, endsAfter string
+		ending                error
+		wraps                 bool
 	}{
-		{name: "at an op", h: &fakeHarness{clean: true, stopsAfter: "createCR widget"},
-			ops: []Op{create, {Type: OpSettle}}, cancelsAfter: "createCR widget", canceled: true},
-		{name: "at the end of a settle wait", h: &fakeHarness{clean: true, stopsAfter: "settle"},
-			ops: []Op{{Type: OpSettle}}, cancelsAfter: "settle", canceled: true},
-		{name: "in the teardown", h: &fakeHarness{converged: true, clean: true, restartFails: true, stopsAfter: deletion},
-			ops: []Op{{Type: OpSettle}}, cancelsAfter: deletion, canceled: true},
-		{name: "before the context ended", h: &fakeHarness{clean: true, stopsAfter: "createCR widget"},
-			ops: []Op{create, {Type: OpSettle}}, cancelsAfter: quiet, canceled: false},
+		{"at an op", []Op{create, settle}, "createCR widget", "createCR widget", context.Canceled, true},
+		{"at an op, past the deadline", []Op{create, settle}, "createCR widget", "createCR widget", context.DeadlineExceeded, true},
+		{"at the end of a settle wait", []Op{settle}, "settle", "settle", context.Canceled, true},
+		{"in the recovery", []Op{settle, fault, settle}, "clearFaults", "clearFaults", context.Canceled, true},
+		{"in the teardown", []Op{settle}, deletion, deletion, context.Canceled, true},
+		{"before the context ended", []Op{create, settle}, "createCR widget", quiet, context.Canceled, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			h := newFakeHarness()
+			h.faulting, h.restartFails, h.stopsAfter = true, true, test.stopsAfter
 			ctx, cancel := context.WithCancel(t.Context())
-			test.h.cancel, test.h.cancelsAfter = cancel, test.cancelsAfter
+			defer cancel()
+			end := cancel
+			if test.ending == context.DeadlineExceeded {
+				var stop context.CancelFunc
+				ctx, stop = context.WithTimeout(ctx, time.Millisecond)
+				defer stop()
+				end = func() { <-ctx.Done() }
+			}
+			h.cancel, h.cancelsAfter = end, test.endsAfter
 
-			_, err := runSequence(ctx, toyTarget, sequenceOf(test.ops...), Options{Check: &fakeChecker{}, Dir: t.TempDir()}, test.h)
+			_, err := runSequence(ctx, toyTarget, sequenceOf(test.ops...), Options{Check: &fakeChecker{}, Dir: t.TempDir()}, h)
 
 			if !errors.Is(err, ErrTargetStopped) {
 				t.Fatalf("The run returned %v, want the target stopped.", err)
 			}
-			if canceled := errors.Is(err, context.Canceled); canceled != test.canceled {
-				t.Errorf("The run returned %q, which wraps context.Canceled: %t, want %t.", err, canceled, test.canceled)
+			if wraps := errors.Is(err, test.ending); wraps != test.wraps {
+				t.Errorf("The run returned %q, which wraps %v: %t, want %t.", err, test.ending, wraps, test.wraps)
 			}
 		})
 	}

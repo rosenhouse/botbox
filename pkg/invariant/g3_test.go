@@ -467,8 +467,8 @@ func TestG3LeavesAnObjectToACRThatAdoptedIt(t *testing.T) {
 	silent(t, invariant.CleanDeletion, in)
 }
 
-// botbox took an object the deleted CR had to answer for, since the CR
-// deleted before it went before its deadline.
+// w answers for an object that names no CR, since w2 goes first, and botbox
+// took the object inside w's window.
 func TestG3NotesAnObjectBotboxTookFromTheLastOfItsCRs(t *testing.T) {
 	in := newRun().withSecondWidget().
 		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup)),

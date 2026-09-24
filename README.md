@@ -325,11 +325,13 @@ note instead of a verdict when another op changed something in between.
 
 ## Reading a report
 
-Once botbox has planned its runs, it writes `summary.json` and `summary.md` into
-`botbox-out/<timestamp>-<seed>/`, however the invocation ends. They list each planned run: its
-seed and sequence, how it ended, the faults the proxy applied, the times your controller
-exited, and what the checks could not judge. `summary.json` is for a machine. Its `schema`
-changes when a field changes meaning or goes away ([DESIGN.md §11](DESIGN.md#11-repo-conventions)).
+Unless botbox cannot read your target or a sequence, it writes `summary.json` and
+`summary.md` into `botbox-out/<timestamp>-<seed>/` as each run starts and when it finishes.
+They list each planned run: its seed, how it ended, the faults the proxy applied, the times
+your controller exited, and what the checks could not judge. A run that was under way when
+botbox was killed reads `unfinished`. `summary.json` also holds each run's sequence, for a
+machine. Its `schema` changes when a field changes meaning or goes away
+([DESIGN.md §11](DESIGN.md#11-repo-conventions)).
 
 A run that violates an invariant prints the ID, what it saw and where the evidence is, then
 exits 1. A configuration or harness error exits 2, so your CI can tell a find from a broken
@@ -457,8 +459,10 @@ Exit 2 means botbox could not test your controller, and the message says what to
 ```
 
 The job's page then shows the summary, and the artifact keeps each run's sequence and a
-failing run's evidence. On GitLab or Jenkins, `--junit botbox.xml` writes the runs as JUnit XML
-for `artifacts:reports:junit` or the `junit` step.
+failing run's evidence. Anyone who can read the repository can download the artifact, and
+botbox hides only the values of a Secret's `data` and annotations
+([Reading a report](#reading-a-report)). On GitLab or Jenkins, `--junit botbox.xml` writes the
+runs as JUnit XML for `artifacts:reports:junit` or the `junit` step.
 
 `$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not.
 `--deadline` caps the job, which botbox otherwise lets run as long as its runs can take. Give it

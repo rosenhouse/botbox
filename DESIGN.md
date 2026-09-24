@@ -442,19 +442,19 @@ equal. An item that `[*]` names stays even when left empty, so the items still c
 **G7 evaluation.** G7 is evaluated once per `DeleteManaged` op that deleted something,
 where the settle wait after it ends, which is always before the teardown boundary. Its
 window is that wait: up to `T_settle` or later after a fault or a deletion, closing once
-`Ready` holds with `T_stable` of quiet behind it (§5.5). Where `Ready` holds without the object, the target therefore has
-`T_stable` to recreate it. An object of the deleted one's kind and name satisfies G7,
-whatever its UID and content, since a recreated object carries a new UID. Where none
-exists, G7 does not judge an op where no primary CR is live, or where the CR is being
-deleted, when the wait ends: nothing asks for the object back. It notes an op where botbox
-changed the CR or a managed object after the last settle wait that converged, since the
-target may then have meant to delete the object itself, and one where a fault was active
-during the op or its wait. It also notes an op that follows a `Restart` where the target
-requested nothing between the two but leader election's leases and lease candidates, and
-paths that name no resource. botbox has no other sign that the target is back (§5.1), and
-a process starting up or waiting to lead requests only those. A violation quotes the
-object's history and the managed objects where the wait ended, which show an object
-recreated under a new name.
+`Ready` holds with `T_stable` of quiet behind it (§5.5). Where `Ready` holds without the
+object, the target therefore has `T_stable` to recreate it. An object of the deleted one's
+kind and name satisfies G7, whatever its UID and content, since a recreated object carries
+a new UID. Where none exists, G7 does not judge an op where no primary CR is live, or
+where the CR is being deleted, when the wait ends: nothing asks for the object back. It
+notes an op where botbox changed the CR or a managed object after the last settle wait
+that converged, since the target may then have meant to delete the object itself, and one
+where a fault was active during the op or its wait. It also notes an op that follows a
+`Restart` where the target requested nothing between the two but leader election's leases
+and lease candidates, and paths that name no resource. botbox has no other sign that the
+target is back (§5.1), and a process starting up or waiting to lead requests only those. A
+violation quotes the object's history and the managed objects where the wait ended, which
+show an object recreated under a new name.
 
 ## 7. Sequence format
 
@@ -566,9 +566,10 @@ thresholds:                                   # optional; defaults in §6
 
 A settle wait ends once the Ready predicate holds and nothing has changed for `stable`,
 within `settle` or later after a fault or a deletion (§5.5), so the target has
-`settle - stable` to react before the quiet window has to open. A `stable` at least as wide as `settle` leaves it none, and every op
-that writes then expires. Loading such a target is a configuration error rather than a run
-that reports G4 against a target that did nothing wrong.
+`settle - stable` to react before the quiet window has to open. A `stable` at least as
+wide as `settle` leaves it none, and every op that writes then expires. Loading such a
+target is a configuration error rather than a run that reports G4 against a target that
+did nothing wrong.
 
 `manages` names kinds as `group/version/Kind`, with `v1/Kind` for the core group. An
 optional `selector` (label selector) refines attribution (§6). Paths under `generate` are

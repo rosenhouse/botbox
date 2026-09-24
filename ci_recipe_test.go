@@ -332,9 +332,14 @@ func TestNightlyFindsSayHowToRestoreTheirEvidence(t *testing.T) {
 				continue
 			}
 			expand := func(text string) string {
-				return os.Expand(text, func(v string) string { return s.Env[v] })
+				return os.Expand(text, func(v string) string {
+					if value, ok := s.Env[v]; ok {
+						return value
+					}
+					return "$" + v
+				})
 			}
-			if expand(hint[1]) != "${{ github.run_id }}" {
+			if expand(hint[1]) != "$GITHUB_RUN_ID" {
 				t.Errorf("job %s: %q names a run other than the one that failed", name, hint[0])
 			}
 			if expand(hint[2]) != upload.With["name"] {

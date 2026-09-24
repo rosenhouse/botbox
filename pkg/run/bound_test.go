@@ -315,7 +315,6 @@ func TestBoundSaturatesRatherThanOverflow(t *testing.T) {
 		ops = append(ops, countedOp)
 	}
 	manyFaults := sequenceOf(append(ops, updateOp)...)
-	// Two of the longest durations add up to one that looks short.
 	const longest = math.MaxInt64
 	settles := withTimeouts(target.Timeouts{Settle: longest, Stable: time.Second, Delete: time.Second})
 	deletes := withTimeouts(target.Timeouts{Settle: 2 * time.Second, Stable: time.Second, Delete: longest / 3})
@@ -332,6 +331,9 @@ func TestBoundSaturatesRatherThanOverflow(t *testing.T) {
 		{"long deletions", Bound(deletes, sequenceOf(slices.Concat([]Op{createOp}, slices.Repeat([]Op{recreate}, 7))...))},
 		{"a long teardown", Bound(teardowns, sequenceOf(createOp))},
 		{"two long runs", Bound(long, sequenceOf(createOp), sequenceOf(createOp))},
+		// Each run takes 2^62ns, with 102s of margins beside its settle wait.
+		{"two runs that just overflow", Bound(withTimeouts(target.Timeouts{Settle: 1<<62 - 102*time.Second, Stable: time.Second, Delete: time.Second}),
+			sequenceOf(createOp), sequenceOf(createOp))},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if test.bound != math.MaxInt64 {

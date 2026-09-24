@@ -14,24 +14,31 @@ const stopBudget = 2*launch.DefaultGracePeriod + teardownMargin
 
 // Bound is the longest the Runner's waits can make the runs of the sequences
 // take, one after another. A target that exits more than once per fault op
-// while faults are active can outlast it.
+// while faults are active can outlast it. A bound too long for a Duration is
+// the longest Duration.
 func Bound(t *target.Target, sequences ...Sequence) time.Duration {
-	var total time.Duration
+	// Faults double the bound, so it is added up in float64, which does not
+	// overflow.
+	var total float64
 	for _, s := range sequences {
-		total = sum(total, bound(t.Timeouts, s))
+		total += bound(t.Timeouts, s)
 	}
-	return total
+	if total >= math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return time.Duration(total)
 }
 
-func bound(timeouts target.Timeouts, s Sequence) time.Duration {
-	bound := defaultNamespaceDefaultsWithin
+func bound(timeouts target.Timeouts, s Sequence) float64 {
+	settle, deletion := float64(timeouts.Settle), float64(timeouts.Delete)
+	bound := float64(defaultNamespaceDefaultsWithin)
 	faults, stops, stopTogether := 0, 0, 0
 	for _, op := range s.Ops {
 		switch op.Type {
 		case OpDelete, OpRecreate:
-			bound = sum(bound, timeouts.Delete)
+			bound += deletion
 		case OpRestart:
-			bound = sum(bound, launch.DefaultGracePeriod)
+			bound += float64(launch.DefaultGracePeriod)
 		case OpFault:
 			faults++
 			if op.Fault.Until == (Trigger{}) {
@@ -41,36 +48,17 @@ func bound(timeouts target.Timeouts, s Sequence) time.Duration {
 			}
 		}
 		if op.Settles() {
-			bound = sum(bound, timeouts.Settle)
+			bound += settle
 		}
 	}
 	// A target that exits while a fault excuses it is owed T_settle past a
 	// restart that can take MaxBackoff. Faults that stopped are owed as long
 	// as they lasted and T_settle. Faults with no trigger stop together.
-	exit := sum(launch.MaxBackoff, timeouts.Settle)
-	for range faults {
-		bound = sum(bound, exit)
-	}
+	exit := float64(launch.MaxBackoff) + settle
+	bound += float64(faults) * exit
 	for range stops + stopTogether {
-		bound = sum(bound, bound, timeouts.Settle, exit)
+		bound = 2*bound + settle + exit
 	}
-	return sum(bound, teardownBudget(timeouts), stopBudget)
-}
-
-// teardownBudget bounds the teardown's steps after any recovery wait.
-func teardownBudget(timeouts target.Timeouts) time.Duration {
-	return sum(timeouts.Stable, timeouts.Delete, teardownMargin)
-}
-
-// sum adds durations that are not negative, and saturates rather than
-// overflow.
-func sum(durations ...time.Duration) time.Duration {
-	var total time.Duration
-	for _, d := range durations {
-		if d > math.MaxInt64-total {
-			return math.MaxInt64
-		}
-		total += d
-	}
-	return total
+	teardown := float64(timeouts.Stable) + deletion + float64(teardownMargin)
+	return bound + teardown + float64(stopBudget)
 }

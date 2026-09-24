@@ -814,7 +814,7 @@ func (r *runner) teardown(ctx context.Context) error {
 	}
 	failures := []error{r.awaitRecovery(ctx)}
 
-	down, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownBudget(r.target.Timeouts))
+	down, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.teardownBudget())
 	defer cancel()
 	r.timeline.Quiet.Start = r.now()
 	cut := r.h.sleep(ctx, r.target.Timeouts.Stable)
@@ -902,6 +902,10 @@ func (r *runner) teardownCheckpoint(ctx context.Context, clean bool) error {
 		return fmt.Errorf("the teardown: %w", r.targetStopped(ctx, status))
 	}
 	return r.checkpoint(Checkpoint{At: r.now(), Op: Teardown, Converged: clean}, false)
+}
+
+func (r *runner) teardownBudget() time.Duration {
+	return r.target.Timeouts.Stable + r.target.Timeouts.Delete + teardownMargin
 }
 
 // spec is the fault in the form the proxy injects (DESIGN.md §5.2).

@@ -195,6 +195,9 @@ func TestAnExpiredWaitSaysTheTargetHadNotShownItRuns(t *testing.T) {
 			"in 5s, ready held from 0s on, but the target had requested no resource outside leader election since it started"},
 		{"until the last stable", restarted().running(6500 * time.Millisecond), sinceTheRestart + " until the last stable (2s)"},
 		{"until the last stable began", restarted().running(6 * time.Second), "in 5s, ready held from 0s on, and nothing changed in the last stable (2s)"},
+		// A recreate's wait lasts T_delete, which can be shorter than stable.
+		{"in a wait shorter than stable", readyCR().running(1100*time.Millisecond).op(invariant.OpRestart, 7*time.Second).op(invariant.OpRecreate, 7*time.Second),
+			"but the target had requested no resource outside leader election since op 0 (restart)"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			in := test.run.checkpoint(8*time.Second, invariant.Expired).through(10 * time.Second)
@@ -205,6 +208,23 @@ func TestAnExpiredWaitSaysTheTargetHadNotShownItRuns(t *testing.T) {
 				t.Errorf("The statement is %q, want it to end %q.", violation.Statement, test.want)
 			}
 		})
+	}
+}
+
+// The op at the instant a wait ended came after the wait.
+func TestAnExpiredWaitIgnoresARestartAtItsEnd(t *testing.T) {
+	in := newRun().
+		record(time.Second, widget("10", spec(1), status(1, 1))).
+		running(1100*time.Millisecond).
+		op(invariant.OpSettle, 3*time.Second).
+		checkpoint(8*time.Second, invariant.Expired).
+		op(invariant.OpRestart, 8*time.Second).
+		through(10 * time.Second)
+
+	violation := expiredWait(t, in)
+
+	if want := "and nothing changed in the last stable (2s)"; !strings.HasSuffix(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to end %q.", violation.Statement, want)
 	}
 }
 

@@ -418,8 +418,6 @@ Exit 2 means botbox could not test your controller, and the message says what to
   for `botbox replay`. A controller that binds a fixed port, such as a health probe on
   `:8081`, collides with a second invocation of itself. Give it a free port in
   `launch.args`, or with `--launch-arg`.
-- The message names the directory that holds the files of a run that could not finish.
-  `botbox matrix` keeps only that run's files, in a temporary directory.
 
 ## Running in CI
 

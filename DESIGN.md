@@ -980,7 +980,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   sequence and replay command hold what the target, the sample and the command line gave
   them (D49). `botbox matrix` writes each run to a directory under the system's temporary
   directory and deletes it once the checks have read it. A run that errs keeps its
-  directory, and the error names it.
+  directory, and the error names it and the command that replays the run. CI uploads that
+  directory.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -1549,4 +1550,7 @@ built from source and run as a black-box binary.
   directory on every exit, so a harness error named a `target.log` that was gone. A run
   that errs now keeps its directory, and every other run's is deleted once the checks
   have read it. The directory stays under the system's temporary directory, because the
-  matrix's `--out` names a file. A matrix that finishes leaves nothing there.
+  matrix's `--out` names a file. A matrix that finishes leaves nothing there. CI's
+  bug-matrix job points `TMPDIR` at a directory it uploads when the job fails. The error
+  also prints a replay command with the run's `--bug`, because the runner's hint names
+  only the run's `sequence.json`.

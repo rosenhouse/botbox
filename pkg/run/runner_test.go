@@ -63,7 +63,7 @@ type fakeHarness struct {
 	unresolved []cluster.Unresolved
 
 	// deleteCRDelay holds the CR delete open, and deletedCRAt is when it began.
-	// Together they show whether the teardown was stamped before the delete.
+	// Together they show whether a stamp was taken before or after the delete.
 	deleteCRDelay time.Duration
 	deletedCRAt   time.Time
 	// finalizerStays has the Observer record a deleted CR still under deletion.
@@ -998,6 +998,7 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			h := newFakeHarness()
 			h.crStays = true
+			h.deleteCRDelay = 20 * time.Millisecond
 			deleted := time.Now().Add(-testTimeouts.Delete - time.Second)
 			h.recordDeletingCR("widget", "11", deleted)
 			if test.fault != nil {
@@ -1009,8 +1010,6 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 				Op{Type: OpCreate, Obj: widget("widget")},
 				Op{Type: OpRecreate, Obj: widget("widget")},
 			)
-
-			began := time.Now()
 
 			result, err := runFake(t, h, check, sequence)
 
@@ -1027,8 +1026,9 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 			if got, want := checkpointsAt(result.Timeline), []int{1, 2}; !slices.Equal(got, want) {
 				t.Fatalf("The run checkpointed at %v, want %v.", got, want)
 			}
-			if stayed := result.Timeline.Checkpoints[1]; stayed.Began.Before(began) || stayed.At.Before(stayed.Began) || stayed.At.After(ended) {
-				t.Errorf("The recreate's checkpoint spans %v to %v, want the wait for its CR.", stayed.Began, stayed.At)
+			deleteReturned := result.Timeline.Ops[2].At.Add(h.deleteCRDelay)
+			if stayed := result.Timeline.Checkpoints[1]; stayed.Began.Before(deleteReturned) || stayed.At.Before(stayed.Began) || stayed.At.After(ended) {
+				t.Errorf("The recreate's checkpoint spans %v to %v, want the wait for its CR, which began after %v.", stayed.Began, stayed.At, deleteReturned)
 			}
 			if ops := check.inputs[len(check.inputs)-1].Timeline.Ops; len(ops) != 3 || ops[2].CR != "widget" {
 				t.Errorf("The checks at the recreate's checkpoint read the ops %+v, want the recreate of widget last.", ops)

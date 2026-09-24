@@ -19,11 +19,15 @@ const ciRecipe = "examples/ci/github-actions.yml"
 // workflow holds what these tests read of a GitHub Actions workflow. YAML 1.2
 // keeps the key on a string, as Actions does.
 type workflow struct {
-	On   map[string]any    `yaml:"on"`
-	Env  map[string]string `yaml:"env"`
-	Jobs map[string]struct {
-		Steps []step `yaml:"steps"`
-	} `yaml:"jobs"`
+	On          map[string]any    `yaml:"on"`
+	Env         map[string]string `yaml:"env"`
+	Permissions map[string]string `yaml:"permissions"`
+	Jobs        map[string]job    `yaml:"jobs"`
+}
+
+type job struct {
+	RunsOn string `yaml:"runs-on"`
+	Steps  []step `yaml:"steps"`
 }
 
 type step struct {
@@ -44,17 +48,21 @@ func readWorkflow(t *testing.T, path string) workflow {
 	return w
 }
 
-// recipeSteps are the steps of the recipe's one job.
-func recipeSteps(t *testing.T) []step {
+func recipeJob(t *testing.T) job {
 	t.Helper()
 	w := readWorkflow(t, ciRecipe)
 	if len(w.Jobs) != 1 {
 		t.Fatalf("%s has %d jobs, and an adopter copies one", ciRecipe, len(w.Jobs))
 	}
-	for _, job := range w.Jobs {
-		return job.Steps
+	for _, j := range w.Jobs {
+		return j
 	}
-	return nil
+	return job{}
+}
+
+func recipeSteps(t *testing.T) []step {
+	t.Helper()
+	return recipeJob(t).Steps
 }
 
 // stepUsing returns the one step that uses the action, at any version.
@@ -210,7 +218,11 @@ func TestTheCIRecipeExportsTheControlPlaneOrFails(t *testing.T) {
 		name, setupEnvtest, wantEnv string
 		wantErr                     bool
 	}{
-		{name: "setup-envtest prints the path", setupEnvtest: "echo /assets", wantEnv: "KUBEBUILDER_ASSETS=/assets\n"},
+		{
+			name:         "setup-envtest prints the path",
+			setupEnvtest: `case " $* " in *" -p path "*) echo /assets ;; *) echo "Path: /assets" ;; esac`,
+			wantEnv:      "KUBEBUILDER_ASSETS=/assets\n",
+		},
 		{name: "setup-envtest fails", setupEnvtest: "exit 1", wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -258,10 +270,10 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 	if hint == nil {
 		t.Fatal("the recipe does not say how to download the evidence")
 	}
-	if hint[1] != upload.With["name"] {
+	if hint[2] != upload.With["name"] {
 		t.Errorf("%q names an artifact other than %s", hint[0], upload.With["name"])
 	}
-	if hint[2] != uploaded {
+	if hint[3] != uploaded {
 		t.Errorf("%q puts the evidence elsewhere than %s, where the replay command in report.md reads it", hint[0], uploaded)
 	}
 }
@@ -307,10 +319,13 @@ func TestNightlyFindsSayHowToRestoreTheirEvidence(t *testing.T) {
 			expand := func(text string) string {
 				return os.Expand(text, func(v string) string { return s.Env[v] })
 			}
-			if expand(hint[1]) != upload.With["name"] {
+			if expand(hint[1]) != "${{ github.run_id }}" {
+				t.Errorf("job %s: %q names a run other than the one that failed", name, hint[0])
+			}
+			if expand(hint[2]) != upload.With["name"] {
 				t.Errorf("job %s: %q names an artifact other than %s", name, hint[0], upload.With["name"])
 			}
-			if expand(hint[2]) != strings.TrimSuffix(upload.With["path"], "/") {
+			if expand(hint[3]) != strings.TrimSuffix(upload.With["path"], "/") {
 				t.Errorf("job %s: %q puts the evidence elsewhere than %s, where a report's replay command reads it", name, hint[0], upload.With["path"])
 			}
 		}
@@ -320,8 +335,43 @@ func TestNightlyFindsSayHowToRestoreTheirEvidence(t *testing.T) {
 	}
 }
 
-// downloadHint matches a gh command that downloads one artifact into a directory.
-var downloadHint = regexp.MustCompile(`gh run download \S+ --name ([\w.$/-]+) --dir ([\w.$/-]+)`)
+// downloadHint matches a gh command that downloads one artifact of a run into a directory.
+var downloadHint = regexp.MustCompile(`gh run download (\S+) --name ([\w.$/-]+) --dir ([\w.$/-]+)`)
+
+func TestTheCIRecipeSetsEveryVariableItReads(t *testing.T) {
+	set := readWorkflow(t, ciRecipe).Env
+	for _, s := range recipeSteps(t) {
+		var read []string
+		for _, m := range regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`).FindAllStringSubmatch(s.Run, -1) {
+			if _, local := s.Env[m[1]]; !local && !strings.HasPrefix(m[1], "GITHUB_") {
+				read = append(read, m[1])
+			}
+		}
+		for _, value := range s.With {
+			for _, m := range regexp.MustCompile(`\$\{\{ env\.(\w+) \}\}`).FindAllStringSubmatch(value, -1) {
+				read = append(read, m[1])
+			}
+		}
+		for _, name := range read {
+			if _, ok := set[name]; !ok {
+				t.Errorf("a step reads %s, and the recipe's env does not set it", name)
+			}
+		}
+	}
+}
+
+func TestTheCIRecipeChecksOutTheRepositoryWithAReadOnlyToken(t *testing.T) {
+	recipe := recipeJob(t)
+	if recipe.RunsOn == "" {
+		t.Error("the job names no runner")
+	}
+	if len(recipe.Steps) == 0 || !strings.HasPrefix(recipe.Steps[0].Uses, "actions/checkout@") {
+		t.Error("the job's first step does not check out the repository")
+	}
+	if permissions := readWorkflow(t, ciRecipe).Permissions; !maps.Equal(permissions, map[string]string{"contents": "read"}) {
+		t.Errorf("the job's token has %v, more than it needs to read the repository", permissions)
+	}
+}
 
 func runText(steps []step) string {
 	var commands []string

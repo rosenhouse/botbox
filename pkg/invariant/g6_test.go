@@ -142,7 +142,8 @@ func TestG6OrdersLoopsByWhenTheyBegan(t *testing.T) {
 			[]string{"botbox-run-0/w-0", namespace + "/w-0"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			in := loop(errLoop+1, test.first).
+			// The first loop also ends last.
+			in := loop(errLoop+3, test.first).
 				requests(time.Second+test.later, 500*time.Millisecond, errLoop+1, test.second).
 				through(8 * time.Second)
 

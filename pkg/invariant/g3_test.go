@@ -431,7 +431,7 @@ func TestG3HoldsTheLastCRDeletedToAnObjectThatNamesNone(t *testing.T) {
 
 	violation := fired(t, invariant.CleanDeletion, in)
 
-	if want := "the v1/ConfigMap kept was still there 10s after the CR w2 was deleted"; !strings.HasPrefix(violation.Statement, want) ||
+	if want := "the v1/ConfigMap kept was still there 10s after w2, the last CR it may belong to, was deleted"; !strings.HasPrefix(violation.Statement, want) ||
 		!violation.At.Equal(at(20100*time.Millisecond)) {
 		t.Errorf("G3 reported %q at %v, want it to begin %q, at w2's deadline.", violation.Statement, violation.At, want)
 	}

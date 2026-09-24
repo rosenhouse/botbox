@@ -134,11 +134,19 @@ func (out *Result) reportLeftovers(in Input, deleted deletion, deadline time.Tim
 			continue
 		}
 		out.violate(Violation{
-			Statement: fmt.Sprintf("the %s %s was still there %s after the CR %s was deleted%s",
-				kindName(left.GVK), left.Name, in.timeouts().Delete, deleted.key.Name, orphaned(left, deleted.uid)),
+			Statement: fmt.Sprintf("the %s %s was still there %s after %s was deleted%s",
+				kindName(left.GVK), left.Name, in.timeouts().Delete, in.answering(deleted, left), orphaned(left, deleted.uid)),
 			At: deadline,
 		}.quotingVersions(RecentHistory(left.Key, in.History.History(left.Key))))
 	}
+}
+
+// answering names the deleted CR as the one that answers for the object.
+func (in Input) answering(deleted deletion, left observe.Version) string {
+	if len(in.namedCRs(left)) == 0 {
+		return deleted.key.Name + ", the last CR it may belong to,"
+	}
+	return "the CR " + deleted.key.Name
 }
 
 // orphaned names what the collector could not reach: an object with no

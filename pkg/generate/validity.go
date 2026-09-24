@@ -90,7 +90,7 @@ const fieldDraws = 100
 func (c *crdRules) acceptsADraw(sample *unstructured.Unstructured, f field) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = errors.New("botbox cannot draw a value its schema allows; a set longer than its enum, or a pattern nothing matches, does this")
+			err = errors.New("botbox cannot draw a value its schema allows; a set whose items allow fewer values than its minItems, or a pattern nothing matches, does this")
 			// rapid calls a draw that no value satisfies invalid data.
 			if reason := fmt.Sprint(recovered); !strings.Contains(reason, "invalid data") {
 				err = fmt.Errorf("botbox failed to draw a value: %s", reason)

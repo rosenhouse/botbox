@@ -56,16 +56,17 @@ func TestAMutatePathTheCRDRefusesInTheSampleIsAConfigurationError(t *testing.T) 
 }
 
 func TestNewReportsAFieldBotboxCannotDraw(t *testing.T) {
-	const cannotDraw = "botbox cannot draw a value its schema allows; a set longer than its enum, or a pattern nothing matches, does this"
+	const cannotDraw = "botbox cannot draw a value its schema allows; a set whose items allow fewer values than its minItems, or a pattern nothing matches, does this"
 	for _, testCase := range []struct {
-		path    string
-		overlay map[string]any
+		name, path string
+		overlay    map[string]any
 	}{
 		// No set of three items holds only a and b.
-		{"spec.tags", map[string]any{"minItems": 3, "items": map[string]any{"enum": []any{"a", "b"}}}},
-		{"spec.left", map[string]any{"pattern": "a$b"}},
+		{"enum", "spec.tags", map[string]any{"minItems": 3, "items": map[string]any{"enum": []any{"a", "b"}}}},
+		{"pattern", "spec.tags", map[string]any{"minItems": 3, "items": map[string]any{"pattern": "^[ab]$"}}},
+		{"no match", "spec.left", map[string]any{"pattern": "a$b"}},
 	} {
-		t.Run(testCase.path, func(t *testing.T) {
+		t.Run(testCase.name, func(t *testing.T) {
 			loaded := loadTarget(t, rulesTarget)
 			overlay := map[string]map[string]any{testCase.path: testCase.overlay}
 			loaded.Generate = target.GenerateSpec{Mutate: []string{testCase.path}, Overlay: overlay}

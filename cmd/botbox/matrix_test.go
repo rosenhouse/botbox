@@ -428,7 +428,7 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 	}
 }
 
-func TestMatrixLeavesNoRunFilesBehindOtherwise(t *testing.T) {
+func TestMatrixCleansUpItsTemporaryDirectory(t *testing.T) {
 	for _, test := range []struct {
 		name    string
 		session *fakeSession

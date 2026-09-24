@@ -494,6 +494,55 @@ func TestTheRunNamespaceIsDeletedAfterAnInterruptWithinABound(t *testing.T) {
 	}
 }
 
+// The API server serves no Widget, so Start fails once it has created the
+// namespace, and takes the namespace back as Stop would.
+func TestTheRunNamespaceIsDeletedOnTheBudgetBoundGivesIt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api":
+			fmt.Fprint(w, `{"kind":"APIVersions","versions":["v1"]}`)
+		case "GET /apis":
+			fmt.Fprint(w, `{"kind":"APIGroupList","apiVersion":"v1","groups":[]}`)
+		case "GET /api/v1":
+			fmt.Fprint(w, `{"kind":"APIResourceList","groupVersion":"v1","resources":[]}`)
+		case "POST /api/v1/namespaces":
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"kind":"Namespace","apiVersion":"v1","metadata":{"name":"botbox-run"}}`)
+		default:
+			fmt.Fprint(w, `{"kind":"Status","apiVersion":"v1","status":"Success"}`)
+		}
+	}))
+	t.Cleanup(server.Close)
+	budgets := make(chan time.Duration, 10)
+	config := &rest.Config{Host: server.URL, WrapTransport: func(next http.RoundTripper) http.RoundTripper {
+		return roundTripper(func(r *http.Request) (*http.Response, error) {
+			if deadline, ok := r.Context().Deadline(); ok && r.Method == http.MethodDelete {
+				budgets <- time.Until(deadline)
+			}
+			return next.RoundTrip(r)
+		})
+	}}
+
+	h, err := Start(t.Context(), toyTarget, Options{Dir: t.TempDir(), Config: config})
+
+	if h != nil || err == nil {
+		t.Fatalf("Start returned (%v, %v), want an error: the API server serves no Widget.", h, err)
+	}
+	select {
+	case budget := <-budgets:
+		if want := stopBudget - 2*launch.DefaultGracePeriod; budget > want || budget < want-time.Second {
+			t.Errorf("Deleting the namespace had %v, want %v.", budget, want)
+		}
+	default:
+		t.Error("The API server got no request to delete the namespace on a budget.")
+	}
+}
+
+type roundTripper func(*http.Request) (*http.Response, error)
+
+func (f roundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
 // The launcher supervises the target under the run's context, so a target that
 // exits after an interrupt is not restarted.
 func TestTheHarnessSupervisesUnderTheContextItIsGiven(t *testing.T) {

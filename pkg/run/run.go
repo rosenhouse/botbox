@@ -171,7 +171,7 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 		return err
 	}
 	h.down.push("deleting the run namespace", func(ctx context.Context) error {
-		return deleteNamespace(ctx, core, h.Namespace, teardownMargin)
+		return deleteNamespace(ctx, core, h.Namespace, namespaceDeletionBudget)
 	})
 
 	if h.Proxy, err = proxy.Start(h.Config, proxy.Options{Seed: opts.Seed}); err != nil {
@@ -248,6 +248,10 @@ func (h *Harness) createNamespace(ctx context.Context, core kubernetes.Interface
 	h.Namespace = name
 	return nil
 }
+
+// namespaceDeletionBudget is how long Stop waits for the run namespace to be
+// deleted.
+const namespaceDeletionBudget = 30 * time.Second
 
 // deleteNamespace deletes the namespace even when an interrupt has ended ctx,
 // and gives up after within.

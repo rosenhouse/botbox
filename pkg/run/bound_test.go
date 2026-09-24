@@ -109,7 +109,7 @@ func (w *waitingHarness) restart(ctx context.Context) error {
 // stop gives the target a grace period after SIGTERM and another after
 // SIGKILL, then deletes the namespace.
 func (w *waitingHarness) stop(ctx context.Context) error {
-	w.at = w.at.Add(2*launch.DefaultGracePeriod + teardownMargin)
+	w.at = w.at.Add(2*launch.DefaultGracePeriod + namespaceDeletionBudget)
 	return w.fakeHarness.stop(ctx)
 }
 

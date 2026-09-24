@@ -66,6 +66,8 @@ type fakeSession struct {
 	refused error
 	// unopened fails opening the session.
 	unopened error
+	// opening runs as botbox opens the session.
+	opening func()
 	// closing runs as the session closes.
 	closing func()
 	// unclosed is what close returns.
@@ -141,6 +143,9 @@ func invokeCtx(t *testing.T, ctx context.Context, fake *fakeSession,
 	c := newCLI(&stdout, &stderr)
 	c.open = func(options, *target.Target) (session, error) {
 		fake.stderrAtOpen = stderr.String()
+		if fake.opening != nil {
+			fake.opening()
+		}
 		if fake.unopened != nil {
 			return nil, fake.unopened
 		}

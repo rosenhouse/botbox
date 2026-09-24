@@ -48,6 +48,9 @@ func (s *summary) provenance() string {
 		}
 		said += ", with `" + strings.Join(args, " ") + "`"
 	}
+	if s.Outcome == outcomeUnfinished {
+		return said + ". It did not finish."
+	}
 	said += fmt.Sprintf(". It took %s", s.Finish.Sub(s.Start).Round(time.Millisecond))
 	switch {
 	case s.Deadline == 0:
@@ -56,7 +59,7 @@ func (s *summary) provenance() string {
 	default:
 		said += fmt.Sprintf(" of the --deadline of %s", time.Duration(s.Deadline))
 	}
-	return said + fmt.Sprintf(", and exited %d.", s.ExitCode)
+	return said + fmt.Sprintf(", and exited %d.", *s.ExitCode)
 }
 
 func (r runSummary) source() string {

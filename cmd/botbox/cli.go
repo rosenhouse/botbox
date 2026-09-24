@@ -173,6 +173,8 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	}
 
 	record := newSummary(opts, exercised, runs, start)
+	// The last save warns of a file botbox cannot write.
+	_ = c.save(record, opts, out.Dir())
 	var code int
 	s, err := c.startSession(opts, exercised)
 	if err != nil {
@@ -188,7 +190,7 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		c.warn(s.close())
 	}
 	// An interrupt that arrived since changes what botbox exits with.
-	if exitStatus(ctx, code) != record.ExitCode {
+	if exitStatus(ctx, code) != *record.ExitCode {
 		record.finish(ctx, code, record.Finish)
 		c.warn(c.save(record, opts, out.Dir()))
 	}
@@ -234,9 +236,11 @@ func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Tar
 		number := i + 1
 		fmt.Fprintf(c.stdout, "run %d: seed %d, %s\n", number, planned.sequence.Seed, planned.source())
 		dir := out.RunDir(number)
+		ran := &record.Runs[i]
+		ran.Outcome = outcomeUnfinished
+		_ = c.save(record, opts, out.Dir())
 		started := c.now()
 		result, err := s.execute(ctx, t, planned.sequence, dir, run.Engine{})
-		ran := &record.Runs[i]
 		ran.ran(result, c.now().Sub(started))
 		code := exitCode(result, err)
 		if code == exitViolation {

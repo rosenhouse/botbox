@@ -30,6 +30,7 @@ const (
 	outcomeError       outcome = "error"
 	outcomeInterrupted outcome = "interrupted"
 	outcomeNotRun      outcome = "not run"
+	outcomeUnfinished  outcome = "unfinished"
 )
 
 // summary is what an invocation planned, ran and found.
@@ -44,9 +45,9 @@ type summary struct {
 	Deadline        run.Duration  `json:"deadline,omitempty"`
 	DeadlineDerived bool          `json:"deadlineDerived,omitempty"`
 	Start           time.Time     `json:"start"`
-	Finish          time.Time     `json:"finish"`
+	Finish          time.Time     `json:"finish,omitzero"`
 	Outcome         outcome       `json:"outcome"`
-	ExitCode        int           `json:"exitCode"`
+	ExitCode        *int          `json:"exitCode,omitempty"`
 	// Error is what stopped the invocation where no run did.
 	Error string       `json:"error,omitempty"`
 	Runs  []runSummary `json:"runs"`
@@ -98,6 +99,7 @@ func newSummary(opts options, t *target.Target, runs []planned, start time.Time)
 		LaunchArgs: opts.launchArgs,
 		Cluster:    "envtest",
 		Start:      start.UTC(),
+		Outcome:    outcomeUnfinished,
 		Runs:       make([]runSummary, len(runs)),
 	}
 	if opts.kubeconfig != "" {
@@ -127,7 +129,8 @@ func (s *summary) deadline(opts options) {
 // finish records how the invocation ended, with the code botbox exits with.
 func (s *summary) finish(ctx context.Context, code int, at time.Time) {
 	s.Finish = at.UTC()
-	s.ExitCode = exitStatus(ctx, code)
+	status := exitStatus(ctx, code)
+	s.ExitCode = &status
 	switch _, stopped := interruption(ctx); {
 	case stopped:
 		s.Outcome = outcomeInterrupted

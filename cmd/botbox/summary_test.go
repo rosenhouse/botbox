@@ -143,10 +143,15 @@ func TestSummaryMarkdown(t *testing.T) {
 			cancel(interrupt{syscall.SIGINT})
 			s.finish(ctx, exitError, s.Finish)
 		}},
-		{"unfinished", func(t *testing.T, s *summary) {
+		{"run-error", func(t *testing.T, s *summary) {
 			s.Runs[1].Violation, s.Runs[1].Notes, s.Runs[1].Dir = nil, nil, ""
 			s.Runs[1].stopped(errors.New("op 0 (create): the target is no longer running"), filepath.Join(t.TempDir(), "run-2"))
 			s.finish(t.Context(), exitError, s.Finish)
+		}},
+		{"killed", func(_ *testing.T, s *summary) {
+			s.Runs[1] = newSummary(options{}, &target.Target{}, []planned{{sequence: widgetSequence(8)}}, s.Start).Runs[0]
+			s.Runs[1].Run, s.Runs[1].Outcome = 2, outcomeUnfinished
+			s.Outcome, s.ExitCode = outcomeUnfinished, nil
 		}},
 	} {
 		t.Run(test.golden, func(t *testing.T) {
@@ -348,6 +353,7 @@ func TestASummaryBotboxCannotWriteOnlyWarns(t *testing.T) {
 	session := &fakeSession{}
 	// A directory in the way fails the write.
 	session.after = func() {
+		taken = nil
 		for _, name := range []string{"summary.json", "summary.md"} {
 			path := filepath.Join(filepath.Dir(session.dirs[0]), name)
 			_ = os.Remove(path)
@@ -358,10 +364,10 @@ func TestASummaryBotboxCannotWriteOnlyWarns(t *testing.T) {
 		}
 	}
 
-	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1")
+	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "2")
 
 	if code != exitOK {
-		t.Errorf("botbox run exited %d, want %d: the run passed.", code, exitOK)
+		t.Errorf("botbox run exited %d, want %d: the runs passed.", code, exitOK)
 	}
 	for _, path := range taken {
 		if n := strings.Count(stderr, "botbox: writing "+path); n != 1 {
@@ -582,19 +588,95 @@ func TestTheSummaryCountsFaults(t *testing.T) {
 // seconds, so the summary is written first.
 func TestTheSummaryIsWrittenBeforeTheClusterStops(t *testing.T) {
 	out := t.TempDir()
-	written := false
-	session := &fakeSession{closing: func() {
-		_, err := os.Stat(filepath.Join(summaryDir(t, out), "summary.json"))
-		written = err == nil
-	}}
+	var written writtenSummary
+	session := &fakeSession{closing: func() { written = readSummary(t, out) }}
 
 	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", out, "--runs", "1")
 
 	if code != exitOK {
 		t.Fatalf("botbox run exited %d: %s", code, stderr)
 	}
-	if !session.closed || !written {
-		t.Errorf("botbox closed the session %t, with the summary written %t, want both.", session.closed, written)
+	if !session.closed || written.Outcome != "passed" {
+		t.Errorf("botbox closed the session %t, with the summary saying %q, want it closed after the summary said passed.",
+			session.closed, written.Outcome)
+	}
+}
+
+// unfinishedSummary reads the summary of an invocation that has not finished,
+// which says neither when it finished nor what it exited with.
+func unfinishedSummary(t *testing.T, out string) writtenSummary {
+	t.Helper()
+	encoded, err := os.ReadFile(filepath.Join(summaryDir(t, out), "summary.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"finish", "exitCode"} {
+		if said, ok := fields[field]; ok {
+			t.Errorf("The unfinished summary says %s is %s.", field, said)
+		}
+	}
+	return readSummary(t, out)
+}
+
+func runOutcomes(written writtenSummary) []string {
+	var outcomes []string
+	for _, ran := range written.Runs {
+		outcomes = append(outcomes, ran.Outcome)
+	}
+	return outcomes
+}
+
+// A signal botbox cannot catch, or a crash, leaves the summary of the runs
+// that finished.
+func TestTheSummaryRecordsEachRunAsItStarts(t *testing.T) {
+	out := t.TempDir()
+	junit := filepath.Join(t.TempDir(), "junit.xml")
+	var planned []string
+	var during [][]string
+	var suites []parsedSuite
+	session := &fakeSession{}
+	session.opening = func() {
+		written := unfinishedSummary(t, out)
+		planned = append(runOutcomes(written), written.Outcome)
+	}
+	session.after = func() {
+		written := unfinishedSummary(t, out)
+		during = append(during, append(runOutcomes(written), written.Outcome))
+		suite, _ := readJUnit(t, junit)
+		suites = append(suites, suite)
+	}
+
+	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", out, "--runs", "2", "--seed", "1", "--junit", junit)
+
+	if code != exitOK {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	if want := []string{"not run", "not run", "unfinished"}; !slices.Equal(planned, want) {
+		t.Errorf("Before the cluster started, the summary said %q, want %q.", planned, want)
+	}
+	want := [][]string{{"unfinished", "not run", "unfinished"}, {"passed", "unfinished", "unfinished"}}
+	if !reflect.DeepEqual(during, want) {
+		t.Errorf("During each run, the summary said %q, want %q.", during, want)
+	}
+	if len(suites) != 2 {
+		t.Fatalf("botbox ran %d times, want 2.", len(suites))
+	}
+	var cases []string
+	for _, c := range suites[1].Cases {
+		switch {
+		case c.Error != nil:
+			cases = append(cases, fmt.Sprintf("%s: %s %s", c.Name, c.Error.Type, c.Error.Message))
+		default:
+			cases = append(cases, c.Name+": passed")
+		}
+	}
+	if want := []string{"run 1: seed 1: passed", "run 2: seed 2: unfinished botbox did not finish this run",
+		"botbox: unfinished botbox did not finish"}; !slices.Equal(cases, want) {
+		t.Errorf("During run 2, the JUnit testcases were %q, want %q.", cases, want)
 	}
 }
 

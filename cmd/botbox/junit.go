@@ -75,13 +75,13 @@ func (s *summary) junit(dir string) ([]byte, error) {
 	for _, r := range s.Runs {
 		suite.Cases = append(suite.Cases, r.junit(s.Target.Name, dir))
 	}
-	if s.Error != "" {
-		kind := outcomeError
-		if s.Outcome == outcomeInterrupted {
-			kind = outcomeInterrupted
-		}
-		suite.Cases = append(suite.Cases, junitCase{Name: "botbox", Classname: s.Target.Name,
-			Error: &junitProblem{Type: string(kind), Message: s.Error}})
+	switch {
+	case s.Outcome == outcomeUnfinished:
+		suite.Cases = append(suite.Cases, s.botboxCase(outcomeUnfinished, "botbox did not finish"))
+	case s.Outcome == outcomeInterrupted && s.Error != "":
+		suite.Cases = append(suite.Cases, s.botboxCase(outcomeInterrupted, s.Error))
+	case s.Error != "":
+		suite.Cases = append(suite.Cases, s.botboxCase(outcomeError, s.Error))
 	}
 	for _, c := range suite.Cases {
 		suite.Tests++
@@ -100,6 +100,11 @@ func (s *summary) junit(dir string) ([]byte, error) {
 		return nil, fmt.Errorf("encoding the JUnit XML: %w", err)
 	}
 	return append(append([]byte(xml.Header), encoded...), '\n'), nil
+}
+
+// botboxCase is what stopped the invocation where no run did.
+func (s *summary) botboxCase(kind outcome, message string) junitCase {
+	return junitCase{Name: "botbox", Classname: s.Target.Name, Error: &junitProblem{Type: string(kind), Message: message}}
 }
 
 func (r runSummary) junit(class, dir string) junitCase {
@@ -123,6 +128,8 @@ func (r runSummary) junit(class, dir string) junitCase {
 		}
 	case outcomeNotRun:
 		c.Skipped = &junitProblem{Message: "botbox stopped before this run"}
+	case outcomeUnfinished:
+		c.Error = &junitProblem{Type: string(outcomeUnfinished), Message: "botbox did not finish this run"}
 	}
 	return c
 }

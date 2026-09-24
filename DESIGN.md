@@ -959,8 +959,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`, `docs/`,
   and `bin/` for git-ignored build output.
-- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]`;
-  `botbox replay --target <yaml> [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>`;
+- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]`;
+  `botbox replay --target <yaml> [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>`;
   `botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...`;
   `botbox version`.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
@@ -987,16 +987,32 @@ the proxy; the `Image` launcher. Separate design addendum.
   with `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl`,
   `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
   where the deadline or an interrupt ended the shrink pass before its result could be
-  run there. The
-  `kubeconfig` names the proxy and the run namespace. Passing runs are not persisted.
+  run there. The `kubeconfig` names the proxy and the run namespace. A passing run's
+  recordings are not kept.
+  Once `run` or `replay` has planned its runs, it writes `summary.json` and `summary.md`
+  into the invocation's directory however it ends, before it stops the cluster. They give
+  botbox's version, the target, the seed, the `--launch-arg` values, the cluster, the
+  deadline, the outcome (`passed`, `violation`, `error` or `interrupted`), the exit code,
+  and what stopped the invocation where no run did. Each planned run has its seed, its
+  sequence file if it had one, its outcome (those four or `not run`), its duration, its
+  ops, how many it applied, its ops by type, how many fault ops the proxy applied and how
+  many requests it faulted, its checkpoints, the target's exits, its notes and its
+  sequence (§7). These describe the run of the planned sequence. A failing run also has
+  its `run-<n>/`, relative to the summary, and its error, or the violation and notes its
+  report carries. `summary.json` carries `schema: 1`, which changes when a field changes
+  meaning or goes away. `--junit FILE` also writes the runs as JUnit XML: one testsuite, a
+  testcase per planned run, a `failure` typed with the check's ID for a violation, an
+  `error` for a run that did not finish, `skipped` for a run that never started, and an
+  `error` testcase named `botbox` for what stopped the invocation where no run did. botbox
+  replaces each file whole, and warns of one it cannot write.
   `objects.jsonl` writes each value of a Secret's `data` and annotations as a marker such
   as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is drawn per
   invocation and never written, so equal values share a marker within one invocation and a
   marker reveals only the value's length. The Observer's history keeps the values, so G5
   compares them exactly, and its report quotes the markers. Nothing else is redacted: a
-  Secret's labels, every other object, `target.log`, `sequence.json`, and a report's
-  sequence and replay command hold what the target, the sample and the command line gave
-  them (D49).
+  Secret's labels, every other object, `target.log`, `sequence.json`, the summary's
+  sequences, and a report's sequence and replay command hold what the target, the sample
+  and the command line gave them (D49).
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -1608,3 +1624,21 @@ built from source and run as a black-box binary.
   namespace, so the count grew with every run. A request into another namespace is a
   request for another object, so G6 now tells them apart. Judging only the run namespace
   was rejected: G6 would then miss a failing cluster-wide watch, which D27 counts.
+- **D@57 Every invocation that planned its runs leaves a summary, and `--junit` writes
+  JUnit XML.** A passing invocation deleted each run directory and printed `every run
+  passed.`, so nothing recorded what a nightly exercised. A seed is no such record, because
+  it names a sequence for one build and one target declaration only (D54). The summary
+  keeps each run's sequence, which a replay needs, and still drops a passing run's
+  recordings. botbox opens the invocation's directory before it starts the cluster, so a
+  cluster that does not start or refuses the target leaves a summary too. It writes the
+  summary before it stops the cluster, because a second signal kills botbox at once, and
+  GitHub Actions sends one 7.5 s after the first. A failing run's counts are of the run of
+  its planned sequence, and its violation and notes are its report's, which may be of the
+  minimized sequence. `run-<n>/` is named relative to the summary, so that it still
+  resolves after an artifact upload. JUnit gets one testcase per planned run, not one per
+  invariant, because a check that could not judge would read as a pass (D31). What stopped
+  the invocation where no run did is an `error` testcase of its own, so that a CI server
+  never shows a stopped invocation as green. botbox detects no CI vendor.
+  `$GITHUB_STEP_SUMMARY` takes `summary.md` as it is, and GitLab and Jenkins read JUnit
+  XML. A file botbox cannot write leaves the exit code alone, since the code already says
+  what the runs found.

@@ -325,6 +325,12 @@ note instead of a verdict when another op changed something in between.
 
 ## Reading a report
 
+Once botbox has planned its runs, it writes `summary.json` and `summary.md` into
+`botbox-out/<timestamp>-<seed>/`, however the invocation ends. They list each planned run: its
+seed and sequence, how it ended, the faults the proxy applied, the times your controller
+exited, and what the checks could not judge. `summary.json` is for a machine. Its `schema`
+changes when a field changes meaning or goes away ([DESIGN.md §11](DESIGN.md#11-repo-conventions)).
+
 A run that violates an invariant prints the ID, what it saw and where the evidence is, then
 exits 1. A configuration or harness error exits 2, so your CI can tell a find from a broken
 target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
@@ -349,7 +355,7 @@ The report quotes the last twenty requests and the last twenty object versions t
 chose from, says how many that was, and names the file holding the rest. A G4 or a
 property also quotes the state of the objects your controller managed where it failed,
 over the kinds your target declares: a second table with its own bound of twenty and
-the count beside it. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-report)).
+the count beside it. A passing run leaves only its entry in the summary.
 
 A G4 also quotes your `ready`, the error evaluating it, and your CR's status where it
 failed. The status holds whatever your controller wrote, so the report cuts it: twenty
@@ -441,7 +447,18 @@ Exit 2 means botbox could not test your controller, and the message says what to
     echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 --index $index -p path)" >>"$GITHUB_ENV"
 - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
 - run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m
+- if: always()
+  run: cat botbox-out/*/summary.md >>"$GITHUB_STEP_SUMMARY"
+- if: always()
+  uses: actions/upload-artifact@v4
+  with:
+    name: botbox-out
+    path: botbox-out/
 ```
+
+The job's page then shows the summary, and the artifact keeps each run's sequence and a
+failing run's evidence. On GitLab or Jenkins, `--junit botbox.xml` writes the runs as JUnit XML
+for `artifacts:reports:junit` or the `junit` step.
 
 `$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not.
 `--deadline` caps the job, which botbox otherwise lets run as long as its runs can take. Give it

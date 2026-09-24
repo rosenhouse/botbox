@@ -12,7 +12,7 @@ import (
 const stamp = "20060102T150405Z"
 
 // Output is one invocation's directory tree: <out>/<timestamp>-<seed>/, with a
-// run-<n>/ per run. Passing runs are not persisted (DESIGN.md §11).
+// run-<n>/ per run until Discard removes a passing one.
 type Output struct{ dir string }
 
 // sameSecond is how many invocations of one seed can open a directory in the

@@ -454,14 +454,11 @@ func (c *cli) failRun(number int, failed planned, dir string, err error) int {
 	return exitError
 }
 
-// showRunFiles names the directory a run that could not finish left, and
-// reports whether there was one.
-func (c *cli) showRunFiles(dir string) bool {
-	if _, err := os.Stat(dir); err != nil {
-		return false
+// showRunFiles prints the directory a failed run left, if it exists.
+func (c *cli) showRunFiles(dir string) {
+	if _, err := os.Stat(dir); err == nil {
+		fmt.Fprintf(c.stderr, "  the run's files are in %s\n", dir)
 	}
-	fmt.Fprintf(c.stderr, "  the run's files are in %s\n", dir)
-	return true
 }
 
 // exitCode maps a run's outcome to the codes of DESIGN.md §11.

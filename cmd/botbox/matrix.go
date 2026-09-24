@@ -70,19 +70,15 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	if err != nil {
 		return c.fail(fmt.Errorf("creating the matrix's run directory: %w", err))
 	}
-	kept := false
-	defer func() {
-		if !kept {
-			c.warn(os.RemoveAll(dir))
-		}
-	}()
+	// Remove leaves the directory while it holds a run that erred.
+	defer os.Remove(dir)
 
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
 	for i := range rows {
 		if failed := c.exerciseRow(ctx, s, exercised, &rows[i], dir); failed != nil {
 			c.fail(opts.named(ctx, failed.err))
-			kept = c.showRunFiles(failed.dir)
+			c.showRunFiles(failed.dir)
 			fmt.Fprintf(c.stderr, "  reproduce it with\n    %s\n", opts.replayRun(rows[i], failed.bugArgs))
 			return exitError
 		}
@@ -132,7 +128,7 @@ func (c *cli) exerciseUnder(ctx context.Context, s session, t *target.Target, ro
 	if err != nil {
 		return checked{}, &erred{bugArgs, dir, fmt.Errorf("%s: %w", ran, err)}
 	}
-	c.warn(os.RemoveAll(dir))
+	os.RemoveAll(dir)
 	var found checked
 	notes := slices.Clone(result.Notes)
 	for _, check := range results {

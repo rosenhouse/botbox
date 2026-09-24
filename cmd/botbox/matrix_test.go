@@ -444,6 +444,9 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(erred, "target.log")); err != nil {
 				t.Errorf("botbox matrix removed the target.log of the run that erred: %v", err)
 			}
+			if kept, err := os.Stat(filepath.Dir(erred)); err != nil || kept.Mode().Perm()&0o077 != 0 {
+				t.Errorf("botbox matrix kept %s where other users can read it (%v).", erred, err)
+			}
 			for _, dir := range finished {
 				if _, err := os.Stat(dir); !errors.Is(err, fs.ErrNotExist) {
 					t.Errorf("botbox matrix kept %s, the files of a run that finished.", dir)

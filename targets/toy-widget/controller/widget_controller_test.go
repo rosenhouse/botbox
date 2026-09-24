@@ -172,6 +172,21 @@ func TestAChangeToTheConfigMapReconcilesEveryWidgetInItsNamespace(t *testing.T) 
 	}
 }
 
+func TestAListThatFailsWakesNoWidget(t *testing.T) {
+	failsWithAWidget := interceptor.Funcs{
+		List: func(_ context.Context, _ client.WithWatch, list client.ObjectList, _ ...client.ListOption) error {
+			list.(*toyv1.WidgetList).Items = []toyv1.Widget{*newWidget(1)}
+			return errors.New("the API server cut the list short")
+		},
+	}
+	r := fixture(t, 0, failsWithAWidget)
+	r.LabelFrom = "config"
+
+	if woken := r.widgetsCopying(t.Context(), labelConfig("blue")); len(woken) != 0 {
+		t.Errorf("A failed list reconciles %v, want none.", woken)
+	}
+}
+
 // A controller that resyncs on a timer requeues itself and writes its status
 // on every tick, changed or not. Without the timer, a converged Widget costs
 // nothing.

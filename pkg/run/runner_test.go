@@ -2305,6 +2305,24 @@ func TestAG4QuotesTheOneExitSinceTheTargetConverged(t *testing.T) {
 	}
 }
 
+// An Exit reads as what follows "with" in a note or a G4, whatever it holds.
+func TestAnExitSaysWhyTheTargetStopped(t *testing.T) {
+	for _, exit := range []struct {
+		err  error
+		said string
+		want string
+	}{
+		{errors.New("exit status 2"), "panic: boom", `exit status 2 after writing "panic: boom"`},
+		{errors.New("exit status 2"), "", "exit status 2"},
+		{nil, "panic: boom", `no error after writing "panic: boom"`},
+		{nil, "", "no error"},
+	} {
+		if got := (Exit{Err: exit.err, Said: exit.said}).String(); got != exit.want {
+			t.Errorf("Exit{Err: %v, Said: %q} reads %q, want %q.", exit.err, exit.said, got, exit.want)
+		}
+	}
+}
+
 // A target that converges after it exited passes, and the exit is noted.
 func TestATargetThatConvergesAfterItExitedPasses(t *testing.T) {
 	h := crashLoop()

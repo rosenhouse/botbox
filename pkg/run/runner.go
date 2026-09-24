@@ -171,10 +171,14 @@ type Exit struct {
 }
 
 func (e Exit) String() string {
-	if e.Said == "" {
-		return e.Err.Error()
+	why := "no error"
+	if e.Err != nil {
+		why = e.Err.Error()
 	}
-	return fmt.Sprintf("%v after writing %q", e.Err, e.Said)
+	if e.Said == "" {
+		return why
+	}
+	return fmt.Sprintf("%s after writing %q", why, e.Said)
 }
 
 // AppliedOp is one op the Runner applied.

@@ -258,7 +258,7 @@ The Runner executes one sequence:
    by requesting a resource outside leader election. botbox has no other sign that a target
    is back, and a controller lists what it watches as it starts. A start and that first
    request count as changes, so a restarted target runs for `T_stable` past its return
-   before a wait converges. A target that exits again within `T_stable` of each restart
+   before a wait converges. A target that exits again within `T_stable` of each return
    therefore never converges, even where it wrote its converged state first, and its wait
    expires as a G4 that counts the exits since the target last converged and quotes the
    last. A target that runs longer between exits can converge in between, until a backoff

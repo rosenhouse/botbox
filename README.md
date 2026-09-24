@@ -388,7 +388,7 @@ while the controller waits to restart. Nor does it converge until the controller
 requested a resource outside leader election since it last started and then run for
 `stable`, because botbox has no other sign that it is back. After a `restart` op, a
 controller has `settle` to come back, and `settle` past its return to converge. A
-controller that crashes again within `stable` of each restart never converges, even where
+controller that crashes again within `stable` of each return never converges, even where
 it wrote its converged state first, so G4 reports it and quotes the last exit.
 A controller that exits during a fault, or while it recovers from one, has the same once
 botbox restarts it. G7 notes a `deleteManaged` after a restart that follows an exit as

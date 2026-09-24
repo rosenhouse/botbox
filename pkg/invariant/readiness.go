@@ -120,7 +120,7 @@ func (w *readyWalk) step(in Input, at time.Time, crs []observe.Version, written 
 }
 
 // why says what kept the wait from converging: Ready, the target's start, or
-// else what changed while Ready held.
+// else what changed.
 func (w readyWalk) why(began time.Time, starting, churn string) string {
 	switch {
 	case w.crs == 0:

@@ -48,14 +48,9 @@ var fixtureWord = regexp.MustCompile(`^([a-z0-9]{4}){1,3}$`)
 
 func TestFixtureOpsActOnlyWhereTheTargetAllows(t *testing.T) {
 	g := newGenerator(t, loadTarget(t, fixturesTarget), Options{})
-	mutable := map[string][]string{
-		"v1/ConfigMap widget-config": {"data.label", "data.app.properties"},
-		"v1/Secret token":            nil,
-	}
-	drawn := map[run.OpType]int{}
 	rapid.Check(t, func(rt *rapid.T) {
 		for _, op := range g.sequence(rt).Ops {
-			paths, declared := mutable[op.Kind+" "+op.Name]
+			paths, declared := fixturePaths[op.Kind+" "+op.Name]
 			switch op.Type {
 			case run.OpUpdateFixture:
 				changed := differences(nil, op.Patch, "")
@@ -69,15 +64,57 @@ func TestFixtureOpsActOnlyWhereTheTargetAllows(t *testing.T) {
 				if !declared {
 					rt.Fatalf("Op %d deletes the %s %s, which generate.fixtures does not name.", op.Index, op.Kind, op.Name)
 				}
-			default:
-				continue
 			}
-			drawn[op.Type]++
 		}
 	})
-	if drawn[run.OpUpdateFixture] == 0 || drawn[run.OpDeleteFixture] == 0 {
-		t.Errorf("Generation drew %v, want both fixture ops.", drawn)
+}
+
+// fixturePaths are the fixtures the fixtures target lets generation delete,
+// and the paths in each it lets generation set.
+var fixturePaths = map[string][]string{
+	"v1/ConfigMap widget-config": {"data.label", "data.app.properties"},
+	"v1/Secret token":            {"data.token"},
+	"v1/ConfigMap ca-bundle":     nil,
+}
+
+// A sequence's first deleteFixture finds every fixture there, so it may
+// delete any.
+func TestFixtureOpsReachEveryFixtureAndPathTheTargetAllows(t *testing.T) {
+	const seeds = 100
+	g := newGenerator(t, loadTarget(t, fixturesTarget), Options{})
+	var wantUpdated, updated, wantDeleted, deletedFirst []string
+	for fixture, paths := range fixturePaths {
+		wantDeleted = append(wantDeleted, fixture)
+		for _, path := range paths {
+			wantUpdated = append(wantUpdated, fixture+" "+path)
+		}
 	}
+	for seed := range int64(seeds) {
+		sequence, err := g.Draw(seed)
+		if err != nil {
+			t.Fatalf("Draw(%d) failed: %v.", seed, err)
+		}
+		first := true
+		for _, op := range sequence.Ops {
+			fixture := op.Kind + " " + op.Name
+			switch {
+			case op.Type == run.OpUpdateFixture:
+				updated = append(updated, fixture+" "+differences(nil, op.Patch, "")[0])
+			case op.Type == run.OpDeleteFixture && first:
+				deletedFirst, first = append(deletedFirst, fixture), false
+			}
+		}
+	}
+	if got := sortedSet(updated); !slices.Equal(got, sortedSet(wantUpdated)) {
+		t.Errorf("Seeds 0 to %d set %v, want %v.", seeds-1, got, sortedSet(wantUpdated))
+	}
+	if got := sortedSet(deletedFirst); !slices.Equal(got, sortedSet(wantDeleted)) {
+		t.Errorf("Seeds 0 to %d first delete %v, want %v.", seeds-1, got, sortedSet(wantDeleted))
+	}
+}
+
+func sortedSet(items []string) []string {
+	return slices.Compact(slices.Sorted(slices.Values(items)))
 }
 
 // leaf is the one string a patch that sets one field sets.
@@ -121,12 +158,14 @@ func TestADeletedFixtureIsBackForTheNextDrawOnceAnOpSettles(t *testing.T) {
 	if legal := g.legal(&at); slices.Contains(legal, run.OpDeleteManaged) {
 		t.Errorf("Right after a deleteFixture, generation may draw %v.", legal)
 	}
-	if present := g.present(&at); len(present) != 1 || present[0].Name != "widget-config" {
-		t.Errorf("With the token deleted, generation may delete %v, want widget-config alone.", present)
+	if present := g.present(&at); len(present) != 2 || slices.ContainsFunc(present, func(fixture target.MutableFixture) bool {
+		return fixture.Name == "token"
+	}) {
+		t.Errorf("With the token deleted, generation may delete %v, want every other fixture.", present)
 	}
 	at.advance(run.Op{Type: run.OpSettle})
-	if present := g.present(&at); len(present) != 2 {
-		t.Errorf("Once an op settled, generation may delete %v, want both fixtures.", present)
+	if present := g.present(&at); len(present) != 3 {
+		t.Errorf("Once an op settled, generation may delete %v, want every fixture.", present)
 	}
 }
 

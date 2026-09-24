@@ -1143,6 +1143,43 @@ func TestAnUnfinishedRunOfTheMinimizedSequenceIsNoPass(t *testing.T) {
 	}
 }
 
+// A run writes its recordings as it ends, so a run of the minimized sequence
+// that botbox is killed in would leave the drawn run's beside its own.
+func TestTheMinimizedSequenceRunsAgainIntoAnEmptyDirectory(t *testing.T) {
+	violation := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{}
+	var held []string
+	reran := false
+	session.fails = func(sequence run.Sequence, dir string) *run.Violation {
+		switch {
+		case len(session.dirs) == 1:
+			if err := os.WriteFile(filepath.Join(dir, "requests.jsonl"), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		case dir == session.dirs[0]:
+			reran = true
+			entries, _ := os.ReadDir(dir)
+			for _, entry := range entries {
+				held = append(held, entry.Name())
+			}
+		}
+		if len(sequence.Ops) < 2 {
+			return nil
+		}
+		return &violation
+	}
+
+	code, _, stderr := invokeWith(t, session, countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle),
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation || !reran {
+		t.Fatalf("botbox run exited %d and ran the minimized sequence again: %t, want %d and true: %s", code, reran, exitViolation, stderr)
+	}
+	if len(held) > 0 {
+		t.Errorf("As the minimized sequence ran again, its directory already held %q.", held)
+	}
+}
+
 func TestAGeneratorThatFailsExitsTwo(t *testing.T) {
 	broken := errors.New("the CRD declares no schema to draw from")
 	for _, test := range []struct {

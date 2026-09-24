@@ -412,11 +412,13 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	return violation, reportNotes(opts, t, result)
 }
 
-// rerun executes the minimized sequence into the run directory, so that the
-// recordings there are of the sequence the run reports, and returns what that
-// run found. A run that did not finish or reproduced nothing says what the
-// directory then holds.
+// rerun executes the minimized sequence into the run directory, in place of
+// what it held, so that the recordings there are of the sequence the run
+// reports, and returns what that run found. A run that did not finish or
+// reproduced nothing says what the directory then holds.
 func (c *cli) rerun(ctx context.Context, opts options, s session, t *target.Target, shrunk run.Sequence, dir string) (run.Result, error) {
+	// A run writes its recordings as it ends.
+	c.warn(os.RemoveAll(dir))
 	result, err := s.execute(ctx, t, shrunk, dir, run.Engine{})
 	switch {
 	case err != nil:

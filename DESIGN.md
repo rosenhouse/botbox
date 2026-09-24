@@ -1092,16 +1092,17 @@ the proxy; the `Image` launcher. Separate design addendum.
   describe the run of the planned sequence. A failing run also has its `run-<n>/`,
   relative to the summary, and its error, or the violation and notes its report carries.
   Until botbox writes the report, those are the run's own, and `run-<n>/` holds no report.
-  While botbox runs the minimized sequence there, `summary.md` and the JUnit file say
-  `run-<n>/` holds a partial run of it. `summary.md` leaves out the ops by type, the
-  checkpoints, what each exit said and the sequences. `summary.json` carries `schema: 1`,
-  which changes when a field changes meaning or goes away. `--junit FILE` writes the runs
-  as JUnit XML with the summary, creating the file's directory: one testsuite, a testcase
-  per planned run, a `failure` typed with the check's ID for a violation, an `error` for a
-  run that did not finish, `skipped` for a run that never started, and an `error` testcase
-  named `botbox` for what stopped the invocation where no run did, or for an invocation
-  that has not finished. The testsuite of an invocation that has not finished gives no
-  time. An invocation that stops before it has a directory writes that testcase alone.
+  botbox empties `run-<n>/` before it runs the minimized sequence there, and meanwhile
+  `summary.md` and the JUnit file say `run-<n>/` holds a partial run of it (D@57).
+  `summary.md` leaves out the ops by type, the checkpoints, what each exit said and the
+  sequences. `summary.json` carries `schema: 1`, which changes when a field changes
+  meaning or goes away. `--junit FILE` writes the runs as JUnit XML with the summary,
+  creating the file's directory: one testsuite, a testcase per planned run, a `failure`
+  typed with the check's ID for a violation, an `error` for a run that did not finish,
+  `skipped` for a run that never started, and an `error` testcase named `botbox` for what
+  stopped the invocation where no run did, or for an invocation that has not finished. The
+  testsuite of an invocation that has not finished gives no time. An invocation that stops
+  before it has a directory writes that testcase alone.
   botbox replaces each file whole, and warns of one it cannot write.
   `objects.jsonl` writes each value of a Secret's `data` and annotations as a marker such
   as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is drawn per
@@ -1849,3 +1850,9 @@ built from source and run as a black-box binary.
   something would never fill the cache that pull requests read. It uploads its `--out` however
   botbox ends, which keeps the summary too (D66). Its download command restores the paths that
   the replay command in `report.md` names. The nightly's issues give the same command.
+- **D@57 botbox empties a run's directory before it runs the minimized sequence there.** A
+  run writes `requests.jsonl` and `objects.jsonl` as it ends. A SIGKILL during that run left
+  the drawn run's recordings and the shrink pass's replays beside the new run's
+  `sequence.json`, `kubeconfig` and `target.log`, under a summary that said the directory
+  held a partial run of the minimized sequence. Naming the run each file came from was
+  rejected, because a run that ends replaces the drawn run's recordings anyway.

@@ -965,19 +965,26 @@ the proxy; the `Image` launcher. Separate design addendum.
   `botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...`;
   `botbox version`.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
-  says how many to draw. `--deadline` defaults to 4m, and the shrinker stops there and
-  reports the smallest failing sequence it found. `--launch-arg` appends to `launch.args`
+  says how many to draw. `--deadline` defaults to 4m. It abandons the run under way
+  (§5.5), and the shrinker stops there and reports the smallest failing sequence it
+  found. `--launch-arg` appends to `launch.args`
   (repeatable; a later flag wins), which is how the bug matrix selects `--bug=N`.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
   CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
   harness error, or a deadline that stopped the invocation before its last run.
+  SIGINT, SIGTERM and SIGHUP interrupt the invocation. No further run starts, and the run
+  under way is abandoned (§5.5). botbox names its directory, stops what it started, and
+  then dies of the signal, so a shell reports 128 plus the signal's number. A second
+  signal kills botbox at once. A signal botbox was started ignoring, as under
+  `nohup`, stays ignored.
 - **Output.** `--out` defaults to `botbox-out/`. Each invocation writes
   `<out>/<timestamp>-<seed>/`, taking the next free name where a second invocation of one
   seed opens a directory in the same second. Each failing run writes `run-<n>/` under it
   with `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl`,
   `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
-  where the deadline ended the shrink pass before its result could be run there. The
+  where the deadline or an interrupt ended the shrink pass before its result could be
+  run there. The
   `kubeconfig` names the proxy and the run namespace. Passing runs are not persisted.
   `objects.jsonl` writes each value of a Secret's `data` and annotations as a marker such
   as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is drawn per
@@ -1551,3 +1558,18 @@ built from source and run as a black-box binary.
   any foreground delete likewise carried a finalizer that only the garbage collector
   removes, so a correctly owned Job failed G3 too. botbox therefore also turns off the API
   server's garbage collector, which adds those finalizers.
+- **D@53 An interrupt abandons the run under way, and botbox dies of the signal once it
+  has stopped what it started.** botbox handled no signal. After `kill -TERM` or a Ctrl-C,
+  etcd, kube-apiserver and the target outlived it, holding about 300 MB. envtest's
+  directories stayed in `TMPDIR`, and a kubeconfig cluster kept the run namespace. envtest
+  starts etcd and kube-apiserver in process groups of their own, so a terminal's Ctrl-C
+  never reaches them. SIGINT, SIGTERM and SIGHUP now end the invocation's context. GitHub
+  Actions sends SIGTERM 7.5 s after the SIGINT that cancels a job, and the teardown's
+  waits alone take `T_stable + T_delete`, so an abandoned run waits for nothing. A
+  context whose deadline has passed cannot report a later interrupt, so the deadline ends
+  the teardown's waits too. A run it cuts there exits 2, as §11 says of a run that
+  overruns it. It used to be judged past the deadline. A Ctrl-C also reaches the target,
+  so supervision ends with the context. botbox dies of the signal rather than exit 2, so
+  that a shell loop, make and `timeout` see an interrupt. `signal.Notify` would undo
+  `nohup`, so botbox leaves alone a signal it was started ignoring. A SIGKILLed botbox
+  still leaves the control plane and the target running.

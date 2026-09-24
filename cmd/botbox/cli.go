@@ -52,8 +52,8 @@ const (
 	shrinkDir = "shrink"
 	// sequenceFile is what run.WriteRunSequence writes.
 	sequenceFile = "sequence.json"
-	// shrunkFile holds a minimized sequence the deadline left unrun, which no
-	// recording in the directory is of (DESIGN.md §11).
+	// shrunkFile holds a minimized sequence the deadline or an interrupt left
+	// unrun, which no recording in the directory is of (DESIGN.md §11).
 	shrunkFile = "sequence.shrunk.json"
 )
 
@@ -107,7 +107,17 @@ type options struct {
 	seedGiven  bool
 }
 
+// main returns what botbox exits with. An invocation a signal interrupted
+// returns 128 plus the signal's number, as a shell reports it.
 func (c *cli) main(ctx context.Context, args []string) int {
+	code := c.dispatch(ctx, args)
+	if stop, ok := interruption(ctx); ok {
+		return 128 + int(stop.signal)
+	}
+	return code
+}
+
+func (c *cli) dispatch(ctx context.Context, args []string) int {
 	opts, paths, err := parse(args)
 	if errors.Is(err, flag.ErrHelp) {
 		fmt.Fprint(c.stdout, usage)
@@ -158,10 +168,13 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
 	for i, planned := range runs {
-		// The deadline is the invocation's budget (DESIGN.md §11): a run that
-		// began keeps its own, and the next does not start. The first always
-		// starts, so a spent deadline is blamed on a run. An invocation the
-		// deadline stopped tested less than asked, so it does not pass.
+		if _, ok := interruption(ctx); ok {
+			return c.fail(fmt.Errorf("an interrupt stopped the invocation after %d of %d runs", i, len(runs)))
+		}
+		// The deadline is the invocation's budget (DESIGN.md §11): the next
+		// run does not start. The first always starts, so a spent deadline is
+		// blamed on a run. An invocation the deadline stopped tested less than
+		// asked, so it does not pass.
 		if i > 0 && ctx.Err() != nil {
 			return c.fail(fmt.Errorf("the --deadline of %s stopped the invocation after %d of %d runs",
 				opts.deadline, i, len(runs)))
@@ -262,20 +275,27 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 		// of, and keeps the smaller one beside it.
 		reported = failed.sequence
 		c.warn(run.WriteSequence(filepath.Join(dir, shrunkFile), shrunk))
-		c.warn(fmt.Errorf("the deadline ended the shrink pass with %s, left unrun in %s",
-			ops(shrunk), filepath.Join(dir, shrunkFile)))
+		c.warn(fmt.Errorf("%s ended the shrink pass with %s, left unrun in %s",
+			ended(ctx), ops(shrunk), filepath.Join(dir, shrunkFile)))
 		result.Notes = append(result.Notes, fmt.Sprintf(
-			"the deadline ended minimization with %s, left unrun in %s: this is the sequence botbox drew",
-			ops(shrunk), shrunkFile))
+			"%s ended minimization with %s, left unrun in %s: this is the sequence botbox drew",
+			ended(ctx), ops(shrunk), shrunkFile))
 	case ctx.Err() != nil:
 		// §5.7 says a report carries the minimized sequence, and the pass
 		// never got to a smaller one (D31).
-		result.Notes = append(result.Notes,
-			"the deadline ended minimization before it found a smaller sequence: this is the sequence botbox drew")
+		result.Notes = append(result.Notes, ended(ctx)+
+			" ended minimization before it found a smaller sequence: this is the sequence botbox drew")
 	case simplified:
-		if again := c.rerun(ctx, opts, s, t, shrunk, dir); again.Violation != nil {
+		again, err := c.rerun(ctx, opts, s, t, shrunk, dir)
+		switch {
+		case again.Violation != nil:
 			result, violation, notes = again, *again.Violation, again.Notes
-		} else {
+		case err != nil:
+			result.Timeline = again.Timeline
+			result.Notes = append(result.Notes, fmt.Sprintf(
+				"the minimized sequence did not finish when it ran again, so this directory holds that partial run and not the one %s was found in",
+				violation.ID))
+		default:
 			// The recordings are of the rerun, so the report counts its ops.
 			result.Timeline = again.Timeline
 			// The directory now holds a run of the minimized sequence that
@@ -302,7 +322,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 // recordings there are of the sequence the run reports, and returns what that
 // run found. A run that reproduced nothing says so: the directory then holds
 // a run that passed.
-func (c *cli) rerun(ctx context.Context, opts options, s session, t *target.Target, shrunk run.Sequence, dir string) run.Result {
+func (c *cli) rerun(ctx context.Context, opts options, s session, t *target.Target, shrunk run.Sequence, dir string) (run.Result, error) {
 	result, err := s.execute(ctx, t, shrunk, dir, run.Engine{})
 	switch {
 	case err != nil:
@@ -310,7 +330,7 @@ func (c *cli) rerun(ctx context.Context, opts options, s session, t *target.Targ
 	case result.Violation == nil:
 		c.warn(fmt.Errorf("the minimized sequence passed when it ran again, so %s holds that run", dir))
 	}
-	return result
+	return result, err
 }
 
 // replayCommand is the one line §5.7 asks a report to carry. It repeats the
@@ -468,16 +488,27 @@ func exitCode(result run.Result, err error) int {
 	}
 }
 
-// named blames the --deadline for a run its own budget cut short. §11 makes
-// this exit 2, which a reader has to be able to tell from a broken target. The
-// context botbox built from the flag is what it asks. That context also ends
-// the teardown's wait for the target to recover from the faults. The rest of
-// the teardown runs on a budget of its own, which is nobody's flag.
+// named blames an interrupt, or the --deadline, for a run its context cut
+// short. §11 makes the deadline exit 2, which a reader has to be able to tell
+// from a broken target. The context botbox built from the flag is what it
+// asks. The teardown's cleanup runs on a budget of its own, which is nobody's
+// flag.
 func (o options) named(ctx context.Context, err error) error {
+	if _, ok := interruption(ctx); ok {
+		return errors.New("an interrupt stopped the run")
+	}
 	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return err
 	}
 	return fmt.Errorf("the --deadline of %s ended the run: %w", o.deadline, err)
+}
+
+// ended names what ended ctx: an interrupt, or else the deadline.
+func ended(ctx context.Context) string {
+	if _, ok := interruption(ctx); ok {
+		return "an interrupt"
+	}
+	return "the deadline"
 }
 
 // simpler reports whether the shrink pass changed the sequence at all. It

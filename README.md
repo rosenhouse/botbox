@@ -32,7 +32,8 @@ kind delete cluster --kubeconfig kind.kubeconfig
 
 - botbox installs the target's `crds`, replacing any CRD of the same name, and leaves them
   installed.
-- Each run creates a namespace and deletes it at the end, unless botbox is killed.
+- Each run creates a namespace and deletes it at the end, even when you interrupt botbox. A
+  SIGKILL leaves it behind.
 - Your controller still runs on your machine, behind botbox's proxy. Do not also deploy it to
   the cluster, or run a second botbox against the cluster at the same time: botbox would
   count the other copy's work as your controller's.
@@ -323,7 +324,7 @@ target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `report.md` — what failed, the command that reproduces it, the sequence and the evidence.
 - `report.json` — the same, for a machine.
 - `sequence.json` — the sequence the rest of the directory is evidence of.
-- `sequence.shrunk.json` — a smaller sequence the deadline left unrun. Present only then.
+- `sequence.shrunk.json` — a smaller sequence the deadline or an interrupt left unrun. Present only then.
 - `requests.jsonl` — every request the target made, as the proxy saw it.
 - `objects.jsonl` — every version of every object the Observer saw. Each value of a Secret's
   `data` and annotations is a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`.
@@ -436,8 +437,15 @@ Exit 2 means botbox could not test your controller, and the message says what to
 
 `$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not. Give
 `--deadline` room for your controller, because a run that overruns it, or an invocation it stops
-before the last run, exits 2 rather than reporting a find. Cache the control plane and the target as
+before the last run, exits 2 rather than reporting a find. botbox stops within seconds of the
+deadline. Cache the control plane and the target as
 [.github/workflows/ci.yml](.github/workflows/ci.yml) does. The job needs no cluster and no registry.
+
+GitHub Actions cancels a job with SIGINT, and sends SIGTERM 7.5 s later. SIGINT, SIGTERM,
+SIGHUP and a terminal's Ctrl-C all stop botbox cleanly. It abandons the run under way, stops your controller
+and the control plane, deletes the run namespace, and names the unfinished run's directory. Then
+it dies of the signal. That takes a second or two. A second signal exits at once and leaves those
+processes running, as SIGKILL does.
 
 Pin botbox to a commit, because `@latest` tracks main. Fix the seed on pull requests, and draw
 fresh seeds on a schedule, as [nightly.yml](.github/workflows/nightly.yml) does. A seed names a

@@ -13,6 +13,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -742,6 +743,133 @@ func TestADeadlineThatStopsTheInvocationBetweenRunsExitsTwo(t *testing.T) {
 	}
 	if strings.Contains(stdout, "every run passed") {
 		t.Errorf("botbox run printed %q, but not every run ran.", stdout)
+	}
+}
+
+func TestAnInterruptBeforeTheFirstRunStartsNone(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cancel(interrupt{syscall.SIGINT})
+	session := &fakeSession{}
+
+	code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
+
+	if code != 128+int(syscall.SIGINT) {
+		t.Errorf("botbox run exited %d, want %d.", code, 128+int(syscall.SIGINT))
+	}
+	if len(session.sequences) != 0 {
+		t.Errorf("The session executed %d sequences after the interrupt.", len(session.sequences))
+	}
+	if !session.closed {
+		t.Error("botbox run left the test cluster running.")
+	}
+	if want := "an interrupt stopped the invocation after 0 of 3 runs"; !strings.Contains(stderr, want) {
+		t.Errorf("botbox run printed %q on stderr, want %q.", stderr, want)
+	}
+}
+
+// A terminal's interrupt reaches the target too, which then stops. The
+// interrupt is what the caller needs to hear about.
+func TestAnInterruptDuringARunStopsTheInvocation(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	session := &fakeSession{failures: []error{errors.New("op 0 (settle): the target is no longer running: signal: interrupt")}}
+	session.after = func() { cancel(interrupt{syscall.SIGTERM}) }
+
+	code, stdout, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
+
+	if code != 128+int(syscall.SIGTERM) {
+		t.Errorf("botbox run exited %d, want %d.", code, 128+int(syscall.SIGTERM))
+	}
+	if len(session.sequences) != 1 {
+		t.Errorf("The session executed %d sequences, want the one the interrupt stopped.", len(session.sequences))
+	}
+	for _, want := range []string{"run 1: an interrupt stopped the run", session.dirs[0]} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("botbox run printed %q on stderr, which does not mention %q.", stderr, want)
+		}
+	}
+	for _, unwanted := range []string{"--deadline", "no longer running"} {
+		if strings.Contains(stderr, unwanted) {
+			t.Errorf("botbox run printed %q on stderr, which blames %q for the interrupt.", stderr, unwanted)
+		}
+	}
+	if strings.Contains(stdout, "every run passed") {
+		t.Errorf("botbox run printed %q, but not every run ran.", stdout)
+	}
+}
+
+// A violation found before the interrupt is reported, and says what cut its
+// minimization short.
+func TestAnInterruptEndsMinimization(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		// replays is how many executes the interrupt waits for: the run
+		// itself, then the candidates of the shrink pass.
+		replays int
+		want    string
+	}{
+		{name: "before a smaller sequence", replays: 1, want: "an interrupt ended minimization before it found a smaller sequence"},
+		{name: "with a smaller sequence unrun", replays: 2, want: "an interrupt ended minimization with 2 ops"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(t.Context())
+			violation := run.Violation{ID: "G4", Statement: "the target converges"}
+			session := &fakeSession{fails: func(run.Sequence, string) *run.Violation { return &violation }}
+			session.after = func() {
+				if len(session.sequences) == test.replays {
+					cancel(interrupt{syscall.SIGINT})
+				}
+			}
+			generate := countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle)
+
+			code, _, stderr := invokeCtx(t, ctx, session, generate,
+				"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+			if code != 128+int(syscall.SIGINT) {
+				t.Fatalf("botbox run exited %d, want %d: %s", code, 128+int(syscall.SIGINT), stderr)
+			}
+			written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(written), test.want) || strings.Contains(string(written)+stderr, "deadline") {
+				t.Errorf("botbox run printed %q and the report\n%s\nwant it to say %q.", stderr, written, test.want)
+			}
+		})
+	}
+}
+
+// The minimized sequence runs again into the run directory. A run of it that
+// did not finish holds part of a run, which is not a pass.
+func TestAnUnfinishedRunOfTheMinimizedSequenceIsNoPass(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	violation := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{failures: make([]error, 10)}
+	rerun := func() bool { n := len(session.sequences); return n > 1 && session.dirs[n-1] == session.dirs[0] }
+	session.after = func() {
+		if rerun() {
+			cancel(interrupt{syscall.SIGINT})
+			session.failures[len(session.sequences)-1] = errors.New("op 0 (settle): context canceled")
+		}
+	}
+	session.fails = func(run.Sequence, string) *run.Violation {
+		if rerun() {
+			return nil
+		}
+		return &violation
+	}
+	generate := countingGenerator(nil, run.OpSettle, run.OpSettle)
+
+	_, _, stderr := invokeCtx(t, ctx, session, generate,
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if said := string(written) + stderr; strings.Contains(said, "passed when it ran again") || !strings.Contains(said, "did not finish when it ran again") {
+		t.Errorf("botbox run printed %q and the report\n%s\nwant them to say the run did not finish.", stderr, written)
 	}
 }
 

@@ -56,6 +56,7 @@ func TestAMutatePathTheCRDRefusesInTheSampleIsAConfigurationError(t *testing.T) 
 }
 
 func TestNewReportsAFieldBotboxCannotDraw(t *testing.T) {
+	const cannotDraw = "botbox cannot draw a value its schema allows; a set longer than its enum, or a pattern nothing matches, does this"
 	for _, testCase := range []struct {
 		path    string
 		overlay map[string]any

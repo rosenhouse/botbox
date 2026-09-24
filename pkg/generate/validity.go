@@ -85,14 +85,12 @@ func (c *crdRules) defaulted(object map[string]any) map[string]any {
 // in the sample.
 const fieldDraws = 100
 
-const cannotDraw = "botbox cannot draw a value its schema allows; a set longer than its enum, or a pattern nothing matches, does this"
-
 // acceptsADraw is nil once the CRD accepts the sample with a value drawn for
 // the field, and otherwise says why it refused them.
 func (c *crdRules) acceptsADraw(sample *unstructured.Unstructured, f field) (err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
-			err = errors.New(cannotDraw)
+			err = errors.New("botbox cannot draw a value its schema allows; a set longer than its enum, or a pattern nothing matches, does this")
 			// rapid calls a draw that no value satisfies invalid data.
 			if reason := fmt.Sprint(recovered); !strings.Contains(reason, "invalid data") {
 				err = fmt.Errorf("botbox failed to draw a value: %s", reason)

@@ -156,6 +156,7 @@ func TestValidateNamesTheControlPlaneBinaryItCannotRun(t *testing.T) {
 func TestValidateLooksABareNameUpOnPATH(t *testing.T) {
 	for name, set := range map[string]struct{ variable, value, etcd string }{
 		"KUBEBUILDER_ASSETS is empty": {"KUBEBUILDER_ASSETS", "", "etcd"},
+		"KUBEBUILDER_ASSETS is .":     {"KUBEBUILDER_ASSETS", ".", "etcd"},
 		"TEST_ASSET_ETCD is a name":   {"TEST_ASSET_ETCD", "my-etcd", "my-etcd"},
 	} {
 		t.Run(name, func(t *testing.T) {

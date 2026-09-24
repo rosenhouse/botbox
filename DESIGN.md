@@ -998,7 +998,7 @@ the proxy; the `Image` launcher. Separate design addendum.
 
 1. Does G2 need a per-target exemption for a status field that a controller rewrites
    with a new value on a timer, such as a heartbeat? `N_quiet` admits writes that change
-   nothing (D@39), and a write that moves a resourceVersion is churn. external-secrets
+   nothing (D51), and a write that moves a resourceVersion is churn. external-secrets
    under `refreshPolicy: Periodic` writes such a field, and D40 answered it with a
    target-side setting. The question stands for a controller that offers no such
    setting.
@@ -1340,7 +1340,7 @@ built from source and run as a black-box binary.
   hook compared. A row of a whole object names no path, because `equalIgnore` cannot ignore
   an object. The line botbox prints quotes the first row with a path, since that is what an
   adopter pastes, and names its object where the statement names another.
-- **D@39 A target declares how many requests a quiet window may hold.** G1 failed a
+- **D51 A target declares how many requests a quiet window may hold.** G1 failed a
   controller that resyncs on a timer, because one request in the `T_stable` after
   convergence was a violation, and a target could not declare the timer.
   `thresholds.quiet`, `N_quiet`, default 0, bounds G1's count of requests in one quiet
@@ -1350,9 +1350,9 @@ built from source and run as a black-box binary.
   because a tick that rewrites an unchanged status is both a request and a status write.
   It never excuses a resourceVersion that moves, so a heartbeat that changes a field is
   still churn (§14 question 1). An `N_quiet` above zero lets a slow loop through G1, and
-  G6 catches only a loop that fails often enough (D@46). The toy's `--resync` runs under
+  G6 catches only a loop that fails often enough (D52). The toy's `--resync` runs under
   envtest with `quiet: 3` and with the default.
-- **D@46 `N_errloop` defaults to 10, and the teardown deletes the fixtures.**
+- **D52 `N_errloop` defaults to 10, and the teardown deletes the fixtures.**
   controller-runtime's default backoff fails 11 times by 5.1 s and 13 times in the densest
   30 s, so G6 missed such a loop at 20. A lower default can fail a correct controller that
   retries one request fast, so the adopted examples set the bar. The worst count of one
@@ -1362,7 +1362,7 @@ built from source and run as a black-box binary.
   It reconciled each earlier run's SecretStore, left in a namespace envtest never deletes,
   and the API server refused every Event it created there. A `T_settle` of 5 s still
   needs 9 or less (§6, backoff).
-- **D@44 G7 requires an object `DeleteManaged` deleted to come back.** The op simulates a
+- **D53 G7 requires an object `DeleteManaged` deleted to come back.** The op simulates a
   missed event, and no check asked whether the target recovered from one. Under B8 with
   the toy's P1 removed, `create` then `deleteManaged v1/ConfigMap` passed every invariant,
   and G5 saw the missing child only when a `restart` followed. G7 judges each such op
@@ -1387,12 +1387,12 @@ built from source and run as a black-box binary.
   API server answered, since only a running target asks. A request anywhere in the op's
   wait was rejected as the bar, because a target first heard from late in the wait has had
   no time to act.
-- **D@44 G1 and G7 treat every `coordination.k8s.io` request as leader election.** The
+- **D54 G1 and G7 treat every `coordination.k8s.io` request as leader election.** The
   group holds only leases and lease candidates. A candidate under coordinated leader
   election creates and renews its LeaseCandidate whether or not it leads. G1 ignores those
   requests as it ignores lease requests, and G7 does not take one as a sign that a
   restarted target is back.
-- **D@70 A settle wait gives a CR under deletion its `T_delete`, and G3 judges a CR that
+- **D55 A settle wait gives a CR under deletion its `T_delete`, and G3 judges a CR that
   outlives it.** The wait after a `delete` op gave the CR `T_settle` to go. The toy with a
   7 s cleanup, under a `T_settle` of 5 s and a `T_delete` of 10 s, failed G4 on a
   `create` and a `delete`, and G3 noted that the run ended before its deadline. B12, whose

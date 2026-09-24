@@ -3,6 +3,7 @@ package run
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -183,6 +184,33 @@ func (l *liveRun) deleteManaged(ctx context.Context, gvk schema.GroupVersionKind
 		return false, fmt.Errorf("deleting the managed %s %s: %w", kindName(gvk), name, err)
 	}
 	return true, nil
+}
+
+func (l *liveRun) patchFixture(ctx context.Context, gvk schema.GroupVersionKind, name string, patch map[string]any) error {
+	data, err := json.Marshal(patch)
+	if err == nil {
+		_, err = l.of(gvk).Patch(ctx, name, types.MergePatchType, data, metav1.PatchOptions{})
+	}
+	if err != nil {
+		return fmt.Errorf("patching the fixture %s %s: %w", kindName(gvk), name, err)
+	}
+	return nil
+}
+
+func (l *liveRun) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind, name string) error {
+	if err := l.of(gvk).Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+		return fmt.Errorf("deleting the fixture %s %s: %w", kindName(gvk), name, err)
+	}
+	return nil
+}
+
+func (l *liveRun) createFixture(ctx context.Context, fixture *unstructured.Unstructured) error {
+	restored := fixture.DeepCopy()
+	restored.SetNamespace(l.h.Namespace)
+	if _, err := l.of(restored.GroupVersionKind()).Create(ctx, restored, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("restoring the fixture %s %s: %w", kindName(restored.GroupVersionKind()), restored.GetName(), err)
+	}
+	return nil
 }
 
 func (l *liveRun) managedCount() int { return len(l.h.Observer.Managed()) }

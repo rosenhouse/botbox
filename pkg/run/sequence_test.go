@@ -1,6 +1,7 @@
 package run
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -226,6 +227,51 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 			ops:  `{"i": 0, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0, "noSettle": true}`,
 			want: "noSettle",
 		},
+		{
+			name: "an updateFixture without a kind",
+			ops:  `{"i": 0, "t": "updateFixture", "name": "token", "patch": {"data": {"token": "abcd"}}}`,
+			want: "kind",
+		},
+		{
+			name: "an updateFixture without a name",
+			ops:  `{"i": 0, "t": "updateFixture", "kind": "v1/Secret", "patch": {"data": {"token": "abcd"}}}`,
+			want: "name",
+		},
+		{
+			name: "an updateFixture without a patch",
+			ops:  `{"i": 0, "t": "updateFixture", "kind": "v1/Secret", "name": "token"}`,
+			want: "patch",
+		},
+		{
+			name: "an updateFixture that skips its settle",
+			ops:  `{"i": 0, "t": "updateFixture", "kind": "v1/Secret", "name": "token", "patch": {"data": {"token": "abcd"}}, "noSettle": true}`,
+			want: "noSettle",
+		},
+		{
+			name: "a deleteFixture without an until",
+			ops:  `{"i": 0, "t": "deleteFixture", "kind": "v1/Secret", "name": "token"}`,
+			want: "until",
+		},
+		{
+			name: "a deleteFixture carrying a patch",
+			ops:  `{"i": 0, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "patch": {"data": {}}, "until": {"op": 1}}`,
+			want: "patch",
+		},
+		{
+			name: "an until that counts requests",
+			ops:  `{"i": 0, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"count": 1}}`,
+			want: "count",
+		},
+		{
+			name: "a settle carrying a name",
+			ops:  `{"i": 0, "t": "settle", "name": "token"}`,
+			want: "name",
+		},
+		{
+			name: "an update carrying an until",
+			ops:  `{"i": 0, "t": "update", "patch": {"spec": {"count": 1}}, "until": {"op": 1}}`,
+			want: "until",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := UnmarshalSequence([]byte(`{"seed": 1, "target": "toy-widget", "ops": [` + test.ops + `]}`))
@@ -256,6 +302,8 @@ func TestSequenceAcceptsTheOpsTheRunnerExecutes(t *testing.T) {
 		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "patch"}, "action": {"drop": true}}}`,
 		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "delete"}, "action": {"drop": true}}}`,
 		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "deletecollection"}, "action": {"drop": true}}}`,
+		`{"i": 0, "t": "updateFixture", "kind": "v1/Secret", "name": "token", "patch": {"data": {"token": "abcd"}}}`,
+		`{"i": 0, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 1}}`,
 	} {
 		t.Run(ops, func(t *testing.T) {
 			// The trailing settle is what the sequence needs, not the op under test.
@@ -298,6 +346,57 @@ func TestSequenceRequiresALastOpThatSettles(t *testing.T) {
 	}
 }
 
+func TestADeletedFixtureComesBackByTheLastOp(t *testing.T) {
+	const deleted = `{"i": 1, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": %d}}`
+	create := `{"i": 0, "t": "create", "obj": {"kind": "Widget"}}, `
+	settle := func(i int) string { return fmt.Sprintf(`, {"i": %d, "t": "settle"}`, i) }
+	for _, test := range []struct {
+		name string
+		ops  string
+		want string
+	}{
+		{name: "an until that names its own op", want: "until names op 1",
+			ops: create + fmt.Sprintf(deleted, 1) + settle(2)},
+		{name: "an until that names an earlier op", want: "until names op 0",
+			ops: create + fmt.Sprintf(deleted, 0) + settle(2)},
+		{name: "an until past the last op", want: "until names op 3",
+			ops: create + fmt.Sprintf(deleted, 3) + settle(2)},
+		{name: "an update of the fixture while it is deleted", want: "op 2 acts on the fixture v1/Secret token, which op 1 deleted until op 4",
+			ops: create + fmt.Sprintf(deleted, 4) +
+				`, {"i": 2, "t": "updateFixture", "kind": "v1/Secret", "name": "token", "patch": {"data": {"token": "abcd"}}}` +
+				settle(3) + settle(4) + settle(5)},
+		{name: "a second delete of the fixture while it is deleted", want: "op 2 acts on the fixture v1/Secret token",
+			ops: create + fmt.Sprintf(deleted, 4) +
+				`, {"i": 2, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 4}}` +
+				settle(3) + settle(4) + settle(5)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := UnmarshalSequence([]byte(`{"seed": 1, "target": "t", "ops": [` + test.ops + `]}`))
+
+			if err == nil {
+				t.Fatalf("The ops %s were accepted, want an error naming %q.", test.ops, test.want)
+			}
+			if !strings.Contains(err.Error(), test.want) {
+				t.Errorf("The ops %s were rejected with %q, want the error to name %q.", test.ops, err, test.want)
+			}
+		})
+	}
+}
+
+// botbox restores the fixture before op until, so that op and the ops after
+// it may act on the fixture again, and ops before it may act on another.
+func TestAFixtureOpActsOnAFixtureThatIsThere(t *testing.T) {
+	ops := `{"i": 0, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 2}},
+		{"i": 1, "t": "updateFixture", "kind": "v1/Secret", "name": "other", "patch": {"data": {"token": "abcd"}}},
+		{"i": 2, "t": "updateFixture", "kind": "v1/Secret", "name": "token", "patch": {"data": {"token": "abcd"}}},
+		{"i": 3, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 4}},
+		{"i": 4, "t": "settle"}`
+
+	if _, err := UnmarshalSequence([]byte(`{"seed": 1, "target": "t", "ops": [` + ops + `]}`)); err != nil {
+		t.Errorf("The ops were rejected: %v", err)
+	}
+}
+
 // OnCR says which ops carry noSettle (DESIGN.md §4), which is what lets
 // generation draw one.
 func TestOnlyTheOpsOnThePrimaryCRActOnIt(t *testing.T) {
@@ -313,6 +412,8 @@ func TestOnlyTheOpsOnThePrimaryCRActOnIt(t *testing.T) {
 		{opType: OpRestart},
 		{opType: OpFault},
 		{opType: OpDeleteManaged},
+		{opType: OpUpdateFixture},
+		{opType: OpDeleteFixture},
 	} {
 		t.Run(string(test.opType), func(t *testing.T) {
 			if got := test.opType.OnCR(); got != test.want {
@@ -333,8 +434,10 @@ func TestOpSettlesUnlessItSaysOtherwise(t *testing.T) {
 		{opType: OpRecreate, want: true},
 		{opType: OpDeleteManaged, want: true},
 		{opType: OpSettle, want: true},
+		{opType: OpUpdateFixture, want: true},
 		{opType: OpRestart},
 		{opType: OpFault},
+		{opType: OpDeleteFixture},
 	} {
 		t.Run(string(test.opType), func(t *testing.T) {
 			if got := (Op{Type: test.opType}).Settles(); got != test.want {

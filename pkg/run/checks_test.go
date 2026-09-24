@@ -273,6 +273,19 @@ func TestTheChecksCarryNoObjectForAnOpThatDeletedNothing(t *testing.T) {
 	}
 }
 
+func TestTheChecksKnowWhereBotboxRestoredAFixture(t *testing.T) {
+	timeline := Timeline{Ops: []AppliedOp{
+		{Op: Op{Index: 0, Type: OpSettle}, At: at(1)},
+		{Op: Op{Index: 1, Type: OpSettle}, At: at(2), Restored: true},
+	}}
+
+	ops := engineOps(checkTarget(), timeline)
+
+	if ops[0].Restored || !ops[1].Restored {
+		t.Errorf("The ops restored a fixture: %t and %t, want only op 1.", ops[0].Restored, ops[1].Restored)
+	}
+}
+
 func TestTheChecksNameTheCRAnOpWrote(t *testing.T) {
 	timeline := Timeline{
 		Namespace: fakeNamespace,

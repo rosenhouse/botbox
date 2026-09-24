@@ -71,6 +71,10 @@ func opOfType(opType OpType) Op {
 		op.Kind, op.Nth = "v1/ConfigMap", nth(0)
 	case OpFault:
 		op.Fault = &Fault{Action: Action{Drop: true}, Until: Trigger{Count: 1}}
+	case OpUpdateFixture:
+		op.Kind, op.Name, op.Patch = "v1/Secret", "token", map[string]any{"data": map[string]any{"token": "abcd"}}
+	case OpDeleteFixture:
+		op.Kind, op.Name, op.Until = "v1/Secret", "token", &Until{Op: 1}
 	}
 	return op
 }
@@ -366,6 +370,32 @@ func TestWithoutMovesAFaultsEnd(t *testing.T) {
 			}
 			if got := *failing.Ops[0].Fault.Until.Op; got != until {
 				t.Errorf("without changed the sequence it was given: its fault ends at op %d.", got)
+			}
+		})
+	}
+}
+
+func TestWithoutMovesWhereADeletedFixtureComesBack(t *testing.T) {
+	const until = 3
+	failing := sequenceOfTypes(OpDeleteFixture, OpSettle, OpRestart, OpDelete, OpSettle)
+	failing.Ops[0].Until = &Until{Op: until}
+	for _, test := range []struct {
+		name    string
+		removed int
+		want    int
+	}{
+		{name: "an op before the one it names", removed: 1, want: until - 1},
+		{name: "the op it names", removed: until, want: until},
+		{name: "an op after the one it names", removed: 4, want: until},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			shorter := failing.without(test.removed)
+
+			if got := shorter.Ops[0].Until.Op; got != test.want {
+				t.Errorf("The fixture comes back at op %d, want %d.", got, test.want)
+			}
+			if got := failing.Ops[0].Until.Op; got != until {
+				t.Errorf("without changed the sequence it was given: its fixture comes back at op %d.", got)
 			}
 		})
 	}

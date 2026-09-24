@@ -908,8 +908,8 @@ func TestG5JudgesWhatTheOpsBetweenItsStatesLeftAlone(t *testing.T) {
 			if fired := len(result.Violations) > 0; fired != c.fires {
 				t.Errorf("G5 reported %v, want a violation: %t.", statements(result), c.fires)
 			}
-			if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], "op 1 (update)") {
-				t.Errorf("G5 noted %v, want one note naming the update to w2.", result.Notes)
+			if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], "on what op 1 (update) may have changed") {
+				t.Errorf("G5 noted %v, want one note that it leaves out what the update to w2 may have changed.", result.Notes)
 			}
 		})
 	}

@@ -22,6 +22,7 @@ const theSeedThatDrawsAB2Reproducer = 2
 // The acceptance of DESIGN.md §10 M5: with --bug=2 the harness finds a failure
 // in a sequence it drew and shrinks it to three ops or fewer.
 func TestShrinkingAGeneratedFailure(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	correct := loadTarget(t, buildToy(t))
 	// The toy converges in milliseconds, and a shrink pass replays many times,

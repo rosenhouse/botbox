@@ -52,6 +52,7 @@ var (
 // TestHarness shares one control plane between its cases, because each start
 // costs seconds. The last case starts its own, which is what it is about.
 func TestHarness(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	binary := buildToy(t)
 	testCluster := startCluster(t, loadTarget(t, binary).CRDs)

@@ -25,6 +25,7 @@ const seededBugB11 = "--bug=11"
 // a backoff interval nor a window width enters into the outcome. The fault's
 // own count ends it, so the run is judged from the refusal on (D36).
 func TestAFaultMakesTheToyFailAnInvariantItOtherwisePasses(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	// One target for both runs, so that the fault is the only difference.
 	toy := loadTarget(t, buildToy(t))
@@ -84,6 +85,7 @@ func TestAFaultMakesTheToyFailAnInvariantItOtherwisePasses(t *testing.T) {
 // recovers once the fault stops, however the fault stopped. B11 never asks
 // again. fault.json is the README's example: the teardown clears its fault.
 func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	binary := buildToy(t)
 	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
@@ -148,6 +150,7 @@ func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
 
 // The fault names the toy's CRD, which the API server serves as widgets.
 func TestAFaultOnAKindNameEndsTheRun(t *testing.T) {
+	t.Parallel()
 	toy := loadTarget(t, buildToy(t))
 	testCluster := startCluster(t, toy.CRDs)
 	sequence := run.Sequence{Seed: 1, Target: toy.Name, Ops: []run.Op{

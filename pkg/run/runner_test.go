@@ -13,9 +13,11 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/util/validation/field"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/invariant"
@@ -52,7 +54,7 @@ type fakeHarness struct {
 	// so that a test can drive the log past what a violation quotes.
 	logged []proxy.Request
 	// applying is what the harness says the proxy did with each fault, by
-	// ID. Its zero value is a fault that matched nothing.
+	// ID. Its zero value is a fault the proxy applied to no request.
 	applying []proxy.FaultWindow
 
 	managed map[schema.GroupVersionKind][]string
@@ -74,10 +76,23 @@ type fakeHarness struct {
 	awaitedUntil []time.Time
 
 	// targetGone makes the harness report a target that has stopped, and
-	// stopsAfter is the call it stops at.
-	targetGone bool
-	stopsAfter string
-	targetExit error
+	// stopsAfter is the call it exits at. exitsInWait is the settle wait it
+	// exits during, counting from 1. Once supervised, an exit is recorded
+	// with the next of says as its last words and the target runs on,
+	// restarting restartsIn later, unless restartFails.
+	targetGone   bool
+	stopsAfter   string
+	exitsInWait  int
+	targetExit   error
+	says         []string
+	supervised   bool
+	restartsIn   time.Duration
+	restartFails bool
+	exited       []Exit
+	// settles are the outcomes of the settle waits in turn. Later waits
+	// converge as converged says.
+	settles []bool
+	waits   int
 
 	// owed is what each settle wait was told the target owed, and
 	// applyingInWait replaces applying once a wait begins.
@@ -108,7 +123,7 @@ func newFakeHarness() *fakeHarness {
 func (f *fakeHarness) record(call string) error {
 	f.calls = append(f.calls, call)
 	if call == f.stopsAfter {
-		f.targetGone = true
+		f.exit()
 	}
 	if call == f.cancelsAfter {
 		f.cancel()
@@ -136,11 +151,38 @@ func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time) (bool, 
 	if f.faultingInWait {
 		f.apply()
 	}
+	if f.waits++; f.waits == f.exitsInWait {
+		f.exit()
+	}
 	if err := errors.Join(f.record("settle"), ctx.Err()); err != nil {
 		return false, err
 	}
+	if f.waits <= len(f.settles) {
+		return f.settles[f.waits-1], nil
+	}
 	return f.converged, nil
 }
+
+// exit stops the target as it would stop on its own.
+func (f *fakeHarness) exit() {
+	if f.supervised && !f.restartFails {
+		said := ""
+		if n := len(f.exited); n < len(f.says) {
+			said = f.says[n]
+		}
+		now := time.Now()
+		f.exited = append(f.exited, Exit{At: now, Err: f.targetExit, Said: said, Restart: now.Add(f.restartsIn)})
+		return
+	}
+	f.targetGone = true
+}
+
+func (f *fakeHarness) supervise() {
+	f.supervised = true
+	_ = f.record("supervise")
+}
+
+func (f *fakeHarness) exits() []Exit { return slices.Clone(f.exited) }
 
 func (f *fakeHarness) sleep(_ context.Context, d time.Duration) error {
 	return f.record("sleep " + d.String())
@@ -189,6 +231,17 @@ func (f *fakeHarness) apply() {
 			f.applied[id] = time.Now()
 		}
 	}
+}
+
+// fakeServed is what discovery answers every fake harness.
+var fakeServed = []metav1.APIResource{
+	{Name: "configmaps", SingularName: "configmap", Kind: "ConfigMap"},
+	{Name: "secrets", SingularName: "secret", Kind: "Secret"},
+	{Name: "widgets", SingularName: "widget", Kind: "Widget"},
+}
+
+func (f *fakeHarness) servedResources() ([]metav1.APIResource, error) {
+	return fakeServed, f.fail["servedResources"]
 }
 
 // faultWindow answers as the proxy does. A test either says what the proxy
@@ -412,8 +465,10 @@ func TestRunAppliesTheOpsInOrder(t *testing.T) {
 	if result.Violation != nil {
 		t.Errorf("The run reported %v, want no violation.", result.Violation)
 	}
+	// The first wait that converged shows the target runs, so botbox
+	// supervises it from there on, once.
 	want := []string{
-		"createCR widget", "settle",
+		"createCR widget", "settle", "supervise",
 		"patchCR widget map[spec:map[count:5]]", "settle",
 		"settle",
 		"restart",
@@ -846,6 +901,106 @@ func TestRunJudgesARunWhoseFaultMatchedNothing(t *testing.T) {
 	if got := result.Timeline.Faults; len(got) != 1 || !got[0].Start.IsZero() {
 		t.Errorf("The fault's window is %+v, want no window: the proxy applied nothing.", got)
 	}
+	if !slices.Contains(result.Notes, "the proxy applied the fault of op 0 to no request") {
+		t.Errorf("The run noted %q, want it to say the proxy applied the fault to nothing.", result.Notes)
+	}
+}
+
+func TestOnlyAFaultTheProxyNeverAppliedLeavesANote(t *testing.T) {
+	h := newFakeHarness()
+	h.applying = []proxy.FaultWindow{{First: time.Now()}, {}}
+	fault := &Fault{Match: Match{Resource: "configmaps"}, Action: Action{Error: 500}, Until: Trigger{Count: 1}}
+
+	result, err := runFake(t, h, nil, sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpFault, Fault: fault},
+		Op{Type: OpFault, Fault: fault},
+		Op{Type: OpSettle},
+	))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	var noted []string
+	for _, note := range result.Notes {
+		if strings.Contains(note, "to no request") {
+			noted = append(noted, note)
+		}
+	}
+	if want := []string{"the proxy applied the fault of op 2 to no request"}; !slices.Equal(noted, want) {
+		t.Errorf("The run noted %q, want %q: the proxy applied the fault of op 1.", noted, want)
+	}
+}
+
+// No op follows the fault op here, so no op reads the fault's window after
+// the proxy first applied it.
+func TestAFaultTheProxyFirstAppliedAfterTheLastOpLeavesNoNote(t *testing.T) {
+	h := newFakeHarness()
+	h.faulting = true
+
+	result, err := runFake(t, h, nil, sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}},
+	))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	for _, note := range result.Notes {
+		if strings.Contains(note, "to no request") {
+			t.Errorf("The run noted %q about a fault the proxy applied.", note)
+		}
+	}
+}
+
+// The proxy records a request's resource as the plural the API server serves,
+// so a fault on any other name would match nothing.
+func TestAFaultOnAResourceTheAPIServerDoesNotServeEndsTheRun(t *testing.T) {
+	for _, test := range []struct {
+		resource string
+		want     []string
+	}{
+		{"configmap", []string{"op 1 (fault)", `match.resource "configmap"`, "did you mean configmaps?"}},
+		{"ConfigMaps", []string{`match.resource "ConfigMaps"`, "did you mean configmaps?"}},
+		{"Secret", []string{"did you mean secrets?"}},
+		{"gizmos", []string{`match.resource "gizmos"`, "plural"}},
+	} {
+		t.Run(test.resource, func(t *testing.T) {
+			h := newFakeHarness()
+
+			_, err := runFake(t, h, nil, sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: test.resource}, Action: Action{Error: 500}}},
+				Op{Type: OpSettle},
+			))
+
+			if err == nil {
+				t.Fatal("The run accepted a fault on a resource the API server does not serve.")
+			}
+			for _, want := range test.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("The run returned %q, want %q.", err, want)
+				}
+			}
+			if h.added != 0 {
+				t.Errorf("The proxy was given %d faults, want none.", h.added)
+			}
+		})
+	}
+}
+
+func TestAFaultThatDiscoveryCannotResolveEndsTheRun(t *testing.T) {
+	h := newFakeHarness()
+	h.fail["servedResources"] = errors.New("discovery is down")
+
+	_, err := runFake(t, h, nil, sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Match: Match{Resource: "configmaps"}, Action: Action{Error: 500}}},
+		Op{Type: OpSettle},
+	))
+
+	if err == nil || !strings.Contains(err.Error(), "discovery is down") {
+		t.Errorf("The run returned %v, want the discovery error.", err)
+	}
 }
 
 func TestRunRecordsG4OnceTheFaultHasExpired(t *testing.T) {
@@ -1033,7 +1188,7 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 			if ops := check.inputs[len(check.inputs)-1].Timeline.Ops; len(ops) != 3 || ops[2].CR != "widget" {
 				t.Errorf("The checks at the recreate's checkpoint read the ops %+v, want the recreate of widget last.", ops)
 			}
-			want := []string{"addFault 0", "createCR widget", "settle", "deleteCR widget", "awaitCRGone widget"}
+			want := []string{"addFault 0", "createCR widget", "settle", "supervise", "deleteCR widget", "awaitCRGone widget"}
 			if got := h.opCalls(); !slices.Equal(got, want) {
 				t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
 			}
@@ -1117,7 +1272,7 @@ func TestTheTeardownWaitsForNoRecoveryTheTargetIsNotOwed(t *testing.T) {
 		name     string
 		applying []proxy.FaultWindow
 	}{
-		{name: "a fault that matched nothing"},
+		{name: "a fault the proxy applied to no request"},
 		{name: "a fault the target converged after",
 			applying: []proxy.FaultWindow{{First: time.Now().Add(-3 * time.Second), Retired: time.Now().Add(-2 * time.Second)}}},
 	} {
@@ -1430,6 +1585,74 @@ func TestRunReportsAFailedOp(t *testing.T) {
 	}
 }
 
+func TestAWriteTheAPIServerRefusesIsARefusalOfItsOp(t *testing.T) {
+	widgets := schema.GroupResource{Group: "toy.botbox", Resource: "widgets"}
+	invalid := apierrors.NewInvalid(schema.GroupKind{Group: "toy.botbox", Kind: "Widget"}, "widget",
+		field.ErrorList{field.Invalid(field.NewPath("spec"), "object", "maxUnavailable must not exceed count")})
+	for _, test := range []struct {
+		name, call string
+		err        error
+		refusedOp  int
+	}{
+		{"a create its CRD refuses", "createCR widget", invalid, 0},
+		{"an update its CRD refuses", "patchCR widget map[spec:map[count:5]]", invalid, 2},
+		{"a create a webhook denies with its default code", "createCR widget",
+			apierrors.NewBadRequest(`admission webhook "validate.toy.botbox" denied the request: no`), 0},
+		{"a create a webhook forbids", "createCR widget",
+			apierrors.NewForbidden(widgets, "widget", errors.New(`admission webhook "validate.toy.botbox" denied the request`)), 0},
+		{"a server that fails", "createCR widget", apierrors.NewInternalError(errors.New("etcd is down")), -1},
+		{"a managed object botbox may not delete", "deleteManaged v1/ConfigMap widget-0",
+			apierrors.NewForbidden(schema.GroupResource{Resource: "configmaps"}, "widget-0", errors.New("no")), -1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newFakeHarness()
+			h.fail[test.call] = test.err
+
+			_, err := runFake(t, h, nil, sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)},
+				Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(5)}}},
+			))
+
+			var refused *Refused
+			switch isRefused := errors.As(err, &refused); {
+			case test.refusedOp < 0 && isRefused:
+				t.Errorf("The run returned %v, a refusal of what op %d wrote.", err, refused.Op.Index)
+			case test.refusedOp >= 0 && !isRefused:
+				t.Errorf("The run returned %v, want a refusal of op %d.", err, test.refusedOp)
+			case isRefused && refused.Op.Index != test.refusedOp:
+				t.Errorf("The run blamed op %d, want op %d.", refused.Op.Index, test.refusedOp)
+			case isRefused && !strings.HasPrefix(err.Error(), refused.Error()):
+				t.Errorf("The run returned %q, which does not open with the refusal.", err)
+			}
+			if err == nil || !strings.Contains(err.Error(), test.err.Error()) {
+				t.Errorf("The run returned %v, want the API server's %v.", err, test.err)
+			}
+		})
+	}
+}
+
+func TestADeleteAWebhookForbidsIsNoRefusedWrite(t *testing.T) {
+	protected := apierrors.NewForbidden(schema.GroupResource{Group: "toy.botbox", Resource: "widgets"}, "widget",
+		errors.New(`admission webhook "protect.toy.botbox" denied the request: deletion is protected`))
+	for _, deleting := range []Op{{Type: OpDelete}, {Type: OpRecreate, Obj: widget("widget")}} {
+		t.Run(string(deleting.Type), func(t *testing.T) {
+			h := newFakeHarness()
+			h.fail["deleteCR widget"] = protected
+
+			_, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}, deleting))
+
+			var refused *Refused
+			if errors.As(err, &refused) {
+				t.Errorf("The run returned %v, a refusal of what op %d wrote.", err, refused.Op.Index)
+			}
+			if err == nil || !strings.Contains(err.Error(), "deletion is protected") {
+				t.Errorf("The run returned %v, want the API server's %v.", err, protected)
+			}
+		})
+	}
+}
+
 func TestRunValidatesTheSequenceAgainstTheTarget(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -1522,7 +1745,7 @@ func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 	if !between(faults[1].Start, ops[1].At, ops[2].At) || !faults[1].End.After(ops[3].At) {
 		t.Errorf("The second fault was active %+v, want from op 1 until the teardown cleared it.", faults[1])
 	}
-	want := []string{"addFault 0", "addFault 1", "removeFault 0", "settle", "settle"}
+	want := []string{"addFault 0", "addFault 1", "removeFault 0", "settle", "supervise", "settle"}
 	if got := h.opCalls(); !slices.Equal(got, want) {
 		t.Errorf("The run did %v, want %v.", got, want)
 	}
@@ -1541,7 +1764,7 @@ func TestRunEndsAFaultWhoseOpTriggerNamesItsOwnOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("The run failed: %v", err)
 	}
-	if got, want := h.opCalls(), []string{"addFault 0", "removeFault 0", "settle"}; !slices.Equal(got, want) {
+	if got, want := h.opCalls(), []string{"addFault 0", "removeFault 0", "settle", "supervise"}; !slices.Equal(got, want) {
 		t.Errorf("The run did %v, want %v.", got, want)
 	}
 }
@@ -1782,10 +2005,10 @@ func TestTheRunnerAppliesNoOpToATargetThatStopped(t *testing.T) {
 	}
 }
 
-// The teardown judges the deletion it asked for. A target that stopped cleaned
-// nothing up, so the window is not its to answer for.
+// The teardown judges the deletion it asked for. A target that could not start
+// again cleaned nothing up, so the window is not its to answer for.
 func TestTheTeardownJudgesNoDeletionWithATargetThatStopped(t *testing.T) {
-	h := &fakeHarness{converged: true, stopsAfter: "deleteCR widget", targetExit: errors.New("exit status 1")}
+	h := &fakeHarness{converged: true, stopsAfter: "deleteCR widget", targetExit: errors.New("exit status 1"), restartFails: true}
 	g3 := Violation{ID: "G3", Statement: "the CR widget still carried its finalizers"}
 	check := &fakeChecker{violations: [][]Violation{nil, {g3}}}
 
@@ -1861,6 +2084,49 @@ func TestASettleExpiryWithADeadTargetIsAHarnessError(t *testing.T) {
 	}
 }
 
+// A target that stopped once botbox had created the CR, and before it ran
+// supervised, may have crashed on it if it had read a resource. The run
+// directory holds the sequence that replays it. A supervised target stops only
+// where a restart failed.
+func TestAStoppedTargetsErrorSaysWhetherTheCRMayHaveCrashedIt(t *testing.T) {
+	watched := []proxy.Request{{Verb: "watch", Resource: "widgets", Watch: true}}
+	const crashed = "panic: runtime error\n"
+	for _, test := range []struct {
+		name    string
+		h       *fakeHarness
+		log     string
+		created bool
+	}{
+		{"before the CR", &fakeHarness{clean: true, targetGone: true, logged: watched}, crashed, false},
+		{"after the CR", &fakeHarness{clean: true, stopsAfter: "createCR widget", logged: watched}, crashed, true},
+		{"after the CR, having read nothing", &fakeHarness{clean: true, stopsAfter: "createCR widget"}, crashed, false},
+		{"after the CR, over a taken port", &fakeHarness{clean: true, stopsAfter: "createCR widget", logged: watched},
+			"listen tcp :8081: bind: address already in use\n", false},
+		{"once a restart failed", &fakeHarness{clean: true, converged: true, restartFails: true, stopsAfter: "deleteCR widget", logged: watched},
+			crashed, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			test.h.targetExit = errors.New("exit status 2")
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, targetLogFile), []byte(test.log), 0o644); err != nil {
+				t.Fatal(err)
+			}
+
+			_, err := runSequence(t.Context(), toyTarget, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}),
+				Options{Check: &fakeChecker{}, Dir: dir}, test.h)
+
+			if err == nil {
+				t.Fatal("The run reported no error although the target had stopped.")
+			}
+			pointer := "botbox had created the CR, so the CR may have crashed the target, and " +
+				filepath.Join(dir, "sequence.json") + " replays the run"
+			if says := strings.Contains(err.Error(), pointer); says != test.created {
+				t.Errorf("The error is %q; want it to say %q: %t.", err, pointer, test.created)
+			}
+		})
+	}
+}
+
 // A launcher holding no process knows no exit status, and the error says what
 // it knows.
 func TestTheStoppedTargetsErrorWithoutAnExitStatus(t *testing.T) {
@@ -1883,7 +2149,7 @@ func TestTheStoppedTargetsErrorWithoutAnExitStatus(t *testing.T) {
 func TestWhatTheTargetSaidOnTheWayOut(t *testing.T) {
 	// The sizes are literal, so that a wider maxTail fails this rather than
 	// scaling the log with it.
-	const pastTheTail = 5000
+	const pastTheTail = 1_100_000
 	for _, log := range []struct {
 		name  string
 		wrote string
@@ -1892,9 +2158,16 @@ func TestWhatTheTargetSaidOnTheWayOut(t *testing.T) {
 		{"one line and no newline", "toy-widget: --bug=12: want a bug ID from 0 to 11",
 			"toy-widget: --bug=12: want a bug ID from 0 to 11"},
 		{"a trailing blank line", "the message\n   \n", "the message"},
+		{"a line in spaces", "  fatal: bad flag \r\n", "fatal: bad flag"},
 		{"a panic before its stack",
 			"starting\npanic: runtime error: index out of range\n\ngoroutine 1 [running]:\nmain.main()\n\t/src/main.go:57 +0x1d5\n",
 			"panic: runtime error: index out of range"},
+		// The log holds every process a restart started.
+		{"a panic after an earlier one",
+			"panic: the first\n\ngoroutine 1 [running]:\nmain.main()\n\t/src/main.go:10 +0x1d\nstarting\npanic: the second\n\ngoroutine 1 [running]:\nmain.main()\n\t/src/main.go:57 +0x1d5\n",
+			"panic: the second"},
+		{"a last line that ends in a port", "starting\nE0923 16:05:39.116650    7054 main.go:30] cannot reach 10.96.0.1:443\n",
+			"E0923 16:05:39.116650    7054 main.go:30] cannot reach 10.96.0.1:443"},
 		{"several lines and no panic", "starting\nlistening on :8080\nE0921 fatal: reconcile failed\n",
 			"E0921 fatal: reconcile failed"},
 		{"a tail that begins mid-line", strings.Repeat("y", pastTheTail) + "\nE0921 fatal: reconcile failed\n",
@@ -1909,13 +2182,65 @@ func TestWhatTheTargetSaidOnTheWayOut(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if got := whyItStopped(path); got != log.want {
+			if got, _ := whyItStopped(path, 0); got != log.want {
 				t.Errorf("A log of %d bytes reads as %q, want %q.", len(log.wrote), got, log.want)
 			}
 		})
 	}
-	if got := whyItStopped(filepath.Join(t.TempDir(), "no-such-log")); got != "" {
+	if got, _ := whyItStopped(filepath.Join(t.TempDir(), "no-such-log"), 0); got != "" {
 		t.Errorf("A log botbox never wrote reads as %q.", got)
+	}
+}
+
+// Real programs wrote these logs as they stopped. A stack trace follows the
+// line that says why, so the last line is a frame.
+func TestWhatTheTargetSaidAboveItsStackTrace(t *testing.T) {
+	for _, log := range []struct{ file, want string }{
+		{"zap-bind.log", "2026-09-23T16:06:01Z\tERROR\tsetup\tunable to start manager\t" +
+			`{"error": "error listening on :45147: listen tcp :45147: bind: address already in use"}`},
+		{"zap-reconcile.log", "2026-09-23T16:03:53Z\tERROR\tReconciler error\t" +
+			`{"controller": "configmap", "controllerGroup": "", "controllerKind": "ConfigMap", "ConfigMap": {"name":"widget-0","namespace":"default"}, "namespace": "default", "name": "widget-0", "reconcileID": "8a0fad41-f98f-47ea-87d1-990173d1d560", "error": "spec.count 11 is out of range"}`},
+		{"panic.log", "panic: runtime error: index out of range [150] with length 0"},
+		{"klog-fatal.log", "F0923 16:05:39.116650    7054 main.go:30] reconciling widget: the cache never synced"},
+		{"zap-json.log", `{"level":"error","ts":"2026-09-23T16:04:03Z","logger":"setup","msg":"unable to create controller","controller":"Widget","error":"no matches for kind \"Widget\" in version \"toy.botbox/v1\"","stacktrace":"main.main\n\tgithub.com/rosenhouse/botbox/zzprobe/main.go:39\nruntime.main\n\truntime/proc.go:290"}`},
+	} {
+		t.Run(log.file, func(t *testing.T) {
+			if got, _ := whyItStopped(filepath.Join("testdata", "stopped", log.file), 0); got != log.want {
+				t.Errorf("%s reads as %q, want %q.", log.file, got, log.want)
+			}
+		})
+	}
+}
+
+func TestATargetThatCouldNotBindItsPortIsToldWhere(t *testing.T) {
+	for _, log := range []struct {
+		file string
+		hint bool
+	}{
+		{"zap-bind.log", true},
+		{"klog-fatal.log", false},
+	} {
+		t.Run(log.file, func(t *testing.T) {
+			wrote, err := os.ReadFile(filepath.Join("testdata", "stopped", log.file))
+			if err != nil {
+				t.Fatal(err)
+			}
+			dir := t.TempDir()
+			if err := os.WriteFile(filepath.Join(dir, targetLogFile), wrote, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			h := &fakeHarness{clean: true, targetGone: true, targetExit: errors.New("exit status 1")}
+
+			_, err = runSequence(t.Context(), toyTarget, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}),
+				Options{Check: &fakeChecker{}, Dir: dir}, h)
+
+			if err == nil {
+				t.Fatal("The run reported no error although the target had stopped.")
+			}
+			if hinted := strings.Contains(err.Error(), "launch.args"); hinted != log.hint {
+				t.Errorf("The error is %q; want it to name launch.args only where a port was taken.", err)
+			}
+		})
 	}
 }
 
@@ -2100,5 +2425,247 @@ func TestACheckpointIsWhereItsWaitEnded(t *testing.T) {
 	checkpoint := result.Timeline.Checkpoints[0]
 	if wait == nil || !checkpoint.At.Equal(wait.Window.End) || !checkpoint.Began.Equal(wait.Window.Start) {
 		t.Errorf("The checkpoint is %+v, want it over the wait %+v.", checkpoint, wait)
+	}
+}
+
+// Until a settle wait converges, botbox has not seen the target work, and an
+// exit reads like a bad flag or a taken port: a harness error.
+func TestAnExitBeforeAnyWaitConvergedEndsTheRun(t *testing.T) {
+	h := newFakeHarness()
+	h.converged, h.faulting = false, true
+	h.exitsInWait, h.targetExit = 2, errors.New("exit status 1")
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpSettle},
+	)
+
+	_, err := runFake(t, h, nil, sequence)
+
+	if err == nil || !strings.Contains(err.Error(), "op 2 (settle): the target is no longer running") {
+		t.Errorf("The run returned %v, want the harness error of the exit in op 2.", err)
+	}
+	if slices.Contains(h.calls, "supervise") {
+		t.Errorf("The run did %v, and no wait converged to show the target worked.", h.calls)
+	}
+}
+
+// crashLoop is a target that converges on op 0 and exits in the wait of the
+// op after.
+func crashLoop() *fakeHarness {
+	h := newFakeHarness()
+	h.exitsInWait, h.targetExit = 2, errors.New("exit status 2")
+	h.says = []string{"panic: runtime error: integer divide by zero"}
+	return h
+}
+
+const crashNote = `the target exited during op 1 (update) with exit status 2 after writing ` +
+	`"panic: runtime error: integer divide by zero"`
+
+// A target that exits once it has worked is restarted, as a kubelet would.
+// One that keeps exiting never converges, and G4 quotes the last exit since it
+// last converged.
+func TestACrashLoopIsAG4ThatQuotesTheLastExit(t *testing.T) {
+	h := crashLoop()
+	h.settles = []bool{true, false}
+	h.stopsAfter = "patchCR widget map[spec:map[count:0]]"
+	h.says = []string{"E0923 lost the lease", "panic: runtime error: integer divide by zero"}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(0)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || result.Violation.ID != "G4" || !strings.Contains(result.Violation.Statement, "op 1 (update)") {
+		t.Fatalf("The run reported %v, want the G4 of the wait after op 1.", result.Violation)
+	}
+	want := `the target exited 2 times since it last converged, last with exit status 2 after writing ` +
+		`"panic: runtime error: integer divide by zero"`
+	if !strings.Contains(result.Violation.Statement, want) {
+		t.Errorf("The G4 says %q, want it to say %q.", result.Violation.Statement, want)
+	}
+	if !slices.Contains(result.Notes, crashNote) {
+		t.Errorf("The run noted %q, want %q.", result.Notes, crashNote)
+	}
+	if len(result.Timeline.Exits) != 2 {
+		t.Errorf("The run recorded the exits %+v, want the two in op 1.", result.Timeline.Exits)
+	}
+}
+
+// A G4 quotes a single exit too.
+func TestAG4QuotesTheOneExitSinceTheTargetConverged(t *testing.T) {
+	h := crashLoop()
+	h.settles = []bool{true, false}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(0)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	want := `the target exited 1 time since it last converged, last with exit status 2 after writing ` +
+		`"panic: runtime error: integer divide by zero"`
+	if result.Violation == nil || !strings.Contains(result.Violation.Statement, want) {
+		t.Errorf("The run reported %+v, want a G4 that says %q.", result.Violation, want)
+	}
+}
+
+// An Exit reads as what follows "with" in a note or a G4, whatever it holds.
+func TestAnExitSaysWhyTheTargetStopped(t *testing.T) {
+	for _, exit := range []struct {
+		err  error
+		said string
+		want string
+	}{
+		{errors.New("exit status 2"), "panic: boom", `exit status 2 after writing "panic: boom"`},
+		{errors.New("exit status 2"), "", "exit status 2"},
+		{nil, "panic: boom", `no error after writing "panic: boom"`},
+		{nil, "", "no error"},
+	} {
+		if got := (Exit{Err: exit.err, Said: exit.said}).String(); got != exit.want {
+			t.Errorf("Exit{Err: %v, Said: %q} reads %q, want %q.", exit.err, exit.said, got, exit.want)
+		}
+	}
+}
+
+// A target that converges after it exited passes, and the exit is noted.
+func TestATargetThatConvergesAfterItExitedPasses(t *testing.T) {
+	h := crashLoop()
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(0)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %v against a target that converged after it exited.", result.Violation)
+	}
+	if !slices.Contains(result.Notes, crashNote) {
+		t.Errorf("The run noted %q, want %q.", result.Notes, crashNote)
+	}
+}
+
+// A G4 quotes only the exits since the target last converged.
+func TestAG4QuotesNoExitBeforeTheTargetLastConverged(t *testing.T) {
+	h := crashLoop()
+	h.settles = []bool{true, true, false}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(0)}}},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(7)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || !strings.Contains(result.Violation.Statement, "op 2 (update)") {
+		t.Fatalf("The run reported %v, want the G4 of the wait after op 2.", result.Violation)
+	}
+	if strings.Contains(result.Violation.Statement, "exited") {
+		t.Errorf("The G4 says %q, and the target converged after it exited.", result.Violation.Statement)
+	}
+	if !slices.Contains(result.Notes, crashNote) {
+		t.Errorf("The run noted %q, want %q.", result.Notes, crashNote)
+	}
+}
+
+// A target that exits on a fault's error waits out the restart's backoff,
+// which is not its to answer for. The wait and the checks give it T_settle
+// past the restart.
+func TestAnExitAFaultExcusedIsOwedTSettlePastItsRestart(t *testing.T) {
+	h := crashLoop()
+	h.faulting, h.exitsInWait, h.restartsIn = true, 0, time.Hour
+	h.stopsAfter = "patchCR widget map[spec:map[count:5]]"
+	check := &fakeChecker{}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(2)}}},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+	)
+
+	_, err := runFake(t, h, check, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if len(h.exited) != 1 {
+		t.Fatalf("The target exited %d times, want once.", len(h.exited))
+	}
+	if want := h.exited[0].Restart.Add(toyTarget.Timeouts.Settle); len(h.owed) < 2 || !h.owed[1].Equal(want) {
+		t.Errorf("The waits were told the target owed recovery until %v, want the wait after op 2 told %v.", h.owed, want)
+	}
+	if exits := check.inputs[1].Timeline.Exits; len(exits) != 1 {
+		t.Errorf("The checks after op 2 read the exits %+v, want the one in its wait.", exits)
+	}
+}
+
+// The wait for recovery from a fault is the teardown's too.
+func TestAnExitWhileTheTeardownAwaitsRecoveryIsTheTeardowns(t *testing.T) {
+	h := crashLoop()
+	h.faulting, h.exitsInWait, h.says = true, 3, nil
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 30}}},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Timeline.Recovery == nil {
+		t.Fatal("The teardown waited for no recovery.")
+	}
+	if want := "the target exited during the teardown with exit status 2"; !slices.Contains(result.Notes, want) {
+		t.Errorf("The run noted %q, want %q.", result.Notes, want)
+	}
+}
+
+// The teardown judges the deletion of a target that exited during it, and the
+// note says where the exit came. The teardown begins as it clears the faults.
+func TestAnExitDuringTheTeardownIsNotedAsSuch(t *testing.T) {
+	for _, exit := range []struct {
+		call string
+		// judged is whether the teardown's checks read the exit.
+		judged bool
+	}{
+		{"clearFaults", true},
+		{"deleteCR widget", true},
+		{"forceFinalizers", false},
+	} {
+		t.Run(exit.call, func(t *testing.T) {
+			h := crashLoop()
+			h.exitsInWait, h.stopsAfter, h.says = 0, exit.call, nil
+			check := &fakeChecker{}
+
+			result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if want := "the target exited during the teardown with exit status 2"; !slices.Contains(result.Notes, want) {
+				t.Errorf("The run noted %q, want %q.", result.Notes, want)
+			}
+			if got := checkpointsAt(result.Timeline); !slices.Equal(got, []int{0, Teardown}) {
+				t.Errorf("The run checkpointed at %v, want the deletion judged too.", got)
+			}
+			if read := len(check.inputs[1].Timeline.Exits) == 1; read != exit.judged {
+				t.Errorf("The teardown's checks read the exits %+v; want the exit read: %t.", check.inputs[1].Timeline.Exits, exit.judged)
+			}
+		})
 	}
 }

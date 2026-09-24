@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"slices"
 	"testing"
@@ -216,5 +217,21 @@ func TestCleanUpIgnoresAWidgetThatIsAlreadyGone(t *testing.T) {
 
 	if err := reconciler.cleanUp(t.Context(), widget); err != nil {
 		t.Errorf("cleanUp returned an error for a Widget the collector had taken: %v", err)
+	}
+}
+
+// A refused status write fails the reconcile, so controller-runtime retries it.
+func TestReconcileReturnsARefusedStatusWrite(t *testing.T) {
+	refused := errors.New("the API server refused the status write")
+	refuseStatus := interceptor.Funcs{
+		SubResourcePatch: func(context.Context, client.Client, string, client.Object, client.Patch, ...client.SubResourcePatchOption) error {
+			return refused
+		},
+	}
+	widget := newWidget(1)
+	r := fixture(t, 0, refuseStatus, widget)
+
+	if err := reconcile(t, r, widget); !errors.Is(err, refused) {
+		t.Errorf("Reconcile returned %v, want the refused status write.", err)
 	}
 }

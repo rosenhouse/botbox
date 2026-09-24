@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -51,6 +52,7 @@ var (
 // TestHarness shares one control plane between its cases, because each start
 // costs seconds. The last case starts its own, which is what it is about.
 func TestHarness(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	binary := buildToy(t)
 	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
@@ -108,6 +110,31 @@ func TestHarness(t *testing.T) {
 		requireNamespaceEmptied(t, ctx, h, widget)
 	})
 
+	t.Run("hands the target the run namespace", func(t *testing.T) {
+		sh := loadTarget(t, "/bin/sh")
+		sh.Launch.Args = []string{"-c", `echo "arg=$1 env=$WATCH_NAMESPACE"; exec sleep 600`, "sh", "--namespace=$NAMESPACE"}
+		sh.Launch.Env = map[string]string{"WATCH_NAMESPACE": "$NAMESPACE"}
+		dir := t.TempDir()
+
+		h := startHarness(t, ctx, sh, testCluster.Config(), dir)
+
+		want := "arg=--namespace=" + h.Namespace + " env=" + h.Namespace + "\n"
+		eventually(t, func() error {
+			logged, err := os.ReadFile(filepath.Join(dir, "target.log"))
+			if err != nil || string(logged) != want {
+				return fmt.Errorf("target.log holds %q (%v), want %q", logged, err, want)
+			}
+			return nil
+		})
+		kubeconfig, err := clientcmd.LoadFromFile(filepath.Join(dir, "kubeconfig"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if namespace, _, err := clientcmd.NewDefaultClientConfig(*kubeconfig, nil).Namespace(); namespace != h.Namespace {
+			t.Errorf("The kubeconfig names the namespace %q (%v), want %s.", namespace, err, h.Namespace)
+		}
+	})
+
 	t.Run("takes back what it started when the target cannot start", func(t *testing.T) {
 		toy := loadTarget(t, filepath.Join(t.TempDir(), "absent-binary"))
 
@@ -121,6 +148,27 @@ func TestHarness(t *testing.T) {
 		}
 		if strings.Contains(err.Error(), "stopping") || strings.Contains(err.Error(), "deleting") {
 			t.Errorf("Start returned %q, want a rollback that itself succeeded.", err)
+		}
+		requireNoRunNamespaceLive(t, ctx, testCluster.Config())
+	})
+
+	// envtest runs no controller manager, so it never adds kube-root-ca.crt.
+	t.Run("ends when the controller manager adds nothing to the namespace", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		opts := run.Options{
+			Dir:                     t.TempDir(),
+			Config:                  testCluster.Config(),
+			ControllerManager:       true,
+			NamespaceDefaultsWithin: time.Second,
+		}
+
+		h, err := run.Start(ctx, toy, opts)
+
+		if h != nil {
+			_ = h.Stop(context.Background())
+		}
+		if err == nil || !strings.Contains(err.Error(), "v1/ConfigMap kube-root-ca.crt in the run namespace within 1s") {
+			t.Fatalf("Start returned %v, want an error naming the v1/ConfigMap kube-root-ca.crt it waited 1s for.", err)
 		}
 		requireNoRunNamespaceLive(t, ctx, testCluster.Config())
 	})
@@ -187,6 +235,8 @@ func loadTarget(t *testing.T, binary string) *target.Target {
 	return toy
 }
 
+// Each envtest test starts its own cluster and calls t.Parallel, so the
+// package takes as long as its longest test.
 func startCluster(t *testing.T, crds []string) *cluster.Cluster {
 	t.Helper()
 	c, err := cluster.Start(cluster.Options{CRDPaths: crds})
@@ -294,7 +344,7 @@ func createCollectedConfigMap(t *testing.T, ctx context.Context, h *run.Harness,
 	if _, err := configMaps(t, h).Create(ctx, owned, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("Creating the owned ConfigMap failed: %v", err)
 	}
-	h.Observer.MarkBotboxCreated(configMapKind, collectedName)
+	h.Observer.Exclude(configMapKind, collectedName)
 }
 
 // requireReconcileRecorded asserts that the target's traffic reached the API

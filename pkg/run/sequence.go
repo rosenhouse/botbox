@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"slices"
+	"strings"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
@@ -271,6 +273,15 @@ func (f *Fault) validate() error {
 	}
 	if actions != 1 {
 		return fmt.Errorf("the fault carries %d actions, want exactly one of error, delay or drop", actions)
+	}
+	if verb := f.Match.Verb; verb != "" && !slices.Contains(proxy.Verbs, verb) {
+		last := len(proxy.Verbs) - 1
+		return fmt.Errorf("match.verb %q is not one of %s and %s",
+			verb, strings.Join(proxy.Verbs[:last], ", "), proxy.Verbs[last])
+	}
+	if strings.Contains(f.Match.Resource, "/") {
+		return fmt.Errorf("match.resource %q holds a slash; name the plural alone, such as configmaps. "+
+			"A fault on a resource matches its subresources' requests too", f.Match.Resource)
 	}
 	return nil
 }

@@ -162,7 +162,7 @@ func TestObserverRecordsTheRunNamespace(t *testing.T) {
 	})
 
 	t.Run("an object botbox created is not managed", func(t *testing.T) {
-		obs.MarkBotboxCreated(configMapGVK, "fixture")
+		obs.Exclude(configMapGVK, "fixture")
 		writeConfigMap(t, ctx, client, ns, "fixture", "applied by botbox")
 		requireVersions(t, obs, observe.Key{GVK: configMapGVK, Namespace: ns, Name: "fixture"}, 1)
 

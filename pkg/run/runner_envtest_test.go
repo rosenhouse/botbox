@@ -122,6 +122,7 @@ func (c *recordingChecker) ops() []int {
 }
 
 func TestRunner(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	binary := buildToy(t)
 	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
@@ -338,7 +339,7 @@ func TestRunner(t *testing.T) {
 		t.Run("fails G3 on a finalizer that never clears, under a "+op, func(t *testing.T) {
 			toy := loadTarget(t, binary)
 			toy.Timeouts = target.Timeouts{Settle: 2 * time.Second, Stable: time.Second, Delete: 4 * time.Second}
-			toy.Launch.Args = append(toy.Launch.Args, "--bug=12")
+			toy.Launch.Args = append(toy.Launch.Args, "--bug=13")
 
 			result, err := run.Run(ctx, toy, readSequence(t, sequence), run.Options{
 				Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},

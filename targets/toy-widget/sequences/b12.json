@@ -12,13 +12,22 @@
           "name": "widget"
         },
         "spec": {
-          "count": 1
+          "count": 2
         }
       }
     },
     {
       "i": 1,
-      "t": "delete"
+      "t": "update",
+      "patch": {
+        "spec": {
+          "count": 0
+        }
+      }
+    },
+    {
+      "i": 2,
+      "t": "settle"
     }
   ]
 }

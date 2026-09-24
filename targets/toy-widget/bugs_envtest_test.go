@@ -240,9 +240,9 @@ func TestSeededBugs(t *testing.T) {
 		})
 	})
 
-	t.Run("B12 keeps a deleted Widget and its children", func(t *testing.T) {
+	t.Run("B13 keeps a deleted Widget and its children", func(t *testing.T) {
 		namespace := createNamespace(t, ctx, c)
-		runReconciler(t, testCluster, namespace, controller.B12)
+		runReconciler(t, testCluster, namespace, controller.B13)
 		widget := createWidgetIn(t, ctx, c, namespace, "w", 1)
 		requireChildren(t, ctx, c, widget, 1)
 		requireSettled(t, ctx, c, widget)

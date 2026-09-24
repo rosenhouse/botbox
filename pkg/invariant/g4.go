@@ -18,7 +18,8 @@ func Convergence(in Input) (Result, error) {
 	out := Result{ID: "G4"}
 	for _, from := range in.convergeAnchors() {
 		deadline := from.deadline
-		if !in.observed(deadline) || in.faulted(from.at, deadline) || in.tornDown(deadline) || in.respecified(from.at, deadline) {
+		if !in.observed(deadline) || in.faulted(from.at, deadline) || in.excusedExit(from.at, deadline) ||
+			in.tornDown(deadline) || in.respecified(from.at, deadline) {
 			continue
 		}
 		seen := in.stateAt(deadline)

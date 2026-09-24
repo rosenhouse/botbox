@@ -20,6 +20,8 @@ launch:
   args:
     - --kubeconfig=$KUBECONFIG
     - --bug=0
+  env:
+    WATCH_NAMESPACE: $NAMESPACE
 timeouts:
   settle: 5s
   stable: 2s

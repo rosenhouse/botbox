@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -25,16 +27,26 @@ type Launcher interface {
 	Restart(ctx context.Context) error
 	// Status reports whether the target is still running.
 	Status() Status
-	// Exited is closed once the running target has stopped, so that a caller
-	// waiting on the target ends where it does.
+	// Exited is closed once the target has stopped and will not start again,
+	// so that a caller waiting on the target ends where it does.
 	Exited() <-chan struct{}
+	// Supervise restarts the target from now on whenever it exits on its own,
+	// as a kubelet restarts a container, and tells onExit why it stopped and
+	// when it starts again.
+	Supervise(onExit func(exit error, restart time.Time))
 }
 
 // Status is what the launcher knows of the target process. It is the process's
 // status, not a health probe (DESIGN.md §5.1).
 type Status struct {
-	// Running is whether the target process is alive.
+	// Running is whether the target process is alive, or will be once the
+	// supervisor has restarted it.
 	Running bool
+	// Restarting is whether a supervised target has exited and waits to start
+	// again.
+	Restarting bool
+	// Started is when the process botbox holds started.
+	Started time.Time
 	// Exit is why a target that ran stopped: an *exec.ExitError naming its exit
 	// status or signal, or ErrExitedZero. It is nil while the target runs, and
 	// before Start and after Stop, when botbox is running no target.
@@ -48,20 +60,32 @@ var ErrExitedZero = errors.New("exit status 0")
 // DefaultGracePeriod is how long Stop waits after SIGTERM before it escalates.
 const DefaultGracePeriod = 5 * time.Second
 
-// kubeconfigVar is the placeholder the launcher substitutes in launch.args.
-const kubeconfigVar = "$KUBECONFIG"
+// A supervised target restarts at once the first time. Each later restart
+// waits twice as long as the one before, from DefaultBackoff up to MaxBackoff.
+const (
+	DefaultBackoff = 10 * time.Second
+	MaxBackoff     = 5 * time.Minute
+)
 
 // Options configure a Binary.
 type Options struct {
-	// Path is the binary to exec, relative to the repository root.
+	// Path is the binary to exec, relative to the working directory.
 	Path string
-	// Args are its arguments, with $KUBECONFIG substituted at Start.
+	// Args are its arguments. Start substitutes $KUBECONFIG and $NAMESPACE in
+	// them and in the values of Env.
 	Args []string
+	// Namespace is the run namespace.
+	Namespace string
+	// Env overrides variables the target inherits.
+	Env map[string]string
 	// Log receives the target's stdout and stderr, as target.log.
 	Log io.Writer
 	// GracePeriod is how long Stop waits after SIGTERM. Zero means
 	// DefaultGracePeriod.
 	GracePeriod time.Duration
+	// Backoff is how long a supervised target waits for its second restart.
+	// Zero means DefaultBackoff.
+	Backoff time.Duration
 }
 
 // Binary runs a target as a local process.
@@ -71,14 +95,26 @@ type Binary struct {
 	mu         sync.Mutex
 	running    *process
 	kubeconfig string
+	// onExit hears each exit of a supervised target. It is nil until
+	// Supervise.
+	onExit   func(error, time.Time)
+	restarts int
+	// gone closes once a supervised target failed to start again, and failed
+	// says why.
+	gone   chan struct{}
+	failed error
 }
 
 type process struct {
-	cmd *exec.Cmd
+	cmd     *exec.Cmd
+	started time.Time
 	// done closes once the process has exited and been reaped, after exit is
 	// set.
 	done chan struct{}
 	exit error
+	// reaped is set once the launcher has seen the exit, restarting the
+	// process if it was supervised.
+	reaped bool
 }
 
 var _ Launcher = (*Binary)(nil)
@@ -100,8 +136,13 @@ func (b *Binary) Start(ctx context.Context, kubeconfig string) error {
 }
 
 func (b *Binary) start(kubeconfig string) error {
-	cmd := exec.Command(b.options.Path, substitute(b.options.Args, kubeconfig)...)
-	cmd.Env = append(os.Environ(), "KUBECONFIG="+kubeconfig)
+	placeholders := strings.NewReplacer("$KUBECONFIG", kubeconfig, "$NAMESPACE", b.options.Namespace)
+	args := make([]string, len(b.options.Args))
+	for i, arg := range b.options.Args {
+		args[i] = placeholders.Replace(arg)
+	}
+	cmd := exec.Command(b.options.Path, args...)
+	cmd.Env = b.environment(placeholders, kubeconfig)
 	log := b.options.Log
 	if log == nil {
 		log = io.Discard
@@ -114,33 +155,50 @@ func (b *Binary) start(kubeconfig string) error {
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("starting %s: %w", b.options.Path, err)
 	}
-	running := &process{cmd: cmd, done: make(chan struct{})}
+	running := &process{cmd: cmd, started: time.Now(), done: make(chan struct{})}
 	go func() {
 		if running.exit = cmd.Wait(); running.exit == nil {
 			running.exit = ErrExitedZero
 		}
 		close(running.done)
+		b.reap(running)
 	}()
 	b.running = running
 	b.kubeconfig = kubeconfig
 	return nil
 }
 
+// environment is botbox's own, with Env and then KUBECONFIG over it. os/exec
+// keeps the last value of a repeated name.
+func (b *Binary) environment(placeholders *strings.Replacer, kubeconfig string) []string {
+	env := os.Environ()
+	for _, name := range slices.Sorted(maps.Keys(b.options.Env)) {
+		env = append(env, name+"="+placeholders.Replace(b.options.Env[name]))
+	}
+	return append(env, "KUBECONFIG="+kubeconfig)
+}
+
 // Status reports whether the target is still running, and why it stopped if it
-// is not. A target that stopped on its own took the run with it, which is a
-// harness error rather than a finding against the target (DESIGN.md §11).
+// is not.
 func (b *Binary) Status() Status {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.running == nil {
+	switch {
+	case b.running == nil:
 		return Status{}
+	case b.failed != nil:
+		return Status{Exit: b.failed}
 	}
+	running := Status{Running: true, Started: b.running.started}
 	select {
 	case <-b.running.done:
-		return Status{Exit: b.running.exit}
+		if b.onExit == nil {
+			return Status{Exit: b.running.exit}
+		}
+		running.Restarting = true
 	default:
-		return Status{Running: true}
 	}
+	return running
 }
 
 // noTarget is the Exited of a launcher with nothing left to wait for.
@@ -155,17 +213,88 @@ var noTarget = func() chan struct{} {
 func (b *Binary) Exited() <-chan struct{} {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.running == nil {
+	switch {
+	case b.running == nil:
 		return noTarget
+	case b.onExit != nil:
+		return b.gone
 	}
 	return b.running.done
 }
 
+// Supervise restarts the target whenever it exits on its own: at once the
+// first time, and after the backoff every later time. A target that exited
+// before the call restarts now.
+func (b *Binary) Supervise(onExit func(exit error, restart time.Time)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.onExit, b.gone = onExit, make(chan struct{})
+	if b.running != nil && b.running.reaped {
+		b.restartLater(b.running)
+	}
+}
+
+// reap sees a process that has exited. Stop and Restart replace the process
+// they end, so only an exit of the target's own restarts it.
+func (b *Binary) reap(exited *process) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	exited.reaped = true
+	if b.onExit != nil && b.running == exited {
+		b.restartLater(exited)
+	}
+}
+
+// restartLater tells the supervisor why the target stopped and when it starts
+// again, then starts it once the backoff has passed. The caller holds b.mu, so
+// that Stop and Restart wait until the exit is heard.
+func (b *Binary) restartLater(exited *process) {
+	delay := b.backoff(b.restarts)
+	b.restarts++
+	b.onExit(exited.exit, time.Now().Add(delay))
+	time.AfterFunc(delay, func() { b.restart(exited) })
+}
+
+// restart starts the target again, unless Stop or Restart already replaced the
+// process that exited.
+func (b *Binary) restart(exited *process) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.running != exited {
+		return
+	}
+	if err := b.start(b.kubeconfig); err != nil {
+		b.failed = fmt.Errorf("%w, and restarting it failed: %w", exited.exit, err)
+		close(b.gone)
+	}
+}
+
+// backoff is how long the restart that follows the given number of restarts
+// waits.
+func (b *Binary) backoff(restarts int) time.Duration {
+	if restarts == 0 {
+		return 0
+	}
+	delay := b.options.Backoff
+	if delay <= 0 {
+		delay = DefaultBackoff
+	}
+	for range restarts - 1 {
+		if delay >= MaxBackoff {
+			break
+		}
+		delay *= 2
+	}
+	return min(delay, MaxBackoff)
+}
+
 // Stop sends SIGTERM and escalates to SIGKILL once the grace period or ctx
-// expires. Stopping a target that is not running does nothing.
+// expires. Stopping a target that is not running does nothing. A stopped
+// target is supervised no longer.
 func (b *Binary) Stop(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	b.onExit = nil
 	if b.running == nil {
 		return nil
 	}
@@ -241,12 +370,4 @@ func signal(running *process, sig syscall.Signal) error {
 		return nil
 	}
 	return fmt.Errorf("sending %s to %s: %w", sig, running.cmd.Path, err)
-}
-
-func substitute(args []string, kubeconfig string) []string {
-	substituted := make([]string, len(args))
-	for i, arg := range args {
-		substituted[i] = strings.ReplaceAll(arg, kubeconfigVar, kubeconfig)
-	}
-	return substituted
 }

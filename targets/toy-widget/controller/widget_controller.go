@@ -16,7 +16,9 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	toyv1 "github.com/rosenhouse/botbox/targets/toy-widget/api/v1"
 )
@@ -70,7 +72,16 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Bug != B8 {
 		builder = builder.Owns(&corev1.ConfigMap{}) // B8 (§9.1): without this watch, a deleted child goes unnoticed.
 	}
-	return builder.Complete(r)
+	return builder.WithOptions(r.controllerOptions()).Complete(r)
+}
+
+// controllerOptions let a panic end B12's process.
+func (r *Reconciler) controllerOptions() controller.Options {
+	if r.Bug != B12 {
+		return controller.Options{}
+	}
+	recoverPanic := false
+	return controller.Options{RecoverPanic: &recoverPanic}
 }
 
 func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -116,13 +127,16 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if r.Bug == B10 && !r.createdChildFor(widget) {
 		return ctrl.Result{}, nil // B10 (§9.1): the status follows a flag a restart lost.
 	}
-	if r.Resync > 0 {
-		return ctrl.Result{RequeueAfter: r.Resync}, r.patchStatus(ctx, widget, status)
+	if changed || r.Resync > 0 {
+		if err := r.patchStatus(ctx, widget, status); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
-	if !changed {
-		return ctrl.Result{}, nil
+	if r.Bug == B12 {
+		// B12: a count of 0 divides by zero.
+		log.FromContext(ctx).Info("reconciled", "percentReady", 100*status.Ready/widget.Spec.Count)
 	}
-	return ctrl.Result{}, r.patchStatus(ctx, widget, status)
+	return ctrl.Result{RequeueAfter: r.Resync}, nil
 }
 
 // claimChildrenEarly reports the children ready and holds that state, so that a
@@ -354,8 +368,8 @@ func (r *Reconciler) cleanUp(ctx context.Context, widget *toyv1.Widget) error {
 	switch r.Bug {
 	case B9:
 		return r.releaseWidget(ctx, widget) // B9 (§9.1): the finalizer goes before the children do.
-	case B12:
-		return nil // B12: the cleanup never runs.
+	case B13:
+		return nil // B13: the cleanup never runs.
 	}
 	controlled, err := controlledChildren(ctx, r.APIReader, widget)
 	if err != nil {

@@ -6,7 +6,7 @@ import (
 )
 
 // Bug selects the seeded bug the controller runs with. Zero is the correct
-// controller; B1 through B12 are the seeded bugs.
+// controller; B1 through B13 are the catalog of DESIGN.md §9.1.
 type Bug int
 
 const (
@@ -22,10 +22,11 @@ const (
 	B10
 	B11
 	B12
+	B13
 )
 
-// MaxBug is the highest seeded bug ID.
-const MaxBug = int(B12)
+// MaxBug is the highest seeded bug ID in the catalog.
+const MaxBug = int(B13)
 
 // defaultB1Hold is Reconciler.B1Hold's value when left unset.
 const defaultB1Hold = 3 * time.Second

@@ -418,7 +418,7 @@ func TestKubeconfigPointsAtTheProxyWithoutCredentials(t *testing.T) {
 	p := startProxy(t, okUpstream())
 	path := filepath.Join(t.TempDir(), "kube", "config")
 
-	if err := p.Kubeconfig(path); err != nil {
+	if err := p.Kubeconfig(path, "ns"); err != nil {
 		t.Fatalf("Kubeconfig returned an error: %v", err)
 	}
 
@@ -442,6 +442,24 @@ func TestKubeconfigPointsAtTheProxyWithoutCredentials(t *testing.T) {
 	}
 	if len(loaded.AuthInfos) != 0 {
 		t.Errorf("The kubeconfig declares users: %+v", loaded.AuthInfos)
+	}
+}
+
+func TestKubeconfigNamesTheNamespace(t *testing.T) {
+	p := startProxy(t, okUpstream())
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+
+	if err := p.Kubeconfig(path, "botbox-run-x"); err != nil {
+		t.Fatalf("Kubeconfig returned an error: %v", err)
+	}
+
+	loaded, err := clientcmd.LoadFromFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	namespace, _, err := clientcmd.NewDefaultClientConfig(*loaded, nil).Namespace()
+	if err != nil || namespace != "botbox-run-x" {
+		t.Errorf("The kubeconfig names the namespace %q (%v), want botbox-run-x.", namespace, err)
 	}
 }
 
@@ -496,7 +514,7 @@ func TestWriteLogReportsAWriteFailure(t *testing.T) {
 func TestKubeconfigReportsAWriteFailure(t *testing.T) {
 	p := startProxy(t, okUpstream())
 
-	err := p.Kubeconfig(t.TempDir()) // A directory is not writable as a file.
+	err := p.Kubeconfig(t.TempDir(), "ns") // A directory is not writable as a file.
 
 	if err == nil {
 		t.Fatal("Kubeconfig reported no error although the path is a directory.")

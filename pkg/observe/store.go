@@ -58,13 +58,13 @@ type Store struct {
 	mu       sync.RWMutex
 	versions []Version
 	byKey    map[Key][]int // positions in versions, in the order recorded
-	botbox   map[Key]bool
+	excluded map[Key]bool
 }
 
 // NewStore returns an empty store. opts carry the attribution rule of §6: the
 // managed kinds and the optional selector.
 func NewStore(opts Options) *Store {
-	return &Store{opts: opts, byKey: map[Key][]int{}, botbox: map[Key]bool{}}
+	return &Store{opts: opts, byKey: map[Key][]int{}, excluded: map[Key]bool{}}
 }
 
 // Record adds the version of obj that an event delivered at time at. A version
@@ -78,12 +78,13 @@ func (s *Store) RecordDeletion(gvk schema.GroupVersionKind, obj *unstructured.Un
 	s.record(newVersion(gvk, obj, at, true))
 }
 
-// MarkBotboxCreated records that botbox, not the target, created the named
-// object: the primary CR and every fixture. Such an object is never managed (§6).
-func (s *Store) MarkBotboxCreated(gvk schema.GroupVersionKind, name string) {
+// Exclude records that the named object is not the target's: botbox created
+// it, or the cluster did. It is never managed, and neither is an object
+// recreated under its name.
+func (s *Store) Exclude(gvk schema.GroupVersionKind, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.botbox[Key{GVK: gvk, Namespace: s.opts.Namespace, Name: name}] = true
+	s.excluded[Key{GVK: gvk, Namespace: s.opts.Namespace, Name: name}] = true
 }
 
 // History returns every version of one object, in the order recorded.
@@ -110,7 +111,7 @@ func (s *Store) Current(gvk schema.GroupVersionKind) []Version {
 }
 
 // Managed returns the latest version of every live managed object: an object
-// of a managed kind that botbox did not create (DESIGN.md §6).
+// of a managed kind that is not excluded.
 func (s *Store) Managed() []Version {
 	return s.live(func(v Version) bool { return s.isManaged(v) })
 }
@@ -235,7 +236,7 @@ func (s *Store) latestAt(key Key, t time.Time) (Version, bool) {
 }
 
 func (s *Store) isManaged(v Version) bool {
-	if !slices.Contains(s.opts.Manages, v.GVK) || s.botbox[v.Key] {
+	if !slices.Contains(s.opts.Manages, v.GVK) || s.excluded[v.Key] {
 		return false
 	}
 	return s.opts.Selector == nil || s.opts.Selector.Matches(labels.Set(v.Labels))

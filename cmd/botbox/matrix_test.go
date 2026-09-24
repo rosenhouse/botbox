@@ -503,3 +503,17 @@ func TestMatrixChecksWithoutEndingTheRun(t *testing.T) {
 		}
 	}
 }
+
+func TestMatrixWarnsOfTheWorkloadsItManages(t *testing.T) {
+	session := &fakeSession{results: []run.Result{recorded(t, true)}}
+
+	code, _, stderr := invoke(t, session, "matrix",
+		"--target", workloadsTargetYAML, "--sequences", bugSequences(t, 0), "--out", matrixFile(t))
+
+	if code != exitOK {
+		t.Fatalf("botbox matrix exited %d: %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "kubelet") {
+		t.Errorf("botbox matrix printed %q on stderr, want the warning of what envtest never runs.", stderr)
+	}
+}

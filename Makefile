@@ -18,6 +18,9 @@ EXTERNAL_SECRETS_COMMIT ?= e8f12e1f1646e0ad47966458023ff10c9577f2b0
 EXTERNAL_SECRETS_CRDS_SHA256 ?= c427124642886d240af8f28d294714a168d920ef8e5d55db14600e00ed0cfb80
 # The release index setup-envtest downloads from, pinned to a controller-tools tag.
 ENVTEST_INDEX_URL ?= https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/$(CONTROLLER_GEN_VERSION)/envtest-releases.yaml
+KIND_VERSION ?= v0.33.0
+# The node image KIND_VERSION releases for ENVTEST_K8S_VERSION, by digest.
+KIND_NODE_IMAGE ?= kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
 
 # Each example draws its own sequences (DESIGN.md §10, M5). A pull request fixes
 # the seeds, so that a failing tier means the change under review and not a new
@@ -31,6 +34,10 @@ EXAMPLE_RUNS ?= 5
 EXAMPLE_DEADLINE ?= 5m
 NIGHTLY_RUNS ?= 20
 NIGHTLY_DEADLINE ?= 30m
+# The kind tier draws the toy's seeds 1 to 3, which the golden draws record.
+KIND_SEED ?= 1
+KIND_RUNS ?= 3
+KIND_DEADLINE ?= 5m
 
 # Project-local tool and asset directories. Both are git-ignored.
 LOCALBIN := $(CURDIR)/bin
@@ -51,6 +58,10 @@ EXTERNAL_SECRETS_CRDS := examples/external-secrets/crds/external-secrets.yaml
 # runs everything else in the directory and it alone.
 EXTERNAL_SECRETS_CONTROL_SEQUENCE := examples/external-secrets/sequences/orphan.json
 EXTERNAL_SECRETS_SEQUENCES := $(filter-out $(EXTERNAL_SECRETS_CONTROL_SEQUENCE),$(wildcard examples/external-secrets/sequences/*.json))
+# The directory carries the pin, so bumping KIND_VERSION reinstalls.
+KIND := $(LOCALBIN)/kind-$(KIND_VERSION)/kind
+KIND_CLUSTER := botbox-test-kind
+KIND_KUBECONFIG := $(LOCALBIN)/kind-kubeconfig
 
 # Let go fetch the toolchain go.mod asks for.
 GOTOOLCHAIN ?= auto
@@ -83,6 +94,9 @@ help:
 	@echo "  test-example-external-secrets          Run the external-secrets example and its negative control."
 	@echo "  test-example-nightly                   Run the cert-manager example on seeds botbox draws."
 	@echo "  test-example-external-secrets-nightly  Run the external-secrets example on seeds botbox draws."
+	@echo "  test-kind                              Run the toy through --kubeconfig against a throwaway kind cluster."
+	@echo "  kind-cluster                           Create the kind cluster test-kind runs against."
+	@echo "  test-kind-runs                         Run the toy against the cluster kind-cluster created."
 	@echo "  fmt                                    Fail if any file needs gofmt."
 	@echo "  vet                                    Run go vet over both tiers."
 
@@ -255,10 +269,10 @@ test-envtest: setup
 	KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" go test -tags envtest -count=1 ./...
 
 # The negative control every example tier ends with: (tier name, a command that
-# must fail, the clause of the G3 statement it must fail on). A tier whose
-# control passes proves nothing.
+# must fail, the clause of the statement it must fail on). A tier whose control
+# passes proves nothing.
 define negative-control
-	@echo "==> the negative control, which must fail G3"
+	@echo "==> the negative control, which must fail on: $(3)"
 	@log=$$($(2) 2>&1); \
 	status=$$?; \
 	echo "$$log"; \
@@ -306,10 +320,11 @@ define external-secrets-control
 	$(call hides-the-secret,$(1),$(EXTERNAL_SECRETS_CONTROL_OUT),token,s3cr3t|czNjcjN0|733363723374|56e1b3f734a3d8e2c7932736ca6ff7fb9a9b5a14378c70c27c5e0adf)
 endef
 
-# The example tier of DESIGN.md §11. The pinned sequences are the worked example
-# of the format §7 states, so the tier runs them rather than letting them rot.
-# Its control turns the owner reference off, under which cert-manager retains
-# the issued Secret by design, and the target declares Secrets as managed.
+# test-example is the example tier of DESIGN.md §11. The pinned sequences are
+# the worked example of the format §7 states, so the tier runs them rather than
+# letting them rot. Its control turns the owner reference off, under which
+# cert-manager retains the issued Secret by design, and the target declares
+# Secrets as managed.
 .PHONY: test-example
 test-example: verify-cert-manager-pin setup build
 	@echo "==> the default configuration, which must pass"
@@ -322,11 +337,11 @@ test-example: verify-cert-manager-pin setup build
 		|| { echo "test-example: a pinned sequence failed."; exit 1; }
 	$(call cert-manager-control,test-example)
 
-# The nightly tier of DESIGN.md §10 (M5). botbox draws the seeds, so a find here
-# is a new one rather than the fixed seeds again, and every run prints its seed,
-# so the find replays (§11). It carries the same negative control as test-example,
-# because a nightly that only ever passes cannot tell a quiet night from a harness
-# that stopped judging.
+# test-example-nightly is the nightly tier of DESIGN.md §10 (M5). botbox draws
+# the seeds, so a find here is a new one rather than the fixed seeds again, and
+# every run prints its seed, so the find replays (§11). It carries the same
+# negative control as test-example, because a nightly that only ever passes
+# cannot tell a quiet night from a harness that stopped judging.
 .PHONY: test-example-nightly
 test-example-nightly: verify-cert-manager-pin
 	@echo "==> drawn seeds, which must pass"
@@ -334,7 +349,7 @@ test-example-nightly: verify-cert-manager-pin
 		|| { echo "test-example-nightly: a drawn seed failed."; exit 1; }
 	$(call cert-manager-control,test-example-nightly)
 
-# The external-secrets example tier, in the shape of test-example. Its negative
+# test-example-external-secrets has the shape of test-example. Its negative
 # control is a sequence rather than a --launch-arg, because no flag makes the
 # controller orphan its Secret: spec.target.creationPolicy does, and that is a
 # field of the CR (DESIGN.md §15, D41).
@@ -358,6 +373,37 @@ test-example-external-secrets-nightly: verify-external-secrets-pin setup build
 	@examples/external-secrets/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE) \
 		|| { echo "test-example-external-secrets-nightly: a drawn seed failed."; exit 1; }
 	$(call external-secrets-control,test-example-external-secrets-nightly)
+
+$(KIND):
+	GOBIN=$(dir $@) go install sigs.k8s.io/kind@$(KIND_VERSION)
+
+KIND_BOTBOX = ./bin/botbox run --target targets/toy-widget/target.yaml --kubeconfig $(KIND_KUBECONFIG) --deadline $(KIND_DEADLINE)
+
+.PHONY: kind-cluster
+kind-cluster: $(KIND)
+	$(KIND) create cluster --name $(KIND_CLUSTER) --image $(KIND_NODE_IMAGE) \
+		--config targets/toy-widget/kind.yaml --kubeconfig $(KIND_KUBECONFIG) --wait 3m
+
+# test-kind is the kind tier of DESIGN.md §11. botbox installs the toy's CRD,
+# and the cluster's own controller manager collects garbage and populates each
+# namespace. The toy runs on the host, so no image is loaded. The trap deletes
+# the cluster however the runs end. A failed create sets no trap, so a cluster
+# that already had the name survives.
+.PHONY: test-kind
+test-kind: kind-cluster
+	@trap '$(KIND) delete cluster --name $(KIND_CLUSTER) --kubeconfig $(KIND_KUBECONFIG)' EXIT INT TERM; \
+	$(MAKE) --no-print-directory test-kind-runs
+
+.PHONY: test-kind-runs
+test-kind-runs: build
+	@echo "==> the toy with no bug, which must pass"
+	@$(KIND_BOTBOX) targets/toy-widget/sequences/b0.json \
+		|| { echo "test-kind: b0.json failed."; exit 1; }
+	@echo "==> drawn seeds, which must pass"
+	@$(KIND_BOTBOX) --seed $(KIND_SEED) --runs $(KIND_RUNS) \
+		|| { echo "test-kind: a drawn seed failed."; exit 1; }
+	$(call negative-control,test-kind,$(KIND_BOTBOX) --launch-arg --bug=3 targets/toy-widget/sequences/b3.json,G3 the v1/ConfigMap widget-0 was still there)
+	$(call negative-control,test-kind,$(KIND_BOTBOX) --launch-arg --bug=8 targets/toy-widget/sequences/b8.json,G7 the v1/ConfigMap widget-0 that op 1 (deleteManaged) deleted never came back)
 
 .PHONY: fmt
 fmt:

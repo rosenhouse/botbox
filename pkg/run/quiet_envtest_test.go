@@ -12,6 +12,7 @@ import (
 // 900ms apart put at most three in the toy's 2s quiet window, so a quiet of 3
 // admits them and the default of 0 does not.
 func TestAQuietThresholdAdmitsATimer(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	binary := buildToy(t)
 	testCluster := startCluster(t, loadTarget(t, binary).CRDs)

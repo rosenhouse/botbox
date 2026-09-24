@@ -304,7 +304,7 @@ func TestVersionsOfReturnsOneKindUpToAnInstant(t *testing.T) {
 
 func TestManagedExcludesFixturesAndTheKindsTheTargetDoesNotManage(t *testing.T) {
 	s := observe.NewStore(managing(configMapGVK))
-	s.MarkBotboxCreated(configMapGVK, "fixture")
+	s.Exclude(configMapGVK, "fixture")
 
 	s.Record(configMapGVK, object(configMapGVK, "fixture", "10"), at(0))
 	s.Record(configMapGVK, object(configMapGVK, "child", "11"), at(1))
@@ -312,6 +312,22 @@ func TestManagedExcludesFixturesAndTheKindsTheTargetDoesNotManage(t *testing.T) 
 
 	if got := names(s.Managed()); !slices.Equal(got, []string{"child"}) {
 		t.Errorf("Managed returned %v, want only the object the target created.", got)
+	}
+}
+
+func TestAnExcludedObjectStaysExcludedWhenItIsRecreated(t *testing.T) {
+	s := observe.NewStore(managing(configMapGVK))
+	s.Exclude(configMapGVK, "kube-root-ca.crt")
+
+	s.Record(configMapGVK, object(configMapGVK, "kube-root-ca.crt", "10"), at(0))
+	s.RecordDeletion(configMapGVK, object(configMapGVK, "kube-root-ca.crt", "11"), at(1))
+	s.Record(configMapGVK, withUID(object(configMapGVK, "kube-root-ca.crt", "12"), "uid-recreated"), at(2))
+
+	if got := names(s.Managed()); len(got) != 0 {
+		t.Errorf("Managed returned %v, want the recreated object excluded.", got)
+	}
+	if s.IsManaged(key(configMapGVK, "kube-root-ca.crt")) {
+		t.Error("IsManaged accepted the recreated object.")
 	}
 }
 
@@ -367,7 +383,7 @@ func TestManagedByReturnsTheObjectsOneOwnerOwns(t *testing.T) {
 
 func TestManagedByExcludesObjectsBotboxCreated(t *testing.T) {
 	s := observe.NewStore(managing(configMapGVK))
-	s.MarkBotboxCreated(configMapGVK, "fixture")
+	s.Exclude(configMapGVK, "fixture")
 	s.Record(configMapGVK, withOwner(object(configMapGVK, "fixture", "10"), "uid-widget"), at(0))
 
 	if got := names(s.ManagedBy("uid-widget")); len(got) != 0 {

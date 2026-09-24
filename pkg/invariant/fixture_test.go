@@ -97,13 +97,13 @@ func newRunManaging(kinds ...schema.GroupVersionKind) *run {
 	t := toyTarget()
 	t.Manages = kinds
 	store := observe.NewStore(observe.Options{Namespace: namespace, Manages: kinds})
-	store.MarkBotboxCreated(widgetGVK, widgetName)
+	store.Exclude(widgetGVK, widgetName)
 	return &run{in: invariant.Input{Target: t, History: store}, store: store}
 }
 
 // fixture marks an object as botbox's, so that it is never managed (§6).
 func (r *run) fixture(obj *unstructured.Unstructured) *run {
-	r.store.MarkBotboxCreated(obj.GroupVersionKind(), obj.GetName())
+	r.store.Exclude(obj.GroupVersionKind(), obj.GetName())
 	return r
 }
 
@@ -181,6 +181,13 @@ func (r *run) cleaned(when time.Duration) *run {
 
 func (r *run) fault(from, to time.Duration) *run {
 	r.in.Faults = append(r.in.Faults, invariant.FaultWindow{Start: at(from), End: at(to)})
+	return r
+}
+
+// exit is the target stopping on its own at when, and botbox starting it again
+// at restart.
+func (r *run) exit(when, restart time.Duration) *run {
+	r.in.Exits = append(r.in.Exits, invariant.Exit{At: at(when), Restart: at(restart), Why: "the exit at " + when.String()})
 	return r
 }
 

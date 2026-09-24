@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -359,6 +360,17 @@ func TestTheCIRecipeFixesSeedsOnPullRequestsAndDrawsThemNightly(t *testing.T) {
 	}
 	if want := map[string]bool{"pull_request": true, "schedule": false}; !maps.Equal(seeded, want) {
 		t.Errorf("botbox run fixes a seed by event as %v, and should as %v", seeded, want)
+	}
+}
+
+func TestTheCIRecipeSizesEachBotboxRun(t *testing.T) {
+	for _, s := range botboxRuns(t, recipeSteps(t)) {
+		runs := regexp.MustCompile(`--runs (\d+)`).FindStringSubmatch(s.Run)
+		if runs == nil || !strings.Contains(s.Run, "--deadline ") {
+			t.Errorf("%q leaves --runs or --deadline to botbox's defaults, and an adopter sizes the two together", s.Run)
+		} else if n, _ := strconv.Atoi(runs[1]); n < 2 {
+			t.Errorf("%q runs %d sequences, and a tier should run several", s.Run, n)
+		}
 	}
 }
 

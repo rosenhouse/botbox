@@ -1,0 +1,62 @@
+name: botbox
+
+on:
+  pull_request:
+  schedule:
+    - cron: '17 6 * * *'
+
+env:
+  BOTBOX_VERSION: <commit>   # a commit of main
+  SETUP_ENVTEST_VERSION: v0.25.1
+  ENVTEST_K8S_VERSION: 1.37.0
+  ENVTEST_INDEX_URL: https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  botbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: false   # true needs a go.sum
+      - id: tools
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/bin
+            bin/envtest
+          key: ${{ runner.os }}-${{ runner.arch }}-botbox-${{ env.BOTBOX_VERSION }}-${{ env.SETUP_ENVTEST_VERSION }}-${{ env.ENVTEST_K8S_VERSION }}
+      - if: steps.tools.outputs.cache-hit != 'true'
+        run: |
+          go install "github.com/rosenhouse/botbox/cmd/botbox@$BOTBOX_VERSION"
+          go install "sigs.k8s.io/controller-runtime/tools/setup-envtest@$SETUP_ENVTEST_VERSION"
+      - run: |
+          assets=$(setup-envtest use "$ENVTEST_K8S_VERSION" --index "$ENVTEST_INDEX_URL" --bin-dir bin/envtest -p path)
+          echo "KUBEBUILDER_ASSETS=$assets" >>"$GITHUB_ENV"
+      # Saving before botbox runs fills the cache even when botbox fails.
+      - if: steps.tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/bin
+            bin/envtest
+          key: ${{ steps.tools.outputs.cache-primary-key }}
+      - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
+      # exec lets a cancel's signal reach botbox, which bash does not pass on.
+      - if: github.event_name == 'pull_request'
+        run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-out
+      - if: github.event_name == 'schedule'
+        run: exec botbox run --target target.yaml --runs 20 --deadline 30m --out botbox-out
+      - if: always()
+        run: cat botbox-out/*/summary.md >>"$GITHUB_STEP_SUMMARY" || true
+      # gh run download <run-id> --name botbox-out --dir botbox-out restores
+      # the paths that the replay command in report.md names.
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: botbox-out
+          path: botbox-out/

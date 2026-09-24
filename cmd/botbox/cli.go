@@ -562,9 +562,7 @@ func (c *cli) failRun(number int, failed planned, dir string, err error) int {
 	var refused *run.Refused
 	switch {
 	case !errors.As(err, &refused):
-		if _, statErr := os.Stat(dir); statErr == nil {
-			fmt.Fprintf(c.stderr, "  the run's files are in %s\n", dir)
-		}
+		c.showRunFiles(dir)
 	case failed.generated():
 		fmt.Fprintf(c.stderr, "  the op is in %s\n", filepath.Join(dir, sequenceFile))
 		fmt.Fprintln(c.stderr, "  botbox drew it to pass the CRD's schema and rules without the status the controller"+
@@ -574,6 +572,13 @@ func (c *cli) failRun(number int, failed planned, dir string, err error) int {
 		fmt.Fprintf(c.stderr, "  the op is in %s\n", failed.path)
 	}
 	return exitError
+}
+
+// showRunFiles prints the directory a failed run left, if it exists.
+func (c *cli) showRunFiles(dir string) {
+	if _, err := os.Stat(dir); err == nil {
+		fmt.Fprintf(c.stderr, "  the run's files are in %s\n", dir)
+	}
 }
 
 // exitCode maps a run's outcome to the codes of DESIGN.md §11.

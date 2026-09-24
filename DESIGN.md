@@ -1033,15 +1033,19 @@ the proxy; the `Image` launcher. Separate design addendum.
   and one trio per adopted example:
   `CERT_MANAGER_VERSION` and `EXTERNAL_SECRETS_VERSION`, each with the `_COMMIT` the tag
   must name and the `_CRDS_SHA256` of its checked-in CRDs, so a moved tag or an edited
-  asset fails rather than passing quietly. Values live in the Makefile only. Bumps are
-  their own PRs, never mixed with features.
+  asset fails rather than passing quietly. Values live in the Makefile. The README's Install
+  block and the CI recipe repeat the envtest pins for adopters to copy. The recipe also
+  repeats go.mod's module and Go version, and the runner and action releases of
+  `.github/workflows/`. `make test` holds each copy to its source. Each `--deadline` in the
+  recipe gives a run at least the time that the Makefile's example tiers give one. Bumps
+  are their own PRs, never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
   import it. The rule covers the root module; the spike modules under `docs/spikes/` are
   separate and exempt. Everything else uses client-go and apimachinery.
 - **Layout.** `cmd/botbox/`, `pkg/cluster`, `pkg/proxy`, `pkg/observe`,
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
-  `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`, `docs/`,
-  and `bin/` for git-ignored build output.
+  `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`,
+  `examples/ci/`, `docs/`, and `bin/` for git-ignored build output.
 - **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]`;
   `botbox replay --target <yaml> [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>`;
   `botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...`;
@@ -1105,7 +1109,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   compares them exactly, and its report quotes the markers. Nothing else is redacted: a
   Secret's labels, every other object, `target.log`, `sequence.json`, the summary's
   sequences, and a report's sequence and replay command hold what the target, the sample
-  and the command line gave them (D49).
+  and the command line gave them (D49). `botbox matrix` writes each run to a directory
+  under the system's temporary directory and deletes it once the checks have read it. A
+  run that errs keeps its directory, and the error names it and the command that replays
+  the run. CI uploads that directory.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -1125,7 +1132,8 @@ the proxy; the `Image` launcher. Separate design addendum.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
   (five lines); install; quickstart against cert-manager, then what the second example
   adds; writing `target.yaml` for your own controller; reading a report; what to change
-  when botbox exits 2; a CI recipe for adopters; a one-line-per-invariant table linking to §6; a closing "Design and
+  when botbox exits 2; a CI recipe for adopters, embedded from `examples/ci/github-actions.yml`;
+  a one-line-per-invariant table linking to §6; a closing "Design and
   internals" link to this document and to
   `docs/bug-matrix.md`. A fenced block preceded by `<!-- embed: <path> -->` has content,
   excluding the two fence lines, byte-identical to that file including its trailing
@@ -1821,3 +1829,22 @@ built from source and run as a black-box binary.
   invocation's file as this one's. botbox detects no CI vendor. `$GITHUB_STEP_SUMMARY`
   takes `summary.md` as it is, and GitLab and Jenkins read JUnit XML. A file botbox cannot
   write leaves the exit code alone, since the code already says what the runs found.
+- **D@68 A matrix run that errs keeps its files.** The matrix deleted its temporary
+  directory on every exit, so a harness error named a `target.log` that was gone. A run
+  that errs now keeps its directory, and every other run's is deleted once the checks
+  have read it. The directory stays under the system's temporary directory, because the
+  matrix's `--out` names a file. A matrix that finishes leaves nothing there. CI's
+  bug-matrix job points `TMPDIR` at a directory it uploads when the job fails. The error
+  also prints a replay command with the run's `--bug`, because the runner's hint names
+  only the run's `sequence.json`.
+- **D@56 The CI recipe is a workflow that runs in any repository, caches what it installs and
+  keeps a failing run's evidence.** The README's recipe read Go's version from a go.mod, which
+  a Rust operator's repository lacks. It said to cache the control plane as ci.yml does, but
+  its setup-envtest wrote to the OS data directory. It uploaded nothing. The recipe is now
+  `examples/ci/github-actions.yml`, which the README embeds and a test parses. It caches
+  botbox and setup-envtest with the control plane, because botbox took 104 s to build cold on
+  four CPUs and the 175 MB control plane took 3 s to fetch. It saves the cache before botbox
+  runs. `actions/cache` saves only when the job passes, so a nightly that kept finding
+  something would never fill the cache that pull requests read. It uploads its `--out` however
+  botbox ends, which keeps the summary too (D@57). Its download command restores the paths that
+  the replay command in `report.md` names. The nightly's issues give the same command.

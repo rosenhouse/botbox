@@ -287,20 +287,26 @@ func TestMatrixFailsOnARowThatBreaksTheAcceptance(t *testing.T) {
 	}
 }
 
+// replay is a replay command the matrix printed.
+type replay struct {
+	options
+	sequences []string
+}
+
 // replayed parses each replay command the matrix printed.
-func replayed(t *testing.T, stderr string) []options {
+func replayed(t *testing.T, stderr string) []replay {
 	t.Helper()
-	var commands []options
+	var commands []replay
 	for _, line := range strings.Split(stderr, "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "botbox replay ") {
 			continue
 		}
-		command, _, err := parse(shellWords(t, line)[1:])
+		command, sequences, err := parse(shellWords(t, line)[1:])
 		if err != nil {
 			t.Fatalf("botbox cannot parse the replay command %q: %v", line, err)
 		}
-		commands = append(commands, command)
+		commands = append(commands, replay{command, sequences})
 	}
 	return commands
 }
@@ -360,54 +366,153 @@ func recordedWithABrokenProperty(t *testing.T) run.Result {
 }
 
 // A run that errored judged nothing, so the matrix neither passes it nor
-// writes it.
+// writes it. It keeps only that run's files, and says how to run it again.
 func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 	stopped := errors.New("the target stopped")
 	for _, test := range []struct {
 		name     string
+		flags    []string
 		results  []run.Result
 		failures []error
 		want     string
+		replay   string
+		bugArgs  []string
 	}{
 		{
 			name:     "under the bug",
 			results:  []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)},
 			failures: []error{nil, stopped},
 			want:     "b1.json under --bug=1: the target stopped",
+			replay:   "b1.json",
+			bugArgs:  []string{"--bug=1"},
 		},
 		{
 			name:     "without the bug",
 			results:  []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)},
 			failures: []error{nil, nil, stopped},
 			want:     "b1.json without --bug=1: the target stopped",
+			replay:   "b1.json",
 		},
 		{
 			name:     "in the control",
 			results:  []run.Result{recorded(t, true)},
 			failures: []error{stopped},
 			want:     "b0.json: the target stopped",
+			replay:   "b0.json",
 		},
 		{
-			name:    "in the checks",
+			name:    "in the checks under the bug",
+			results: []run.Result{recorded(t, true), recordedWithABrokenProperty(t)},
+			want:    "b1.json under --bug=1: evaluating property P1: the predicate broke",
+			replay:  "b1.json",
+			bugArgs: []string{"--bug=1"},
+		},
+		{
+			name:    "in the checks without the bug",
 			results: []run.Result{recorded(t, true), recorded(t, false), recordedWithABrokenProperty(t)},
 			want:    "b1.json without --bug=1: evaluating property P1: the predicate broke",
+			replay:  "b1.json",
+		},
+		{
+			name:     "at the deadline",
+			flags:    []string{"--deadline", "1ns"},
+			failures: []error{fmt.Errorf("op 0 (create): %w", context.DeadlineExceeded)},
+			want:     "b0.json: the --deadline of 1ns ended the run: op 0 (create): context deadline exceeded",
+			replay:   "b0.json",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			t.Setenv("TMPDIR", tmp)
 			session := &fakeSession{results: test.results, failures: test.failures}
-			out := matrixFile(t)
+			session.after = func() {
+				if err := os.WriteFile(filepath.Join(session.dirs[len(session.dirs)-1], "target.log"), nil, 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			sequences, out := bugSequences(t, 0, 1), matrixFile(t)
 
-			code, _, stderr := invoke(t, session, "matrix",
-				"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", out)
+			code, _, stderr := invoke(t, session, append([]string{"matrix",
+				"--target", toyTargetYAML, "--sequences", sequences, "--out", out, "--launch-arg", "--x=1"}, test.flags...)...)
 
 			if code != exitError {
 				t.Errorf("botbox matrix exited %d, want %d.", code, exitError)
 			}
-			if !strings.Contains(stderr, test.want) {
-				t.Errorf("botbox matrix reported %q, want %q.", stderr, test.want)
-			}
 			if _, err := os.Stat(out); !errors.Is(err, fs.ErrNotExist) {
 				t.Errorf("botbox matrix wrote %s, want no matrix of a run that errored.", out)
+			}
+			erred, finished := session.dirs[len(session.dirs)-1], session.dirs[:len(session.dirs)-1]
+			if want := "botbox: " + test.want + "\n  the run's files are in " + erred + "\n  run it again with\n"; !strings.Contains(stderr, want) {
+				t.Errorf("botbox matrix reported\n%s\nwant\n%s", stderr, want)
+			}
+			commands := replayed(t, stderr)
+			if len(commands) != 1 || !slices.Equal(commands[0].launchArgs, append([]string{"--x=1"}, test.bugArgs...)) ||
+				!slices.Equal(commands[0].sequences, []string{filepath.Join(sequences, test.replay)}) {
+				t.Errorf("botbox matrix printed the replay commands %+v, want one of %s with --x=1 and %v.", commands, test.replay, test.bugArgs)
+			}
+			if !strings.HasPrefix(erred, tmp+string(filepath.Separator)) {
+				t.Errorf("botbox matrix kept %s, want it under %s.", erred, tmp)
+			}
+			if _, err := os.Stat(filepath.Join(erred, "target.log")); err != nil {
+				t.Errorf("botbox matrix removed the target.log of the run that erred: %v", err)
+			}
+			if kept, err := os.Stat(filepath.Dir(erred)); err != nil || kept.Mode().Perm()&0o077 != 0 {
+				t.Errorf("botbox matrix kept %s where other users can read it (%v).", erred, err)
+			}
+			for _, dir := range finished {
+				if _, err := os.Stat(dir); !errors.Is(err, fs.ErrNotExist) {
+					t.Errorf("botbox matrix kept %s, the files of a run that finished.", dir)
+				}
+			}
+		})
+	}
+}
+
+func TestMatrixCleansUpItsTemporaryDirectory(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		session *fakeSession
+		want    int
+	}{
+		{
+			name:    "a matrix that passes",
+			session: &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)}},
+			want:    exitOK,
+		},
+		{
+			name:    "a matrix that fails",
+			session: &fakeSession{results: []run.Result{recorded(t, true), recorded(t, true), recorded(t, true)}},
+			want:    exitViolation,
+		},
+		{
+			name: "a run that erred before it wrote anything",
+			session: &fakeSession{
+				failures:      []error{errors.New("the sequence is for another target")},
+				writesNothing: true,
+			},
+			want: exitError,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			t.Setenv("TMPDIR", tmp)
+
+			code, _, stderr := invoke(t, test.session, "matrix",
+				"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", matrixFile(t))
+
+			if code != test.want {
+				t.Errorf("botbox matrix exited %d, want %d: %s", code, test.want, stderr)
+			}
+			for _, dir := range test.session.dirs {
+				if !strings.HasPrefix(dir, tmp+string(filepath.Separator)) {
+					t.Errorf("botbox matrix ran in %s, want a directory under %s.", dir, tmp)
+				}
+			}
+			if left, err := os.ReadDir(tmp); err != nil || len(left) > 0 {
+				t.Errorf("botbox matrix left %v in the temporary directory (%v), want nothing.", left, err)
+			}
+			if strings.Contains(stderr, "files are in") {
+				t.Errorf("botbox matrix reported %q, which names files it did not keep.", stderr)
 			}
 		})
 	}

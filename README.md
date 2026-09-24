@@ -474,38 +474,90 @@ Exit 2 means botbox could not test your controller, and the message says what to
 
 ## Running in CI
 
+Copy this workflow into `.github/workflows/`, and replace its build and `target.yaml` with your
+own. Set `BOTBOX_VERSION` to a commit of main, because `@latest` tracks main. The workflow needs
+no go.mod, no cluster and no registry.
+
+<!-- embed: examples/ci/github-actions.yml -->
 ```yaml
-- uses: actions/setup-go@v5
-  with:
-    go-version-file: go.mod
-- run: go install github.com/rosenhouse/botbox/cmd/botbox@<commit>   # a commit of main
-- run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
-- run: |
-    index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
-    echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 --index $index -p path)" >>"$GITHUB_ENV"
-- run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
-- run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m
-- if: always()
-  run: cat botbox-out/*/summary.md >>"$GITHUB_STEP_SUMMARY" || true
-- if: always()
-  uses: actions/upload-artifact@v4
-  with:
-    name: botbox-out
-    path: botbox-out/
+name: botbox
+
+on:
+  pull_request:
+  schedule:
+    - cron: '17 6 * * *'
+
+env:
+  BOTBOX_VERSION: <commit>   # a commit of main
+  SETUP_ENVTEST_VERSION: v0.25.1
+  ENVTEST_K8S_VERSION: 1.37.0
+  ENVTEST_INDEX_URL: https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  botbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: false   # true needs a go.sum
+      - id: tools
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/bin
+            bin/envtest
+          key: ${{ runner.os }}-${{ runner.arch }}-botbox-${{ env.BOTBOX_VERSION }}-${{ env.SETUP_ENVTEST_VERSION }}-${{ env.ENVTEST_K8S_VERSION }}
+      - if: steps.tools.outputs.cache-hit != 'true'
+        run: |
+          go install "github.com/rosenhouse/botbox/cmd/botbox@$BOTBOX_VERSION"
+          go install "sigs.k8s.io/controller-runtime/tools/setup-envtest@$SETUP_ENVTEST_VERSION"
+      - run: |
+          assets=$(setup-envtest use "$ENVTEST_K8S_VERSION" --index "$ENVTEST_INDEX_URL" --bin-dir bin/envtest -p path)
+          echo "KUBEBUILDER_ASSETS=$assets" >>"$GITHUB_ENV"
+      # Saving before botbox runs fills the cache even when botbox fails.
+      - if: steps.tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/bin
+            bin/envtest
+          key: ${{ steps.tools.outputs.cache-primary-key }}
+      - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
+      # exec lets a cancel's signal reach botbox, which bash does not pass on.
+      - if: github.event_name == 'pull_request'
+        run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-out
+      - if: github.event_name == 'schedule'
+        run: exec botbox run --target target.yaml --runs 20 --deadline 30m --out botbox-out
+      - if: always()
+        run: cat botbox-out/*/summary.md >>"$GITHUB_STEP_SUMMARY" || true
+      # gh run download <run-id> --name botbox-out --dir botbox-out restores
+      # the paths that the replay command in report.md names.
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: botbox-out
+          path: botbox-out/
 ```
 
-The job's page then shows the summary, and the artifact keeps each run's sequence and a
-failing run's evidence. Anyone who can read the repository can download the artifact, and
-botbox hides only the values of a Secret's `data` and annotations
-([Reading a report](#reading-a-report)). On GitLab or Jenkins, `--junit botbox.xml` writes the
-runs as JUnit XML for `artifacts:reports:junit` or the `junit` step.
+The job caches botbox and setup-envtest in `~/go/bin`, and the control plane in `bin/envtest`,
+under a key of their versions. `--deadline` caps the job, which botbox otherwise lets run as long
+as its runs can take. Give it room for your controller, because a run that overruns it, or an
+invocation it stops before the last run, exits 2 rather than reporting a find. botbox stops within
+seconds of the deadline. A Go repository may instead read Go's version from its go.mod and turn
+setup-go's cache on.
 
-`$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not.
-`--deadline` caps the job, which botbox otherwise lets run as long as its runs can take. Give it
-room for your controller, because a run that overruns it, or an invocation it stops before the
-last run, exits 2 rather than reporting a find. botbox stops within seconds of the deadline.
-Cache the control plane and the target as [.github/workflows/ci.yml](.github/workflows/ci.yml)
-does. The job needs no cluster and no registry.
+The job's page shows the summary, and the job uploads `botbox-out/`, which keeps each run's
+sequence and a failing run's evidence. Anyone who can read the repository can download the
+artifact, and botbox hides only the values of a Secret's `data` and annotations
+([Reading a report](#reading-a-report)). Download it with the command in the workflow's last
+comment and build your controller. The replay command in `report.md` then runs as written from the
+repository root. On GitLab or Jenkins, `--junit botbox.xml` writes the runs as JUnit XML for
+`artifacts:reports:junit` or the `junit` step.
 
 SIGINT, SIGTERM, SIGHUP and a terminal's Ctrl-C all stop botbox cleanly. It abandons the run
 under way, stops your controller and the control plane, and deletes the run namespace.
@@ -513,14 +565,14 @@ under way, stops your controller and the control plane, and deletes the run name
 the interrupt still says why. Then botbox dies of the signal. That takes a few seconds. A second
 signal kills botbox at once and leaves those processes running, as SIGKILL does. GitHub Actions
 cancels a job by sending the step's shell SIGINT and, 7.5 s later, SIGTERM. The shell passes
-neither on, so the step above runs botbox with `exec`.
+neither on, so the workflow runs botbox with `exec`.
 
-Pin botbox to a commit, because `@latest` tracks main. Fix the seed on pull requests, and draw
-fresh seeds on a schedule, as [nightly.yml](.github/workflows/nightly.yml) does. A seed names a
-sequence for one build of botbox and one target declaration: its CRD schema, `sample`,
-`generate` and `manages`. A botbox upgrade, or a pull request that edits any of those, draws
-different sequences under the same seed. To tell whether a failure comes from the change under
-review, replay its `sequence.json` against the base branch's controller.
+A pull request runs fixed seeds, and the nightly run draws fresh ones. GitHub tells whoever last
+edited the schedule when a nightly run fails. [nightly.yml](.github/workflows/nightly.yml) also
+files an issue. A seed names a sequence for one build of botbox and one target declaration: its
+CRD schema, `sample`, `generate` and `manages`. A botbox upgrade, or a pull request that edits any
+of those, draws different sequences under the same seed. To tell whether a failure comes from the
+change under review, replay its `sequence.json` against the base branch's controller.
 
 ## Invariants
 

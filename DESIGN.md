@@ -593,15 +593,14 @@ a new UID. Where none exists, G7 does not judge an op where no primary CR is liv
 where the CR is being deleted, when the wait ends: nothing asks for the object back. It
 notes an op where botbox changed the CR, a managed object or a fixture after the last
 settle wait that converged, since the target may then have meant to delete the object
-itself. It notes
-one where a fault was active during the op or its wait, or where the wait ended while the
-target was still owed time to recover from a fault. It also notes an op that follows a
-restart, by a `Restart` op or by `Supervise` after an exit, where the target requested
-nothing between the last restart and the op but leader election's leases and lease
-candidates, and paths that name no resource. botbox has no other sign that the target is
-back (§5.1), and a process starting up or waiting to lead requests only those. A settle
-wait that converged after the restart rules this out (§5.5). It notes an op where the
-target exited, or waited to restart, during the op or its wait. Where several of these
+itself. It notes one where a fault was active during the op or its wait, or where the wait
+ended while the target was still owed time to recover from a fault. It also notes an op
+that follows a restart, by a `Restart` op or by `Supervise` after an exit, where the
+target requested nothing between the last restart and the op but leader election's leases
+and lease candidates, and paths that name no resource. botbox has no other sign that the
+target is back (§5.1), and a process starting up or waiting to lead requests only those. A
+settle wait that converged after the restart rules this out (§5.5). It notes an op where
+the target exited, or waited to restart, during the op or its wait. Where several of these
 apply, the note names the first. A violation quotes the object's history and the managed
 objects where the wait ended, which show an object recreated under a new name.
 

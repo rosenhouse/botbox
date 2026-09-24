@@ -268,10 +268,11 @@ cert-manager's `spec.secretName` names its Secret, list that path under `generat
 Each CR after the first then appends its suffix to your sample's value there, and no two CRs
 ever hold one value. Otherwise two CRs name one child, and botbox reports the fight that
 follows as your controller's. `generate.maxCRs: 1` keeps every sequence to your sample, for a
-controller that takes one CR per namespace. botbox holds each CR to the objects whose
-ownerReferences name it: deleting one CR must remove its own children, and leave another's
-alone. A property's `managed` holds the objects that name the CR it judges, and those that
-name no CR.
+controller that takes one CR per namespace. Your sample needs a `metadata.name`, which the
+other CRs extend. botbox holds each CR to the objects whose ownerReferences name it: deleting
+a CR must remove its own children. An object that names no CR may be any CR's, so it may stay
+until the last CR goes. A property's `managed` holds the objects that name the CR it judges,
+and those that name no CR.
 
 `deleteManaged` deletes one managed object behind the controller's back. G7 then requires
 your controller to recreate an object of that kind and name before the run settles. Where your
@@ -355,7 +356,8 @@ a failure, and `make test-example` runs every pinned sequence so none can rot.
 
 A `create` names its CR in `obj`. An `update`, `delete` or `recreate` acts on the CR named as
 your sample unless it names another in `cr`, such as `{"i": 2, "t": "delete", "cr":
-"example-2"}`. botbox refuses an op on a CR that no op before it creates.
+"example-2"}`. botbox refuses an op on a CR that no op before it creates, and an `update` or
+`delete` of a CR an op before it deleted.
 
 In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
 before it settles. G5 compares the states the controller settled in on either side, and leaves a

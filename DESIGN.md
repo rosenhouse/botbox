@@ -190,10 +190,11 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   target's. No draw gives a CR another CR's value at a distinct path, whether or not that
   CR is live, nor the value another CR's suffix makes. An update or a delete acts on a
   live CR, and a recreate on any CR the sequence created.
-- Control ops: `Restart` (launcher), `Fault{FaultSpec}`, `Settle` (wait for convergence
-  before continuing; used to make properties checkable mid-sequence), and
-  `DeleteManaged{kind, index}` (delete one managed object behind the target's back, §7).
-  The Runner issues `DeleteManaged` directly to the API server, as it does the CR ops.
+- Control ops: `Restart` (launcher), `Settle` (wait for convergence before continuing;
+  used to make properties checkable mid-sequence), and `DeleteManaged{kind, index}`
+  (delete one managed object behind the target's back, §7). The Runner issues
+  `DeleteManaged` directly to the API server, as it does the CR ops. The generator draws
+  no `Fault`; only a sequence written by hand carries one.
 - **Schema-driven mutation** from the CRD's OpenAPI v3 schema: numeric ranges, enums,
   string patterns, optional-field presence, list length, map size. Generic and works on
   any CRD.
@@ -239,17 +240,18 @@ The Runner executes one sequence:
    primary CR, the wait may run until the deletion's G3 deadline, or `T_settle` past the
    instant the CR went if it went by then. A `recreate` waits `T_delete` for its old CR to
    go, and longer while the target is owed time as above. A CR still there where that wait
-   ends is judged there, as an expired settle wait is. A wait in which a CR outlived a G3
-   deadline that no fault reached into is G3's to judge (§6). Any other wait that expires while no fault excuses
-   it records a G4 violation, which says why from the Observer's history of the wait:
-   `Ready` never held, held and then stopped, or held while the namespace kept changing
-   within `T_stable`; a CR was still being deleted; or no CR was left to be ready. Where
-   `Ready` held while the target waited to restart, or restarted within `T_stable`, it says
-   that instead. Where `Ready` held and nothing changed within `T_stable`, it says that.
-   The Runner and the engine raise it with one function, so they agree. A fault excuses it
-   while active, which is once the proxy has applied it and until the proxy stops (D36),
-   and while the target is still owed time to recover from it (§6). A `recreate` whose old
-   CR stays where no check reports it cannot go on, so the run ends as a harness error.
+   ends is judged there, as an expired settle wait is. A wait in which a CR outlived a
+   G3 deadline that no fault reached into is G3's to judge (§6). Any other wait that
+   expires while no fault excuses it records a G4 violation, which says why from the
+   Observer's history of the wait: `Ready` never held, held and then stopped, or held
+   while the namespace kept changing within `T_stable`; a CR was still being deleted;
+   or no CR was left to be ready. Where `Ready` held while the target waited to
+   restart, or restarted within `T_stable`, it says that instead. Where `Ready` held
+   and nothing changed within `T_stable`, it says that. The Runner and the engine
+   raise it with one function, so they agree. A fault excuses it while active, which
+   is once the proxy has applied it and until the proxy stops (D36), and while the
+   target is still owed time to recover from it (§6). A `recreate` whose old CR stays
+   where no check reports it cannot go on, so the run ends as a harness error.
    Until a settle wait has converged, normally op 0's, a wait also ends where the target's
    process exits, and the Runner checks the target is running before it applies each op. A
    target that stopped then ends the run as a harness error naming the op it was at (§11):
@@ -479,8 +481,7 @@ ownerReferences refine attribution to a particular CR; they are not required for
 object belongs to the primary CRs its ownerReferences name, by UID, and one that names
 none may belong to any CR. G3, G5, G7 and the properties attribute by that rule, so that
 a run of several CRs holds each to its own objects (below). An object owned through
-another, such as a ReplicaSet of a Deployment the CR owns, names no CR, so G3 holds it to
-the last of the CRs there when its own went.
+another, such as a ReplicaSet of a Deployment a CR owns, names no CR.
 
 **Deletion.** Owned children are removed by the cluster's garbage collector (real on kind,
 emulated on envtest, §5.8). G3 therefore fails on orphans, meaning children with no
@@ -490,10 +491,10 @@ namespace until it is clean or `T_delete` expires (§5.5 step 4). The settle wai
 deletion where the wait ends if the CR outlived `T_delete`. A namespace that came clean
 satisfies G3 at that instant, which is how a target that cleans up promptly is judged
 rather than left unjudged: the run stops watching long before `T_delete` is up. An object
-a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (D38). G3 holds a
-deleted CR to the objects there when it went that name it, and to those that name no CR
-once no other CR there then remains. An object that still names a CR which remains is that
-CR's to answer for.
+a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (D38). An object
+there when a CR went belongs to the CRs it names, or to every CR there then if it names
+none. The last of those CRs to go answers for it, at its own deadline: a CR still there at
+another's deadline, or deleted after it, keeps the object.
 
 **Periodic work.** A controller that resyncs on a timer makes requests after it has
 converged, often a write that changes nothing. `N_quiet` is how many of those one quiet
@@ -587,13 +588,13 @@ after the last settle wait that converged, since the target may then have meant 
 the object itself. It notes one where a fault was active during the op or its wait, or
 where the wait ended while the target was still owed time to recover from a fault. It also
 notes an op that follows a restart, by a `Restart` op or by `Supervise` after an exit,
-where the target requested
-nothing between the last restart and the op but leader election's leases and lease
-candidates, and paths that name no resource. botbox has no other sign that the target is
-back (§5.1), and a process starting up or waiting to lead requests only those. It notes an
-op where the target exited, or waited to restart, during the op or its wait. Where several
-of these apply, the note names the first. A violation quotes the object's history and the
-managed objects where the wait ended, which show an object recreated under a new name.
+where the target requested nothing between the last restart and the op but leader
+election's leases and lease candidates, and paths that name no resource. botbox has no
+other sign that the target is back (§5.1), and a process starting up or waiting to lead
+requests only those. It notes an op where the target exited, or waited to restart, during
+the op or its wait. Where several of these apply, the note names the first. A violation
+quotes the object's history and the managed objects where the wait ended, which show an
+object recreated under a new name.
 
 ## 7. Sequence format
 
@@ -618,10 +619,12 @@ Details the example does not show:
 
 - Any CR op may carry `"noSettle": true`, which skips the Runner's implicit settle wait.
 - `update`, `delete` and `recreate` act on the CR that `"cr"` names, or on the sample's name
-  where they name none, so a sequence of one CR names none. A `create` names its CR in
-  `obj`, and a `recreate` creates the CR it deletes. An op on a CR that no earlier `create`
-  or `recreate` creates is a configuration error, as are a `recreate` whose `obj` names
-  another CR and a `create` of a CR that no `delete` has removed since.
+  where they name none, so a sequence of one CR named as the sample names none. A `create`
+  names its CR in `obj`, and a `recreate` creates the CR it deletes. These are
+  configuration errors: an `obj` with no `metadata.name`, an op on a CR that no earlier
+  `create` or `recreate` creates, an `update` or `delete` of a CR deleted since, a
+  `recreate` whose `obj` names another CR, and a `create` of a CR that no `delete` has
+  removed since.
 - A sequence ends with an op that settles, or nothing judges the state it leaves behind
   (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
 - G5 judges a `restart` only between two converged settle waits with no fault's window
@@ -739,6 +742,9 @@ the spec paths at which no two CRs may hold one value, such as a field that name
 child. Each CR after the first appends `-2` or `-3` to the sample's string there (§5.4). A
 distinct path the sample holds no string at is a configuration error, as is a CR so made
 that its CRD refuses.
+
+The sample must set `metadata.name`, since each further CR extends it and ops name the CR
+they act on.
 
 `crds`, `sample` and `fixtures` are relative to the directory holding target.yaml.
 `launch.binary` is relative to the directory botbox runs in, or a name on `PATH`, because
@@ -1750,25 +1756,29 @@ built from source and run as a black-box binary.
   harness error.
 - **D@47 A sequence creates up to three CRs, and G3, G5 and G7 attribute objects to them
   by ownerReference.** A run acted on one CR, so botbox never tried two CRs side by side.
-  `update`, `delete` and `recreate` take an optional `cr`, the sample's name by default, so
-  every existing sequence means what it did. About a quarter of drawn sequences create a
-  second CR. A CR made by renaming the sample keeps every spec field, including
-  cert-manager's `spec.secretName` and external-secrets' `spec.target.name`, which name the
-  Secret each CR owns. Two CRs that name one Secret fight over it, which is a user's
-  mistake. Without `generate.distinct`, cert-manager's seed 5 drew two Certificates that
-  name `example-tls`, and cert-manager made 5226 requests in 30 s and failed G4. No draw
-  takes another CR's value at a distinct path, nor the value another CR's suffix makes:
+  `update`, `delete` and `recreate` take an optional `cr`, the sample's name by default,
+  so a sequence whose one CR takes the sample's name means what it did. One that creates
+  its CR under another name must name it in `cr`. A CR with no `metadata.name`, and a
+  sample with none, are configuration errors: ops name the CR they act on, and further CRs
+  extend the sample's name. About a quarter of drawn sequences create a second CR. A CR
+  made by renaming the sample keeps every spec field, including cert-manager's
+  `spec.secretName` and external-secrets' `spec.target.name`, which name the Secret each
+  CR owns. Two CRs that name one Secret fight over it, which is a user's mistake. Without
+  `generate.distinct`, cert-manager's seed 5 drew two Certificates that name
+  `example-tls`, and cert-manager made 5226 requests in 30 s and failed G4. No draw takes
+  another CR's value at a distinct path, nor the value another CR's suffix makes:
   external-secrets' pattern for `spec.target.name` allows `example-secret-2`. Making
   several CRs opt-in was rejected, since generation is on by default and a target already
   narrows it where the schema says too little (§8.3). `maxCRs: 1` turns it off. Checks
-  that read "the CR" were ambiguous: G3 failed the toy with no bug when one Widget went and
-  another outlived its deadline. An object now belongs to the CRs its ownerReferences name,
-  and one that names none to any. G5 judges what botbox's changes between its states could
-  not have reached, which assumes one CR does not change another's objects (§14, question
-  6). B14 names its children after the kind, which a run of one Widget named `widget`
-  cannot tell from correct. Seeds 1 to 30 of cert-manager passed, 11 of them with two
-  Certificates or more, and so did seeds 36, 66, 157 and 178, which draw three. Seeds 1
-  to 40 of external-secrets passed, 7 of them with two. One run of seed 22 ended at op 1,
-  before its second CR, when the fake provider's unguarded map crashed external-secrets;
-  it passed on a rerun. cert-manager's seeds 23 to 27 no longer draw a delete or a
-  `deleteManaged`, and its pinned sequences hold both.
+  that read "the CR" were ambiguous: G3 failed the toy with no bug when one Widget went
+  and another outlived its deadline. An object now belongs to the CRs its ownerReferences
+  name, and one that names none to any. G3 holds it to the last of those CRs to go, at
+  that CR's deadline, since the garbage collector keeps an object until its last owner
+  goes, and a grandchild names no CR at all. G5 judges what botbox's changes between its
+  states could not have reached, which assumes one CR does not change another's objects
+  (§14, question 6). B14 names its children after the kind, which a run of one Widget
+  named `widget` cannot tell from correct. Seeds 1 to 30 of cert-manager passed, 11 of
+  them with two Certificates or more, and so did seeds 36, 66, 157 and 178, which draw
+  three. Seeds 1 to 40 of external-secrets passed, 7 of them with two. cert-manager's
+  seeds 23 to 27 no longer draw a delete or a `deleteManaged`, and its pinned sequences
+  hold both.

@@ -391,6 +391,7 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("TMPDIR", t.TempDir()) // The matrix keeps the files of a run that erred.
 			session := &fakeSession{results: test.results, failures: test.failures}
 			out := matrixFile(t)
 
@@ -405,6 +406,81 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 			}
 			if _, err := os.Stat(out); !errors.Is(err, fs.ErrNotExist) {
 				t.Errorf("botbox matrix wrote %s, want no matrix of a run that errored.", out)
+			}
+		})
+	}
+}
+
+func TestMatrixKeepsTheFilesOfARunThatErred(t *testing.T) {
+	t.Setenv("TMPDIR", t.TempDir())
+	session := &fakeSession{
+		results:  []run.Result{recorded(t, true), recorded(t, false)},
+		failures: []error{nil, errors.New("the target stopped")},
+	}
+	session.after = func() {
+		if err := os.WriteFile(filepath.Join(session.dirs[len(session.dirs)-1], "target.log"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	code, _, stderr := invoke(t, session, "matrix",
+		"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", matrixFile(t))
+
+	if code != exitError {
+		t.Errorf("botbox matrix exited %d, want %d.", code, exitError)
+	}
+	passed, erred := session.dirs[0], session.dirs[1]
+	if !strings.Contains(stderr, "the run's files are in "+erred+"\n") {
+		t.Errorf("botbox matrix reported %q, want it to name %s.", stderr, erred)
+	}
+	if _, err := os.Stat(filepath.Join(erred, "target.log")); err != nil {
+		t.Errorf("botbox matrix removed the target.log of the run that erred: %v", err)
+	}
+	if _, err := os.Stat(passed); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("botbox matrix kept %s, the files of a run that finished.", passed)
+	}
+}
+
+func TestMatrixLeavesNoRunFilesBehindOtherwise(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		session *fakeSession
+		want    int
+	}{
+		{
+			name:    "a matrix that passes",
+			session: &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)}},
+			want:    exitOK,
+		},
+		{
+			name:    "a matrix that fails",
+			session: &fakeSession{results: []run.Result{recorded(t, true), recorded(t, true), recorded(t, true)}},
+			want:    exitViolation,
+		},
+		{
+			name: "a run that erred before it wrote anything",
+			session: &fakeSession{
+				failures:      []error{errors.New("the sequence is for another target")},
+				writesNothing: true,
+			},
+			want: exitError,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			tmp := t.TempDir()
+			t.Setenv("TMPDIR", tmp)
+
+			code, _, stderr := invoke(t, test.session, "matrix",
+				"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", matrixFile(t))
+
+			if code != test.want {
+				t.Errorf("botbox matrix exited %d, want %d: %s", code, test.want, stderr)
+			}
+			if left, err := os.ReadDir(tmp); err != nil || len(left) > 0 {
+				t.Errorf("botbox matrix left %v in the temporary directory (%v), want nothing.", left, err)
+			}
+			if strings.Contains(stderr, "files are in") {
+				t.Errorf("botbox matrix reported %q, which names files it did not keep.", stderr)
 			}
 		})
 	}

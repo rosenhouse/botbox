@@ -70,13 +70,20 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	if err != nil {
 		return c.fail(fmt.Errorf("creating the matrix's run directory: %w", err))
 	}
-	defer os.RemoveAll(dir)
+	kept := false
+	defer func() {
+		if !kept {
+			c.warn(os.RemoveAll(dir))
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
 	for i := range rows {
-		if err := c.exerciseRow(ctx, s, exercised, &rows[i], dir); err != nil {
-			return c.fail(opts.named(ctx, err))
+		if erred, err := c.exerciseRow(ctx, s, exercised, &rows[i], dir); err != nil {
+			c.fail(opts.named(ctx, err))
+			kept = c.showRunFiles(erred)
+			return exitError
 		}
 	}
 
@@ -87,23 +94,29 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	return c.judge(opts, rows)
 }
 
-// exerciseRow runs the row's sequence under its bug, and then without it.
-func (c *cli) exerciseRow(ctx context.Context, s session, t *target.Target, row *bugRow, dir string) error {
+// exerciseRow runs the row's sequence under its bug, and then without it. It
+// returns the directory of a run that erred.
+func (c *cli) exerciseRow(ctx context.Context, s session, t *target.Target, row *bugRow, dir string) (string, error) {
 	var err error
 	if row.bug != control {
-		if row.bugged, err = c.exerciseUnder(ctx, s, t, row, row.bugArgs(), filepath.Join(dir, row.name())); err != nil {
-			return err
+		bugged := filepath.Join(dir, row.name())
+		if row.bugged, err = c.exerciseUnder(ctx, s, t, row, row.bugArgs(), bugged); err != nil {
+			return bugged, err
 		}
 	}
-	row.correct, err = c.exerciseUnder(ctx, s, t, row, nil, filepath.Join(dir, row.name()+"-no-bug"))
+	correct := filepath.Join(dir, row.name()+"-no-bug")
+	if row.correct, err = c.exerciseUnder(ctx, s, t, row, nil, correct); err != nil {
+		return correct, err
+	}
 	if row.bug == control {
 		row.bugged = row.correct
 	}
-	return err
+	return "", nil
 }
 
 // exerciseUnder runs the row's sequence with bugArgs appended to the target's
-// launch args, and records what the checks found over the whole run.
+// launch args, and records what the checks found over the whole run. It
+// removes the run's files unless the run erred.
 func (c *cli) exerciseUnder(ctx context.Context, s session, t *target.Target, row *bugRow, bugArgs []string, dir string) (checked, error) {
 	exercised := *t
 	exercised.Launch.Args = slices.Concat(t.Launch.Args, bugArgs)
@@ -116,6 +129,7 @@ func (c *cli) exerciseUnder(ctx context.Context, s session, t *target.Target, ro
 	if err != nil {
 		return checked{}, fmt.Errorf("%s: %w", ran, err)
 	}
+	c.warn(os.RemoveAll(dir))
 	var found checked
 	notes := slices.Clone(result.Notes)
 	for _, check := range results {

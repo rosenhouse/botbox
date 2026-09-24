@@ -991,27 +991,28 @@ the proxy; the `Image` launcher. Separate design addendum.
   recordings are not kept.
   Once `run` or `replay` has read or drawn its sequences, it writes `summary.json` and
   `summary.md` into the invocation's directory. It writes them again as each run starts,
-  and when the invocation ends, before it stops the cluster. Until then, the invocation
-  and the run under way are `unfinished`, and the summary gives no exit code, so a
-  SIGKILL or a crash leaves the runs that finished. An interrupt that arrives while the
-  cluster stops rewrites them, since botbox then dies of it. They give botbox's version,
-  the target, the seed, the `--launch-arg` values, the cluster, the deadline, the outcome
-  (`passed`, `violation`, `error`, `interrupted` or `unfinished`), the exit code, and what
-  stopped the invocation where no run did. Each planned run has its seed, its sequence
-  file if it had one, its outcome (those five or `not run`), its duration, its ops, how
-  many it applied, its ops by type, how many fault ops the proxy applied and how many
-  requests it faulted, its checkpoints, the target's exits, its notes and its sequence
-  (§7). These describe the run of the planned sequence. A failing run also has its
-  `run-<n>/`, relative to the summary, and its error, or the violation and notes its
-  report carries. `summary.md` leaves out the ops by type, the checkpoints, what each exit
-  said and the sequences. `summary.json` carries `schema: 1`, which changes when a field
-  changes meaning or goes away. `--junit FILE` writes the runs as JUnit XML with the
-  summary, creating the file's directory: one testsuite, a testcase per planned run, a
-  `failure` typed with the check's ID for a violation, an `error` for a run that did not
-  finish, `skipped` for a run that never started, and an `error` testcase named `botbox`
-  for what stopped the invocation where no run did, or for an invocation that has not
-  finished. The testsuite of an invocation that has not finished gives no time. An
-  invocation that stops before it has a directory writes that testcase alone.
+  once a run finds a violation, and when the invocation ends, before it stops the
+  cluster. Until then, the invocation and the run under way are `unfinished`, and the
+  summary gives no exit code, so a SIGKILL or a crash leaves the runs that finished. An
+  interrupt that arrives while the cluster stops rewrites them, since botbox then dies of
+  it. They give botbox's version, the target, the seed, the `--launch-arg` values, the
+  cluster, the deadline, the outcome (`passed`, `violation`, `error`, `interrupted` or
+  `unfinished`), the exit code, and what stopped the invocation where no run did. Each
+  planned run has its seed, its sequence file if it had one, its outcome (those five or
+  `not run`), its duration, its ops, how many it applied, its ops by type, how many fault
+  ops the proxy applied and how many requests it faulted, its checkpoints, the target's
+  exits, its notes and its sequence (§7). These describe the run of the planned sequence.
+  A failing run also has its `run-<n>/`, relative to the summary, and its error, or the
+  violation and notes its report carries, which are the run's own until the shrink pass
+  ends. `summary.md` leaves out the ops by type, the checkpoints, what each exit said and
+  the sequences. `summary.json` carries `schema: 1`, which changes when a field changes
+  meaning or goes away. `--junit FILE` writes the runs as JUnit XML with the summary,
+  creating the file's directory: one testsuite, a testcase per planned run, a `failure`
+  typed with the check's ID for a violation, an `error` for a run that did not finish,
+  `skipped` for a run that never started, and an `error` testcase named `botbox` for what
+  stopped the invocation where no run did, or for an invocation that has not finished.
+  The testsuite of an invocation that has not finished gives no time. An invocation that
+  stops before it has a directory writes that testcase alone.
   botbox replaces each file whole, and warns of one it cannot write.
   `objects.jsonl` writes each value of a Secret's `data` and annotations as a marker such
   as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is drawn per
@@ -1641,17 +1642,19 @@ built from source and run as a black-box binary.
   cluster that does not start or refuses the target leaves a summary too. It writes the
   summary then and as each run starts, because a second signal kills botbox at once, and
   GitHub Actions sends one 7.5 s after the first, which an abandoned run's teardown can
-  outlast. An `unfinished` summary gives no exit code, which a reader would take for 0. The
-  final summary comes before the cluster stops, and an interrupt during the stop rewrites
-  it, because botbox then dies of the signal. A failing run's counts are of the run of
-  its planned sequence, and its violation and notes are its report's, which may be of the
-  minimized sequence. `run-<n>/` is named relative to the summary, so that it still
-  resolves after an artifact upload. JUnit gets one testcase per planned run, not one per
-  invariant, because a check that could not judge would read as a pass (D31). What stopped
-  the invocation where no run did is an `error` testcase of its own, so that a CI server
-  never shows a stopped invocation as green. An invocation that stops before it has a
-  directory writes that testcase alone, since a CI server would otherwise read an earlier
-  invocation's file as this one's. botbox detects no CI vendor.
-  `$GITHUB_STEP_SUMMARY` takes `summary.md` as it is, and GitLab and Jenkins read JUnit
-  XML. A file botbox cannot write leaves the exit code alone, since the code already says
-  what the runs found.
+  outlast. It writes it again once a run finds a violation, because the shrink pass can
+  take minutes and an OOM kill needs no second signal. An `unfinished` summary gives no
+  exit code, which a reader would take for 0. Its JUnit testsuite gives no time, because
+  the time to the last write would read as the invocation's. The final summary comes
+  before the cluster stops, and an interrupt during the stop rewrites it, because botbox
+  then dies of the signal. A failing run's counts are of the run of its planned sequence,
+  and its violation and notes are its report's, which may be of the minimized sequence.
+  `run-<n>/` is named relative to the summary, so that it still resolves after an
+  artifact upload. JUnit gets one testcase per planned run, not one per invariant,
+  because a check that could not judge would read as a pass (D31). What stopped the
+  invocation where no run did is an `error` testcase of its own, so that a CI server never
+  shows a stopped invocation as green. An invocation that stops before it has a directory
+  writes that testcase alone, since a CI server would otherwise read an earlier
+  invocation's file as this one's. botbox detects no CI vendor. `$GITHUB_STEP_SUMMARY`
+  takes `summary.md` as it is, and GitLab and Jenkins read JUnit XML. A file botbox cannot
+  write leaves the exit code alone, since the code already says what the runs found.

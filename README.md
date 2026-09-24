@@ -329,7 +329,8 @@ Unless botbox cannot read your target or a sequence, it writes `summary.json` an
 `summary.md` into `botbox-out/<timestamp>-<seed>/` as each run starts and when it finishes.
 They list each planned run: its seed, how it ended, the faults the proxy applied, the times
 your controller exited, and what the checks could not judge. A run that was under way when
-botbox was killed reads `unfinished`. `summary.json` also holds each run's sequence, for a
+botbox was killed reads `unfinished`, unless it had found a violation that botbox was
+minimizing. `summary.json` also holds each run's sequence, for a
 machine. Its `schema` changes when a field changes meaning or goes away
 ([DESIGN.md §11](DESIGN.md#11-repo-conventions)).
 

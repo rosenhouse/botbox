@@ -245,6 +245,9 @@ func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Tar
 		ran.ran(result, c.now().Sub(started))
 		code := exitCode(result, err)
 		if code == exitViolation {
+			// Minimizing can take minutes, so the summary keeps the find first.
+			ran.found(*result.Violation, reportNotes(opts, t, result), dir)
+			_ = c.save(record, opts, out.Dir())
 			violation, notes := c.reportFailure(ctx, opts, s, t, planned, result, number, dir)
 			ran.found(violation, notes, dir)
 			return exitViolation

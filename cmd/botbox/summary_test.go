@@ -704,6 +704,42 @@ func TestTheSummaryRecordsEachRunAsItStarts(t *testing.T) {
 	}
 }
 
+// Minimizing can take minutes, and a kill then leaves the violation the run
+// found.
+func TestTheSummaryRecordsAViolationBeforeMinimizing(t *testing.T) {
+	out := t.TempDir()
+	g4 := run.Violation{ID: "G4", Statement: "the target converges", Evidence: "the settle wait after op 2 expired"}
+	session := &fakeSession{results: []run.Result{{Violation: &g4, Notes: []string{"a note of the run"}}}}
+	var minimizing []writtenRun
+	session.fails = func(_ run.Sequence, dir string) *run.Violation {
+		if filepath.Base(dir) == shrinkDir {
+			minimizing = append(minimizing, unfinishedSummary(t, out).Runs[0])
+		}
+		return nil
+	}
+	workloads, err := target.Load(workloadsTargetYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	notes := []string{"a note of the run", envtestLimit(options{}, workloads)}
+
+	code, _, stderr := invokeWith(t, session, countingGenerator(nil, run.OpSettle, run.OpRestart, run.OpSettle),
+		"run", "--target", workloadsTargetYAML, "--out", out, "--runs", "2", "--seed", "1")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d, want %d: %s", code, exitViolation, stderr)
+	}
+	if len(minimizing) == 0 {
+		t.Fatal("botbox replayed nothing to minimize run 1.")
+	}
+	ran := minimizing[0]
+	if ran.Outcome != "violation" || ran.Violation == nil || ran.Violation.ID != g4.ID || ran.Violation.Evidence != g4.Evidence ||
+		ran.Dir != "run-1" || !slices.Equal(ran.Notes, notes) {
+		t.Errorf("While botbox minimized run 1, the summary listed it as %s in %q, with the violation %+v and the notes %q, "+
+			"want %s in run-1, with %+v and %q.", ran.Outcome, ran.Dir, ran.Violation, ran.Notes, "violation", g4, notes)
+	}
+}
+
 // botbox dies of a signal that arrives as the cluster stops, so the summary
 // has to say so.
 func TestAnInterruptAfterEveryRunPassedRewritesTheSummary(t *testing.T) {

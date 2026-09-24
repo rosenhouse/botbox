@@ -3,6 +3,12 @@ name: botbox
 on:
   pull_request:
 
+env:
+  BOTBOX_VERSION: <commit>   # a commit of main
+  SETUP_ENVTEST_VERSION: v0.25.1
+  ENVTEST_K8S_VERSION: 1.37.0
+  ENVTEST_INDEX_URL: https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
+
 permissions:
   contents: read
 
@@ -15,10 +21,8 @@ jobs:
         with:
           go-version: '1.26'
           cache: false   # true needs a go.sum
-      - run: go install github.com/rosenhouse/botbox/cmd/botbox@<commit>   # a commit of main
-      - run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
-      - run: |
-          index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
-          echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 --index $index -p path)" >>"$GITHUB_ENV"
+      - run: go install github.com/rosenhouse/botbox/cmd/botbox@$BOTBOX_VERSION
+      - run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$SETUP_ENVTEST_VERSION
+      - run: echo "KUBEBUILDER_ASSETS=$(setup-envtest use $ENVTEST_K8S_VERSION --index $ENVTEST_INDEX_URL -p path)" >>"$GITHUB_ENV"
       - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
       - run: botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m

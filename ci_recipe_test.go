@@ -1,6 +1,7 @@
 package botbox_test
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -74,6 +75,77 @@ func readFile(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return string(content)
+}
+
+func TestTheCIRecipeAndTheREADMEInstallTheMakefilesPins(t *testing.T) {
+	pins := makefilePins(t)
+	var commands []string
+	for _, s := range recipeSteps(t) {
+		commands = append(commands, s.Run)
+	}
+	for _, drift := range pinDrift(strings.Join(commands, "\n"), readWorkflow(t, ciRecipe).Env, pins) {
+		t.Errorf("%s: %s", ciRecipe, drift)
+	}
+
+	install := section(t, readFile(t, "README.md"), "## Install")
+	assignments := map[string]string{}
+	for _, m := range regexp.MustCompile(`(?m)^(\w+)=(\S+)$`).FindAllStringSubmatch(install, -1) {
+		assignments[m[1]] = m[2]
+	}
+	for _, drift := range pinDrift(install, assignments, pins) {
+		t.Errorf("README.md, Install: %s", drift)
+	}
+}
+
+// pinDrift says where commands name a pin other than the Makefile's, reading a
+// $name through vars. It also says which pins they never name.
+func pinDrift(commands string, vars, pins map[string]string) []string {
+	var drift []string
+	for _, pin := range []struct{ name, pattern string }{
+		{"SETUP_ENVTEST_VERSION", `setup-envtest@(\S+)`},
+		{"ENVTEST_K8S_VERSION", `setup-envtest use (\S+)`},
+		{"ENVTEST_INDEX_URL", `--index (\S+)`},
+	} {
+		matches := regexp.MustCompile(pin.pattern).FindAllStringSubmatch(commands, -1)
+		if len(matches) == 0 {
+			drift = append(drift, "no command names "+pin.name)
+		}
+		for _, m := range matches {
+			value := m[1]
+			if name, isVar := strings.CutPrefix(value, "$"); isVar {
+				value = vars[name]
+			}
+			if value != pins[pin.name] {
+				drift = append(drift, fmt.Sprintf("%q names %q, and the Makefile's %s is %q", m[0], value, pin.name, pins[pin.name]))
+			}
+		}
+	}
+	return drift
+}
+
+// makefilePins are the Makefile's variables, each $(NAME) in them expanded.
+func makefilePins(t *testing.T) map[string]string {
+	t.Helper()
+	pins := map[string]string{}
+	for _, m := range regexp.MustCompile(`(?m)^(\w+) \?= (.*)$`).FindAllStringSubmatch(readFile(t, "Makefile"), -1) {
+		pins[m[1]] = regexp.MustCompile(`\$\((\w+)\)`).ReplaceAllStringFunc(m[2], func(ref string) string {
+			return pins[ref[2:len(ref)-1]]
+		})
+	}
+	return pins
+}
+
+// section is the text under a Markdown heading, up to the next heading.
+func section(t *testing.T, doc, heading string) string {
+	t.Helper()
+	_, after, found := strings.Cut(doc, "\n"+heading+"\n")
+	if !found {
+		t.Fatalf("no %q heading", heading)
+	}
+	if next := regexp.MustCompile(`(?m)^#`).FindStringIndex(after); next != nil {
+		return after[:next[0]]
+	}
+	return after
 }
 
 func TestTheCIRecipeNeedsNoGoMod(t *testing.T) {

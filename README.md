@@ -365,8 +365,8 @@ and `targets/toy-widget/sequences/b12.json` sets one:
 ```
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
-run 1: G4 the settle wait after op 1 (update) expired with no fault active
-  at 2026-09-23T22:39:39.478931922Z; in 5.037s the target never held its Ready predicate with 2s of quiet behind it; the target managed 0 objects of the kinds it declares; the target exited 2 times since it last converged, last with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
+run 1: G4 the settle wait after op 1 (update) expired with no fault active: in 5.043s, ready held from 9ms on, and nothing changed in the last stable (2s); the target exited 2 times since it last converged, last with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
+  at 2026-09-24T00:20:08.753043575Z; 16 requests, the first get /api 200; 6 versions, the first toy.botbox/v1/Widget widget; the target managed 0 objects of the kinds it declares
 ```
 
 ### When a settle wait fails G4
@@ -380,7 +380,8 @@ A settle wait expired. What follows `expired with no fault active` says why:
   and status, which is where a reason such as `0/10 replicas available` appears. Compare
   that status with your `ready`: a misspelled field under `has()` also evaluates to false.
   envtest runs only the API server and etcd: no Deployment, ReplicaSet or Pod controller
-  runs, so a CR that waits on a Deployment's replicas never becomes ready there.
+  runs, so a CR that waits on a Deployment's replicas never becomes ready there. The report
+  then notes that, and you can run [against kind](#against-kind).
 - `ready held from … on, but the namespace never held still for stable (2s)` means your
   controller converged and kept writing. The Object versions table lists the writes. A
   status field rewritten on every reconcile, such as a timestamp, does this.

@@ -3,11 +3,11 @@ package invariant
 import "time"
 
 // WaitOwed is when a settle wait that has not converged may end: once the
-// target has had its time to recover from the faults, each deleted CR has gone
-// or reached its G3 deadline, and the run has had T_settle to settle after a
-// CR went.
+// target has had its time to recover from the faults and from a Restart op,
+// each deleted CR has gone or reached its G3 deadline, and the run has had
+// T_settle to settle after a CR went.
 func (in Input) WaitOwed(t time.Time) time.Time {
-	return later(in.Owed(t), in.deletionOwed(t))
+	return later(later(in.Owed(t), in.restartOwed(t)), in.deletionOwed(t))
 }
 
 func (in Input) deletionOwed(t time.Time) time.Time {

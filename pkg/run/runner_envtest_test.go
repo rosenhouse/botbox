@@ -497,11 +497,12 @@ func TestRunner(t *testing.T) {
 		}
 	})
 
-	// Only its requests show botbox that a restarted target is back.
+	// Only its requests show botbox that a restarted target is back, and the
+	// wait gives it T_settle from there.
 	t.Run("passes a target that takes a while to come back from a restart", func(t *testing.T) {
-		const delay = 2200 * time.Millisecond
+		const delay = 3500 * time.Millisecond
 		toy := loadTarget(t, restartsAfter(t, binary, fmt.Sprintf("sleep %v", delay.Seconds())))
-		toy.Timeouts = target.Timeouts{Settle: 8 * time.Second, Stable: time.Second, Delete: 10 * time.Second}
+		toy.Timeouts = target.Timeouts{Settle: 5 * time.Second, Stable: 2 * time.Second, Delete: 10 * time.Second}
 
 		result, err := run.Run(ctx, toy, readSequence(t, restartThenDeleteManaged), run.Options{
 			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
@@ -516,8 +517,9 @@ func TestRunner(t *testing.T) {
 		if len(result.Notes) > 0 {
 			t.Errorf("The run noted %q, want every check to judge.", result.Notes)
 		}
-		if wait := result.Timeline.Ops[2].Settled; wait == nil || !wait.Converged || wait.Window.End.Sub(wait.Window.Start) < delay {
-			t.Errorf("The settle wait after the restart was %+v, want one that converged once the toy was back, after %v.", wait, delay)
+		if wait := result.Timeline.Ops[2].Settled; wait == nil || !wait.Converged || wait.Window.End.Sub(wait.Window.Start) < delay+toy.Timeouts.Stable {
+			t.Errorf("The settle wait after the restart was %+v, want one that converged once the toy had been back for stable, after %v.",
+				wait, delay+toy.Timeouts.Stable)
 		}
 	})
 

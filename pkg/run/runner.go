@@ -606,7 +606,9 @@ func (r *runner) asOf(t time.Time) invariant.Input {
 	r.readExits()
 	return invariant.Input{
 		Target:      r.target,
+		Requests:    r.h.requests(),
 		History:     r.h.objects(),
+		Ops:         engineOps(r.target, r.timeline),
 		Checkpoints: engineCheckpoints(r.timeline.Checkpoints),
 		Faults:      engineFaults(r.timeline.Faults),
 		Exits:       engineExits(r.timeline.Exits),

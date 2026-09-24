@@ -72,14 +72,15 @@ func (in Input) convergeAnchors() []anchor {
 }
 
 // readyBy is when the target must be ready after at: T_settle later, or when
-// Owed says if that is later. A settle wait that converged before then shows
-// the target had recovered.
+// Owed or a Restart op before then says if that is later. A settle wait that
+// converged before then shows the target had recovered.
 func (in Input) readyBy(at time.Time) time.Time {
-	owed := in.Owed(at)
+	settled := at.Add(in.timeouts().Settle)
+	owed := later(in.Owed(at), in.restartOwed(settled))
 	if converged := in.nextConverged(at); !converged.IsZero() && converged.Before(owed) {
 		owed = converged
 	}
-	return later(at.Add(in.timeouts().Settle), owed)
+	return later(settled, owed)
 }
 
 // respecified reports whether a later op changed the spec inside the window,

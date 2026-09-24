@@ -212,6 +212,46 @@ func TestG4GivesASpecChangeAfterAFaultTheTimeTheFaultLeaves(t *testing.T) {
 	silent(t, invariant.Convergence, in)
 }
 
+// botbox chose to restart the target, so G4 gives it T_settle past its return
+// to converge on a spec change made around the restart.
+func TestG4GivesARestartedTargetTSettlePastItsReturn(t *testing.T) {
+	converged := func() *run {
+		return newRun().
+			op(invariant.OpCreate, 0).
+			record(500*time.Millisecond, widget("10", spec(2), status(2, 1))).
+			running(600*time.Millisecond).
+			checkpoint(3*time.Second, invariant.Converged)
+	}
+	readyAt := func(r *run, back, ready time.Duration) invariant.Input {
+		return r.
+			record(4200*time.Millisecond, widget("11", spec(3), generation(2), status(2, 1))).
+			running(back).
+			record(ready, widget("12", spec(3), generation(2), status(3, 2))).
+			checkpoint(ready+stableWindow, invariant.Converged).
+			through(ready + 3*time.Second)
+	}
+	restartThenUpdate := func() *run {
+		return converged().op(invariant.OpRestart, 4*time.Second).op(invariant.OpUpdate, 4100*time.Millisecond)
+	}
+	updateThenRestart := func() *run {
+		return converged().op(invariant.OpUpdate, 4*time.Second).op(invariant.OpRestart, 4100*time.Millisecond)
+	}
+
+	for name, in := range map[string]invariant.Input{
+		"a restart before the change": readyAt(restartThenUpdate(), 8900*time.Millisecond, 10*time.Second),
+		"a restart after the change":  readyAt(updateThenRestart(), 8900*time.Millisecond, 10*time.Second),
+	} {
+		t.Run(name, func(t *testing.T) { silent(t, invariant.Convergence, in) })
+	}
+	t.Run("a target back only T_settle after the restart", func(t *testing.T) {
+		violation := fired(t, invariant.Convergence, readyAt(restartThenUpdate(), 9*time.Second, 10*time.Second))
+
+		if want := "not ready 5s after op 2 (update)"; !strings.Contains(violation.Statement, want) {
+			t.Errorf("The statement is %q, want it to say %q.", violation.Statement, want)
+		}
+	})
+}
+
 func TestG4IgnoresADeadlineWhoseCRIsNotBackYet(t *testing.T) {
 	in := newRun().
 		record(0, widget("10", spec(2), status(2, 1))).

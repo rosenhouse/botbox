@@ -2651,6 +2651,33 @@ func TestAnExitAFaultExcusedIsOwedTSettlePastItsRestart(t *testing.T) {
 	}
 }
 
+// botbox chose to restart the target, so the wait after the restart gives it
+// T_settle past its return.
+func TestTheWaitAfterARestartIsOwedTSettlePastTheTargetsReturn(t *testing.T) {
+	h := newFakeHarness()
+	var back time.Time
+	h.inWait = func() {
+		if h.waits == 1 {
+			back = time.Now()
+			h.logged = append(h.logged, proxy.Request{Start: back, Verb: "list", Version: "v1", Resource: "configmaps"})
+		}
+	}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpRestart},
+		Op{Type: OpSettle},
+	)
+
+	_, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if want := back.Add(testTimeouts.Settle); len(h.owed) < 2 || !h.owed[1].Equal(want) {
+		t.Errorf("The waits were told the target owed %v, want the wait after op 1 told %v.", h.owed, want)
+	}
+}
+
 // The wait for recovery from a fault is the teardown's too.
 func TestAnExitWhileTheTeardownAwaitsRecoveryIsTheTeardowns(t *testing.T) {
 	h := crashLoop()

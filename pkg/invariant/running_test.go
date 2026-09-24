@@ -39,6 +39,39 @@ func TestBackIsTheFirstRequestThatShowsTheTargetRunning(t *testing.T) {
 	}
 }
 
+// botbox chose to restart the target, so a wait gives it T_settle past its
+// return, where it returned within T_settle.
+func TestWaitOwedRunsPastTheReturnFromARestartOp(t *testing.T) {
+	restarted := func() *run { return newRun().running(time.Second).op(invariant.OpRestart, 3*time.Second) }
+	for _, test := range []struct {
+		name string
+		run  *run
+		at   time.Duration
+		// want is zero where nothing is owed.
+		want time.Duration
+	}{
+		{name: "back", run: restarted().running(6500 * time.Millisecond), at: 7 * time.Second, want: 11500 * time.Millisecond},
+		{name: "not back", run: restarted(), at: 7 * time.Second, want: 8 * time.Second},
+		{name: "with leader election alone", run: restarted().requests(3100*time.Millisecond, time.Second, 4, lease("update")),
+			at: 7 * time.Second, want: 8 * time.Second},
+		{name: "back only T_settle after it", run: restarted().running(8 * time.Second), at: 9 * time.Second, want: 8 * time.Second},
+		{name: "a restart at the instant asked about", run: restarted().running(3500 * time.Millisecond), at: 3 * time.Second},
+		{name: "two restarts", run: restarted().running(3500*time.Millisecond).op(invariant.OpRestart, 5*time.Second).running(9 * time.Second),
+			at: 10 * time.Second, want: 14 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := test.run.through(20 * time.Second).WaitOwed(at(test.at))
+
+			if test.want == 0 && !got.IsZero() {
+				t.Errorf("The wait is owed until %v, want nothing.", got.Sub(epoch))
+			}
+			if test.want != 0 && !got.Equal(at(test.want)) {
+				t.Errorf("The wait is owed until %v, want %v.", got.Sub(epoch), test.want)
+			}
+		})
+	}
+}
+
 func TestBackFindsNothingUntilTheTargetShowsItRuns(t *testing.T) {
 	for name, r := range map[string]*run{
 		"no request":            newRun(),

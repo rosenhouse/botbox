@@ -24,6 +24,28 @@ func Back(requests []proxy.Request, since time.Time) (time.Time, bool) {
 // resource, such as discovery.
 func showsRunning(r proxy.Request) bool { return r.Resource != "" && !leaderElection(r) }
 
+// settledBy is when a target botbox restarted at restart must have converged:
+// T_settle past its return where it returned within T_settle, or else T_settle
+// past the restart.
+func (in Input) settledBy(restart time.Time) time.Time {
+	settle := in.timeouts().Settle
+	if back, found := Back(in.Requests, restart); found && back.Before(restart.Add(settle)) {
+		return back.Add(settle)
+	}
+	return restart.Add(settle)
+}
+
+// restartOwed is settledBy of the last Restart op before t, or zero.
+func (in Input) restartOwed(t time.Time) time.Time {
+	var owed time.Time
+	for _, op := range in.Ops {
+		if op.Type == OpRestart && op.Time.Before(t) {
+			owed = in.settledBy(op.Time)
+		}
+	}
+	return owed
+}
+
 // lastRestart names the target's last start before t, by a Restart op or by
 // the supervisor after an exit, or is empty where it has not restarted.
 func (in Input) lastRestart(t time.Time) (time.Time, string) {

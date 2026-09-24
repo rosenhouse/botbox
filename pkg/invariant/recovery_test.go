@@ -54,9 +54,10 @@ func TestOwedIsAsLongAfterTheFaultsAsTheyLastedAndTSettleMore(t *testing.T) {
 	}
 }
 
-// An exit a fault excused owes the target T_settle past its restart. An exit
-// that only another exit could excuse owes nothing.
-func TestOwedRunsPastTheRestartOfAnExitAFaultExcused(t *testing.T) {
+// An exit a fault excused owes the target T_settle past its return from the
+// restart, where it returned within T_settle. An exit that only another exit
+// could excuse owes nothing.
+func TestOwedRunsPastTheReturnFromAnExitAFaultExcused(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		run  *run
@@ -66,6 +67,12 @@ func TestOwedRunsPastTheRestartOfAnExitAFaultExcused(t *testing.T) {
 	}{
 		{name: "an exit while a fault was active", run: newRun().fault(time.Second, 4*time.Second).exit(3*time.Second, 13*time.Second),
 			at: 14 * time.Second, want: 18 * time.Second},
+		{name: "an exit the target came back from", run: newRun().fault(time.Second, 4*time.Second).exit(3*time.Second, 13*time.Second).
+			running(16500 * time.Millisecond),
+			at: 17 * time.Second, want: 21500 * time.Millisecond},
+		{name: "an exit the target came back from only T_settle later", run: newRun().fault(time.Second, 4*time.Second).
+			exit(3*time.Second, 13*time.Second).running(18 * time.Second),
+			at: 19 * time.Second, want: 18 * time.Second},
 		{name: "an exit while recovery was owed", run: newRun().fault(time.Second, time.Second).exit(1100*time.Millisecond, 11100*time.Millisecond),
 			at: 12 * time.Second, want: 16100 * time.Millisecond},
 		{name: "an exit after the recovery", run: newRun().fault(time.Second, 4*time.Second).exit(20*time.Second, 30*time.Second),

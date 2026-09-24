@@ -984,9 +984,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
   binary (cached). All four run on every PR. The `-nightly` target beside each example
   runs it on seeds botbox draws, with the negative control. `make test-kind` = the toy
-  through `--kubeconfig` against a kind cluster it creates and deletes, nightly or on
-  demand. It passes `b0.json` and fixed seeds, and fails B3 on G3 and B8 on P1 as its
-  negative controls. It installs the pinned kind into `bin/` and needs Docker.
+  through `--kubeconfig` against a kind cluster it creates and deletes, on demand. It
+  passes `b0.json` and fixed seeds, and fails B3 on G3 and B8 on P1 as its negative
+  controls. It installs the pinned kind into `bin/` and needs Docker. The nightly workflow
+  runs the same runs with `make test-kind-runs`.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code

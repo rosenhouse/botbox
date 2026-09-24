@@ -320,10 +320,11 @@ define external-secrets-control
 	$(call hides-the-secret,$(1),$(EXTERNAL_SECRETS_CONTROL_OUT),token,s3cr3t|czNjcjN0|733363723374|56e1b3f734a3d8e2c7932736ca6ff7fb9a9b5a14378c70c27c5e0adf)
 endef
 
-# The example tier of DESIGN.md §11. The pinned sequences are the worked example
-# of the format §7 states, so the tier runs them rather than letting them rot.
-# Its control turns the owner reference off, under which cert-manager retains
-# the issued Secret by design, and the target declares Secrets as managed.
+# test-example is the example tier of DESIGN.md §11. The pinned sequences are
+# the worked example of the format §7 states, so the tier runs them rather than
+# letting them rot. Its control turns the owner reference off, under which
+# cert-manager retains the issued Secret by design, and the target declares
+# Secrets as managed.
 .PHONY: test-example
 test-example: verify-cert-manager-pin setup build
 	@echo "==> the default configuration, which must pass"
@@ -336,11 +337,11 @@ test-example: verify-cert-manager-pin setup build
 		|| { echo "test-example: a pinned sequence failed."; exit 1; }
 	$(call cert-manager-control,test-example)
 
-# The nightly tier of DESIGN.md §10 (M5). botbox draws the seeds, so a find here
-# is a new one rather than the fixed seeds again, and every run prints its seed,
-# so the find replays (§11). It carries the same negative control as test-example,
-# because a nightly that only ever passes cannot tell a quiet night from a harness
-# that stopped judging.
+# test-example-nightly is the nightly tier of DESIGN.md §10 (M5). botbox draws
+# the seeds, so a find here is a new one rather than the fixed seeds again, and
+# every run prints its seed, so the find replays (§11). It carries the same
+# negative control as test-example, because a nightly that only ever passes
+# cannot tell a quiet night from a harness that stopped judging.
 .PHONY: test-example-nightly
 test-example-nightly: verify-cert-manager-pin
 	@echo "==> drawn seeds, which must pass"
@@ -348,7 +349,7 @@ test-example-nightly: verify-cert-manager-pin
 		|| { echo "test-example-nightly: a drawn seed failed."; exit 1; }
 	$(call cert-manager-control,test-example-nightly)
 
-# The external-secrets example tier, in the shape of test-example. Its negative
+# test-example-external-secrets has the shape of test-example. Its negative
 # control is a sequence rather than a --launch-arg, because no flag makes the
 # controller orphan its Secret: spec.target.creationPolicy does, and that is a
 # field of the CR (DESIGN.md §15, D41).
@@ -383,8 +384,8 @@ kind-cluster: $(KIND)
 	$(KIND) create cluster --name $(KIND_CLUSTER) --image $(KIND_NODE_IMAGE) \
 		--config targets/toy-widget/kind.yaml --kubeconfig $(KIND_KUBECONFIG) --wait 3m
 
-# The kind tier of DESIGN.md §11. botbox installs the toy's CRD, and the
-# cluster's own controller manager collects garbage and populates each
+# test-kind is the kind tier of DESIGN.md §11. botbox installs the toy's CRD,
+# and the cluster's own controller manager collects garbage and populates each
 # namespace. The toy runs on the host, so no image is loaded. The trap deletes
 # the cluster however the runs end. A failed create sets no trap, so a cluster
 # that already had the name survives.

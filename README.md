@@ -465,7 +465,7 @@ Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generi
 
 - `make setup` installs the envtest control plane, and `make help` lists every target.
 - `make test`, `make test-envtest`, `make test-example` and `make test-example-external-secrets` are the tiers CI runs on every PR.
-- `make test-kind` runs the toy through `--kubeconfig` against a kind cluster that it creates and deletes. It needs Docker, and the nightly workflow runs it.
+- `make test-kind` runs the toy through `--kubeconfig` against a kind cluster that it creates and deletes. It needs Docker. The nightly workflow runs the same runs with `make test-kind-runs`.
 - A block after `<!-- embed: path -->` holds that file byte for byte, and `make test` enforces it.
 - [DESIGN.md](DESIGN.md) is the governing design. Code and docs must not contradict it.
 - [docs/journal.md](docs/journal.md) and [docs/spikes/](docs/spikes/) hold the milestone journal and the experiments behind DESIGN.md §15.

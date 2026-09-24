@@ -20,6 +20,9 @@ func TestG4LeavesToG3AWaitThatEndedOnACRPastItsDeletionDeadline(t *testing.T) {
 		"the CR is still there": beingDeleted().
 			checkpoint(20150*time.Millisecond, invariant.Expired).
 			through(25 * time.Second),
+		"the wait ended on the deadline": beingDeleted().
+			checkpoint(20100*time.Millisecond, invariant.Expired).
+			through(25 * time.Second),
 		"the CR went after its deadline": beingDeleted().
 			remove(21*time.Second, deletedWidget("16")).
 			checkpoint(22100*time.Millisecond, invariant.Expired).
@@ -90,6 +93,15 @@ func TestG4JudgesAWaitG3DoesNot(t *testing.T) {
 				through(25 * time.Second),
 			want: "the CR w was still being deleted, held by the finalizers " + cleanup,
 		},
+		{
+			name: "a fault reached into the deletion before a later wait began",
+			in: beingDeleted().
+				fault(11*time.Second, 11500*time.Millisecond).
+				op(invariant.OpSettle, 15*time.Second).
+				checkpoint(20150*time.Millisecond, invariant.Expired).
+				through(25 * time.Second),
+			want: "the CR w was still being deleted, held by the finalizers " + cleanup,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			violation := fired(t, invariant.Convergence, test.in)
@@ -139,6 +151,11 @@ func TestWaitOwedCoversEachDeletion(t *testing.T) {
 			op(invariant.OpDelete, 16*time.Second).
 			record(16100*time.Millisecond, widget("21", uid("uid-w-again"), spec(2), finalizers(cleanup), deleting(16*time.Second))),
 			at: 17 * time.Second, want: 26100 * time.Millisecond},
+		{name: "a CR still being deleted, and a later one that went", run: beingDeleted().
+			record(11*time.Second, object(widgetGVK, "b", "30", finalizers(cleanup))).
+			record(12*time.Second, object(widgetGVK, "b", "31", finalizers(cleanup), deleting(12*time.Second))).
+			remove(12500*time.Millisecond, object(widgetGVK, "b", "32")),
+			at: 13 * time.Second, want: 20100 * time.Millisecond},
 		{name: "a fault owed less than the deletion", run: beingDeleted().fault(11*time.Second, 11500*time.Millisecond),
 			at: 12 * time.Second, want: 20100 * time.Millisecond},
 		{name: "a fault owed more than the deletion", run: beingDeleted().fault(11*time.Second, 19*time.Second),

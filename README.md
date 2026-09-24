@@ -489,18 +489,17 @@ jobs:
 ```
 
 The job caches botbox and setup-envtest in `~/go/bin`, and the control plane in `bin/envtest`,
-under a key of their versions. It saves that cache before botbox runs, so a run that fails still
-fills it. Give `--deadline` room for your controller, because a run that overruns it, or an
-invocation it stops before the last run, exits 2 rather than reporting a find. A Go repository
-may instead read Go's version from its go.mod and turn setup-go's cache on.
+under a key of their versions. Give `--deadline` room for your controller, because a run that
+overruns it, or an invocation it stops before the last run, exits 2 rather than reporting a find.
+A Go repository may instead read Go's version from its go.mod and turn setup-go's cache on.
 
 When botbox fails, the job uploads `botbox-out/`. Download it with the command in the workflow's
 last comment and build your controller. The replay command in `report.md` then runs as written
 from the repository root.
 
 A pull request runs fixed seeds, and the nightly run draws fresh ones. GitHub tells whoever last
-edited the schedule when a nightly run fails. [nightly.yml](.github/workflows/nightly.yml) files
-an issue instead. A seed names a sequence for one build of botbox and one target declaration: its
+edited the schedule when a nightly run fails. [nightly.yml](.github/workflows/nightly.yml) also
+files an issue. A seed names a sequence for one build of botbox and one target declaration: its
 CRD schema, `sample`, `generate` and `manages`. A botbox upgrade, or a pull request that edits any
 of those, draws different sequences under the same seed. To tell whether a failure comes from the
 change under review, replay its `sequence.json` against the base branch's controller.

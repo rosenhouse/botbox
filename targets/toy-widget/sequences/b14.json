@@ -38,29 +38,16 @@
     },
     {
       "i": 3,
-      "t": "delete"
-    },
-    {
-      "i": 4,
       "t": "restart"
     },
     {
+      "i": 4,
+      "t": "settle"
+    },
+    {
       "i": 5,
-      "t": "settle"
-    },
-    {
-      "i": 6,
-      "t": "update",
-      "cr": "widget-2",
-      "patch": {
-        "spec": {
-          "count": 2
-        }
-      }
-    },
-    {
-      "i": 7,
-      "t": "settle"
+      "t": "delete",
+      "cr": "widget-2"
     }
   ]
 }

@@ -39,6 +39,24 @@ const toySequence = `{
   ]
 }`
 
+// oneOutlivesTheOther deletes one Widget while another lives, and runs past
+// the first's deletion deadline before the teardown cleans up.
+const oneOutlivesTheOther = `{
+  "seed": 20260920,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget-2"}, "spec": {"count": 1}}},
+    {"i": 2, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 3, "t": "delete"},
+    {"i": 4, "t": "restart"},
+    {"i": 5, "t": "settle"},
+    {"i": 6, "t": "update", "cr": "widget-2", "patch": {"spec": {"count": 2}}},
+    {"i": 7, "t": "restart"},
+    {"i": 8, "t": "settle"}
+  ]
+}`
+
 // oneCreate settles, so the run waits for a reaction from a target that has
 // stopped.
 const oneCreate = `{
@@ -236,6 +254,31 @@ func TestRunner(t *testing.T) {
 			return strings.HasPrefix(note, "G5") && strings.Contains(note, "for op 1 (restart): op 2 (update) ran")
 		}) {
 			t.Errorf("The run noted %q, want G5 to say the update of op 2 kept it from judging the restart of op 1.", result.Notes)
+		}
+	})
+
+	// The children of the Widget that lives stay past the other's deadline, and
+	// belong to it.
+	t.Run("passes the toy without a bug where one Widget outlives another", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+
+		result, err := run.Run(ctx, toy, readSequence(t, oneOutlivesTheOther), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy runs without a bug.", result.Violation)
+		}
+		if len(result.Notes) > 0 {
+			t.Errorf("The run noted %q, want every check to judge.", result.Notes)
+		}
+		deleted := result.Timeline.Ops[3].At
+		if passed := result.Timeline.Deletion.Start.Sub(deleted); passed <= toy.Timeouts.Delete {
+			t.Errorf("The teardown began %v after the first Widget's delete, so G3 never judged its deadline %v on.",
+				passed, toy.Timeouts.Delete)
 		}
 	})
 

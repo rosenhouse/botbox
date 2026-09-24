@@ -154,11 +154,6 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	if err != nil {
 		return c.fail(err)
 	}
-	sequences := make([]run.Sequence, len(runs))
-	for i, planned := range runs {
-		sequences[i] = planned.sequence
-	}
-	c.derive(&opts, exercised, sequences, runs[0].generated())
 
 	s, err := c.startSession(opts, exercised)
 	if err != nil {
@@ -172,6 +167,11 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	if err != nil {
 		return c.fail(err)
 	}
+	sequences := make([]run.Sequence, len(runs))
+	for i, planned := range runs {
+		sequences[i] = planned.sequence
+	}
+	c.derive(&opts, exercised, sequences, runs[0].generated())
 
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()

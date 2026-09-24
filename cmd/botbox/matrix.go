@@ -57,14 +57,6 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	if err != nil {
 		return c.fail(err)
 	}
-	var runs []run.Sequence
-	for _, row := range rows {
-		runs = append(runs, row.sequence)
-		if row.bug != control {
-			runs = append(runs, row.sequence)
-		}
-	}
-	c.derive(&opts, exercised, runs, false)
 
 	s, err := c.startSession(opts, exercised)
 	if err != nil {
@@ -79,6 +71,14 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 		return c.fail(fmt.Errorf("creating the matrix's run directory: %w", err))
 	}
 	defer os.RemoveAll(dir)
+	var runs []run.Sequence
+	for _, row := range rows {
+		runs = append(runs, row.sequence)
+		if row.bug != control {
+			runs = append(runs, row.sequence)
+		}
+	}
+	c.derive(&opts, exercised, runs, false)
 
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()

@@ -1254,13 +1254,16 @@ func TestATargetTheClusterRefusesEndsTheInvocationBeforeARun(t *testing.T) {
 		t.Run(args[0], func(t *testing.T) {
 			session := &fakeSession{refused: refused}
 
-			code, _, stderr := invoke(t, session, args...)
+			code, stdout, stderr := invoke(t, session, args...)
 
 			if code != exitError {
 				t.Errorf("botbox %s exited %d, want %d.", args[0], code, exitError)
 			}
 			if !strings.Contains(stderr, refused.Error()) {
 				t.Errorf("botbox %s reported %q, want %q.", args[0], stderr, refused)
+			}
+			if stdout != "" {
+				t.Errorf("botbox %s printed %q, and ran nothing.", args[0], stdout)
 			}
 			if len(session.sequences) != 0 {
 				t.Errorf("botbox %s ran %d sequences against a target the cluster refused.", args[0], len(session.sequences))

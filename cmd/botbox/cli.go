@@ -181,16 +181,27 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		code = c.runAll(ctx, opts, s, exercised, runs, out, record)
 	}
 	record.finish(ctx, code, c.now())
-	c.warn(record.write(out.Dir()))
-	if opts.junit != "" {
-		c.warn(record.writeJUnit(opts.junit, out.Dir()))
-	}
 	// A second signal kills botbox at once, and stopping the cluster takes
 	// seconds, so the summary comes first.
+	c.warn(c.save(record, opts, out.Dir()))
 	if s != nil {
 		c.warn(s.close())
 	}
+	// An interrupt that arrived since changes what botbox exits with.
+	if exitStatus(ctx, code) != record.ExitCode {
+		record.finish(ctx, code, record.Finish)
+		c.warn(c.save(record, opts, out.Dir()))
+	}
 	return code
+}
+
+// save writes the summary, and the JUnit file if one was asked for.
+func (c *cli) save(record *summary, opts options, dir string) error {
+	err := record.write(dir)
+	if opts.junit != "" {
+		err = errors.Join(err, record.writeJUnit(opts.junit, dir))
+	}
+	return err
 }
 
 // runAll executes the runs in order, records each, and stops at the first

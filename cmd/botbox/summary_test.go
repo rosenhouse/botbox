@@ -598,6 +598,37 @@ func TestTheSummaryIsWrittenBeforeTheClusterStops(t *testing.T) {
 	}
 }
 
+// botbox dies of a signal that arrives as the cluster stops, so the summary
+// has to say so.
+func TestAnInterruptAfterEveryRunPassedRewritesTheSummary(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	session := &fakeSession{closing: func() { cancel(interrupt{syscall.SIGTERM}) }}
+	out := t.TempDir()
+	junit := filepath.Join(t.TempDir(), "junit.xml")
+
+	code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
+		"run", "--target", toyTargetYAML, "--out", out, "--runs", "2", "--seed", "1", "--junit", junit)
+
+	want := 128 + int(syscall.SIGTERM)
+	if code != want {
+		t.Fatalf("botbox run exited %d, want %d: %s", code, want, stderr)
+	}
+	written := readSummary(t, out)
+	if written.Outcome != "interrupted" || written.ExitCode != want || written.Error != "an interrupt arrived after every run passed" {
+		t.Errorf("The summary says %s, exit %d, on %q, want interrupted, exit %d, after every run passed.",
+			written.Outcome, written.ExitCode, written.Error, want)
+	}
+	if md, _ := os.ReadFile(filepath.Join(summaryDir(t, out), "summary.md")); !strings.Contains(string(md), fmt.Sprintf("exited %d.", want)) {
+		t.Errorf("summary.md is\n%s\nwant it to say botbox exited %d.", md, want)
+	}
+	suite, _ := readJUnit(t, junit)
+	if i := slices.IndexFunc(suite.Cases, func(c parsedCase) bool { return c.Name == "botbox" }); i < 0 || suite.Cases[i].Error == nil ||
+		suite.Cases[i].Error.Type != "interrupted" {
+		t.Errorf("The JUnit testcases are %+v, want an interrupted one named botbox.", suite.Cases)
+	}
+}
+
 func TestEveryExitPathWritesTheSummary(t *testing.T) {
 	g3 := run.Violation{ID: "G3", Statement: "the target deletes what it manages", Evidence: "the v1/ConfigMap widget-0 was still there"}
 	stopping := func(cancel context.CancelCauseFunc, sig syscall.Signal, s *fakeSession) *fakeSession {

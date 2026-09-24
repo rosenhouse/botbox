@@ -131,6 +131,9 @@ func (s *summary) finish(ctx context.Context, code int, at time.Time) {
 	switch _, stopped := interruption(ctx); {
 	case stopped:
 		s.Outcome = outcomeInterrupted
+		if code == exitOK {
+			s.Error = "an interrupt arrived after every run passed"
+		}
 	case code == exitOK:
 		s.Outcome = outcomePassed
 	case code == exitViolation:

@@ -1728,5 +1728,7 @@ built from source and run as a black-box binary.
   does. Counting the startup against the wait's `T_settle`, as op 0 does, failed G4 on
   the toy behind a 3.5 s delay under its 5 s `T_settle`. A target must return within
   `T_settle` of the restart, so the 5 s wrapper still fails G4, which says the target was
-  not back. Leaving G1 and G2 unjudged in the window after an op G7 notes was rejected,
+  not back. An exit no fault excused owes nothing, so G4 also fails a crash whose restart,
+  startup and `T_stable` outlast the wait. Such a wait converged before, while the target
+  was not back. Leaving G1 and G2 unjudged in the window after an op G7 notes was rejected,
   because it judges less.

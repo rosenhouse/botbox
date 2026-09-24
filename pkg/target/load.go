@@ -52,8 +52,10 @@ type propertyDeclaration struct {
 }
 
 type generateDeclaration struct {
-	Mutate  []string                  `json:"mutate"`
-	Overlay map[string]map[string]any `json:"overlay"`
+	Mutate   []string                  `json:"mutate"`
+	Overlay  map[string]map[string]any `json:"overlay"`
+	MaxCRs   *int                      `json:"maxCRs"`
+	Distinct []string                  `json:"distinct"`
 }
 
 type timeoutsDeclaration struct {
@@ -93,13 +95,23 @@ func load(path string) (*Target, error) {
 	dir := filepath.Dir(path)
 
 	loaded := &Target{
-		Name:     declared.Name,
-		Version:  declared.Version,
-		Generate: GenerateSpec(declared.Generate),
-		Launch:   declared.Launch,
+		Name:    declared.Name,
+		Version: declared.Version,
+		Generate: GenerateSpec{
+			Mutate:   declared.Generate.Mutate,
+			Overlay:  declared.Generate.Overlay,
+			Distinct: declared.Generate.Distinct,
+		},
+		Launch: declared.Launch,
 	}
 	if loaded.Name == "" {
 		return nil, errors.New("name is required")
+	}
+	if maxCRs := declared.Generate.MaxCRs; maxCRs != nil {
+		if *maxCRs < 1 {
+			return nil, fmt.Errorf("generate.maxCRs %d: a sequence creates at least 1 CR", *maxCRs)
+		}
+		loaded.Generate.MaxCRs = *maxCRs
 	}
 	for _, crd := range declared.CRDs {
 		crdPath := resolve(dir, crd)

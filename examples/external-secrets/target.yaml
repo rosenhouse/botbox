@@ -35,6 +35,10 @@ properties:
 # specs the fake provider rejects. creationPolicy and deletionPolicy are not
 # mutated either, because Orphan is the negative control.
 generate:
+  # Two ExternalSecrets that name one Secret fight over it, which is a user's
+  # mistake and not the controller's.
+  distinct:
+    - spec.target.name
   mutate:
     - spec.target.name
     - spec.refreshInterval

@@ -44,23 +44,18 @@ func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
 		t.Run(testCase.path, func(t *testing.T) {
 			// The API server enforces the CRD; the overlay only tightens what
 			// the generator draws, and the sample need not satisfy it.
-			g := newGenerator(t, loadTarget(t, testCase.path), Options{})
+			loaded := loadTarget(t, testCase.path)
+			g := newGenerator(t, loaded, Options{})
 			crd := crdSchemaOf(t, testCase.path)
 			rapid.Check(t, func(rt *rapid.T) {
-				var cr map[string]any
-				for _, op := range g.sequence(rt).Ops {
-					switch op.Type {
-					case run.OpCreate, run.OpRecreate:
-						cr = op.Obj.DeepCopy().Object
-					case run.OpUpdate:
-						cr = merge(cr, op.Patch)
-					default:
-						continue
+				follow(g.sequence(rt), loaded.Sample.GetName(), func(op run.Op, name string, crs map[string]*written) {
+					if !op.Type.OnCR() || op.Type == run.OpDelete {
+						return
 					}
-					if err := validate(crd, cr, ""); err != nil {
-						rt.Fatalf("Op %d left the CR outside its schema: %v.", op.Index, err)
+					if err := validate(crd, crs[name].object, ""); err != nil {
+						rt.Fatalf("Op %d left the CR %s outside its schema: %v.", op.Index, name, err)
 					}
-				}
+				})
 			})
 		})
 	}
@@ -103,24 +98,22 @@ func TestGeneratedGadgetsKeepTheirCRDsRules(t *testing.T) {
 	crd := crdSchemaOf(t, rulesTarget)
 	var changed, switchedMode, updated int
 	rapid.Check(t, func(rt *rapid.T) {
-		var current map[string]any
+		crs := map[string]map[string]any{}
 		for _, op := range g.sequence(rt).Ops {
 			var next, old map[string]any
+			name := orSample(op.CR, loaded.Sample.GetName())
 			switch op.Type {
 			case run.OpCreate, run.OpRecreate:
-				next = op.Obj.DeepCopy().Object
-				if !equalJSON(next, loaded.Sample.Object) {
+				next, name = op.Obj.DeepCopy().Object, op.Obj.GetName()
+				if !equalJSON(next["spec"], loaded.Sample.Object["spec"]) {
 					changed++
 				}
 				if mode, _, _ := unstructured.NestedString(next, "spec", "mode"); mode != "fast" {
 					switchedMode++
 				}
 			case run.OpUpdate:
-				next, old = merge(current, op.Patch), current
+				next, old = merge(crs[name], op.Patch), crs[name]
 				updated++
-			case run.OpDelete:
-				current = nil
-				continue
 			default:
 				continue
 			}
@@ -130,7 +123,7 @@ func TestGeneratedGadgetsKeepTheirCRDsRules(t *testing.T) {
 			if broken := gadgetRuleBroken(next, old); broken != "" {
 				rt.Fatalf("Op %d (%s) left a gadget whose %s: %v.", op.Index, op.Type, broken, next["spec"])
 			}
-			current = next
+			crs[name] = next
 		}
 	})
 	if changed == 0 || updated == 0 {
@@ -166,7 +159,8 @@ func TestARefusedUpdateIsDrawnEightTimes(t *testing.T) {
 	} {
 		draws := 0
 		g.fields = []field{countField(testCase.count, &draws)}
-		patch := rapid.Custom(func(t *rapid.T) map[string]any { return g.patch(t, loaded.Sample.Object) }).Example(0)
+		at := &state{crs: []drawnCR{{object: loaded.Sample.Object, live: true}}}
+		patch := rapid.Custom(func(t *rapid.T) map[string]any { return g.patch(t, 0, at) }).Example(0)
 		if (patch != nil) != testCase.accepted || draws != testCase.draws {
 			t.Errorf("With every count %d, an update drew %d times and patched %v, want %d draws and accepted=%t.",
 				testCase.count, draws, patch, testCase.draws, testCase.accepted)
@@ -182,7 +176,7 @@ func TestAnUpdateTheCRDAlwaysRefusesBecomesASettle(t *testing.T) {
 	refused := 0
 	rapid.Check(t, func(rt *rapid.T) {
 		before := draws
-		op := g.op(rt, 1, &state{cr: loaded.Sample.Object})
+		op := g.op(rt, 1, &state{crs: []drawnCR{{object: loaded.Sample.Object, live: true}}})
 		if draws-before != updateDraws {
 			return
 		}
@@ -200,19 +194,20 @@ func TestTheStateFollowsTheCRBotboxLastWrote(t *testing.T) {
 	spec := func(count int64) map[string]any {
 		return map[string]any{"spec": map[string]any{"count": count, "mode": "fast"}}
 	}
-	at := state{cr: spec(3)}
+	at := state{crs: []drawnCR{{object: spec(3), live: true}}}
 
-	at.advance(run.Op{Type: run.OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(5)}}})
-	if !equalJSON(at.cr, spec(5)) {
-		t.Errorf("After an update the state holds %v, want %v.", at.cr, spec(5))
+	at.advance(run.Op{Type: run.OpCreate, Obj: &unstructured.Unstructured{Object: spec(1)}}, 1)
+	at.advance(run.Op{Type: run.OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(5)}}}, 0)
+	if !equalJSON(at.crs[0].object, spec(5)) || !equalJSON(at.crs[1].object, spec(1)) {
+		t.Errorf("After an update the state holds %v, want %v and %v.", at.crs, spec(5), spec(1))
 	}
-	at.advance(run.Op{Type: run.OpRecreate, Obj: &unstructured.Unstructured{Object: spec(7)}})
-	if !equalJSON(at.cr, spec(7)) {
-		t.Errorf("After a recreate the state holds %v, want %v.", at.cr, spec(7))
+	at.advance(run.Op{Type: run.OpDelete}, 0)
+	if at.crs[0].live || !equalJSON(at.crs[0].object, spec(5)) || len(at.live()) != 1 {
+		t.Errorf("After a delete the state holds %v, want the first CR deleted and still known.", at.crs)
 	}
-	at.advance(run.Op{Type: run.OpDelete})
-	if at.cr != nil {
-		t.Errorf("After a delete the state holds %v, want no CR.", at.cr)
+	at.advance(run.Op{Type: run.OpRecreate, Obj: &unstructured.Unstructured{Object: spec(7)}}, 0)
+	if !at.crs[0].live || !equalJSON(at.crs[0].object, spec(7)) {
+		t.Errorf("After a recreate the state holds %v, want %v live.", at.crs, spec(7))
 	}
 }
 
@@ -238,15 +233,7 @@ func TestSequencesAreLegalToReplay(t *testing.T) {
 				if sequence.Ops[0].Type != run.OpCreate {
 					rt.Fatalf("The sequence opens with a %s, want the create of the CR.", sequence.Ops[0].Type)
 				}
-				crExists := true
 				for i, op := range sequence.Ops[1:] {
-					needsCR := []run.OpType{run.OpUpdate, run.OpDelete, run.OpDeleteManaged}
-					switch {
-					case op.Type == run.OpCreate:
-						rt.Fatalf("Op %d creates the CR a second time.", op.Index)
-					case !crExists && slices.Contains(needsCR, op.Type):
-						rt.Fatalf("Op %d is a %s while the CR is deleted.", op.Index, op.Type)
-					}
 					if op.Type == run.OpDeleteManaged {
 						if !slices.Contains(testCase.managed, op.Kind) {
 							rt.Fatalf("Op %d deletes a %s, which the target does not declare it manages.",
@@ -260,12 +247,6 @@ func TestSequencesAreLegalToReplay(t *testing.T) {
 							rt.Fatalf("Op %d deletes a managed object after op %d skipped its settle wait.",
 								op.Index, previous.Index)
 						}
-					}
-					switch op.Type {
-					case run.OpDelete:
-						crExists = false
-					case run.OpRecreate:
-						crExists = true
 					}
 				}
 			})
@@ -426,12 +407,15 @@ func TestOnlyTheMutablePathsMove(t *testing.T) {
 			loaded := loadTarget(t, testCase.path)
 			g := newGenerator(t, loaded, Options{})
 			rapid.Check(t, func(rt *rapid.T) {
+				// Each CR after the first also takes a name and distinct values of
+				// its own.
+				moves := slices.Concat(testCase.mutablePaths, []string{"metadata.name"}, loaded.Generate.Distinct)
 				for _, op := range g.sequence(rt).Ops {
 					if op.Obj == nil {
 						continue
 					}
 					for _, path := range differences(loaded.Sample.Object, op.Obj.Object, "") {
-						if !slices.Contains(testCase.mutablePaths, path) {
+						if !slices.Contains(moves, path) {
 							rt.Fatalf("Op %d moved %s, and the target lets the generator move %v.",
 								op.Index, path, testCase.mutablePaths)
 						}

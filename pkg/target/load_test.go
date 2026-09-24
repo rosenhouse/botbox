@@ -282,6 +282,7 @@ func TestLoadRejects(t *testing.T) {
 		{"negative timeout", minimalTarget + "timeouts:\n  delete: -1s\n", "", []string{"delete", "positive"}},
 		{"errloop of zero", minimalTarget + "thresholds:\n  errloop: 0\n", "", []string{"errloop", "positive"}},
 		{"negative quiet", minimalTarget + "thresholds:\n  quiet: -1\n", "", []string{"quiet -1", "negative"}},
+		{"no CR at all", minimalTarget + "generate:\n  maxCRs: 0\n", "", []string{"generate.maxCRs 0", "at least 1"}},
 		{"a launch env that sets the kubeconfig", minimalTargetWithEnv + "    KUBECONFIG: /elsewhere\n", "", []string{"launch.env", "KUBECONFIG"}},
 		{"a launch env name holding an equals sign", minimalTargetWithEnv + "    A=B: x\n", "", []string{"launch.env", `"A=B"`}},
 		{"an empty launch env name", minimalTargetWithEnv + "    '': x\n", "", []string{"launch.env", `""`}},
@@ -713,6 +714,8 @@ generate:
   mutate: [spec.count]
   overlay:
     spec.count: {minimum: 1, maximum: 3}
+  maxCRs: 2
+  distinct: [spec.secretName]
 `, map[string]string{"widget.yaml": sampleWidget})
 
 	loaded, err := target.Load(path)
@@ -738,5 +741,9 @@ generate:
 	}
 	if want := `{"maximum":3,"minimum":1}`; string(overlay) != want {
 		t.Errorf("Load read the overlay of spec.count as %s, want %s.", overlay, want)
+	}
+	if loaded.Generate.MaxCRs != 2 || !reflect.DeepEqual(loaded.Generate.Distinct, []string{"spec.secretName"}) {
+		t.Errorf("Load read generate.maxCRs %d and generate.distinct %v, want 2 and [spec.secretName].",
+			loaded.Generate.MaxCRs, loaded.Generate.Distinct)
 	}
 }

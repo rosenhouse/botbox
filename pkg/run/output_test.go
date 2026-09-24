@@ -85,6 +85,31 @@ func TestWriteAtomicReplacesTheFileWhole(t *testing.T) {
 	}
 }
 
+func TestWriteAtomicLeavesNoFileOpen(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skipf("This system lists no open files: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "summary.json")
+
+	if err := WriteAtomic(path, []byte("new\n")); err != nil {
+		t.Fatalf("WriteAtomic failed: %v", err)
+	}
+
+	written, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fds, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fd := range fds {
+		if open, _ := os.Readlink(filepath.Join("/proc/self/fd", fd.Name())); open == written {
+			t.Errorf("File descriptor %s still holds %s open.", fd.Name(), written)
+		}
+	}
+}
+
 func TestAFailedWriteAtomicLeavesNothingBehind(t *testing.T) {
 	dir := t.TempDir()
 	// A directory in the way fails the rename, after the content is written.

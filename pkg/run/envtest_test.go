@@ -235,6 +235,8 @@ func loadTarget(t *testing.T, binary string) *target.Target {
 	return toy
 }
 
+// Each envtest test starts its own cluster and calls t.Parallel, so the
+// package takes as long as its longest test.
 func startCluster(t *testing.T, crds []string) *cluster.Cluster {
 	t.Helper()
 	c, err := cluster.Start(cluster.Options{CRDPaths: crds})

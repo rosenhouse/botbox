@@ -1591,12 +1591,15 @@ built from source and run as a black-box binary.
   stopped are owed as long as they lasted plus `T_settle` (§6), so each time faults stop,
   the deadline doubles what the run had and allows another exit. Faults with no trigger
   stop together, at the teardown. Minimizing gets what the runs left plus 4m, so it may
-  still stop early. At §6's timeouts the deadline runs to tens of minutes, so botbox
-  prints it. An explicit `--deadline` must be positive and is used as given. The derived
-  deadline ends no run the Runner would end on its own, unless a request hangs or a target
-  exits more than once per fault op while faults are active. The Runner owes each such
-  exit `T_settle` past its restart, so a crash loop under an active fault runs until the
-  deadline and exits 2 rather than failing G4.
+  still stop early. At §6's timeouts, a create and an update get 3m50s, and ten drawn
+  runs tens of minutes. A fault that stops before the update raises the 3m50s to 22 min.
+  Four such faults, each before an update of its own, give 8 h, past GitHub Actions' 6 h
+  job limit. botbox prints the deadline, and a sequence with faults should set
+  `--deadline`. An explicit `--deadline` must be positive and is used as given. The
+  derived deadline ends no run the Runner would end on its own, unless a request hangs or
+  a target exits more than once per fault op while faults are active. The Runner owes
+  each such exit `T_settle` past its restart, so a crash loop under an active fault runs
+  until the deadline and exits 2 rather than failing G4.
 - **D@51 G6 counts each namespace's requests apart.** Ten runs of external-secrets with
   no flags failed G6 at run 8: the controller repeated `create events` 34 times in 30 s.
   None went to the run namespace. envtest never finishes deleting a namespace, so each

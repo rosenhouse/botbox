@@ -268,6 +268,8 @@ that matches no request changes nothing and hides nothing ([DESIGN.md §5.2](DES
 `match.verb` is a Kubernetes verb such as `create` or `list`, and `match.resource` is the
 plural the API server serves, such as `configmaps`. botbox refuses any other value, because
 the fault would match nothing. A run notes each fault the proxy applied to no request.
+The deadline botbox derives allows for how long each fault can hold a run open, which for a
+few faults that stop one after another is hours. Give a sequence with faults `--deadline`.
 
 Field values come from the CRD's own schema: its numeric ranges, enums, patterns, list
 lengths and map sizes. Every CR botbox draws also passes the CRD's validation rules, CEL

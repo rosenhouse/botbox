@@ -262,8 +262,8 @@ func (f *fakeHarness) faultWindow(id proxy.FaultID) proxy.FaultWindow {
 	return window
 }
 
-func (f *fakeHarness) createCR(_ context.Context, obj *unstructured.Unstructured) (string, error) {
-	return obj.GetName(), f.record("createCR " + obj.GetName())
+func (f *fakeHarness) createCR(_ context.Context, obj *unstructured.Unstructured) error {
+	return f.record("createCR " + obj.GetName())
 }
 
 func (f *fakeHarness) patchCR(_ context.Context, name string, patch map[string]any) error {

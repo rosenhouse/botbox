@@ -281,7 +281,7 @@ type harness interface {
 	// servedResources is what the API server serves now, which includes the
 	// CRDs a target installed.
 	servedResources() ([]metav1.APIResource, error)
-	createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error)
+	createCR(ctx context.Context, obj *unstructured.Unstructured) error
 	patchCR(ctx context.Context, name string, patch map[string]any) error
 	deleteCR(ctx context.Context, name string) error
 	// awaitCRGone waits for the CR to go until the instant until returns has
@@ -441,20 +441,18 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 
 func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 	applied := AppliedOp{Op: op, At: r.now()}
-	var err error
+	if op.Type.OnCR() {
+		applied.CR = op.crName(r.target.Sample.GetName())
+	}
 	switch op.Type {
 	case OpCreate:
-		applied.CR, err = r.create(ctx, op)
-		return applied, err
+		return applied, r.create(ctx, op)
 	case OpUpdate:
-		applied.CR = op.crName(r.target.Sample.GetName())
 		return applied, refusal(op, r.h.patchCR(ctx, applied.CR, op.Patch))
 	case OpDelete:
-		applied.CR = op.crName(r.target.Sample.GetName())
 		return applied, r.h.deleteCR(ctx, applied.CR)
 	case OpRecreate:
-		applied.CR, err = r.recreate(ctx, op, op.crName(r.target.Sample.GetName()))
-		return applied, err
+		return applied, r.recreate(ctx, op, applied.CR)
 	case OpRestart:
 		return applied, r.h.restart(ctx)
 	case OpFault:
@@ -473,25 +471,23 @@ func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 	return applied, fmt.Errorf("%q is not an op type", op.Type)
 }
 
-// create creates the op's object and returns the name the CR took.
-func (r *runner) create(ctx context.Context, op Op) (string, error) {
-	name, err := r.h.createCR(ctx, op.Obj)
-	if err != nil {
-		return "", refusal(op, err)
+func (r *runner) create(ctx context.Context, op Op) error {
+	if err := r.h.createCR(ctx, op.Obj); err != nil {
+		return refusal(op, err)
 	}
-	if !slices.Contains(r.crs, name) {
+	if name := op.Obj.GetName(); !slices.Contains(r.crs, name) {
 		r.crs = append(r.crs, name)
 	}
-	return name, nil
+	return nil
 }
 
 // recreate deletes the CR, waits for it to go and creates the op's object. The
 // wait lasts T_delete, or longer while the run is owed time. A CR still there
-// where the wait ends is judged there. It returns the CR the op last wrote.
-func (r *runner) recreate(ctx context.Context, op Op, cr string) (string, error) {
+// where the wait ends is judged there.
+func (r *runner) recreate(ctx context.Context, op Op, cr string) error {
 	due := r.now().Add(r.target.Timeouts.Delete)
 	if err := r.h.deleteCR(ctx, cr); err != nil {
-		return cr, err
+		return err
 	}
 	wait := Wait{Window: Window{Start: r.now()}}
 	gone, err := r.h.awaitCRGone(ctx, cr, func() time.Time {
@@ -502,12 +498,12 @@ func (r *runner) recreate(ctx context.Context, op Op, cr string) (string, error)
 	})
 	switch {
 	case err != nil:
-		return cr, err
+		return err
 	case gone:
 		return r.create(ctx, op)
 	}
 	wait.Window.End = r.now()
-	return cr, &crStayed{cr: cr, wait: wait}
+	return &crStayed{cr: cr, wait: wait}
 }
 
 // crStayed is a recreate whose CR was still there where the wait for it to go

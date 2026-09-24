@@ -29,6 +29,7 @@ type workflow struct {
 }
 
 type job struct {
+	If              string `yaml:"if"`
 	RunsOn          any    `yaml:"runs-on"`
 	ContinueOnError any    `yaml:"continue-on-error"`
 	TimeoutMinutes  any    `yaml:"timeout-minutes"`
@@ -245,10 +246,77 @@ func TestTheCIRecipeCachesWhatItInstalls(t *testing.T) {
 		switch {
 		case strings.Contains(s.Run, "go install") && s.If != missed:
 			t.Errorf("step %d builds with go install on a cache hit too: %q", i, s.Run)
-		case (strings.Contains(s.Run, "go install") || strings.Contains(s.Run, "setup-envtest use")) && i > saved:
-			t.Errorf("step %d installs after the cache is saved: %q", i, s.Run)
 		case strings.Contains(s.Run, "botbox run") && i < saved:
 			t.Errorf("step %d runs botbox before the cache is saved, so a find would leave it unsaved: %q", i, s.Run)
+		}
+	}
+}
+
+// The walk takes every step to pass, and so runs no step if: failure().
+func TestTheCIRecipeGivesEachStepWhatItNeedsOnACacheHitAndAMiss(t *testing.T) {
+	cached := []string{"botbox", "setup-envtest", "the control plane"}
+	effects := []struct {
+		usesOrRuns   *regexp.Regexp
+		needs, gives []string
+	}{
+		{regexp.MustCompile(`^actions/setup-go@`), nil, []string{"go"}},
+		{regexp.MustCompile(`(?m)^\s*go `), []string{"go"}, nil},
+		{regexp.MustCompile(`/botbox@`), nil, []string{"botbox"}},
+		{regexp.MustCompile(`/setup-envtest@`), nil, []string{"setup-envtest"}},
+		{regexp.MustCompile(`setup-envtest use`), []string{"setup-envtest"}, []string{"the control plane"}},
+		{regexp.MustCompile(`KUBEBUILDER_ASSETS=`), nil, []string{"KUBEBUILDER_ASSETS"}},
+		{regexp.MustCompile(`^actions/cache/save@`), cached, nil},
+		{regexp.MustCompile(`go build -o`), nil, []string{"the controller"}},
+		{regexp.MustCompile(`botbox run`), []string{"botbox", "KUBEBUILDER_ASSETS", "the controller"}, []string{"a botbox run"}},
+	}
+	recipe := recipeJob(t)
+	restore := stepUsing(t, recipe.Steps, "actions/cache/restore")
+	for _, event := range slices.Sorted(maps.Keys(recipeEvents(t))) {
+		for _, hit := range []bool{true, false} {
+			t.Run(fmt.Sprintf("%s with cache-hit %t", event, hit), func(t *testing.T) {
+				runs := func(condition string) bool {
+					if on := regexp.MustCompile(`^github\.event_name == '(\w+)'$`).FindStringSubmatch(condition); on != nil {
+						return on[1] == event
+					}
+					switch condition {
+					case "":
+						return true
+					case "failure()":
+						return false
+					case "steps." + restore.ID + ".outputs.cache-hit != 'true'":
+						return !hit
+					}
+					t.Fatalf("the walk cannot evaluate if: %s", condition)
+					return false
+				}
+				has := map[string]bool{}
+				for i, s := range recipe.Steps {
+					if !runs(recipe.If) || !runs(s.If) {
+						continue
+					}
+					var gives []string
+					if hit && s.Uses == restore.Uses {
+						gives = append(gives, cached...)
+					}
+					for _, effect := range effects {
+						if !effect.usesOrRuns.MatchString(s.Uses + "\n" + s.Run) {
+							continue
+						}
+						for _, need := range effect.needs {
+							if !has[need] {
+								t.Errorf("step %d needs %s, and no step before it gives it", i, need)
+							}
+						}
+						gives = append(gives, effect.gives...)
+					}
+					for _, g := range gives {
+						has[g] = true
+					}
+				}
+				if !has["a botbox run"] {
+					t.Error("no step runs botbox")
+				}
+			})
 		}
 	}
 }
@@ -530,25 +598,6 @@ func runText(steps []step) string {
 		commands = append(commands, s.Run)
 	}
 	return strings.Join(commands, "\n")
-}
-
-func TestTheCIRecipeSetsUpGoBeforeItRunsGo(t *testing.T) {
-	steps := recipeSteps(t)
-	setupGo := slices.IndexFunc(steps, func(s step) bool { return strings.HasPrefix(s.Uses, "actions/setup-go@") })
-	for i, s := range steps {
-		if regexp.MustCompile(`(?m)^\s*go `).MatchString(s.Run) && i < setupGo {
-			t.Errorf("step %d runs go before setup-go installs it: %q", i, s.Run)
-		}
-	}
-}
-
-func TestTheCIRecipeBuildsTheControllerBeforeBotboxRuns(t *testing.T) {
-	steps := recipeSteps(t)
-	build := slices.IndexFunc(steps, func(s step) bool { return strings.Contains(s.Run, "go build -o ") })
-	run := slices.IndexFunc(steps, func(s step) bool { return strings.Contains(s.Run, "botbox run") })
-	if build < 0 || build > run {
-		t.Error("the recipe does not build the controller before botbox launches it")
-	}
 }
 
 func TestTheCIRecipeNeedsNoGoMod(t *testing.T) {

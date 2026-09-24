@@ -95,11 +95,14 @@ func TestNewReportsAFieldBotboxCannotDraw(t *testing.T) {
 func TestACannotDrawErrorQuotesAnyOtherPanic(t *testing.T) {
 	loaded := loadTarget(t, rulesTarget)
 	g := newGenerator(t, loaded, Options{})
-	panics := field{path: []string{"spec", "count"}, dotted: "spec.count", values: rapid.Custom(func(*rapid.T) any { panic("boom") })}
+	panics := field{path: []string{"spec", "count"}, dotted: "spec.count", values: rapid.Custom(func(*rapid.T) any {
+		var missing *field
+		return missing.dotted
+	})}
 
 	err := g.rules.acceptsADraw(loaded.Sample, panics)
 
-	if err == nil || !strings.Contains(err.Error(), "boom") || strings.Contains(err.Error(), "enum") {
+	if err == nil || !strings.Contains(err.Error(), "nil pointer dereference") || strings.Contains(err.Error(), "cannot draw") {
 		t.Errorf("acceptsADraw returned %v, want the panic's reason and no guess at its cause.", err)
 	}
 }

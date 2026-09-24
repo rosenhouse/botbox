@@ -579,20 +579,23 @@ func (r *runner) judge(op int, wait Wait, excused bool) error {
 		!wait.Converged && !excused)
 }
 
+// ErrTargetStopped is in the error of a run whose target is no longer running.
+var ErrTargetStopped = errors.New("the target is no longer running")
+
 // targetStopped is the harness error for a target that is no longer running.
 // A target that rejects its own flags writes one line and exits, and that line
 // is what its reader acts on.
 func (r *runner) targetStopped(status launch.Status) error {
 	log := filepath.Join(r.dir, targetLogFile)
-	stopped := "the target is no longer running"
+	stopped := ErrTargetStopped
 	// The launcher knows no exit where it holds no process at all.
 	if status.Exit != nil {
-		stopped += ": " + status.Exit.Error()
+		stopped = fmt.Errorf("%w: %v", ErrTargetStopped, status.Exit)
 	}
 	said, _ := whyItStopped(log, 0)
-	err := fmt.Errorf("%s; its output is in %s", stopped, log)
+	err := fmt.Errorf("%w; its output is in %s", stopped, log)
 	if said != "" {
-		err = fmt.Errorf("%s; it wrote %q, and the rest of its output is in %s", stopped, said, log)
+		err = fmt.Errorf("%w; it wrote %q, and the rest of its output is in %s", stopped, said, log)
 	}
 	switch {
 	case strings.Contains(said, "address already in use"):

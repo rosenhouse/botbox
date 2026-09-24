@@ -771,31 +771,61 @@ func TestAnInterruptBeforeTheFirstRunStartsNone(t *testing.T) {
 // A terminal's interrupt reaches the target too, which then stops. The
 // interrupt is what the caller needs to hear about.
 func TestAnInterruptDuringARunStopsTheInvocation(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{"ending a wait", fmt.Errorf("op 0 (settle): %w", context.Canceled)},
+		{"stopping the target", fmt.Errorf("op 0 (settle): %w: signal: interrupt", run.ErrTargetStopped)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(t.Context())
+			session := &fakeSession{failures: []error{test.err}}
+			session.after = func() { cancel(interrupt{syscall.SIGTERM}) }
+
+			code, stdout, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
+				"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
+
+			if code != 128+int(syscall.SIGTERM) {
+				t.Errorf("botbox run exited %d, want %d.", code, 128+int(syscall.SIGTERM))
+			}
+			if len(session.sequences) != 1 {
+				t.Errorf("The session executed %d sequences, want the one the interrupt stopped.", len(session.sequences))
+			}
+			for _, want := range []string{"run 1: an interrupt stopped the run", session.dirs[0]} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("botbox run printed %q on stderr, which does not mention %q.", stderr, want)
+				}
+			}
+			for _, unwanted := range []string{"--deadline", "no longer running", "canceled"} {
+				if strings.Contains(stderr, unwanted) {
+					t.Errorf("botbox run printed %q on stderr, which blames %q for the interrupt.", stderr, unwanted)
+				}
+			}
+			if strings.Contains(stdout, "every run passed") {
+				t.Errorf("botbox run printed %q, but not every run ran.", stdout)
+			}
+		})
+	}
+}
+
+// A run that failed on its own before the interrupt says why.
+func TestAnInterruptKeepsARunsOwnError(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
-	session := &fakeSession{failures: []error{errors.New("op 0 (settle): the target is no longer running: signal: interrupt")}}
+	refusal := &run.Refused{Op: run.Op{Index: 0, Type: run.OpCreate}, Reason: errors.New("spec.count: must be at most 10")}
+	session := &fakeSession{failures: []error{refusal}}
 	session.after = func() { cancel(interrupt{syscall.SIGTERM}) }
 
-	code, stdout, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
+	code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
 		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
 
 	if code != 128+int(syscall.SIGTERM) {
 		t.Errorf("botbox run exited %d, want %d.", code, 128+int(syscall.SIGTERM))
 	}
-	if len(session.sequences) != 1 {
-		t.Errorf("The session executed %d sequences, want the one the interrupt stopped.", len(session.sequences))
-	}
-	for _, want := range []string{"run 1: an interrupt stopped the run", session.dirs[0]} {
+	for _, want := range []string{"run 1: " + refusal.Error(), "the op is in " + filepath.Join(session.dirs[0], "sequence.json")} {
 		if !strings.Contains(stderr, want) {
-			t.Errorf("botbox run printed %q on stderr, which does not mention %q.", stderr, want)
+			t.Errorf("botbox run printed %q on stderr, which does not say %q.", stderr, want)
 		}
-	}
-	for _, unwanted := range []string{"--deadline", "no longer running"} {
-		if strings.Contains(stderr, unwanted) {
-			t.Errorf("botbox run printed %q on stderr, which blames %q for the interrupt.", stderr, unwanted)
-		}
-	}
-	if strings.Contains(stdout, "every run passed") {
-		t.Errorf("botbox run printed %q, but not every run ran.", stdout)
 	}
 }
 
@@ -850,7 +880,7 @@ func TestAnUnfinishedRunOfTheMinimizedSequenceIsNoPass(t *testing.T) {
 	session.after = func() {
 		if rerun() {
 			cancel(interrupt{syscall.SIGINT})
-			session.failures[len(session.sequences)-1] = errors.New("op 0 (settle): context canceled")
+			session.failures[len(session.sequences)-1] = fmt.Errorf("op 1 (settle): %w", context.Canceled)
 		}
 	}
 	session.fails = func(run.Sequence, string) *run.Violation {

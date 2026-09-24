@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -407,6 +410,29 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 				t.Errorf("botbox matrix wrote %s, want no matrix of a run that errored.", out)
 			}
 		})
+	}
+}
+
+func TestMatrixNamesTheRunAnInterruptStopped(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	session := &fakeSession{
+		results:  []run.Result{recorded(t, true), recorded(t, false)},
+		failures: []error{nil, fmt.Errorf("op 0 (settle): %w", context.Canceled)},
+	}
+	session.after = func() {
+		if len(session.sequences) == 2 {
+			cancel(interrupt{syscall.SIGINT})
+		}
+	}
+
+	code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil), "matrix",
+		"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", matrixFile(t))
+
+	if code != 128+int(syscall.SIGINT) {
+		t.Errorf("botbox matrix exited %d, want %d.", code, 128+int(syscall.SIGINT))
+	}
+	if want := "b1.json under --bug=1: an interrupt stopped the run"; !strings.Contains(stderr, want) {
+		t.Errorf("botbox matrix reported %q, want %q.", stderr, want)
 	}
 }
 

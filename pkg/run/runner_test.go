@@ -1873,6 +1873,9 @@ func TestTheRunnerAppliesNoOpToATargetThatStopped(t *testing.T) {
 			t.Errorf("The error is %q, which does not mention %q.", err, want)
 		}
 	}
+	if !errors.Is(err, ErrTargetStopped) {
+		t.Errorf("The error is %q, which does not wrap ErrTargetStopped.", err)
+	}
 	if got, want := h.opCalls(), []string{"createCR widget"}; !slices.Equal(got, want) {
 		t.Errorf("The run did %v, want %v: an op is never applied to a target that stopped.", got, want)
 	}
@@ -2002,6 +2005,9 @@ func TestAStoppedTargetsErrorSaysWhetherTheCRMayHaveCrashedIt(t *testing.T) {
 			if says := strings.Contains(err.Error(), pointer); says != test.created {
 				t.Errorf("The error is %q; want it to say %q: %t.", err, pointer, test.created)
 			}
+			if !errors.Is(err, ErrTargetStopped) {
+				t.Errorf("The error is %q, which does not wrap ErrTargetStopped.", err)
+			}
 		})
 	}
 }
@@ -2017,7 +2023,7 @@ func TestTheStoppedTargetsErrorWithoutAnExitStatus(t *testing.T) {
 	if err == nil {
 		t.Fatal("The run reported no error although the target had stopped.")
 	}
-	if !strings.Contains(err.Error(), "no longer running") || strings.Contains(err.Error(), "<nil>") {
+	if !errors.Is(err, ErrTargetStopped) || strings.Contains(err.Error(), "<nil>") {
 		t.Errorf("The error is %q, want it to say what the launcher knows.", err)
 	}
 }

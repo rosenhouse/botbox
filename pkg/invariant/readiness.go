@@ -24,10 +24,14 @@ func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 	}
 	stable := in.timeouts().Stable
 	changes := in.versionsIn(at.Add(-stable), at)
+	quiet := in.restarting(at, stable)
+	if quiet == "" {
+		quiet = churn(stable, changes)
+	}
 	violation := Violation{
 		ID: "G4",
 		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active: in %s, %s%s%s",
-			in.describeOp(checkpoint.Op), at.Sub(began).Round(time.Millisecond), walk.why(began, stable, changes),
+			in.describeOp(checkpoint.Op), at.Sub(began).Round(time.Millisecond), walk.why(began, quiet),
 			in.repeated(began, at), in.exited(at)),
 		At: at,
 	}.quotingRequests(Recent(requestsUpTo(in.Requests, at))).
@@ -116,13 +120,14 @@ func (w *readyWalk) step(in Input, at time.Time, crs []observe.Version, written 
 	return nil
 }
 
-// why says what kept the wait from converging.
-func (w readyWalk) why(began time.Time, stable time.Duration, changes []observe.Version) string {
+// why says what kept the wait from converging. quiet says why a wait on a
+// ready CR did not converge.
+func (w readyWalk) why(began time.Time, quiet string) string {
 	switch {
 	case w.crs == 0:
-		return "no CR was left to be ready, " + churn(stable, changes)
+		return "no CR was left to be ready, " + quiet
 	case w.held:
-		return fmt.Sprintf("ready held from %s on, %s", w.turned.Sub(began).Round(time.Millisecond), churn(stable, changes))
+		return fmt.Sprintf("ready held from %s on, %s", w.turned.Sub(began).Round(time.Millisecond), quiet)
 	case w.cr.DeletionTimestamp != nil:
 		return fmt.Sprintf("the CR %s was still being deleted, held by the finalizers %s", w.cr.Name, strings.Join(w.cr.Finalizers, ", "))
 	case w.ever:
@@ -137,6 +142,23 @@ func (w readyWalk) failure() string {
 		return w.err.Error()
 	}
 	return "it evaluated to false"
+}
+
+// restarting says how a restart kept the wait that ended at at from
+// converging, or is empty. A target waiting to restart is not ready, and a
+// restart is a change.
+func (in Input) restarting(at time.Time, stable time.Duration) string {
+	for _, exit := range in.Exits {
+		if !exit.At.After(at) && exit.Restart.After(at) {
+			return "but the target was waiting to restart"
+		}
+	}
+	for _, exit := range in.Exits {
+		if exit.Restart.After(at.Add(-stable)) && !exit.Restart.After(at) {
+			return fmt.Sprintf("but the target restarted in the last stable (%s)", stable)
+		}
+	}
+	return ""
 }
 
 // churn says what changed in the last stable, which a wait needs quiet.

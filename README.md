@@ -365,8 +365,8 @@ and `targets/toy-widget/sequences/b12.json` sets one:
 ```
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
-run 1: G4 the settle wait after op 1 (update) expired with no fault active: in 5.043s, ready held from 9ms on, and nothing changed in the last stable (2s); the target exited 2 times since it last converged, last with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
-  at 2026-09-24T00:20:08.753043575Z; 16 requests, the first get /api 200; 6 versions, the first toy.botbox/v1/Widget widget; the target managed 0 objects of the kinds it declares
+run 1: G4 the settle wait after op 1 (update) expired with no fault active: in 5.038s, ready held from 12ms on, but the target was waiting to restart; the target exited 2 times since it last converged, last with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
+  at 2026-09-24T00:57:57.490964784Z; 15 requests, the first get /api 200; 5 versions, the first toy.botbox/v1/Widget widget; the target managed 0 objects of the kinds it declares
 ```
 
 ### When a settle wait fails G4
@@ -380,12 +380,16 @@ A settle wait expired. What follows `expired with no fault active` says why:
   and status, which is where a reason such as `0/10 replicas available` appears. Compare
   that status with your `ready`: a misspelled field under `has()` also evaluates to false.
   envtest runs only the API server and etcd: no Deployment, ReplicaSet or Pod controller
-  runs, so a CR that waits on a Deployment's replicas never becomes ready there. The report
-  then notes that, and you can run [against kind](#against-kind).
+  runs, so a CR that waits on a Deployment's replicas never becomes ready there. botbox
+  warns of this when `manages` names such a kind. Run such a target
+  [against kind](#against-kind).
 - `ready held from … on, but the namespace never held still for stable (2s)` means your
   controller converged and kept writing. The Object versions table lists the writes. A
   status field rewritten on every reconcile, such as a timestamp, does this.
 - `ready held until …` means `ready` held and then stopped holding.
+- `ready held from … on, but the target was waiting to restart`, or `but the target
+  restarted in the last stable`, means your controller exited. The line counts the exits
+  since it last converged and quotes the last.
 
 After a `delete`, `the CR … was still being deleted, held by the finalizers …` means
 nothing removed those finalizers within `settle`. `no CR was left to be ready, but the
@@ -393,8 +397,7 @@ namespace never held still …` means something kept writing after the CR was go
 
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
 `settle`. Where your controller repeated a failing request, the line names it and its
-count: an error loop that backs off can fail too rarely for G6 to count. Where your controller
-exited since it last converged, the line counts the exits and quotes the last. A `ready` that yields
+count: an error loop that backs off can fail too rarely for G6 to count. A `ready` that yields
 something other than a bool is a configuration error, and botbox exits 2 naming it.
 
 ## When botbox exits 2

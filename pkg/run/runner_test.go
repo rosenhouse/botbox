@@ -2284,7 +2284,7 @@ func TestACrashLoopIsAG4ThatQuotesTheLastExit(t *testing.T) {
 	}
 }
 
-// One exit is evidence too.
+// A G4 quotes a single exit too.
 func TestAG4QuotesTheOneExitSinceTheTargetConverged(t *testing.T) {
 	h := crashLoop()
 	h.settles = []bool{true, false}
@@ -2327,7 +2327,7 @@ func TestATargetThatConvergesAfterItExitedPasses(t *testing.T) {
 }
 
 // A G4 quotes only the exits since the target last converged.
-func TestAnExitBeforeTheTargetLastConvergedIsNotEvidence(t *testing.T) {
+func TestAG4QuotesNoExitBeforeTheTargetLastConverged(t *testing.T) {
 	h := crashLoop()
 	h.settles = []bool{true, true, false}
 	sequence := sequenceOf(

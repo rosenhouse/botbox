@@ -27,14 +27,21 @@ type Options struct {
 // Validate reports the first CRD path that cannot be stat'ed, or the first
 // control plane binary envtest cannot run, before a control plane starts.
 func (o Options) Validate() error {
-	for _, path := range o.CRDPaths {
-		if _, err := os.Stat(path); err != nil {
-			return fmt.Errorf("CRD path: %w", err)
-		}
+	if err := o.checkCRDPaths(); err != nil {
+		return err
 	}
 	for _, binary := range []string{"etcd", "kube-apiserver"} {
 		if err := findBinary(binary); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+func (o Options) checkCRDPaths() error {
+	for _, path := range o.CRDPaths {
+		if _, err := os.Stat(path); err != nil {
+			return fmt.Errorf("CRD path: %w", err)
 		}
 	}
 	return nil
@@ -120,7 +127,7 @@ func Start(opts Options) (*Cluster, error) {
 // opts there. It creates or replaces each CRD, waits until the API server
 // serves it, and leaves it installed.
 func Connect(kubeconfig string, opts Options) (*Cluster, error) {
-	if err := opts.Validate(); err != nil {
+	if err := opts.checkCRDPaths(); err != nil {
 		return nil, fmt.Errorf("connecting to the test cluster: %w", err)
 	}
 	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)

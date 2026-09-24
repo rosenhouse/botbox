@@ -207,6 +207,17 @@ func TestConnectNamesAKubeconfigItCannotRead(t *testing.T) {
 	}
 }
 
+// A kubeconfig cluster runs none of envtest's binaries, so Connect needs none.
+func TestConnectNeedsNoControlPlaneBinaries(t *testing.T) {
+	pointAssetsNowhere(t)
+	kubeconfig := filepath.Join(t.TempDir(), "no-such-kubeconfig")
+
+	_, err := cluster.Connect(kubeconfig, cluster.Options{CRDPaths: []string{t.TempDir()}})
+	if want := "reading the kubeconfig " + kubeconfig; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("Connect returned %v, want it to read the kubeconfig without envtest's binaries.", err)
+	}
+}
+
 func TestConnectReportsCRDsItCouldNotInstall(t *testing.T) {
 	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
 	unreachable := clientcmdapi.Config{

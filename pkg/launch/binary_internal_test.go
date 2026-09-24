@@ -144,8 +144,9 @@ func TestRestartReportsAProcessItCannotReap(t *testing.T) {
 // Restart and Stop give up on a process they cannot reap within RestartWithin
 // and StopWithin, scaled to the grace period.
 func TestRestartAndStopGiveUpWithinTheirBudgets(t *testing.T) {
-	const scale = 25
+	const scale = 5
 	grace := DefaultGracePeriod / scale
+	slack := grace / 5
 	for _, test := range []struct {
 		name   string
 		call   func(*Binary) error
@@ -155,6 +156,7 @@ func TestRestartAndStopGiveUpWithinTheirBudgets(t *testing.T) {
 		{"Stop", func(b *Binary) error { return b.Stop(context.Background()) }, StopWithin / scale},
 	} {
 		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			cmd := exec.Command("/bin/sh", "-c", "trap '' TERM; while :; do sleep 0.1; done")
 			if err := cmd.Start(); err != nil {
 				t.Fatal(err)
@@ -166,7 +168,7 @@ func TestRestartAndStopGiveUpWithinTheirBudgets(t *testing.T) {
 
 			err := test.call(binary)
 
-			if elapsed := time.Since(start); err == nil || elapsed > test.within+grace/2 {
+			if elapsed := time.Since(start); err == nil || elapsed > test.within+slack {
 				t.Errorf("%s returned %v after %v, want it to give up within %v.", test.name, err, elapsed, test.within)
 			}
 		})

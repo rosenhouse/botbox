@@ -3,6 +3,7 @@ package run
 import (
 	"context"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -120,6 +121,9 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 		settles     []bool
 		exitsInWait int
 		runsOut     []int
+		// waits is what the Runner's waits take, which shows the case holds
+		// what it names.
+		waits time.Duration
 	}{
 		{name: "a create", timeouts: long, ops: []Op{createOp}},
 		{name: "an update", timeouts: long, ops: []Op{createOp, updateOp}},
@@ -130,17 +134,20 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 		{name: "a restart", timeouts: long, ops: []Op{createOp, {Type: OpRestart}, settleOp}},
 		{name: "a deleteManaged", timeouts: long, ops: []Op{createOp, {Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)}}},
 		{name: "a fault the teardown stops", timeouts: long,
-			ops: []Op{createOp, faultOp, updateOp, updateOp, updateOp}, settles: []bool{true, false, false, false}},
+			ops: []Op{createOp, faultOp, updateOp, updateOp, updateOp}, settles: []bool{true, false, false, false},
+			waits: 3*time.Hour + 31*time.Minute + 11*time.Second},
 		{name: "faults that stop one after another", timeouts: long,
 			ops:     []Op{createOp, faultUntil(4), faultOp, updateOp, updateOp, updateOp},
-			settles: []bool{true, false, false, false}},
+			settles: []bool{true, false, false, false}, waits: 4*time.Hour + 11*time.Minute + 11*time.Second},
 		{name: "faults whose triggers run out as a wait would end", timeouts: long,
 			ops:     []Op{createOp, faultOp, faultOp, faultOp, faultOp, updateOp},
-			settles: []bool{true, false}, runsOut: []int{2, 2, 2, 2}},
+			settles: []bool{true, false}, runsOut: []int{2, 2, 2, 2}, waits: 11*time.Hour + 31*time.Minute + 11*time.Second},
 		{name: "an exit while a fault is active", timeouts: target.DefaultTimeouts,
-			ops: []Op{createOp, faultOp, updateOp}, settles: []bool{true, false}, exitsInWait: 2},
+			ops: []Op{createOp, faultOp, updateOp}, settles: []bool{true, false}, exitsInWait: 2,
+			waits: 14*time.Minute + 21*time.Second},
 		{name: "an exit after a fault stopped", timeouts: target.DefaultTimeouts,
-			ops: []Op{createOp, faultUntil(3), settleOp, updateOp}, settles: []bool{true, false, false}, exitsInWait: 3},
+			ops: []Op{createOp, faultUntil(3), settleOp, updateOp}, settles: []bool{true, false, false}, exitsInWait: 3,
+			waits: 8*time.Minute + 51*time.Second},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newWaitingHarness(test.timeouts)
@@ -156,6 +163,9 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 			}
 			if len(h.runsOut) > 0 {
 				t.Fatalf("The triggers of %d faults never ran out.", len(h.runsOut))
+			}
+			if waited := h.waited().Truncate(time.Second); test.waits > 0 && waited != test.waits {
+				t.Fatalf("The Runner's waits took %v, want %v.", waited, test.waits)
 			}
 			if bound := Bound(exercised, sequence); bound < h.waited() {
 				t.Errorf("Bound is %v, and the Runner's waits can take %v.", bound, h.waited())
@@ -269,15 +279,22 @@ func TestBoundSaturatesRatherThanOverflow(t *testing.T) {
 		ops = append(ops, faultOp)
 	}
 	manyFaults := sequenceOf(append(ops, updateOp)...)
-	enormous := withTimeouts(target.Timeouts{Settle: math.MaxInt64 / 2, Stable: time.Second, Delete: math.MaxInt64 / 2})
+	// Two of the longest durations add up to one that looks short.
+	const longest = math.MaxInt64
+	settles := withTimeouts(target.Timeouts{Settle: longest, Stable: time.Second, Delete: time.Second})
+	deletes := withTimeouts(target.Timeouts{Settle: 2 * time.Second, Stable: time.Second, Delete: longest / 3})
+	teardowns := withTimeouts(target.Timeouts{Settle: 2 * time.Second, Stable: longest, Delete: longest})
 	// A run takes over half the longest duration.
-	long := withTimeouts(target.Timeouts{Settle: math.MaxInt64 / 4, Stable: time.Second, Delete: math.MaxInt64 / 4})
+	long := withTimeouts(target.Timeouts{Settle: longest / 4, Stable: time.Second, Delete: longest / 4})
+	recreate := Op{Type: OpRecreate, Obj: widget("widget"), NoSettle: true}
 	for _, test := range []struct {
 		name  string
 		bound time.Duration
 	}{
 		{"many faults", Bound(defaults, manyFaults)},
-		{"enormous timeouts", Bound(enormous, sequenceOf(createOp))},
+		{"long settle waits", Bound(settles, sequenceOf(createOp, updateOp))},
+		{"long deletions", Bound(deletes, sequenceOf(slices.Concat([]Op{createOp}, slices.Repeat([]Op{recreate}, 7))...))},
+		{"a long teardown", Bound(teardowns, sequenceOf(createOp))},
 		{"two long runs", Bound(long, sequenceOf(createOp), sequenceOf(createOp))},
 	} {
 		t.Run(test.name, func(t *testing.T) {

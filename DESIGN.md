@@ -968,7 +968,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   shrinker stops there and reports the smallest failing sequence it found. Without
   `--deadline`, botbox prints and uses the longest the planned runs' waits can take at the
   target's timeouts, plus 4m to minimize a failure where botbox drew the sequences
-  (D@51). `--launch-arg` appends to `launch.args` (repeatable; a later flag wins), which
+  (D@51a). `--launch-arg` appends to `launch.args` (repeatable; a later flag wins), which
   is how the bug matrix selects `--bug=N`.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
   CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
@@ -1579,7 +1579,7 @@ built from source and run as a black-box binary.
   ignores SIGPIPE once interrupted. `signal.Notify` would undo `nohup`, so botbox leaves
   alone a SIGHUP or SIGINT it was started ignoring. Go keeps no other inherited SIG_IGN.
   A SIGKILLed botbox still leaves the control plane and the target running.
-- **D@51 Without `--deadline`, botbox derives the deadline from the target's timeouts.** A
+- **D@51a Without `--deadline`, botbox derives the deadline from the target's timeouts.** A
   fixed 4m stopped ten runs of a correct controller at §6's timeouts after six, each of
   which took 32 to 42 s, and a larger fixed default fails again when `--runs` grows or the
   timeouts widen. The derived deadline is the longest the planned runs' waits (§5.5) can
@@ -1600,7 +1600,7 @@ built from source and run as a black-box binary.
   a target exits more than once per fault op while faults are active. The Runner owes
   each such exit `T_settle` past its restart, so a crash loop under an active fault runs
   until the deadline and exits 2 rather than failing G4.
-- **D@51 G6 counts each namespace's requests apart.** Ten runs of external-secrets with
+- **D@51b G6 counts each namespace's requests apart.** Ten runs of external-secrets with
   no flags failed G6 at run 8: the controller repeated `create events` 34 times in 30 s.
   None went to the run namespace. envtest never finishes deleting a namespace, so each
   earlier run's objects stay, and the controller wrote two events into each of 17 such

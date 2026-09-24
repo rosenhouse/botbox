@@ -1384,16 +1384,18 @@ built from source and run as a black-box binary.
   the op or its wait, as every check ignores a fault's window, and one whose wait ended
   while the target was still owed time to recover from a fault. The Runner stops a fault
   that runs until an op just before it applies the op, and the toy's informer retried its
-  list 4 s after such a fault stopped, when G7 had already failed it. G7 does not judge an
-  op while no CR is live. An object that is back satisfies G7 before any of these, whatever
-  the fault or the change did. A `Restart` gives botbox no sign that the target is back,
-  so a settle wait after one could converge while the target was still starting, or
-  waiting out the lease its killed predecessor held. G7 then failed the correct toy behind
-  a wrapper that delayed each restart by 3 s. G7 judges an op after a `Restart` only where
-  the target requested a resource outside leader election between the two, whatever the
-  API server answered, since only a running target asks. A request anywhere in the op's
-  wait was rejected as the bar, because a target first heard from late in the wait has had
-  no time to act.
+  list 4 s after such a fault stopped, when G7 had already failed it. A settle wait that
+  converges ends that time (§6), though an informer may still be backing off. So the toy,
+  restarted into a 4 s fault on ConfigMaps, can still fail G7 on a `deleteManaged` after
+  settle waits that converged. G7 does not judge an op while no CR is live. An object that
+  is back satisfies G7 before any of these, whatever the fault or the change did. A
+  `Restart` gives botbox no sign that the target is back, so a settle wait after one could
+  converge while the target was still starting, or waiting out the lease its killed
+  predecessor held. G7 then failed the correct toy behind a wrapper that delayed each
+  restart by 3 s. G7 judges an op after a `Restart` only where the target requested a
+  resource outside leader election between the two, whatever the API server answered,
+  since only a running target asks. A request anywhere in the op's wait was rejected as
+  the bar, because a target first heard from late in the wait has had no time to act.
 - **D54 G1 and G7 treat every `coordination.k8s.io` request as leader election.** The
   group holds only leases and lease candidates. A candidate under coordinated leader
   election creates and renews its LeaseCandidate whether or not it leads. G1 ignores those

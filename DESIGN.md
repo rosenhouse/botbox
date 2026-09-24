@@ -440,11 +440,11 @@ from that convergence if it came later, to the instant the last of them stopped.
 wait does not give up before that time has passed, and one that expired is excused only
 while a fault is active or that time is still owed. A spec change made within that time is
 judged at the later of the two deadlines. A settle wait that converged sooner ends that
-time early. A target that exits while a fault excuses it, as controller-runtime does when
-it loses leader election, then waits out the restart's backoff (§5.1), which botbox chose.
-G4 gives it `T_settle` past that restart too, and does not judge a window the exit falls
-in, as it does not judge one a fault reaches into. Only a fault excuses an exit, so a
-crash loop that a fault set off still fails G4.
+time early. A target that exits while a fault excuses it, as controller-runtime with
+leader election on does when it loses its lease, then waits out the restart's backoff
+(§5.1), which botbox chose. G4 gives it `T_settle` past that restart too, and does not
+judge a window the exit falls in, as it does not judge one a fault reaches into. Only a
+fault excuses an exit, so a crash loop that a fault set off still fails G4.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -1539,19 +1539,19 @@ built from source and run as a black-box binary.
   resolve from there. The Runner checks a fault's resource when it applies the fault op,
   not when the run starts, because a target may install its CRDs itself.
 - **D53 botbox restarts a target that exits once it has converged, and a crash loop is a
-  G4.** Controllers are deployed to be restarted, and controller-runtime exits on purpose
-  when it loses leader election, which a fault can cause. A seventh invariant, "the target
-  keeps running", would report such a controller, so botbox restarts the target as a
-  kubelet does, with a kubelet's backoff. A target waiting out the backoff has not
-  converged, and a restart counts as a change, so a target that exits again soon after
-  each restart fails G4, even where it writes the converged state first. A drawn sequence
-  that finds one shrinks. An exit before any wait converged stays a harness error, since a
-  bad flag, a taken port and a crash on op 0's CR look alike there. An exit a fault excuses
-  owes the target `T_settle` past its restart. Otherwise a correct controller that exits
-  once under each of two faults fails G4, because the second restart waits 10 s. Any other
-  restart gives the target no more time, and its startup requests count toward G1 in a
-  quiet window. Excusing them would need a recovery window of their own, and a correct
-  controller rarely exits with no fault active.
+  G4.** Controllers are deployed to be restarted, and controller-runtime with leader
+  election on exits on purpose when it loses its lease, which a fault can cause. A new
+  invariant, "the target keeps running", would report such a controller, so botbox
+  restarts the target as a kubelet does, with a kubelet's backoff. A target waiting out
+  the backoff has not converged, and a restart counts as a change, so a target that exits
+  again soon after each restart fails G4, even where it writes the converged state first.
+  A drawn sequence that finds one shrinks. An exit before any wait converged stays a
+  harness error, since a bad flag, a taken port and a crash on op 0's CR look alike there.
+  An exit a fault excuses owes the target `T_settle` past its restart. Otherwise a correct
+  controller that exits once under each of two faults fails G4, because the second restart
+  waits 10 s. Any other restart gives the target no more time, and its startup requests
+  count toward G1 in a quiet window. Excusing them would need a recovery window of their
+  own, and a correct controller rarely exits with no fault active.
 - **D54 A golden test pins what fixed seeds draw.** Draws come from rapid's
   `Example(seed)`, which rapid documents as fit only for examples and which promises nothing
   across versions. A draw also depends on the CRD schema, the sample, `generate` and

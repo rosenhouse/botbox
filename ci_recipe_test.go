@@ -191,14 +191,18 @@ func TestTheCIRecipeCachesWhatItInstalls(t *testing.T) {
 		t.Errorf("the cache saves %q and restores %q", save.With["path"], restore.With["path"])
 	}
 
-	keyed := []string{"${{ runner.os }}", "${{ runner.arch }}"}
-	for _, m := range regexp.MustCompile(`\$(\w+_VERSION)\b`).FindAllStringSubmatch(commands, -1) {
-		keyed = append(keyed, "${{ env."+m[1]+" }}")
+	want := []string{"runner.arch", "runner.os"}
+	for _, m := range regexp.MustCompile(`\$\{?(\w+_VERSION)\b`).FindAllStringSubmatch(commands, -1) {
+		want = append(want, "env."+m[1])
 	}
-	for _, part := range keyed {
-		if !strings.Contains(restore.With["key"], part) {
-			t.Errorf("the cache key %q leaves out %s, so a change to it restores a stale cache", restore.With["key"], part)
-		}
+	var keyed []string
+	for _, m := range regexp.MustCompile(`\$\{\{\s*(.*?)\s*\}\}`).FindAllStringSubmatch(restore.With["key"], -1) {
+		keyed = append(keyed, m[1])
+	}
+	slices.Sort(want)
+	slices.Sort(keyed)
+	if want = slices.Compact(want); !slices.Equal(keyed, want) {
+		t.Errorf("the cache key %q reads %q, not %q. A pin it leaves out restores a stale cache, and anything else can miss on every run", restore.With["key"], keyed, want)
 	}
 
 	missed := "steps." + restore.ID + ".outputs.cache-hit != 'true'"

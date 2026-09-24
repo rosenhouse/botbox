@@ -213,8 +213,7 @@ func (s Sequence) Validate() error {
 	return s.validateFixtures()
 }
 
-// fixture names a fixture op's fixture as DESIGN.md §7 writes a kind, then its
-// name.
+// fixture names a fixture op's fixture by kind and name.
 func (o Op) fixture() string { return o.Kind + " " + o.Name }
 
 // validateFixtures reports a deleted fixture that does not come back by the

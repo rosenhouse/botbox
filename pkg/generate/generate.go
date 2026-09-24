@@ -96,7 +96,7 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 	return g, nil
 }
 
-// kindName writes a kind as a sequence names it (DESIGN.md §7).
+// kindName writes a kind as a sequence names it.
 func kindName(gvk kschema.GroupVersionKind) string {
 	if gvk.Group == "" {
 		return gvk.Version + "/" + gvk.Kind

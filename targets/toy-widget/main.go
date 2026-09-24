@@ -52,6 +52,9 @@ func run(args []string, out io.Writer) error {
 	if *resync < 0 {
 		return fmt.Errorf("--resync=%v: want 0 or more", *resync)
 	}
+	if *cleanupDelay < 0 {
+		return fmt.Errorf("--cleanup-delay=%v: want 0 or more", *cleanupDelay)
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 

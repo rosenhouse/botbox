@@ -943,15 +943,16 @@ the proxy; the `Image` launcher. Separate design addendum.
   and one trio per adopted example:
   `CERT_MANAGER_VERSION` and `EXTERNAL_SECRETS_VERSION`, each with the `_COMMIT` the tag
   must name and the `_CRDS_SHA256` of its checked-in CRDs, so a moved tag or an edited
-  asset fails rather than passing quietly. Values live in the Makefile only. Bumps are
-  their own PRs, never mixed with features.
+  asset fails rather than passing quietly. Values live in the Makefile. The README's Install
+  block and the CI recipe repeat the envtest pins for adopters to copy, and `make test`
+  holds them to the Makefile's. Bumps are their own PRs, never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
   import it. The rule covers the root module; the spike modules under `docs/spikes/` are
   separate and exempt. Everything else uses client-go and apimachinery.
 - **Layout.** `cmd/botbox/`, `pkg/cluster`, `pkg/proxy`, `pkg/observe`,
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
-  `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`, `docs/`,
-  and `bin/` for git-ignored build output.
+  `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`,
+  `examples/ci/`, `docs/`, and `bin/` for git-ignored build output.
 - **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]`;
   `botbox replay --target <yaml> [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>`;
   `botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...`;
@@ -1001,7 +1002,8 @@ the proxy; the `Image` launcher. Separate design addendum.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
   (five lines); install; quickstart against cert-manager, then what the second example
   adds; writing `target.yaml` for your own controller; reading a report; what to change
-  when botbox exits 2; a CI recipe for adopters; a one-line-per-invariant table linking to §6; a closing "Design and
+  when botbox exits 2; a CI recipe for adopters, embedded from `examples/ci/github-actions.yml`;
+  a one-line-per-invariant table linking to §6; a closing "Design and
   internals" link to this document and to
   `docs/bug-matrix.md`. A fenced block preceded by `<!-- embed: <path> -->` has content,
   excluding the two fence lines, byte-identical to that file including its trailing
@@ -1554,3 +1556,14 @@ built from source and run as a black-box binary.
   bug-matrix job points `TMPDIR` at a directory it uploads when the job fails. The error
   also prints a replay command with the run's `--bug`, because the runner's hint names
   only the run's `sequence.json`.
+- **D@56 The CI recipe is a workflow that runs in any repository, caches what it installs and
+  keeps a failing run's evidence.** The README's recipe read Go's version from a go.mod, which
+  a Rust operator's repository lacks. It said to cache the control plane as ci.yml does, but
+  its setup-envtest wrote to the OS data directory. It uploaded nothing. The recipe is now
+  `examples/ci/github-actions.yml`, which the README embeds and a test parses. It caches
+  botbox and setup-envtest with the control plane, because botbox took 104 s to build cold on
+  four CPUs and the 175 MB control plane took 3 s to fetch. It saves the cache before botbox
+  runs. `actions/cache` saves only when the job passes, so a nightly that kept finding
+  something would never fill the cache that pull requests read. It uploads its `--out` when it
+  fails, and its download command restores the paths that the replay command in `report.md`
+  names. The nightly's issues give the same command.

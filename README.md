@@ -421,6 +421,10 @@ Exit 2 means botbox could not test your controller, and the message says what to
 
 ## Running in CI
 
+Copy this workflow into `.github/workflows/`, and replace its build and `target.yaml` with your
+own. Set `BOTBOX_VERSION` to a commit of main, because `@latest` tracks main. The workflow needs
+no go.mod, no cluster and no registry.
+
 <!-- embed: examples/ci/github-actions.yml -->
 ```yaml
 name: botbox
@@ -484,13 +488,16 @@ jobs:
           path: botbox-out/
 ```
 
-`$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not. Give
-`--deadline` room for your controller, because a run that overruns it, or an invocation it stops
-before the last run, exits 2 rather than reporting a find. Cache the control plane and the target as
-[.github/workflows/ci.yml](.github/workflows/ci.yml) does. The job needs no cluster and no registry.
+The job caches botbox and setup-envtest in `~/go/bin`, and the control plane in `bin/envtest`,
+under a key of their versions. It saves that cache before botbox runs, so a run that fails still
+fills it. Give `--deadline` room for your controller, because a run that overruns it, or an
+invocation it stops before the last run, exits 2 rather than reporting a find.
 
-Pin botbox to a commit, because `@latest` tracks main. Fix the seed on pull requests, and draw
-fresh seeds on a schedule, as [nightly.yml](.github/workflows/nightly.yml) does. A seed names a
+When botbox fails, the job uploads `botbox-out/`. Download it with the command in the workflow's
+last comment and build your controller. The replay command in `report.md` then runs as written
+from the repository root.
+
+A pull request runs fixed seeds, and the nightly run draws fresh ones. A seed names a
 sequence for one build of botbox and one target declaration: its CRD schema, `sample`,
 `generate` and `manages`. A botbox upgrade, or a pull request that edits any of those, draws
 different sequences under the same seed. To tell whether a failure comes from the change under

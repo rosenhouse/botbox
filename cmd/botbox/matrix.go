@@ -71,12 +71,20 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 		return c.fail(fmt.Errorf("creating the matrix's run directory: %w", err))
 	}
 	defer os.RemoveAll(dir)
+	var runs []run.Sequence
+	for _, row := range rows {
+		runs = append(runs, row.sequence)
+		if row.bug != control {
+			runs = append(runs, row.sequence)
+		}
+	}
+	c.derive(&opts, exercised, runs, false)
 
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
 	for i := range rows {
-		if err := c.exerciseRow(ctx, s, exercised, &rows[i], dir); err != nil {
-			return c.fail(opts.named(ctx, err))
+		if err := c.exerciseRow(ctx, opts, s, exercised, &rows[i], dir); err != nil {
+			return c.fail(err)
 		}
 	}
 
@@ -88,14 +96,14 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 }
 
 // exerciseRow runs the row's sequence under its bug, and then without it.
-func (c *cli) exerciseRow(ctx context.Context, s session, t *target.Target, row *bugRow, dir string) error {
+func (c *cli) exerciseRow(ctx context.Context, opts options, s session, t *target.Target, row *bugRow, dir string) error {
 	var err error
 	if row.bug != control {
-		if row.bugged, err = c.exerciseUnder(ctx, s, t, row, row.bugArgs(), filepath.Join(dir, row.name())); err != nil {
+		if row.bugged, err = c.exerciseUnder(ctx, opts, s, t, row, row.bugArgs(), filepath.Join(dir, row.name())); err != nil {
 			return err
 		}
 	}
-	row.correct, err = c.exerciseUnder(ctx, s, t, row, nil, filepath.Join(dir, row.name()+"-no-bug"))
+	row.correct, err = c.exerciseUnder(ctx, opts, s, t, row, nil, filepath.Join(dir, row.name()+"-no-bug"))
 	if row.bug == control {
 		row.bugged = row.correct
 	}
@@ -104,13 +112,13 @@ func (c *cli) exerciseRow(ctx context.Context, s session, t *target.Target, row 
 
 // exerciseUnder runs the row's sequence with bugArgs appended to the target's
 // launch args, and records what the checks found over the whole run.
-func (c *cli) exerciseUnder(ctx context.Context, s session, t *target.Target, row *bugRow, bugArgs []string, dir string) (checked, error) {
+func (c *cli) exerciseUnder(ctx context.Context, opts options, s session, t *target.Target, row *bugRow, bugArgs []string, dir string) (checked, error) {
 	exercised := *t
 	exercised.Launch.Args = slices.Concat(t.Launch.Args, bugArgs)
 	ran := row.describe(bugArgs)
 	result, err := s.execute(ctx, &exercised, row.sequence, dir, observing{})
 	if err != nil {
-		return checked{}, fmt.Errorf("%s: %w", ran, err)
+		return checked{}, fmt.Errorf("%s: %w", ran, opts.named(ctx, err))
 	}
 	results, err := run.Evaluate(result.Recorded)
 	if err != nil {

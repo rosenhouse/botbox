@@ -152,8 +152,8 @@ type Timeline struct {
 	// no End is a fault the proxy still applies.
 	Faults []Window
 	// Forced names every object the teardown force-removed a finalizer from.
-	// The run notes each one: G3 judged the deletion window, which closed
-	// before any of this (DESIGN.md §5.5, D37).
+	// A run that was not abandoned notes each one: G3 judged the deletion
+	// window, which closed before any of this (DESIGN.md §5.5, D37).
 	Forced []string
 	// Exits are the times the target stopped on its own after the first
 	// settle wait converged.
@@ -264,6 +264,7 @@ func WriteRunSequence(dir string, sequence Sequence) error {
 // implements it over a started Harness.
 type harness interface {
 	namespace() string
+	now() time.Time
 	// settle waits for the target to converge, past T_settle while owed
 	// returns a later instant.
 	settle(ctx context.Context, owed func() time.Time) (bool, error)
@@ -303,9 +304,9 @@ type harness interface {
 	// targetStatus reports whether the target is still running, and why it
 	// stopped if it is not.
 	targetStatus() launch.Status
-	// supervise restarts the target from now on whenever it exits, and
+	// supervise restarts the target whenever it exits until ctx ends, and
 	// records each exit in exits.
-	supervise()
+	supervise(ctx context.Context)
 	exits() []Exit
 	stop(ctx context.Context) error
 	// unresolvedOwners names each owner the collector could not resolve. It
@@ -363,7 +364,7 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 		h:        h,
 		limit:    opts.maxManaged(),
 		dir:      opts.Dir,
-		now:      time.Now,
+		now:      h.now,
 		timeline: Timeline{Namespace: h.namespace()},
 	}
 	failure := r.applyOps(ctx)
@@ -419,7 +420,7 @@ func (r *runner) applyOps(ctx context.Context) error {
 // nothing (DESIGN.md §5.5).
 func (r *runner) applyOp(ctx context.Context, op Op) error {
 	if status := r.h.targetStatus(); !status.Running {
-		return r.targetStopped(status)
+		return r.targetStopped(ctx, status)
 	}
 	r.expireFaults(op.Index)
 	applied, err := r.apply(ctx, op)
@@ -428,7 +429,7 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 	}
 	r.timeline.Ops = append(r.timeline.Ops, applied)
 	if stayed := (*crStayed)(nil); errors.As(err, &stayed) {
-		return r.judgeStayed(op, stayed)
+		return r.judgeStayed(ctx, op, stayed)
 	}
 	if err != nil {
 		return err
@@ -524,8 +525,8 @@ func (s *crStayed) Error() string {
 
 // judgeStayed checkpoints where a recreate's wait for its CR ended. A CR that
 // no check reports there is a harness error, since the op cannot go on.
-func (r *runner) judgeStayed(op Op, stayed *crStayed) error {
-	if err := r.judge(op.Index, stayed.wait, invariant.Input.Excused); err != nil || r.violation != nil {
+func (r *runner) judgeStayed(ctx context.Context, op Op, stayed *crStayed) error {
+	if err := r.judge(ctx, op.Index, stayed.wait, invariant.Input.Excused); err != nil || r.violation != nil {
 		return err
 	}
 	return stayed
@@ -576,7 +577,7 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		return err
 	}
 	r.timeline.Ops[len(r.timeline.Ops)-1].Settled = &wait
-	return r.judge(op.Index, wait, invariant.Input.Excused)
+	return r.judge(ctx, op.Index, wait, invariant.Input.Excused)
 }
 
 // wait waits up to T_settle for the target to converge, or longer while it is
@@ -587,7 +588,7 @@ func (r *runner) wait(ctx context.Context) (Wait, error) {
 	wait.Window.End, wait.Converged = r.now(), converged
 	if converged {
 		if r.converged.IsZero() {
-			r.h.supervise()
+			r.h.supervise(ctx)
 		}
 		r.converged = wait.Window.End
 	}
@@ -618,12 +619,12 @@ func (r *runner) readExits() { r.timeline.Exits = r.h.exits() }
 
 // judge checkpoints where a settle wait ended. A wait that expired unexcused
 // is a G4 violation, which ends the run.
-func (r *runner) judge(op int, wait Wait, excused func(invariant.Input, invariant.Checkpoint) bool) error {
+func (r *runner) judge(ctx context.Context, op int, wait Wait, excused func(invariant.Input, invariant.Checkpoint) bool) error {
 	if !wait.Converged {
 		// A target that is gone cannot converge, so that is the harness's
 		// failure to report, not the target's to answer for.
 		if status := r.h.targetStatus(); !status.Running {
-			return r.targetStopped(status)
+			return r.targetStopped(ctx, status)
 		}
 	}
 	checkpoint := Checkpoint{At: wait.Window.End, Began: wait.Window.Start, Op: op, Converged: wait.Converged}
@@ -631,20 +632,24 @@ func (r *runner) judge(op int, wait Wait, excused func(invariant.Input, invarian
 	return r.checkpoint(checkpoint, expired)
 }
 
+// ErrTargetStopped is in the error of a run whose target is no longer running.
+var ErrTargetStopped = errors.New("the target is no longer running")
+
 // targetStopped is the harness error for a target that is no longer running.
 // A target that rejects its own flags writes one line and exits, and that line
-// is what its reader acts on.
-func (r *runner) targetStopped(status launch.Status) error {
+// is what its reader acts on. A terminal's Ctrl-C stops the target as it ends
+// ctx, so a target found stopped once ctx has ended carries ctx's error.
+func (r *runner) targetStopped(ctx context.Context, status launch.Status) error {
 	log := filepath.Join(r.dir, targetLogFile)
-	stopped := "the target is no longer running"
+	stopped := ErrTargetStopped
 	// The launcher knows no exit where it holds no process at all.
 	if status.Exit != nil {
-		stopped += ": " + status.Exit.Error()
+		stopped = fmt.Errorf("%w: %v", ErrTargetStopped, status.Exit)
 	}
 	said, _ := whyItStopped(log, 0)
-	err := fmt.Errorf("%s; its output is in %s", stopped, log)
+	err := fmt.Errorf("%w; its output is in %s", stopped, log)
 	if said != "" {
-		err = fmt.Errorf("%s; it wrote %q, and the rest of its output is in %s", stopped, said, log)
+		err = fmt.Errorf("%w; it wrote %q, and the rest of its output is in %s", stopped, said, log)
 	}
 	switch {
 	case strings.Contains(said, "address already in use"):
@@ -654,6 +659,9 @@ func (r *runner) targetStopped(status launch.Status) error {
 	case r.cr != "" && r.converged.IsZero() && slices.ContainsFunc(r.h.requests(), namesAResource):
 		err = fmt.Errorf("%w; botbox had created the CR, so the CR may have crashed the target, and %s replays the run",
 			err, filepath.Join(r.dir, sequenceFile))
+	}
+	if ctx.Err() != nil {
+		return fmt.Errorf("%w: %w", ctx.Err(), err)
 	}
 	return err
 }
@@ -836,7 +844,7 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 		r.timeline.Recovery = &wait
 		// The faults are cleared, and the wait ran until the time they left
 		// the target was up, so no fault excuses it.
-		err = r.judge(Recovery, wait, invariant.Input.DeletionOverdue)
+		err = r.judge(ctx, Recovery, wait, invariant.Input.DeletionOverdue)
 	}
 	if err != nil {
 		r.failed = true
@@ -846,8 +854,8 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 }
 
 // teardown is step 4 of DESIGN.md §5.5. Every step runs even if one fails.
-// The caller's deadline can end the recovery, which is judged as an op's wait
-// is, but no step after it.
+// Its waits end with the caller's context, which abandons the run: the
+// teardown then judges nothing and kills the target at once.
 func (r *runner) teardown(ctx context.Context) error {
 	r.teardownStart = r.now()
 	r.clearFaults()
@@ -858,10 +866,10 @@ func (r *runner) teardown(ctx context.Context) error {
 	}
 	failures := []error{r.awaitRecovery(ctx)}
 
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.teardownBudget())
+	down, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.teardownBudget())
 	defer cancel()
 	r.timeline.Quiet.Start = r.now()
-	failures = append(failures, r.h.sleep(ctx, r.target.Timeouts.Stable))
+	cut := r.h.sleep(ctx, r.target.Timeouts.Stable)
 
 	// Stamped before the delete, not after it: from here on botbox is the one
 	// changing the namespace, and no invariant window reaches past this instant
@@ -870,27 +878,34 @@ func (r *runner) teardown(ctx context.Context) error {
 	r.timeline.Quiet.End = r.now()
 	r.timeline.Deletion.Start = r.timeline.Quiet.End
 	if r.cr != "" {
-		failures = append(failures, r.h.deleteCR(ctx, r.cr))
+		failures = append(failures, r.h.deleteCR(down, r.cr))
 	}
-	clean, err := r.h.awaitClean(ctx, r.target.Timeouts.Delete+deletionMargin)
+	clean := false
+	if cut == nil {
+		clean, cut = r.h.awaitClean(ctx, r.target.Timeouts.Delete+deletionMargin)
+	}
 	r.timeline.Deletion.End = r.now()
 	if clean {
 		r.timeline.Cleaned = r.timeline.Deletion.End
 	}
-	failures = append(failures, err)
-	if r.violation == nil && !r.failed {
-		failures = append(failures, r.teardownCheckpoint(clean))
+	switch {
+	case r.violation != nil || r.failed:
+	case cut != nil:
+		failures = append(failures, fmt.Errorf("the teardown: %w", cut))
+	default:
+		failures = append(failures, r.teardownCheckpoint(ctx, clean))
 	}
 
 	// Deleting first keeps a running target from putting back a finalizer it
 	// owns, since the API server refuses one new to an object being deleted.
-	failures = append(failures, r.h.empty(ctx))
-	forced, err := r.h.forceFinalizers(ctx)
+	failures = append(failures, r.h.empty(down))
+	forced, err := r.h.forceFinalizers(down)
 	r.timeline.Forced = forced
-	if len(forced) > 0 {
+	if len(forced) > 0 && cut == nil {
 		// G3's window closed before this, so nothing forced here was ever
 		// credited to the target. What a reader would otherwise miss is that
-		// the namespace did not empty on its own (D37).
+		// the namespace did not empty on its own (D37). An abandoned run gave
+		// it no time to.
 		r.skipped = append(r.skipped, fmt.Sprintf("the teardown force-removed the finalizers of %s, so the run namespace did not empty on its own",
 			strings.Join(forced, ", ")))
 	}
@@ -937,9 +952,9 @@ func unresolvedNote(u cluster.Unresolved) string {
 
 // teardownCheckpoint judges the deletion window, unless the target stopped: a
 // target that is gone cleaned nothing up (DESIGN.md §5.5).
-func (r *runner) teardownCheckpoint(clean bool) error {
+func (r *runner) teardownCheckpoint(ctx context.Context, clean bool) error {
 	if status := r.h.targetStatus(); !status.Running {
-		return fmt.Errorf("the teardown: %w", r.targetStopped(status))
+		return fmt.Errorf("the teardown: %w", r.targetStopped(ctx, status))
 	}
 	return r.checkpoint(Checkpoint{At: r.now(), Op: Teardown, Converged: clean}, false)
 }

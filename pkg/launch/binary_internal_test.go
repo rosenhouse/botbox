@@ -76,7 +76,7 @@ func TestSuperviseRestartsATargetThatAlreadyExited(t *testing.T) {
 	}
 	heard := make(chan error, 2)
 
-	binary.Supervise(func(exit error, _ time.Time) { heard <- exit })
+	binary.Supervise(t.Context(), func(exit error, _ time.Time) { heard <- exit })
 
 	// The restarted target exits too, so a second exit shows the restart.
 	for _, which := range []string{"the exit that came before it", "an exit of the restarted target"} {
@@ -103,7 +103,7 @@ func TestAStopThatGivesUpEndsSupervision(t *testing.T) {
 	unreaped := &process{cmd: cmd, done: make(chan struct{})}
 	binary.running = unreaped
 	var heard atomic.Bool
-	binary.Supervise(func(error, time.Time) { heard.Store(true) })
+	binary.Supervise(t.Context(), func(error, time.Time) { heard.Store(true) })
 	if err := binary.Stop(t.Context()); err == nil {
 		t.Fatal("Stop reaped a process whose done never closes.")
 	}
@@ -138,5 +138,39 @@ func TestRestartReportsAProcessItCannotReap(t *testing.T) {
 
 	if err := binary.Restart(t.Context()); err == nil {
 		t.Error("Restart started a replacement although the old process was never reaped.")
+	}
+}
+
+// Restart and Stop give up on a process they cannot reap within RestartWithin
+// and StopWithin, scaled to the grace period.
+func TestRestartAndStopGiveUpWithinTheirBudgets(t *testing.T) {
+	const scale = 5
+	grace := DefaultGracePeriod / scale
+	slack := grace / 5
+	for _, test := range []struct {
+		name   string
+		call   func(*Binary) error
+		within time.Duration
+	}{
+		{"Restart", func(b *Binary) error { return b.Restart(context.Background()) }, RestartWithin / scale},
+		{"Stop", func(b *Binary) error { return b.Stop(context.Background()) }, StopWithin / scale},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			cmd := exec.Command("/bin/sh", "-c", "trap '' TERM; while :; do sleep 0.1; done")
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+			binary := NewBinary(Options{Path: "/bin/sh", GracePeriod: grace})
+			binary.running = &process{cmd: cmd, done: make(chan struct{})} // nothing closes done
+			start := time.Now()
+
+			err := test.call(binary)
+
+			if elapsed := time.Since(start); err == nil || elapsed > test.within+slack {
+				t.Errorf("%s returned %v after %v, want it to give up within %v.", test.name, err, elapsed, test.within)
+			}
+		})
 	}
 }

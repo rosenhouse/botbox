@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -33,15 +34,16 @@ const (
 )
 
 const (
-	defaultOut      = "botbox-out"
-	defaultDeadline = 4 * time.Minute
-	defaultRuns     = 10
+	defaultOut  = "botbox-out"
+	defaultRuns = 10
+	// minimizing is what a derived deadline gives a shrink pass beyond the runs.
+	minimizing = 4 * time.Minute
 )
 
 const usage = `botbox exercises a controller against the generic invariants of DESIGN.md §6.
 
-  botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]
-  botbox replay --target <yaml> [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>
+  botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]
+  botbox replay --target <yaml> [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>
   botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...
   botbox version
 `
@@ -52,8 +54,8 @@ const (
 	shrinkDir = "shrink"
 	// sequenceFile is what run.WriteRunSequence writes.
 	sequenceFile = "sequence.json"
-	// shrunkFile holds a minimized sequence the deadline left unrun, which no
-	// recording in the directory is of (DESIGN.md §11).
+	// shrunkFile holds a minimized sequence the deadline or an interrupt left
+	// unrun, which no recording in the directory is of (DESIGN.md §11).
 	shrunkFile = "sequence.shrunk.json"
 )
 
@@ -72,8 +74,9 @@ func rapidGenerator(t *target.Target) (Generator, []string, error) {
 	return g.Draw, g.LeftAlone(), nil
 }
 
-// cli is one invocation. Its writers, its generator and its test cluster are
-// injected, so the unit tier needs no API server.
+// cli is one invocation. Its writers, its generator, its test cluster, its
+// clock and what discards a passing run are injected, so the unit tier needs
+// no API server.
 type cli struct {
 	stdout, stderr io.Writer
 	open           func(options, *target.Target) (session, error)
@@ -81,6 +84,13 @@ type cli struct {
 	// pkg/generate's does: reading the target's CRDs costs I/O, drawing does
 	// not.
 	newGenerator func(*target.Target) (Generator, []string, error)
+	now          func() time.Time
+	discard      func(out *run.Output, n int) error
+}
+
+func newCLI(stdout, stderr io.Writer) *cli {
+	return &cli{stdout: stdout, stderr: stderr, open: openSession, newGenerator: rapidGenerator,
+		now: time.Now, discard: (*run.Output).Discard}
 }
 
 // session executes sequences against one test cluster. Runs share it, because
@@ -94,27 +104,42 @@ type session interface {
 
 // options are the flags of DESIGN.md §11.
 type options struct {
-	command    string
-	target     string
-	sequences  string
-	out        string
-	kubeconfig string
-	deadline   time.Duration
-	launchArgs []string
-	runs       int
-	runsGiven  bool
-	seed       int64
-	seedGiven  bool
+	command       string
+	target        string
+	sequences     string
+	out           string
+	junit         string
+	kubeconfig    string
+	deadline      time.Duration
+	deadlineGiven bool
+	launchArgs    []string
+	runs          int
+	runsGiven     bool
+	seed          int64
+	seedGiven     bool
 }
 
+// main returns what botbox exits with. An invocation a signal interrupted
+// returns 128 plus the signal's number, as a shell reports it.
 func (c *cli) main(ctx context.Context, args []string) int {
+	return exitStatus(ctx, c.dispatch(ctx, args))
+}
+
+func exitStatus(ctx context.Context, code int) int {
+	if stop, ok := interruption(ctx); ok {
+		return 128 + int(stop.signal)
+	}
+	return code
+}
+
+func (c *cli) dispatch(ctx context.Context, args []string) int {
 	opts, paths, err := parse(args)
 	if errors.Is(err, flag.ErrHelp) {
 		fmt.Fprint(c.stdout, usage)
 		return exitOK
 	}
 	if err != nil {
-		return c.fail(err)
+		return c.failUnrecorded(opts, nil, err)
 	}
 	switch opts.command {
 	case "version":
@@ -127,11 +152,12 @@ func (c *cli) main(ctx context.Context, args []string) int {
 }
 
 // exercise executes the sequences the caller named, or the ones botbox draws
-// from the seed, and stops at the first that fails.
+// from the seed, and stops at the first that fails. Once the runs are planned,
+// the invocation's directory records how each ended.
 func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	exercised, err := target.Load(opts.target)
 	if err != nil {
-		return c.fail(err)
+		return c.failUnrecorded(opts, nil, err)
 	}
 	exercised.Launch.Args = append(exercised.Launch.Args, opts.launchArgs...)
 	if len(paths) == 0 && !opts.seedGiven {
@@ -139,51 +165,126 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	}
 	runs, err := c.plan(opts, exercised, paths)
 	if err != nil {
-		return c.fail(err)
+		return c.failUnrecorded(opts, exercised, err)
+	}
+	start := c.now()
+	out, err := run.OpenOutput(opts.out, opts.invocationSeed(runs[0].sequence), start)
+	if err != nil {
+		return c.failUnrecorded(opts, exercised, err)
 	}
 
+	record := newSummary(opts, exercised, runs, start)
+	// The last save warns of a file botbox cannot write.
+	_ = c.save(record, opts, out.Dir())
+	var code int
 	s, err := c.startSession(opts, exercised)
 	if err != nil {
-		return c.fail(err)
+		code = c.stop(record, err)
+	} else {
+		code = c.runAll(ctx, opts, s, exercised, runs, out, record)
 	}
-	defer func() { c.warn(s.close()) }()
-	if err := s.vet(exercised); err != nil {
-		return c.fail(err)
+	record.finish(ctx, code, c.now())
+	// A second signal kills botbox at once, and stopping the cluster takes
+	// seconds, so the summary comes first.
+	c.warn(c.save(record, opts, out.Dir()))
+	if s != nil {
+		c.warn(s.close())
 	}
-	out, err := run.OpenOutput(opts.out, opts.invocationSeed(runs[0].sequence), time.Now())
-	if err != nil {
-		return c.fail(err)
+	// An interrupt that arrived since changes what botbox exits with.
+	if exitStatus(ctx, code) != *record.ExitCode {
+		record.finish(ctx, code, record.Finish)
+		c.warn(c.save(record, opts, out.Dir()))
 	}
+	return code
+}
+
+// save writes the summary, and the JUnit file if one was asked for.
+func (c *cli) save(record *summary, opts options, dir string) error {
+	err := record.write(dir)
+	if opts.junit != "" {
+		err = errors.Join(err, record.writeJUnit(opts.junit, dir))
+	}
+	return err
+}
+
+// runAll executes the runs in order, records each, and stops at the first
+// that fails.
+func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Target,
+	runs []planned, out *run.Output, record *summary) int {
+	if err := s.vet(t); err != nil {
+		return c.stop(record, err)
+	}
+	sequences := make([]run.Sequence, len(runs))
+	for i, planned := range runs {
+		sequences[i] = planned.sequence
+	}
+	c.derive(&opts, t, sequences, runs[0].generated())
+	record.deadline(opts)
 
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
 	for i, planned := range runs {
-		// The deadline is the invocation's budget (DESIGN.md §11): a run that
-		// began keeps its own, and the next does not start. The first always
-		// starts, so a spent deadline is blamed on a run. An invocation the
-		// deadline stopped tested less than asked, so it does not pass.
+		if _, ok := interruption(ctx); ok {
+			return c.stop(record, fmt.Errorf("an interrupt stopped the invocation after %d of %d runs", i, len(runs)))
+		}
+		// The deadline is the invocation's budget (DESIGN.md §11): the next
+		// run does not start. The first always starts, so a spent deadline is
+		// blamed on a run. An invocation the deadline stopped tested less than
+		// asked, so it does not pass.
 		if i > 0 && ctx.Err() != nil {
-			return c.fail(fmt.Errorf("the --deadline of %s stopped the invocation after %d of %d runs",
-				opts.deadline, i, len(runs)))
+			return c.stop(record, fmt.Errorf("%s stopped the invocation after %d of %d runs", opts.deadlineName(), i, len(runs)))
 		}
 		number := i + 1
 		fmt.Fprintf(c.stdout, "run %d: seed %d, %s\n", number, planned.sequence.Seed, planned.source())
 		dir := out.RunDir(number)
-		result, err := s.execute(ctx, exercised, planned.sequence, dir, run.Engine{})
+		ran := &record.Runs[i]
+		ran.Outcome = outcomeUnfinished
+		_ = c.save(record, opts, out.Dir())
+		started := c.now()
+		result, err := s.execute(ctx, t, planned.sequence, dir, run.Engine{})
+		ran.ran(result, c.now().Sub(started))
 		code := exitCode(result, err)
 		if code == exitViolation {
-			return c.reportFailure(ctx, opts, s, exercised, planned, result, number, dir)
+			// Minimizing can take minutes, so the summary keeps the find first.
+			ran.found(*result.Violation, reportNotes(opts, t, result), dir)
+			_ = c.save(record, opts, out.Dir())
+			violation, notes := c.reportFailure(ctx, opts, s, t, planned, result, number, dir)
+			ran.found(violation, notes, dir)
+			return exitViolation
 		}
 		c.printNotes(number, result.Notes)
 		if code == exitError {
-			return c.failRun(number, planned, dir, opts.named(ctx, err))
+			err = opts.named(ctx, err)
+			ran.stopped(err, dir)
+			return c.failRun(number, planned, dir, err)
 		}
-		if err := out.Discard(number); err != nil {
-			return c.fail(err)
+		ran.Outcome = outcomePassed
+		if err := c.discard(out, number); err != nil {
+			return c.stop(record, err)
 		}
 	}
 	fmt.Fprintln(c.stdout, "every run passed.")
 	return exitOK
+}
+
+// failUnrecorded ends an invocation that has no directory to write its summary
+// in. Its JUnit file still says what stopped it.
+func (c *cli) failUnrecorded(opts options, t *target.Target, err error) int {
+	if opts.junit != "" {
+		now := c.now().UTC()
+		record := &summary{Botbox: version(), Target: summaryTarget{Name: "botbox"}, Start: now, Finish: now, Error: err.Error()}
+		if t != nil {
+			record.Target.Name = t.Name
+		}
+		c.warn(record.writeJUnit(opts.junit, ""))
+	}
+	return c.fail(err)
+}
+
+// stop ends the invocation on an error no run carries.
+func (c *cli) stop(record *summary, err error) int {
+	record.Error = err.Error()
+	return c.fail(err)
 }
 
 // planned is one run's sequence and the file it was read from. botbox drew
@@ -236,16 +337,17 @@ func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, e
 
 // reportFailure minimizes a sequence botbox drew and leaves it in the run
 // directory with the evidence of a run of it (DESIGN.md §5.5). A sequence the
-// caller wrote is reported as it was written.
+// caller wrote is reported as it was written. It returns the violation and
+// notes the report carries.
 func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *target.Target,
-	failed planned, result run.Result, number int, dir string) int {
+	failed planned, result run.Result, number int, dir string) (run.Violation, []string) {
 	violation := *result.Violation
 	if !failed.generated() {
 		// The caller's file is a better thing to replay than a copy of it.
 		c.warn(c.writeReport(dir, opts, t, failed.path, failed.sequence, result))
 		c.printNotes(number, result.Notes)
 		c.report(number, violation, dir)
-		return exitViolation
+		return violation, reportNotes(opts, t, result)
 	}
 	shrunk := run.Shrink(ctx, failed.sequence, violation, func(ctx context.Context, candidate run.Sequence) (run.Result, error) {
 		return s.execute(ctx, t, candidate, filepath.Join(dir, shrinkDir), run.Engine{})
@@ -262,20 +364,27 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 		// of, and keeps the smaller one beside it.
 		reported = failed.sequence
 		c.warn(run.WriteSequence(filepath.Join(dir, shrunkFile), shrunk))
-		c.warn(fmt.Errorf("the deadline ended the shrink pass with %s, left unrun in %s",
-			ops(shrunk), filepath.Join(dir, shrunkFile)))
+		c.warn(fmt.Errorf("%s ended the shrink pass with %s, left unrun in %s",
+			ended(ctx), ops(shrunk), filepath.Join(dir, shrunkFile)))
 		result.Notes = append(result.Notes, fmt.Sprintf(
-			"the deadline ended minimization with %s, left unrun in %s: this is the sequence botbox drew",
-			ops(shrunk), shrunkFile))
+			"%s ended minimization with %s, left unrun in %s: this is the sequence botbox drew",
+			ended(ctx), ops(shrunk), shrunkFile))
 	case ctx.Err() != nil:
 		// §5.7 says a report carries the minimized sequence, and the pass
 		// never got to a smaller one (D31).
-		result.Notes = append(result.Notes,
-			"the deadline ended minimization before it found a smaller sequence: this is the sequence botbox drew")
+		result.Notes = append(result.Notes, ended(ctx)+
+			" ended minimization before it found a smaller sequence: this is the sequence botbox drew")
 	case simplified:
-		if again := c.rerun(ctx, opts, s, t, shrunk, dir); again.Violation != nil {
+		again, err := c.rerun(ctx, opts, s, t, shrunk, dir)
+		switch {
+		case again.Violation != nil:
 			result, violation, notes = again, *again.Violation, again.Notes
-		} else {
+		case err != nil:
+			result.Timeline = again.Timeline
+			result.Notes = append(result.Notes, fmt.Sprintf(
+				"the minimized sequence did not finish when it ran again, so this directory holds that partial run and not the one %s was found in",
+				violation.ID))
+		default:
 			// The recordings are of the rerun, so the report counts its ops.
 			result.Timeline = again.Timeline
 			// The directory now holds a run of the minimized sequence that
@@ -295,22 +404,23 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	c.printNotes(number, notes)
 	c.report(number, violation, dir)
 	fmt.Fprintf(c.stdout, "  the sequence is %s, in %s\n", ops(reported), filepath.Join(dir, sequenceFile))
-	return exitViolation
+	return violation, reportNotes(opts, t, result)
 }
 
 // rerun executes the minimized sequence into the run directory, so that the
 // recordings there are of the sequence the run reports, and returns what that
-// run found. A run that reproduced nothing says so: the directory then holds
-// a run that passed.
-func (c *cli) rerun(ctx context.Context, opts options, s session, t *target.Target, shrunk run.Sequence, dir string) run.Result {
+// run found. A run that did not finish or reproduced nothing says what the
+// directory then holds.
+func (c *cli) rerun(ctx context.Context, opts options, s session, t *target.Target, shrunk run.Sequence, dir string) (run.Result, error) {
 	result, err := s.execute(ctx, t, shrunk, dir, run.Engine{})
 	switch {
 	case err != nil:
-		c.warn(opts.named(ctx, err))
+		c.warn(fmt.Errorf("the minimized sequence did not finish when it ran again, so %s holds that partial run: %w",
+			dir, opts.named(ctx, err)))
 	case result.Violation == nil:
 		c.warn(fmt.Errorf("the minimized sequence passed when it ran again, so %s holds that run", dir))
 	}
-	return result
+	return result, err
 }
 
 // replayCommand is the one line §5.7 asks a report to carry. It repeats the
@@ -357,16 +467,12 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 		return err
 	}
 	violation := *result.Violation
-	notes := result.Notes
-	if limit := envtestLimit(opts, t); limit != "" && violation.ID == "G4" {
-		notes = append(notes, limit)
-	}
 	return report.Write(dir, report.Report{
 		Check:            report.Check{ID: violation.ID, Statement: violation.Statement, At: violation.At, Evidence: violation.Evidence},
 		Target:           report.Target{Name: t.Name, Version: t.Version},
 		Botbox:           version(),
 		Seed:             sequence.Seed,
-		Notes:            notes,
+		Notes:            reportNotes(opts, t, result),
 		Replay:           opts.replayCommand(replay),
 		Sequence:         encoded,
 		Applied:          len(result.Timeline.Ops),
@@ -385,9 +491,23 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 	})
 }
 
+// reportNotes are the notes of a failing run's report.
+func reportNotes(opts options, t *target.Target, result run.Result) []string {
+	if limit := envtestLimit(opts, t); limit != "" && result.Violation.ID == "G4" {
+		return slices.Concat(result.Notes, []string{limit})
+	}
+	return result.Notes
+}
+
 // warn reports what went wrong beside a finding, which stands whether or not
 // the run directory could be tidied (DESIGN.md §11).
 func (c *cli) warn(err error) {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, err := range joined.Unwrap() {
+			c.warn(err)
+		}
+		return
+	}
 	if err != nil {
 		fmt.Fprintln(c.stderr, "botbox:", err)
 	}
@@ -468,16 +588,59 @@ func exitCode(result run.Result, err error) int {
 	}
 }
 
-// named blames the --deadline for a run its own budget cut short. §11 makes
-// this exit 2, which a reader has to be able to tell from a broken target. The
-// context botbox built from the flag is what it asks. That context also ends
-// the teardown's wait for the target to recover from the faults. The rest of
-// the teardown runs on a budget of its own, which is nobody's flag.
+var errRunInterrupted = errors.New("an interrupt stopped the run")
+
+// named blames an interrupt, or the deadline, for a run its context cut short.
+// §11 makes the deadline exit 2, which a reader has to be able to tell from a
+// broken target. The context botbox built from the deadline is what it asks.
+// The teardown's cleanup runs on a budget of its own.
 func (o options) named(ctx context.Context, err error) error {
+	if _, ok := interruption(ctx); ok && errors.Is(err, context.Canceled) {
+		return errRunInterrupted
+	}
 	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return err
 	}
-	return fmt.Errorf("the --deadline of %s ended the run: %w", o.deadline, err)
+	return fmt.Errorf("%s ended the run: %w", o.deadlineName(), err)
+}
+
+// deadlineName names the deadline, and says whether botbox derived it.
+func (o options) deadlineName() string {
+	if o.deadlineGiven {
+		return "the --deadline of " + o.deadline.String()
+	}
+	return "the derived deadline of " + o.deadline.String()
+}
+
+// derive gives an invocation that set no deadline what its runs can take at
+// the target's timeouts, and time to minimize a failure where botbox drew the
+// sequences.
+func (c *cli) derive(opts *options, t *target.Target, sequences []run.Sequence, minimizes bool) {
+	if opts.deadlineGiven {
+		return
+	}
+	runs := run.Bound(t, sequences...)
+	opts.deadline = runs
+	these := "this run"
+	if len(sequences) > 1 {
+		these = fmt.Sprintf("these %d runs", len(sequences))
+	}
+	if !minimizes {
+		fmt.Fprintf(c.stdout, "the deadline is %s: %s can take that long at the target's timeouts. --deadline sets another.\n",
+			opts.deadline, these)
+		return
+	}
+	opts.deadline = min(runs, math.MaxInt64-minimizing) + minimizing
+	fmt.Fprintf(c.stdout, "the deadline is %s: %s can take %s at the target's timeouts, and minimizing a failure gets %s. --deadline sets another.\n",
+		opts.deadline, these, runs, minimizing)
+}
+
+// ended names what ended ctx: an interrupt, or else the deadline.
+func ended(ctx context.Context) string {
+	if _, ok := interruption(ctx); ok {
+		return "an interrupt"
+	}
+	return "the deadline"
 }
 
 // simpler reports whether the shrink pass changed the sequence at all. It
@@ -526,11 +689,15 @@ func parse(args []string) (options, []string, error) {
 	flags.Visit(func(f *flag.Flag) {
 		opts.seedGiven = opts.seedGiven || f.Name == "seed"
 		opts.runsGiven = opts.runsGiven || f.Name == "runs"
+		opts.deadlineGiven = opts.deadlineGiven || f.Name == "deadline"
 	})
 
 	sequences := flags.Args()
 	if opts.target == "" {
 		return opts, nil, errors.New("the --target flag is required")
+	}
+	if opts.deadlineGiven && opts.deadline <= 0 {
+		return opts, nil, fmt.Errorf("--deadline is %s, and an invocation needs time to run: leave the flag out, and botbox derives one", opts.deadline)
 	}
 	if opts.command == "run" {
 		if err := opts.validateRuns(len(sequences)); err != nil {
@@ -568,13 +735,16 @@ func (o *options) flags() *flag.FlagSet {
 	flags.SetOutput(io.Discard) // The caller prints what Parse returns.
 	flags.StringVar(&o.target, "target", "", "the target.yaml to exercise")
 	flags.StringVar(&o.kubeconfig, "kubeconfig", "", "an existing cluster to run against, instead of envtest")
-	flags.DurationVar(&o.deadline, "deadline", defaultDeadline, "how long the invocation may take")
+	flags.DurationVar(&o.deadline, "deadline", 0, "how long the invocation may take")
 	flags.Var((*stringList)(&o.launchArgs), "launch-arg", "append an argument to the target's launch.args (repeatable)")
 	if o.command == "matrix" {
 		flags.StringVar(&o.out, "out", defaultMatrix, "the Markdown file to write")
 		flags.StringVar(&o.sequences, "sequences", "", "the directory holding one b<id>.json per seeded bug")
 	} else {
 		flags.StringVar(&o.out, "out", defaultOut, "where failing runs are written")
+	}
+	if o.command != "matrix" {
+		flags.StringVar(&o.junit, "junit", "", "a JUnit XML file to write each run's outcome to")
 	}
 	if o.command == "run" {
 		flags.IntVar(&o.runs, "runs", defaultRuns, "how many sequences to draw and run")

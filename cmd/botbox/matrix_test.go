@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -9,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -407,6 +410,63 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 				t.Errorf("botbox matrix wrote %s, want no matrix of a run that errored.", out)
 			}
 		})
+	}
+}
+
+func TestMatrixNamesTheRunAnInterruptStopped(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	session := &fakeSession{
+		results:  []run.Result{recorded(t, true), recorded(t, false)},
+		failures: []error{nil, fmt.Errorf("op 0 (settle): %w", context.Canceled)},
+	}
+	session.after = func() {
+		if len(session.sequences) == 2 {
+			cancel(interrupt{syscall.SIGINT})
+		}
+	}
+
+	code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil), "matrix",
+		"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", matrixFile(t))
+
+	if code != 128+int(syscall.SIGINT) {
+		t.Errorf("botbox matrix exited %d, want %d.", code, 128+int(syscall.SIGINT))
+	}
+	if want := "b1.json under --bug=1: an interrupt stopped the run"; !strings.Contains(stderr, want) {
+		t.Errorf("botbox matrix reported %q, want %q.", stderr, want)
+	}
+}
+
+// A matrix minimizes nothing, so its runs get what they can take.
+func TestMatrixDerivesItsDeadlineFromItsRuns(t *testing.T) {
+	toy, err := target.Load(toyTargetYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sequences := bugSequences(t, 0)
+	longer := run.Sequence{Seed: 1, Target: "toy-widget", Ops: []run.Op{{Type: run.OpSettle}, {Index: 1, Type: run.OpSettle}}}
+	if err := run.WriteSequence(filepath.Join(sequences, "b1.json"), longer); err != nil {
+		t.Fatal(err)
+	}
+	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)}}
+	before := time.Now()
+
+	code, stdout, stderr := invoke(t, session, "matrix",
+		"--target", toyTargetYAML, "--sequences", sequences, "--out", matrixFile(t))
+
+	after := time.Now()
+	if code != exitOK {
+		t.Fatalf("botbox matrix exited %d: %s", code, stderr)
+	}
+	var want time.Duration
+	for _, sequence := range session.sequences {
+		want += run.Bound(toy, sequence)
+	}
+	if deadline := session.deadlines[0]; deadline.Before(before.Add(want)) || deadline.After(after.Add(want)) {
+		t.Errorf("The runs had %v, want %v.", deadline.Sub(before), want)
+	}
+	says := fmt.Sprintf("the deadline is %s: these 3 runs can take that long at the target's timeouts. --deadline sets another.\n", want)
+	if !strings.Contains(stdout, says) {
+		t.Errorf("botbox matrix printed %q, want %q.", stdout, says)
 	}
 }
 

@@ -1,8 +1,12 @@
 package run
 
 import (
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -48,6 +52,114 @@ func TestOutputNeverSharesADirectoryWithAnotherInvocation(t *testing.T) {
 		if _, err := os.Stat(dir); err != nil {
 			t.Errorf("The invocation directory is missing: %v", err)
 		}
+	}
+}
+
+func TestWriteAtomicReplacesTheFileWhole(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "summary.json")
+	if err := WriteAtomic(path, []byte("old\n")); err != nil {
+		t.Fatalf("WriteAtomic failed: %v", err)
+	}
+	reader, err := os.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+
+	if err := WriteAtomic(path, []byte("new\n")); err != nil {
+		t.Fatalf("The second WriteAtomic failed: %v", err)
+	}
+
+	if held, _ := io.ReadAll(reader); string(held) != "old\n" {
+		t.Errorf("A reader that opened the file before the write read %q, want the old file whole.", held)
+	}
+	if now, _ := os.ReadFile(path); string(now) != "new\n" {
+		t.Errorf("The file holds %q, want the new content.", now)
+	}
+	if info, err := os.Stat(path); err != nil || info.Mode().Perm() != 0o644 {
+		t.Errorf("The file's mode is %v (%v), want -rw-r--r--.", info.Mode(), err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("The directory holds %v, want the file alone.", entries)
+	}
+}
+
+func TestWriteAtomicLeavesNoFileOpen(t *testing.T) {
+	if _, err := os.Stat("/proc/self/fd"); err != nil {
+		t.Skipf("This system lists no open files: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "summary.json")
+
+	if err := WriteAtomic(path, []byte("new\n")); err != nil {
+		t.Fatalf("WriteAtomic failed: %v", err)
+	}
+
+	written, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fds, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, fd := range fds {
+		if open, _ := os.Readlink(filepath.Join("/proc/self/fd", fd.Name())); open == written {
+			t.Errorf("File descriptor %s still holds %s open.", fd.Name(), written)
+		}
+	}
+}
+
+func TestAFailedWriteAtomicLeavesNothingBehind(t *testing.T) {
+	dir := t.TempDir()
+	// A directory in the way fails the rename, after the content is written.
+	taken := filepath.Join(dir, "summary.json")
+	if err := os.MkdirAll(filepath.Join(taken, "inside"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	err := WriteAtomic(taken, []byte("new\n"))
+
+	if err == nil || !strings.HasPrefix(err.Error(), "writing "+taken+": ") {
+		t.Errorf("WriteAtomic returned %v, want an error naming %s.", err, taken)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("The directory holds %v, want only what was there.", entries)
+	}
+}
+
+// underFileSizeLimit is where the test binary, run again under a file size
+// limit, writes.
+const underFileSizeLimit = "BOTBOX_TEST_UNDER_FILE_SIZE_LIMIT"
+
+// A write that runs out of room, as on a full disk, keeps the old file.
+func TestAWriteThatFailsKeepsTheOldFile(t *testing.T) {
+	if path := os.Getenv(underFileSizeLimit); path != "" {
+		if err := syscall.Setrlimit(syscall.RLIMIT_FSIZE, &syscall.Rlimit{Cur: 4, Max: 4}); err != nil {
+			t.Fatal(err)
+		}
+		if err := WriteAtomic(path, []byte("longer than the limit\n")); err == nil {
+			t.Fatal("WriteAtomic wrote past the file size limit and returned no error.")
+		}
+		return
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "summary.json")
+	if err := WriteAtomic(path, []byte("old\n")); err != nil {
+		t.Fatal(err)
+	}
+	limited := exec.Command(os.Args[0], "-test.run=^"+t.Name()+"$")
+	limited.Env = append(os.Environ(), underFileSizeLimit+"="+path)
+
+	if out, err := limited.CombinedOutput(); err != nil {
+		t.Fatalf("The write under a file size limit failed the test: %v\n%s", err, out)
+	}
+
+	if held, _ := os.ReadFile(path); string(held) != "old\n" {
+		t.Errorf("The file holds %q, want the old file whole.", held)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("The directory holds %v, want the file alone.", entries)
 	}
 }
 

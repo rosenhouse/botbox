@@ -31,34 +31,38 @@ func Bound(t *target.Target, sequences ...Sequence) time.Duration {
 
 func bound(timeouts target.Timeouts, s Sequence) float64 {
 	settle, deletion := float64(timeouts.Settle), float64(timeouts.Delete)
-	bound := float64(defaultNamespaceDefaultsWithin)
-	faults, stops, stopTogether := 0, 0, 0
+	waits := float64(defaultNamespaceDefaultsWithin)
+	faults, stops, untriggered := 0, 0, false
 	for _, op := range s.Ops {
 		switch op.Type {
 		case OpDelete, OpRecreate:
-			bound += deletion
+			waits += deletion
 		case OpRestart:
-			bound += float64(launch.DefaultGracePeriod)
+			waits += float64(launch.DefaultGracePeriod)
 		case OpFault:
 			faults++
 			if op.Fault.Until == (Trigger{}) {
-				stopTogether = 1
+				untriggered = true
 			} else {
 				stops++
 			}
 		}
 		if op.Settles() {
-			bound += settle
+			waits += settle
 		}
 	}
-	// A target that exits while a fault excuses it is owed T_settle past a
-	// restart that can take MaxBackoff. Faults that stopped are owed as long
-	// as they lasted and T_settle. Faults with no trigger stop together.
+	// Faults with no trigger stop together, at the teardown.
+	if untriggered {
+		stops++
+	}
+	// Each fault allows an exit, owed T_settle past a restart that can take
+	// MaxBackoff. Faults that stop are owed as long as they lasted and
+	// T_settle, and allow another exit.
 	exit := float64(launch.MaxBackoff) + settle
-	bound += float64(faults) * exit
-	for range stops + stopTogether {
-		bound = 2*bound + settle + exit
+	waits += float64(faults) * exit
+	for range stops {
+		waits = 2*waits + settle + exit
 	}
 	teardown := float64(timeouts.Stable) + deletion + float64(teardownMargin)
-	return bound + teardown + float64(stopBudget)
+	return waits + teardown + float64(stopBudget)
 }

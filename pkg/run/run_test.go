@@ -182,6 +182,24 @@ func TestAwaitCRGoneWaitsUntilTheInstantTheRunnerGives(t *testing.T) {
 	}
 }
 
+func TestAwaitCleanWaitsOutItsWindow(t *testing.T) {
+	store := observe.NewStore(observe.Options{Namespace: "botbox-run-1"})
+	cr := widget("widget")
+	cr.SetNamespace("botbox-run-1")
+	store.Record(widgetKind, cr, time.Now())
+	live := &liveRun{h: &Harness{Observer: &observe.Observer{Store: store}}, target: &target.Target{Primary: widgetKind}}
+	began := time.Now()
+
+	clean, err := live.awaitClean(t.Context(), 100*time.Millisecond)
+
+	if err != nil || clean {
+		t.Fatalf("The wait returned (%t, %v), want a namespace that stayed.", clean, err)
+	}
+	if waited := time.Since(began); waited < 100*time.Millisecond {
+		t.Errorf("The wait ended %v in, want it to last 100ms.", waited)
+	}
+}
+
 // The Runner names each fault on the run's proxy by the ID the proxy gave it.
 func TestTheLiveRunDrivesTheProxysFaults(t *testing.T) {
 	p, err := proxy.Start(unreachable(), proxy.Options{})

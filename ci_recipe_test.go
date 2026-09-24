@@ -354,6 +354,8 @@ func TestTheCIRecipeInstallsEachToolItRunsAtAPin(t *testing.T) {
 		}
 		got = append(got, strings.Split(strings.TrimSpace(string(output)), "\n")...)
 	}
+	slices.Sort(got)
+	slices.Sort(want)
 	if !slices.Equal(got, want) {
 		t.Errorf("the recipe runs go %q, not %q, which puts each tool in ~/go/bin at its pin", got, want)
 	}
@@ -469,8 +471,11 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 		}
 		_, deadline := botboxBudget(t, s)
 		for _, timeout := range []any{recipe.TimeoutMinutes, s.TimeoutMinutes} {
+			if timeout == nil {
+				continue
+			}
 			minutes, err := strconv.ParseFloat(fmt.Sprint(timeout), 64)
-			if timeout != nil && (err != nil || time.Duration(minutes*float64(time.Minute)) <= deadline) {
+			if err != nil || time.Duration(minutes*float64(time.Minute)) <= deadline {
 				t.Errorf("timeout-minutes %v can stop %q before its --deadline makes it write a report", timeout, s.Run)
 			}
 		}

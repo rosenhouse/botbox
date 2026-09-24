@@ -971,6 +971,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
   where the deadline ended the shrink pass before its result could be run there. The
   `kubeconfig` names the proxy and the run namespace. Passing runs are not persisted.
+  `botbox matrix` writes each run to a directory under the system's temporary directory
+  and deletes it once the checks have read it. A run that ends in a harness error keeps
+  its directory, and the error names it.
   `objects.jsonl` writes each value of a Secret's `data` and annotations as a marker such
   as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is drawn per
   invocation and never written, so equal values share a marker within one invocation and a
@@ -1543,3 +1546,8 @@ built from source and run as a black-box binary.
   any foreground delete likewise carried a finalizer that only the garbage collector
   removes, so a correctly owned Job failed G3 too. botbox therefore also turns off the API
   server's garbage collector, which adds those finalizers.
+- **D@68 A matrix run that errs keeps its files.** The matrix deleted its temporary
+  directory on every exit, so a harness error named a `target.log` that was gone. A run
+  that errs now keeps its directory, and every other run's is deleted once the checks
+  have read it. The directory stays temporary, because the matrix's `--out` names a file,
+  and a matrix that finishes leaves nothing behind.

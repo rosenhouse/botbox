@@ -309,10 +309,10 @@ func (at *state) live() []int {
 // CR's value at a distinct path.
 func (at *state) collides(distinct [][]string, n int, cr map[string]any) bool {
 	for _, path := range distinct {
-		value, found, _ := unstructured.NestedFieldNoCopy(cr, path...)
+		value, _, _ := unstructured.NestedFieldNoCopy(cr, path...)
 		for other, drawn := range at.crs {
-			theirs, held, _ := unstructured.NestedFieldNoCopy(drawn.object, path...)
-			if other != n && found && held && reflect.DeepEqual(value, theirs) {
+			theirs, _, _ := unstructured.NestedFieldNoCopy(drawn.object, path...)
+			if other != n && reflect.DeepEqual(value, theirs) {
 				return true
 			}
 		}

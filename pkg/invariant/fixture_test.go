@@ -351,6 +351,11 @@ func ownedByRecreated(u *unstructured.Unstructured) {
 
 func orphaned(u *unstructured.Unstructured) { u.SetOwnerReferences(nil) }
 
+// ownedByAPod names an owner of a kind the target does not declare.
+func ownedByAPod(u *unstructured.Unstructured) {
+	u.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "v1", Kind: "Pod", Name: "p", UID: "uid-p"}})
+}
+
 // ownedByGhost names an owner no snapshot holds, which §6 ignores.
 func ownedByGhost(u *unstructured.Unstructured) {
 	u.SetOwnerReferences([]metav1.OwnerReference{{

@@ -915,6 +915,33 @@ func TestG5JudgesWhatTheOpsBetweenItsStatesLeftAlone(t *testing.T) {
 	}
 }
 
+func TestG5JudgesACRNoOpBetweenItsStatesActedOn(t *testing.T) {
+	in := newRun().withSecondWidget().
+		record(time.Second, widget("10", spec(1), status(1, 1)), secondWidget("30", spec(1), status(1, 1))).
+		checkpoint(5*time.Second, invariant.Converged).
+		op(invariant.OpRestart, 10*time.Second).
+		opOn(invariant.OpUpdate, 11*time.Second, secondName).
+		record(12*time.Second, widget("11", spec(1), status(1, 1), labelled("restarted")),
+			secondWidget("31", spec(2), generation(2), status(2, 2))).
+		checkpoint(15*time.Second, invariant.Converged).
+		through(20 * time.Second)
+
+	violation := fired(t, invariant.RestartStable, in)
+
+	if !strings.Contains(violation.Statement, "Widget w changed") {
+		t.Errorf("The statement is %q, want it to name the Widget w.", violation.Statement)
+	}
+}
+
+// An object that names no CR may be any CR's, so deleting one may change any.
+func TestG5LeavesARestartUnjudgedWhereBotboxTookAnObjectThatNamesNoCR(t *testing.T) {
+	in := changedAround(func(r *run) *run {
+		return r.record(time.Second, child("kept", "12", orphaned)).deletedManaged(11*time.Second, "kept")
+	})
+
+	noted(t, invariant.RestartStable, in, "for op 0 (restart): op 1 (deleteManaged) ran")
+}
+
 func TestG5ComparesTheMetadataSection6DoesNotIgnore(t *testing.T) {
 	in := restarted(child("w-0", "11", data("0")), child("w-0", "21", data("0"), deleting(12*time.Second)))
 

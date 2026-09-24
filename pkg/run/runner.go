@@ -477,7 +477,7 @@ func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 func (r *runner) create(ctx context.Context, op Op) (string, error) {
 	name, err := r.h.createCR(ctx, op.Obj)
 	if err != nil {
-		return op.Obj.GetName(), refusal(op, err)
+		return "", refusal(op, err)
 	}
 	if !slices.Contains(r.crs, name) {
 		r.crs = append(r.crs, name)

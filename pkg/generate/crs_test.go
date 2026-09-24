@@ -185,6 +185,45 @@ func TestACRAfterTheFirstTakesTheSamplesDistinctValueWithASuffix(t *testing.T) {
 	})
 }
 
+// fixedField is a field whose every draw is the value given.
+func fixedField(dotted string, value any) field {
+	return field{path: strings.Split(dotted, "."), dotted: dotted, values: rapid.Just(value).AsAny()}
+}
+
+// twoGadgets is the state of a sequence that created two gadgets, the first
+// holding the sample's spec.left and the second its own.
+func twoGadgets(g *Generator) *state {
+	return &state{crs: []drawnCR{{object: g.base(0).Object, live: true}, {object: g.base(1).Object, live: true}}}
+}
+
+func TestADrawThatRepeatsAnotherCRsDistinctValueIsUndone(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	loaded.Generate.Distinct = []string{"spec.left"}
+	g := newGenerator(t, loaded, Options{})
+	g.fields = []field{fixedField("spec.left", "one")}
+	at := twoGadgets(g)
+	rapid.Check(t, func(rt *rapid.T) {
+		cr := g.cr(rt, 1, at)
+		if left, _, _ := unstructured.NestedString(cr.Object, "spec", "left"); left != "one-2" {
+			rt.Fatalf("The second gadget holds the spec.left %q, want its own one-2.", left)
+		}
+	})
+}
+
+func TestAnUpdateThatRepeatsAnotherCRsDistinctValueIsDrawnAgain(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	loaded.Generate.Distinct = []string{"spec.left"}
+	g := newGenerator(t, loaded, Options{})
+	g.fields = []field{fixedField("spec.left", "one")}
+	at := twoGadgets(g)
+
+	patch := rapid.Custom(func(t *rapid.T) map[string]any { return g.patch(t, 1, at) }).Example(0)
+
+	if patch != nil {
+		t.Errorf("An update of the second gadget patched %v, which gives it the first's spec.left.", patch)
+	}
+}
+
 func TestADistinctPathMustHoldAStringInTheSample(t *testing.T) {
 	for _, dotted := range []string{"spec.count", "spec.nothing"} {
 		t.Run(dotted, func(t *testing.T) {

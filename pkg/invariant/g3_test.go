@@ -338,6 +338,48 @@ func TestG3JudgesAnObjectThatNamesNoCRWhereNoOtherCRRemains(t *testing.T) {
 	}
 }
 
+// Each deleted CR answers for its own leftovers, even where both went.
+func TestG3HoldsEachDeletedCRToItsOwnLeftovers(t *testing.T) {
+	in := twoWidgetsDeleted().
+		remove(11*time.Second, child("w-0", "13")).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		opOn(invariant.OpDelete, 10*time.Second, secondName).
+		record(10*time.Second, secondWidget("22", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
+		remove(12*time.Second, secondWidget("24", spec(1), status(1, 1), deleting(10*time.Second))).
+		through(21 * time.Second)
+
+	violation := fired(t, invariant.CleanDeletion, in)
+
+	if !strings.Contains(violation.Statement, "w2-0") {
+		t.Errorf("The statement is %q, want it to name w2's child.", violation.Statement)
+	}
+}
+
+// The finalizer that holds a CR does not make its children another CR's.
+func TestG3FiresOnTheChildrenOfACRItsFinalizerHolds(t *testing.T) {
+	in := deletedRun().
+		record(time.Second, child("w-0", "12")).
+		through(21 * time.Second)
+
+	if result := evaluate(t, invariant.CleanDeletion, in); len(result.Violations) != 2 {
+		t.Errorf("G3 reported %v, want the finalizer and the child w-0.", statements(result))
+	}
+}
+
+// An owner of another kind is not a CR, so its object names none.
+func TestG3JudgesAnObjectWhoseOwnersAreNoCR(t *testing.T) {
+	in := deletedRun().
+		record(time.Second, child("w-0", "12", ownedByAPod)).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		through(21 * time.Second)
+
+	violation := fired(t, invariant.CleanDeletion, in)
+
+	if !strings.Contains(violation.Statement, "w-0") {
+		t.Errorf("The statement is %q, want it to name w-0.", violation.Statement)
+	}
+}
+
 func TestG3NotesNothingBotboxTookFromAnotherCR(t *testing.T) {
 	in := twoWidgetsDeleted().
 		remove(11*time.Second, child("w-0", "13")).

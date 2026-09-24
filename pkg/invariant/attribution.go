@@ -61,17 +61,17 @@ func (in Input) askedFor(v observe.Version, s state) bool {
 }
 
 // reach is what botbox's changes may have changed: the CRs they acted on and
-// what those CRs own, the objects they deleted, or everything.
+// what those CRs own, or everything.
 type reach struct {
 	any, all bool
 	crs      map[types.UID]bool
-	objects  map[observe.Key]bool
 }
 
-// reached is the reach of the ops. An object that names no CR may be any
-// CR's, so an op that deleted one reaches everything.
+// reached is the reach of the ops. A deleted object reaches the CRs it names.
+// An object that names no CR may be any CR's, so deleting one reaches
+// everything.
 func (in Input) reached(ops []Op) reach {
-	r := reach{any: len(ops) > 0, crs: map[types.UID]bool{}, objects: map[observe.Key]bool{}}
+	r := reach{any: len(ops) > 0, crs: map[types.UID]bool{}}
 	for _, op := range ops {
 		for _, v := range in.History.History(op.CR) {
 			r.crs[v.UID] = true
@@ -79,7 +79,6 @@ func (in Input) reached(ops []Op) reach {
 		if op.Deleted == (observe.Key{}) {
 			continue
 		}
-		r.objects[op.Deleted] = true
 		took, _ := in.versionAt(op.Deleted, op.Time)
 		named := in.namedCRs(took)
 		r.all = r.all || len(named) == 0
@@ -96,7 +95,7 @@ func (r reach) touches(in Input, v observe.Version) bool {
 	switch {
 	case !r.any:
 		return false
-	case r.all || r.objects[v.Key] || r.crs[v.UID]:
+	case r.all || r.crs[v.UID]:
 		return true
 	case v.GVK == in.Target.Primary:
 		return false

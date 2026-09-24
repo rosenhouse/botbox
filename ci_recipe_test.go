@@ -361,11 +361,11 @@ func TestTheCIRecipeInstallsEachToolItRunsAtAPin(t *testing.T) {
 		if !strings.Contains(s.Run, "go install") {
 			continue
 		}
-		_, output, err := runStep(t, s, "go", `echo "$*${GOBIN:+ into $GOBIN}${GOPATH:+ under $GOPATH}"`)
-		if err != nil {
-			t.Fatalf("%q: %v\n%s", s.Run, err, output)
+		ran := runStep(t, s, t.TempDir(), map[string]string{"go": `echo "$*${GOBIN:+ into $GOBIN}${GOPATH:+ under $GOPATH}"`})
+		if ran.err != nil {
+			t.Fatalf("%q: %v\n%s", s.Run, ran.err, ran.output)
 		}
-		got = append(got, strings.Split(strings.TrimSpace(string(output)), "\n")...)
+		got = append(got, strings.Split(strings.TrimSpace(string(ran.output)), "\n")...)
 	}
 	slices.Sort(got)
 	slices.Sort(want)
@@ -392,37 +392,59 @@ func TestTheCIRecipeExportsTheControlPlaneOrFails(t *testing.T) {
 		{name: "setup-envtest fails", setupEnvtest: "exit 1", wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			exported, output, err := runStep(t, steps[i], "setup-envtest", test.setupEnvtest)
-			if (err != nil) != test.wantErr {
-				t.Fatalf("the step returned %v, and wanted an error: %t\n%s", err, test.wantErr, output)
+			ran := runStep(t, steps[i], t.TempDir(), map[string]string{"setup-envtest": test.setupEnvtest})
+			if (ran.err != nil) != test.wantErr {
+				t.Fatalf("the step returned %v, and wanted an error: %t\n%s", ran.err, test.wantErr, ran.output)
 			}
-			if exported != test.wantEnv {
-				t.Errorf("the step exported %q, not %q", exported, test.wantEnv)
+			if ran.env != test.wantEnv {
+				t.Errorf("the step exported %q, not %q", ran.env, test.wantEnv)
 			}
 		})
 	}
 }
 
-// runStep runs a recipe step's script under the recipe's env alone, with a
-// stub for one command, and returns what the script wrote to GITHUB_ENV.
-func runStep(t *testing.T, s step, command, stub string) (exported string, output []byte, err error) {
+// ranStep is what a recipe step's script did.
+type ranStep struct {
+	// env and summary are what it wrote to GITHUB_ENV and GITHUB_STEP_SUMMARY.
+	env, summary string
+	output       []byte
+	err          error
+}
+
+// runStep runs a recipe step's script in workspace under the recipe's env
+// alone, with a stub for each command stubs names.
+func runStep(t *testing.T, s step, workspace string, stubs map[string]string) ranStep {
 	t.Helper()
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, command), []byte("#!/bin/sh\n"+stub+"\n"), 0o755); err != nil {
+	for command, stub := range stubs {
+		if err := os.WriteFile(filepath.Join(dir, command), []byte("#!/bin/sh\n"+stub+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	script := filepath.Join(dir, "step.sh")
+	if err := os.WriteFile(script, []byte(s.Run), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	githubEnv := filepath.Join(dir, "github-env")
-	// Actions runs a step with no shell key as bash -e.
-	cmd := exec.Command("bash", "-e", "-c", s.Run)
-	cmd.Env = []string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"), "GITHUB_ENV=" + githubEnv}
+	githubEnv, stepSummary := filepath.Join(dir, "github-env"), filepath.Join(dir, "step-summary")
+	// Actions runs a step with no shell key as bash -e on a file that holds it.
+	cmd := exec.Command("bash", "-e", script)
+	cmd.Dir = workspace
+	cmd.Env = []string{
+		"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"GITHUB_ENV=" + githubEnv,
+		"GITHUB_STEP_SUMMARY=" + stepSummary,
+	}
 	for _, env := range []map[string]string{readWorkflow(t, ciRecipe).Env, recipeJob(t).Env, s.Env} {
 		for name, value := range env {
 			cmd.Env = append(cmd.Env, name+"="+value)
 		}
 	}
-	output, err = cmd.CombinedOutput()
+	var ran ranStep
+	ran.output, ran.err = cmd.CombinedOutput()
 	env, _ := os.ReadFile(githubEnv)
-	return string(env), output, err
+	summary, _ := os.ReadFile(stepSummary)
+	ran.env, ran.summary = string(env), string(summary)
+	return ran
 }
 
 func TestTheCIRecipeFailsWhenBotboxFinds(t *testing.T) {
@@ -431,8 +453,19 @@ func TestTheCIRecipeFailsWhenBotboxFinds(t *testing.T) {
 		t.Error("the recipe sets continue-on-error, which can pass a find and skip the upload")
 	}
 	for _, s := range botboxRuns(t, recipe.Steps) {
-		if _, output, err := runStep(t, s, "botbox", "exit 1"); err == nil {
-			t.Errorf("%q passes when botbox fails\n%s", s.Run, output)
+		if ran := runStep(t, s, t.TempDir(), map[string]string{"botbox": "exit 1"}); ran.err == nil {
+			t.Errorf("%q passes when botbox fails\n%s", s.Run, ran.output)
+		}
+	}
+}
+
+// Actions cancels a job by signalling the step's shell, which passes no signal
+// on.
+func TestTheCIRecipeRunsBotboxInPlaceOfTheStepsShell(t *testing.T) {
+	for _, s := range botboxRuns(t, recipeSteps(t)) {
+		ran := runStep(t, s, t.TempDir(), map[string]string{"botbox": `echo "$PPID"`})
+		if parent := strings.TrimSpace(string(ran.output)); ran.err != nil || parent != strconv.Itoa(os.Getpid()) {
+			t.Errorf("%q runs botbox as a child of the step's shell, so a cancel never reaches it\n%s", s.Run, ran.output)
 		}
 	}
 }
@@ -471,8 +504,8 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 	recipe := recipeJob(t)
 	steps := recipe.Steps
 	upload := stepUsing(t, steps, "actions/upload-artifact")
-	if upload.If != "failure()" && upload.If != "always()" {
-		t.Errorf("the evidence uploads if %q, not when botbox fails", upload.If)
+	if upload.If != "always()" {
+		t.Errorf("the job uploads its output if %q, not however botbox ends, and only the summary keeps the sequences a passing nightly drew", upload.If)
 	}
 	if upload.With["if-no-files-found"] == "error" {
 		t.Error("the upload adds an error to a job that failed before botbox wrote anything")
@@ -516,6 +549,29 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 	}
 	if hint[3] != uploaded {
 		t.Errorf("%q puts the evidence elsewhere than %s, where the replay command in report.md reads it", hint[0], uploaded)
+	}
+}
+
+func TestTheCIRecipeShowsTheSummaryOnTheJobsPage(t *testing.T) {
+	steps := recipeSteps(t)
+	i := slices.IndexFunc(steps, func(s step) bool { return strings.Contains(s.Run, "GITHUB_STEP_SUMMARY") })
+	if i < 0 {
+		t.Fatal("no step writes the job's summary")
+	}
+	shows := steps[i]
+	if shows.If != "always()" {
+		t.Errorf("the job shows the summary if %q, not however botbox ends", shows.If)
+	}
+
+	workspace := t.TempDir()
+	invocation := filepath.Join(workspace, stepUsing(t, steps, "actions/upload-artifact").With["path"], "20260101T000000Z-1")
+	writeFile(t, filepath.Join(invocation, "summary.md"), "# botbox\n")
+	writeFile(t, filepath.Join(invocation, "summary.json"), "{}\n")
+	if ran := runStep(t, shows, workspace, nil); ran.err != nil || ran.summary != "# botbox\n" {
+		t.Errorf("the job's summary is %q, not summary.md: %v\n%s", ran.summary, ran.err, ran.output)
+	}
+	if ran := runStep(t, shows, t.TempDir(), nil); ran.err != nil {
+		t.Errorf("the step fails when botbox wrote no summary: %v\n%s", ran.err, ran.output)
 	}
 }
 

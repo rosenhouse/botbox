@@ -195,24 +195,29 @@ func TestTheStateFollowsTheCRBotboxLastWrote(t *testing.T) {
 		return map[string]any{"spec": map[string]any{"count": count, "mode": "fast"}}
 	}
 	at := state{crs: []drawnCR{{object: spec(3), live: true}}}
+	holds := func(after string, want ...drawnCR) {
+		t.Helper()
+		same := len(at.crs) == len(want)
+		for n := range min(len(at.crs), len(want)) {
+			same = same && at.crs[n].live == want[n].live && equalJSON(at.crs[n].object, want[n].object)
+		}
+		if !same {
+			t.Errorf("After %s the state holds %v, want %v.", after, at.crs, want)
+		}
+	}
 
 	at.advance(run.Op{Type: run.OpCreate, Obj: &unstructured.Unstructured{Object: spec(1)}}, 1)
 	at.advance(run.Op{Type: run.OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(5)}}}, 0)
-	if !equalJSON(at.crs[0].object, spec(5)) || !equalJSON(at.crs[1].object, spec(1)) {
-		t.Errorf("After an update the state holds %v, want %v and %v.", at.crs, spec(5), spec(1))
-	}
+	holds("an update of the first CR", drawnCR{spec(5), true}, drawnCR{spec(1), true})
 	at.advance(run.Op{Type: run.OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(6)}}}, 1)
-	if !equalJSON(at.crs[0].object, spec(5)) || !equalJSON(at.crs[1].object, spec(6)) {
-		t.Errorf("After an update of the second CR the state holds %v, want %v and %v.", at.crs, spec(5), spec(6))
+	holds("an update of the second CR", drawnCR{spec(5), true}, drawnCR{spec(6), true})
+	at.advance(run.Op{Type: run.OpDelete}, 1)
+	holds("a delete of the second CR", drawnCR{spec(5), true}, drawnCR{spec(6), false})
+	if live := at.live(); !slices.Equal(live, []int{0}) {
+		t.Errorf("After a delete of the second CR the CRs %v are live, want the first alone.", live)
 	}
-	at.advance(run.Op{Type: run.OpDelete}, 0)
-	if at.crs[0].live || !equalJSON(at.crs[0].object, spec(5)) || len(at.live()) != 1 {
-		t.Errorf("After a delete the state holds %v, want the first CR deleted and still known.", at.crs)
-	}
-	at.advance(run.Op{Type: run.OpRecreate, Obj: &unstructured.Unstructured{Object: spec(7)}}, 0)
-	if !at.crs[0].live || !equalJSON(at.crs[0].object, spec(7)) {
-		t.Errorf("After a recreate the state holds %v, want %v live.", at.crs, spec(7))
-	}
+	at.advance(run.Op{Type: run.OpRecreate, Obj: &unstructured.Unstructured{Object: spec(7)}}, 1)
+	holds("a recreate of the second CR", drawnCR{spec(5), true}, drawnCR{spec(7), true})
 }
 
 func TestSequencesAreLegalToReplay(t *testing.T) {

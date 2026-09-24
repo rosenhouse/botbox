@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
@@ -565,6 +566,24 @@ func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
 		if down := exit.Restart.Sub(exit.At); down > want.backoff || down < want.backoff-time.Second {
 			t.Errorf("Exit %d restarts %v after it, want %v.", i+1, down, want.backoff)
 		}
+	}
+}
+
+// The API server takes no strategic merge patch of a custom resource, and one
+// would merge lists that the sequence's merge patch replaces.
+func TestAFixtureTakesAJSONMergePatch(t *testing.T) {
+	fixture := widget("fixture")
+	fixture.SetNamespace("botbox-run-1")
+	client := widgetsClient(fixture)
+
+	err := liveOver(client).patchFixture(t.Context(), widgetKind, "fixture", map[string]any{"spec": map[string]any{"count": 2}})
+
+	if err != nil {
+		t.Fatalf("The patch failed: %v", err)
+	}
+	patches := slices.DeleteFunc(client.Actions(), func(action clienttesting.Action) bool { return action.GetVerb() != "patch" })
+	if len(patches) != 1 || patches[0].(clienttesting.PatchAction).GetPatchType() != types.MergePatchType {
+		t.Errorf("patchFixture sent %v, want one %s.", patches, types.MergePatchType)
 	}
 }
 

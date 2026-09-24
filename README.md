@@ -330,9 +330,9 @@ writes `summary.json` and `summary.md` there, and rewrites them as each run star
 it finishes. They list each planned run: its seed, how it ended, the faults the proxy
 applied, the times your controller exited, and what the checks could not judge. A run that
 was under way when botbox was killed reads `unfinished`, unless it had found a violation
-that botbox was minimizing. `summary.json` also holds each run's sequence, for a machine.
-Its `schema` changes when a field changes meaning or goes away
-([DESIGN.md §11](DESIGN.md#11-repo-conventions)).
+that botbox was minimizing. Its directory then holds the evidence but no report.
+`summary.json` also holds each run's sequence, for a machine. Its `schema` changes when a
+field changes meaning or goes away ([DESIGN.md §11](DESIGN.md#11-repo-conventions)).
 
 A run that violates an invariant prints the ID, what it saw and where the evidence is, then
 exits 1. A configuration or harness error exits 2, so your CI can tell a find from a broken

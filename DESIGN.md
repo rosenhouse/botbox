@@ -1003,16 +1003,17 @@ the proxy; the `Image` launcher. Separate design addendum.
   ops the proxy applied and how many requests it faulted, its checkpoints, the target's
   exits, its notes and its sequence (§7). These describe the run of the planned sequence.
   A failing run also has its `run-<n>/`, relative to the summary, and its error, or the
-  violation and notes its report carries, which are the run's own until the shrink pass
-  ends. `summary.md` leaves out the ops by type, the checkpoints, what each exit said and
-  the sequences. `summary.json` carries `schema: 1`, which changes when a field changes
-  meaning or goes away. `--junit FILE` writes the runs as JUnit XML with the summary,
-  creating the file's directory: one testsuite, a testcase per planned run, a `failure`
-  typed with the check's ID for a violation, an `error` for a run that did not finish,
-  `skipped` for a run that never started, and an `error` testcase named `botbox` for what
-  stopped the invocation where no run did, or for an invocation that has not finished.
-  The testsuite of an invocation that has not finished gives no time. An invocation that
-  stops before it has a directory writes that testcase alone.
+  violation and notes its report carries. Until the shrink pass ends, those are the run's
+  own, and `run-<n>/` holds no report. `summary.md` leaves out the ops by type, the
+  checkpoints, what each exit said and the sequences. `summary.json` carries `schema: 1`,
+  which changes when a field changes meaning or goes away. `--junit FILE` writes the runs
+  as JUnit XML with the summary, creating the file's directory: one testsuite, a testcase
+  per planned run, a `failure` typed with the check's ID for a violation, an `error` for a
+  run that did not finish, `skipped` for a run that never started, and an `error`
+  testcase named `botbox` for what stopped the invocation where no run did, or for an
+  invocation that has not finished. The testsuite of an invocation that has not finished
+  gives no time. An invocation that stops before it has a directory writes that testcase
+  alone.
   botbox replaces each file whole, and warns of one it cannot write.
   `objects.jsonl` writes each value of a Secret's `data` and annotations as a marker such
   as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is drawn per

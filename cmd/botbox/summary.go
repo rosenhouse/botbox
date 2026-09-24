@@ -179,6 +179,15 @@ func (r *runSummary) found(violation run.Violation, notes []string, dir string) 
 	r.Dir = filepath.Base(dir)
 }
 
+// holds is what a failing run's directory holds. The report comes once the
+// shrink pass ends.
+func holds(reported bool) string {
+	if reported {
+		return "the report and the evidence"
+	}
+	return "the evidence"
+}
+
 // stopped records a run that did not finish, and the directory it made.
 func (r *runSummary) stopped(err error, dir string) {
 	r.Outcome = outcomeError

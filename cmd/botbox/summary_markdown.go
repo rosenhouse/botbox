@@ -28,7 +28,7 @@ func (s *summary) markdown() []byte {
 			r.Run, r.Seed, r.source(), r.verdict(), r.Applied, r.Ops, r.faults(), len(r.Exits), r.took())
 	}
 	for _, r := range s.Runs {
-		r.details(&md)
+		r.details(&md, s.Outcome != outcomeUnfinished)
 	}
 	return []byte(md.String())
 }
@@ -102,7 +102,7 @@ func (r runSummary) took() string {
 
 // details says what a run found, why it stopped, and what its checks could
 // not judge.
-func (r runSummary) details(md *strings.Builder) {
+func (r runSummary) details(md *strings.Builder, reported bool) {
 	if r.Violation == nil && r.Error == "" && len(r.Notes) == 0 {
 		return
 	}
@@ -113,7 +113,7 @@ func (r runSummary) details(md *strings.Builder) {
 		if r.Violation.Evidence != "" {
 			fmt.Fprintf(md, "\n%s\n", r.Violation.Evidence)
 		}
-		fmt.Fprintf(md, "\n`%s/` holds the report and the evidence.\n", r.Dir)
+		fmt.Fprintf(md, "\n`%s/` holds %s.\n", r.Dir, holds(reported))
 	case r.Error != "":
 		fmt.Fprintf(md, "\n%s\n", r.Error)
 		if r.Dir != "" {

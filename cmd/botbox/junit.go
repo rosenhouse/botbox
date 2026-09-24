@@ -77,7 +77,7 @@ func (s *summary) junit(dir string) ([]byte, error) {
 			junitProperty{Name: "summary", Value: filepath.Join(dir, summaryJSONFile)})
 	}
 	for _, r := range s.Runs {
-		suite.Cases = append(suite.Cases, r.junit(s.Target.Name, dir))
+		suite.Cases = append(suite.Cases, r.junit(s.Target.Name, dir, s.Outcome != outcomeUnfinished))
 	}
 	switch {
 	case s.Outcome == outcomeUnfinished:
@@ -111,7 +111,7 @@ func (s *summary) botboxCase(kind outcome, message string) junitCase {
 	return junitCase{Name: "botbox", Classname: s.Target.Name, Error: &junitProblem{Type: string(kind), Message: message}}
 }
 
-func (r runSummary) junit(class, dir string) junitCase {
+func (r runSummary) junit(class, dir string, reported bool) junitCase {
 	name := "seed " + strconv.FormatInt(r.Seed, 10)
 	if r.File != "" {
 		name = r.File
@@ -124,7 +124,7 @@ func (r runSummary) junit(class, dir string) junitCase {
 	switch r.Outcome {
 	case outcomeViolation:
 		c.Failure = &junitProblem{Type: r.Violation.ID, Message: r.Violation.Statement,
-			Body: files + " holds the report and the evidence."}
+			Body: files + " holds " + holds(reported) + "."}
 		if r.Violation.Evidence != "" {
 			c.Failure.Body = r.Violation.Evidence + "\n" + c.Failure.Body
 		}

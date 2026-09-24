@@ -708,12 +708,19 @@ func TestTheSummaryRecordsEachRunAsItStarts(t *testing.T) {
 // found.
 func TestTheSummaryRecordsAViolationBeforeMinimizing(t *testing.T) {
 	out := t.TempDir()
+	junit := filepath.Join(t.TempDir(), "junit.xml")
 	g4 := run.Violation{ID: "G4", Statement: "the target converges", Evidence: "the settle wait after op 2 expired"}
 	session := &fakeSession{results: []run.Result{{Violation: &g4, Notes: []string{"a note of the run"}}}}
 	var minimizing []writtenRun
+	var md string
+	var failure *parsedProblem
 	session.fails = func(_ run.Sequence, dir string) *run.Violation {
-		if filepath.Base(dir) == shrinkDir {
+		if filepath.Base(dir) == shrinkDir && len(minimizing) == 0 {
 			minimizing = append(minimizing, unfinishedSummary(t, out).Runs[0])
+			written, _ := os.ReadFile(filepath.Join(summaryDir(t, out), "summary.md"))
+			md = string(written)
+			suite, _ := readJUnit(t, junit)
+			failure = suite.Cases[0].Failure
 		}
 		return nil
 	}
@@ -724,7 +731,7 @@ func TestTheSummaryRecordsAViolationBeforeMinimizing(t *testing.T) {
 	notes := []string{"a note of the run", envtestLimit(options{}, workloads)}
 
 	code, _, stderr := invokeWith(t, session, countingGenerator(nil, run.OpSettle, run.OpRestart, run.OpSettle),
-		"run", "--target", workloadsTargetYAML, "--out", out, "--runs", "2", "--seed", "1")
+		"run", "--target", workloadsTargetYAML, "--out", out, "--runs", "2", "--seed", "1", "--junit", junit)
 
 	if code != exitViolation {
 		t.Fatalf("botbox run exited %d, want %d: %s", code, exitViolation, stderr)
@@ -737,6 +744,14 @@ func TestTheSummaryRecordsAViolationBeforeMinimizing(t *testing.T) {
 		ran.Dir != "run-1" || !slices.Equal(ran.Notes, notes) {
 		t.Errorf("While botbox minimized run 1, the summary listed it as %s in %q, with the violation %+v and the notes %q, "+
 			"want %s in run-1, with %+v and %q.", ran.Outcome, ran.Dir, ran.Violation, ran.Notes, "violation", g4, notes)
+	}
+	// The report comes once the pass ends.
+	if !strings.Contains(md, "`run-1/` holds the evidence.\n") {
+		t.Errorf("While botbox minimized run 1, summary.md was\n%s\nwant it to say run-1/ holds the evidence, and no report yet.", md)
+	}
+	if failure == nil || failure.Type != g4.ID || !strings.HasSuffix(failure.Body, "run-1 holds the evidence.") {
+		t.Errorf("While botbox minimized run 1, its JUnit testcase failed with %+v, want %s, and run-1 holding the evidence and no report yet.",
+			failure, g4.ID)
 	}
 }
 

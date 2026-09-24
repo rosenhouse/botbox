@@ -265,6 +265,27 @@ wide `settle` is. If your controller leaves a kind deleted by design, or recreat
 new name, list the kind under `notRecreated`. cert-manager lists CertificateRequest, because a
 Ready Certificate does not replace a deleted request.
 
+Your controller may read an object it does not own, such as a Secret or an Issuer. Declare it
+under `fixtures`, and name its file under `generate.fixtures` to let generation change it:
+
+```yaml
+generate:
+  fixtures:
+    secret.yaml:                              # a file under fixtures
+      mutate:                                 # strings in it generation may set
+        - data.token
+```
+
+Generation then also draws `updateFixture`, which sets one of those strings to a short word
+of letters and digits, and `deleteFixture`, which deletes the fixture until the next op that
+settles and then creates it again. Your `ready` may fail while the fixture is gone, so no
+settle wait runs without it. A controller that reads the fixture without watching it misses
+the change until something else reconciles its CR, and G5 reports what a restart then
+changes. G7 never asks your controller to recreate a fixture. A sequence you write names the
+op before which botbox creates a deleted fixture again:
+`{"i": 2, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 3}}`.
+Without `generate.fixtures`, generation leaves every fixture alone.
+
 A sequence you write yourself can also carry a `fault`, which makes the proxy refuse, delay or
 drop the requests it matches. This is `targets/toy-widget/sequences/fault.json`:
 
@@ -498,7 +519,7 @@ Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-gene
 | G1 | Bounded reconciliation. Under an unchanged spec, one quiet window holds no more requests than `quiet` allows, zero by default. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
 | G3 | Clean deletion. Deleting the CR removes everything it manages and clears its finalizers. |
-| G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
+| G4 | Convergence. `ready` holds within `T_settle` of every change to the spec or a fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
 | G7 | Self-healing. An object `deleteManaged` deletes exists again, by kind and name, once the run settles. |

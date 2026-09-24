@@ -200,9 +200,9 @@ The Runner executes one sequence:
    the CR nor a managed object has changed for `T_stable`, so a checkpoint lands after the
    target's reaction, not before it. After a deletion of the primary CR, the wait may run
    until the deletion's G3 deadline, or `T_settle` past the instant the CR went if it went
-   by then. A `recreate` waits for its old CR to go for `T_delete`, or as long as a settle
-   wait may run if that is later. A CR still there where that wait ends is judged there,
-   as an expired settle wait is. A wait in which a CR outlived a G3 deadline that no fault
+   by then. A `recreate` waits `T_delete` for its old CR to go, and longer while the target
+   is owed time as above. A CR still there where that wait ends is judged there, as an
+   expired settle wait is. A wait in which a CR outlived a G3 deadline that no fault
    reached into is G3's to judge (§6). Any other wait that expires while no fault excuses
    it records a G4 violation, which says why from the Observer's history of the wait:
    `Ready` never held, held and then stopped, or held while the namespace kept changing

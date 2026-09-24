@@ -249,8 +249,7 @@ func (h *Harness) createNamespace(ctx context.Context, core kubernetes.Interface
 	return nil
 }
 
-// namespaceDeletionBudget is how long Stop waits for the run namespace to be
-// deleted.
+// namespaceDeletionBudget bounds Stop's request to delete the run namespace.
 const namespaceDeletionBudget = 30 * time.Second
 
 // deleteNamespace deletes the namespace even when an interrupt has ended ctx,

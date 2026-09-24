@@ -235,17 +235,18 @@ func TestASignalStopsBotboxAndThenKillsIt(t *testing.T) {
 	}
 }
 
-// botbox 2>&1 | tee log: a Ctrl-C kills tee too, and botbox writes on.
+// botbox 2>&1 | tee log: an interrupt kills tee too, and botbox writes on.
+// SIGTERM stands in for a Ctrl-C, which a background job starts out ignoring.
 func TestAnInterruptOutlivesTheReaderOfItsOutput(t *testing.T) {
 	b := startBotbox(t, 0)
 	b.waitFor(t, "run 1:")
 	b.stopReading()
 
-	b.signal(t, syscall.SIGINT, true)
+	b.signal(t, syscall.SIGTERM, true)
 
 	status := b.exit(t, 10*time.Second)
-	if !status.Signaled() || status.Signal() != syscall.SIGINT {
-		t.Errorf("botbox ended with %v, want death by SIGINT.", status)
+	if !status.Signaled() || status.Signal() != syscall.SIGTERM {
+		t.Errorf("botbox ended with %v, want death by SIGTERM.", status)
 	}
 	if !b.closedItsSession() {
 		t.Error("botbox never closed its session.")

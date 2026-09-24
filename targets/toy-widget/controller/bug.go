@@ -24,7 +24,7 @@ const (
 	B12
 )
 
-// MaxBug is the highest seeded bug ID in the catalog.
+// MaxBug is the highest seeded bug ID.
 const MaxBug = int(B12)
 
 // defaultB1Hold is Reconciler.B1Hold's value when left unset.

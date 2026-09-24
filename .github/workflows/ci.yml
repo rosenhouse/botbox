@@ -91,7 +91,19 @@ jobs:
             bin/setup-envtest
           key: envtest-${{ runner.os }}-${{ hashFiles('Makefile') }}
       - name: The bug matrix is current
-        run: make verify-bug-matrix
+        env:
+          TMPDIR: ${{ runner.temp }}/bug-matrix
+        run: |
+          mkdir -p "$TMPDIR"
+          make verify-bug-matrix
+      # The matrix leaves a directory there only for a run that erred.
+      - name: Keep the files of a run that erred
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bug-matrix-run
+          path: ${{ runner.temp }}/bug-matrix/botbox-matrix-*/
+          if-no-files-found: ignore
 
   # The cert-manager adoption example of DESIGN.md §10 (M5): generated sequences
   # on the seeds the Makefile fixes. §11 budgets the tier at ten minutes, and the

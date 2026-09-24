@@ -2,6 +2,8 @@ name: botbox
 
 on:
   pull_request:
+  schedule:
+    - cron: '17 6 * * *'
 
 env:
   BOTBOX_VERSION: <commit>   # a commit of main
@@ -44,7 +46,10 @@ jobs:
             bin/envtest
           key: ${{ steps.tools.outputs.cache-primary-key }}
       - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
-      - run: botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-out
+      - if: github.event_name == 'pull_request'
+        run: botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-out
+      - if: github.event_name == 'schedule'
+        run: botbox run --target target.yaml --runs 20 --deadline 30m --out botbox-out
       # gh run download <run-id> --name botbox-out --dir botbox-out restores
       # the paths that the replay command in report.md names.
       - if: failure()

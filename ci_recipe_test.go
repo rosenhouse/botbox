@@ -2,6 +2,7 @@ package botbox_test
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -262,6 +263,30 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 	}
 	if hint[2] != uploaded {
 		t.Errorf("%q puts the evidence elsewhere than %s, where the replay command in report.md reads it", hint[0], uploaded)
+	}
+}
+
+func TestTheCIRecipeFixesSeedsOnPullRequestsAndDrawsThemNightly(t *testing.T) {
+	w := readWorkflow(t, ciRecipe)
+	for _, event := range []string{"pull_request", "schedule"} {
+		if _, ok := w.On[event]; !ok {
+			t.Errorf("the recipe does not run on %s", event)
+		}
+	}
+	seeded := map[string]bool{}
+	for _, s := range recipeSteps(t) {
+		if !strings.Contains(s.Run, "botbox run") {
+			continue
+		}
+		event := regexp.MustCompile(`^github\.event_name == '(\w+)'$`).FindStringSubmatch(s.If)
+		if event == nil {
+			t.Errorf("%q runs if %q, not on one event", s.Run, s.If)
+			continue
+		}
+		seeded[event[1]] = strings.Contains(s.Run, "--seed ")
+	}
+	if want := map[string]bool{"pull_request": true, "schedule": false}; !maps.Equal(seeded, want) {
+		t.Errorf("botbox run fixes a seed by event as %v, and should as %v", seeded, want)
 	}
 }
 

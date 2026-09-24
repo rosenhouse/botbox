@@ -13,7 +13,9 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -563,5 +565,30 @@ func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
 		if down := exit.Restart.Sub(exit.At); down > want.backoff || down < want.backoff-time.Second {
 			t.Errorf("Exit %d restarts %v after it, want %v.", i+1, down, want.backoff)
 		}
+	}
+}
+
+func TestAFixtureIsGoneOnceNoObjectUnderDeletionHoldsItsName(t *testing.T) {
+	deleting := &unstructured.Unstructured{}
+	deleting.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
+	refused := errors.New("the API server refused the read")
+	for _, test := range []struct {
+		name    string
+		fixture *unstructured.Unstructured
+		err     error
+		gone    bool
+	}{
+		{"not found", nil, apierrors.NewNotFound(configMapResource.GroupResource(), "fixture"), true},
+		{"still being deleted", deleting, nil, false},
+		{"another object under its name", &unstructured.Unstructured{}, nil, true},
+		{"a failed read", nil, refused, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gone, err := fixtureGone(test.fixture, test.err)
+
+			if gone != test.gone || (test.err == refused) != errors.Is(err, refused) {
+				t.Errorf("fixtureGone returned (%t, %v), want gone: %t.", gone, err, test.gone)
+			}
+		})
 	}
 }

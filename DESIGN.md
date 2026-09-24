@@ -654,7 +654,8 @@ Details the example does not show:
   to go, and botbox creates it again, as it last wrote it, before the op `until` names acts:
   `{"i": 2, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 3}}`.
   A fixture still there where the wait ends, held by a finalizer, ends the run as a harness
-  error that names the finalizers. `until.op` names a later op, up to the last, and no op
+  error that names the finalizers. So does another object that takes the fixture's name
+  before botbox restores it. `until.op` names a later op, up to the last, and no op
   before it acts on that fixture. A `deleteFixture` does not settle.
   A fixture op names a fixture the target declares, or the run ends as a configuration
   error.

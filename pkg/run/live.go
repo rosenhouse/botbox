@@ -208,13 +208,10 @@ func (l *liveRun) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind
 	deadline := time.Now().Add(l.target.Timeouts.Delete)
 	gone, err := l.await(ctx, func() time.Time { return deadline }, func() (bool, error) {
 		fixture, err := fixtures.Get(ctx, name, metav1.GetOptions{})
-		if apierrors.IsNotFound(err) {
-			return true, nil
-		}
 		if err == nil {
 			held = fixture.GetFinalizers()
 		}
-		return false, err
+		return fixtureGone(fixture, err)
 	})
 	switch {
 	case err != nil:
@@ -226,9 +223,26 @@ func (l *liveRun) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind
 	return nil
 }
 
+// fixtureGone reads a Get of a fixture botbox deleted. An object that is not
+// being deleted is another under the fixture's name.
+func fixtureGone(fixture *unstructured.Unstructured, err error) (bool, error) {
+	switch {
+	case apierrors.IsNotFound(err):
+		return true, nil
+	case err != nil:
+		return false, err
+	}
+	return fixture.GetDeletionTimestamp() == nil, nil
+}
+
 func (l *liveRun) createFixture(ctx context.Context, fixture *unstructured.Unstructured) error {
 	gvk := fixture.GroupVersionKind()
-	if _, err := l.of(gvk).Create(ctx, fixture, metav1.CreateOptions{}); err != nil {
+	_, err := l.of(gvk).Create(ctx, fixture, metav1.CreateOptions{})
+	switch {
+	case apierrors.IsAlreadyExists(err):
+		return fmt.Errorf("something created the fixture %s %s again after botbox deleted it, so botbox cannot restore it",
+			kindName(gvk), fixture.GetName())
+	case err != nil:
 		return fmt.Errorf("restoring the fixture %s %s: %w", kindName(gvk), fixture.GetName(), err)
 	}
 	return nil

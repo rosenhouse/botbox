@@ -17,6 +17,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
@@ -580,6 +581,25 @@ func TestRunner(t *testing.T) {
 		}
 	})
 
+	t.Run("ends the run where something creates a deleted fixture again", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		toy.Fixtures = append(toy.Fixtures, fixtureConfigMap())
+		client, err := dynamic.NewForConfig(testCluster.Config())
+		if err != nil {
+			t.Fatalf("Building a client failed: %v", err)
+		}
+		recreateOnDelete(t, client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}), fixtureName)
+
+		_, err = run.Run(ctx, toy, readSequence(t, deleteTheFixture), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		want := "op 2 (settle): something created the fixture v1/ConfigMap fixture again after botbox deleted it"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("The run returned %v, want an error saying %q.", err, want)
+		}
+	})
+
 	t.Run("notes an owner the collector cannot resolve", func(t *testing.T) {
 		toy := loadTarget(t, binary)
 		ownedBySecret := fixtureConfigMap()
@@ -758,6 +778,36 @@ func releaseOnDelete(t *testing.T, resource dynamic.NamespaceableResourceInterfa
 			time.Sleep(delay)
 			_, _ = resource.Namespace(object.GetNamespace()).Patch(ctx, name, types.MergePatchType,
 				[]byte(`{"metadata":{"finalizers":null}}`), metav1.PatchOptions{})
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		watcher.Stop()
+		<-done
+	})
+}
+
+// recreateOnDelete creates the object of that name again, in any namespace,
+// as soon as it is deleted.
+func recreateOnDelete(t *testing.T, resource dynamic.NamespaceableResourceInterface, name string) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	watcher, err := resource.Watch(ctx, metav1.ListOptions{FieldSelector: "metadata.name=" + name})
+	if err != nil {
+		t.Fatalf("Watching for %s failed: %v", name, err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for event := range watcher.ResultChan() {
+			object, ok := event.Object.(*unstructured.Unstructured)
+			if !ok || event.Type != watch.Deleted {
+				continue
+			}
+			again := &unstructured.Unstructured{Object: map[string]any{"data": object.Object["data"]}}
+			again.SetGroupVersionKind(object.GroupVersionKind())
+			again.SetName(name)
+			_, _ = resource.Namespace(object.GetNamespace()).Create(ctx, again, metav1.CreateOptions{})
 		}
 	}()
 	t.Cleanup(func() {

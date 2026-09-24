@@ -248,7 +248,10 @@ func validateRun(t *target.Target, sequence Sequence, opts Options) error {
 	if sequence.Target != t.Name {
 		return fmt.Errorf("the sequence is for the target %q, and this run's target is %q", sequence.Target, t.Name)
 	}
-	return sequence.Validate()
+	if err := sequence.Validate(); err != nil {
+		return err
+	}
+	return sequence.checkCRs(t.Sample.GetName())
 }
 
 // WriteRunSequence puts the sequence in the run directory, so that a failing
@@ -335,8 +338,8 @@ type runner struct {
 	converged time.Time
 	// teardownStart is where the teardown began.
 	teardownStart time.Time
-	// cr is the primary CR the CR ops act on.
-	cr     string
+	// crs are the CRs the run created, in the order it first created each.
+	crs    []string
 	faults []heldFault
 	// faultOps is the op index of each of Timeline.Faults.
 	faultOps []int
@@ -423,9 +426,6 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 	}
 	r.expireFaults(op.Index)
 	applied, err := r.apply(ctx, op)
-	if op.Type.OnCR() {
-		applied.CR = r.cr
-	}
 	r.timeline.Ops = append(r.timeline.Ops, applied)
 	if stayed := (*crStayed)(nil); errors.As(err, &stayed) {
 		return r.judgeStayed(op, stayed)
@@ -441,21 +441,20 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 
 func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 	applied := AppliedOp{Op: op, At: r.now()}
+	var err error
 	switch op.Type {
 	case OpCreate:
-		return applied, r.create(ctx, op)
+		applied.CR, err = r.create(ctx, op)
+		return applied, err
 	case OpUpdate:
-		if err := r.haveCR(); err != nil {
-			return applied, err
-		}
-		return applied, refusal(op, r.h.patchCR(ctx, r.cr, op.Patch))
+		applied.CR = op.crOr(r.target.Sample.GetName())
+		return applied, refusal(op, r.h.patchCR(ctx, applied.CR, op.Patch))
 	case OpDelete:
-		if err := r.haveCR(); err != nil {
-			return applied, err
-		}
-		return applied, r.h.deleteCR(ctx, r.cr)
+		applied.CR = op.crOr(r.target.Sample.GetName())
+		return applied, r.h.deleteCR(ctx, applied.CR)
 	case OpRecreate:
-		return applied, r.recreate(ctx, op)
+		applied.CR, err = r.recreate(ctx, op, op.crOr(r.target.Sample.GetName()))
+		return applied, err
 	case OpRestart:
 		return applied, r.h.restart(ctx)
 	case OpFault:
@@ -474,28 +473,28 @@ func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 	return applied, fmt.Errorf("%q is not an op type", op.Type)
 }
 
-func (r *runner) create(ctx context.Context, op Op) error {
+// create creates the op's object and returns the name the CR took.
+func (r *runner) create(ctx context.Context, op Op) (string, error) {
 	name, err := r.h.createCR(ctx, op.Obj)
 	if err != nil {
-		return refusal(op, err)
+		return op.Obj.GetName(), refusal(op, err)
 	}
-	r.cr = name
-	return nil
+	if !slices.Contains(r.crs, name) {
+		r.crs = append(r.crs, name)
+	}
+	return name, nil
 }
 
 // recreate deletes the CR, waits for it to go and creates the op's object. The
 // wait lasts T_delete, or longer while the run is owed time. A CR still there
-// where the wait ends is judged there.
-func (r *runner) recreate(ctx context.Context, op Op) error {
-	if err := r.haveCR(); err != nil {
-		return err
-	}
+// where the wait ends is judged there. It returns the CR the op last wrote.
+func (r *runner) recreate(ctx context.Context, op Op, cr string) (string, error) {
 	due := r.now().Add(r.target.Timeouts.Delete)
-	if err := r.h.deleteCR(ctx, r.cr); err != nil {
-		return err
+	if err := r.h.deleteCR(ctx, cr); err != nil {
+		return cr, err
 	}
 	wait := Wait{Window: Window{Start: r.now()}}
-	gone, err := r.h.awaitCRGone(ctx, r.cr, func() time.Time {
+	gone, err := r.h.awaitCRGone(ctx, cr, func() time.Time {
 		if owed := r.owed(); owed.After(due) {
 			return owed
 		}
@@ -503,12 +502,12 @@ func (r *runner) recreate(ctx context.Context, op Op) error {
 	})
 	switch {
 	case err != nil:
-		return err
+		return cr, err
 	case gone:
 		return r.create(ctx, op)
 	}
 	wait.Window.End = r.now()
-	return &crStayed{cr: r.cr, wait: wait}
+	return cr, &crStayed{cr: cr, wait: wait}
 }
 
 // crStayed is a recreate whose CR was still there where the wait for it to go
@@ -529,13 +528,6 @@ func (r *runner) judgeStayed(op Op, stayed *crStayed) error {
 		return err
 	}
 	return stayed
-}
-
-func (r *runner) haveCR() error {
-	if r.cr == "" {
-		return errors.New("no CR has been created yet")
-	}
-	return nil
 }
 
 // applyDeleteManaged resolves the op's index against the managed objects and
@@ -651,7 +643,7 @@ func (r *runner) targetStopped(status launch.Status) error {
 		err = fmt.Errorf("%w; another process holds that port, perhaps a concurrent run of this target, so give the target a free one in launch.args", err)
 	// A supervised target stops only where a restart failed, and a target that
 	// requested no resource never saw the CR.
-	case r.cr != "" && r.converged.IsZero() && slices.ContainsFunc(r.h.requests(), namesAResource):
+	case len(r.crs) > 0 && r.converged.IsZero() && slices.ContainsFunc(r.h.requests(), namesAResource):
 		err = fmt.Errorf("%w; botbox had created the CR, so the CR may have crashed the target, and %s replays the run",
 			err, filepath.Join(r.dir, sequenceFile))
 	}
@@ -869,8 +861,8 @@ func (r *runner) teardown(ctx context.Context) error {
 	// target's to answer for.
 	r.timeline.Quiet.End = r.now()
 	r.timeline.Deletion.Start = r.timeline.Quiet.End
-	if r.cr != "" {
-		failures = append(failures, r.h.deleteCR(ctx, r.cr))
+	for _, cr := range r.crs {
+		failures = append(failures, r.h.deleteCR(ctx, cr))
 	}
 	clean, err := r.h.awaitClean(ctx, r.target.Timeouts.Delete+deletionMargin)
 	r.timeline.Deletion.End = r.now()

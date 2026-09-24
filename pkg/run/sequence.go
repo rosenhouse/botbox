@@ -30,6 +30,9 @@ type Op struct {
 	// Index is the op's position in the sequence.
 	Index int    `json:"i"`
 	Type  OpType `json:"t"`
+	// CR names the CR update, delete and recreate act on. Empty names the
+	// sample's.
+	CR string `json:"cr,omitempty"`
 	// Obj is what create and recreate create.
 	Obj *unstructured.Unstructured `json:"obj,omitempty"`
 	// Patch is the JSON merge patch (RFC 7386) update applies.
@@ -245,7 +248,39 @@ func (o Op) validateFields() error {
 	if o.Type == OpDeleteManaged && *o.Nth < 0 {
 		return fmt.Errorf("index is %d, want the position of a managed object", *o.Nth)
 	}
+	if o.CR != "" && !slices.Contains(namingOps, o.Type) {
+		return fmt.Errorf("a %s op takes no cr", o.Type)
+	}
 	return nil
+}
+
+// namingOps act on a CR an earlier op created, which cr names.
+var namingOps = []OpType{OpUpdate, OpDelete, OpRecreate}
+
+// checkCRs reports an op that acts on a CR no op before it creates. An op
+// that names no CR acts on the sample's.
+func (s Sequence) checkCRs(sample string) error {
+	created := map[string]bool{}
+	for _, op := range s.Ops {
+		if name := op.crOr(sample); slices.Contains(namingOps, op.Type) && !created[name] {
+			if op.CR == "" {
+				return fmt.Errorf("op %d (%s) names no cr, so it acts on the sample's %s, which no op before it creates", op.Index, op.Type, name)
+			}
+			return fmt.Errorf("op %d (%s) acts on the CR %s, which no op before it creates", op.Index, op.Type, name)
+		}
+		if op.Obj != nil {
+			created[op.Obj.GetName()] = true
+		}
+	}
+	return nil
+}
+
+// crOr is the name of the CR the op acts on, where sample is the sample's.
+func (o Op) crOr(sample string) string {
+	if o.CR == "" {
+		return sample
+	}
+	return o.CR
 }
 
 // fieldsOf says which fields an op type carries.

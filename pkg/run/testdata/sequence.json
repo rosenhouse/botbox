@@ -73,6 +73,30 @@
     },
     {
       "i": 7,
+      "t": "create",
+      "obj": {
+        "apiVersion": "toy.botbox/v1",
+        "kind": "Widget",
+        "metadata": {
+          "name": "widget-2"
+        },
+        "spec": {
+          "count": 2
+        }
+      }
+    },
+    {
+      "i": 8,
+      "t": "update",
+      "cr": "widget-2",
+      "patch": {
+        "spec": {
+          "count": 4
+        }
+      }
+    },
+    {
+      "i": 9,
       "t": "delete"
     }
   ]

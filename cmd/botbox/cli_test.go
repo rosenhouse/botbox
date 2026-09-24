@@ -70,6 +70,10 @@ type fakeSession struct {
 	closing func()
 	// deadlines are when each execute's context ends.
 	deadlines []time.Time
+	// now is botbox's clock, where it is not the real one.
+	now func() time.Time
+	// discarding fails discarding a passing run.
+	discarding error
 }
 
 func (s *fakeSession) vet(*target.Target) error { return s.refused }
@@ -132,17 +136,20 @@ func invokeCtx(t *testing.T, ctx context.Context, fake *fakeSession,
 	newGenerator func(*target.Target) (Generator, []string, error), args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	c := &cli{
-		stdout: &stdout,
-		stderr: &stderr,
-		open: func(options, *target.Target) (session, error) {
-			fake.stderrAtOpen = stderr.String()
-			if fake.unopened != nil {
-				return nil, fake.unopened
-			}
-			return fake, nil
-		},
-		newGenerator: newGenerator,
+	c := newCLI(&stdout, &stderr)
+	c.open = func(options, *target.Target) (session, error) {
+		fake.stderrAtOpen = stderr.String()
+		if fake.unopened != nil {
+			return nil, fake.unopened
+		}
+		return fake, nil
+	}
+	c.newGenerator = newGenerator
+	if fake.now != nil {
+		c.now = fake.now
+	}
+	if fake.discarding != nil {
+		c.discard = func(*run.Output, int) error { return fake.discarding }
 	}
 	return c.main(ctx, args), stdout.String(), stderr.String()
 }

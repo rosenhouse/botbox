@@ -301,6 +301,48 @@ func TestAPassingInvocationWritesItsSummary(t *testing.T) {
 	}
 }
 
+func TestTheSummaryTimesTheInvocationAndEachRun(t *testing.T) {
+	berlin := time.FixedZone("CEST", 2*60*60)
+	clock := time.Date(2026, 9, 24, 3, 2, 3, 0, berlin)
+	began := clock
+	session := &fakeSession{now: func() time.Time { return clock }}
+	session.after = func() { clock = clock.Add(1500 * time.Millisecond) }
+	out := t.TempDir()
+
+	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", out, "--runs", "2", "--seed", "1")
+
+	if code != exitOK {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	written := readSummary(t, out)
+	if !written.Start.Equal(began) || !written.Finish.Equal(began.Add(3*time.Second)) || written.Start.Location() != time.UTC {
+		t.Errorf("The summary says the invocation ran from %v to %v, want the 3s from %v, in UTC.", written.Start, written.Finish, began.UTC())
+	}
+	for _, ran := range written.Runs {
+		if ran.Duration != "1.5s" {
+			t.Errorf("The summary says run %d took %q, want 1.5s.", ran.Run, ran.Duration)
+		}
+	}
+}
+
+func TestAPassingRunBotboxCannotDiscardStopsTheInvocation(t *testing.T) {
+	out := t.TempDir()
+	session := &fakeSession{discarding: errors.New("discarding the passing run: device or resource busy")}
+
+	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", out, "--runs", "2", "--seed", "1")
+
+	if code != exitError {
+		t.Fatalf("botbox run exited %d, want %d: %s", code, exitError, stderr)
+	}
+	written := readSummary(t, out)
+	if written.Outcome != "error" || written.Error != session.discarding.Error() {
+		t.Errorf("The summary says %s on %q, want an error on %q.", written.Outcome, written.Error, session.discarding)
+	}
+	if outcomes := []string{written.Runs[0].Outcome, written.Runs[1].Outcome}; !slices.Equal(outcomes, []string{"passed", "not run"}) {
+		t.Errorf("The summary lists the runs as %q, want run 1 passed and run 2 not run.", outcomes)
+	}
+}
+
 func TestTheSummaryNamesTheSequenceFilesItRan(t *testing.T) {
 	out := t.TempDir()
 	path := writeSequence(t, 8675309)

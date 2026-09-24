@@ -30,8 +30,9 @@ const (
 
 func TestMain(m *testing.M) {
 	if os.Getenv(asBotbox) != "" {
-		c := &cli{stdout: os.Stdout, stderr: os.Stderr, newGenerator: countingGenerator(nil),
-			open: func(options, *target.Target) (session, error) { return untilInterrupted{}, nil }}
+		c := newCLI(os.Stdout, os.Stderr)
+		c.newGenerator = countingGenerator(nil)
+		c.open = func(options, *target.Target) (session, error) { return untilInterrupted{}, nil }
 		os.Exit(c.interruptible(os.Args[1:]))
 	}
 	os.Exit(m.Run())

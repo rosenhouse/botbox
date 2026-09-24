@@ -31,7 +31,7 @@ func TestACrashLoopIsAFindingWithAReport(t *testing.T) {
 	}
 	t.Chdir(dir) // launch.binary is relative to the working directory.
 	var stdout, stderr bytes.Buffer
-	c := &cli{stdout: &stdout, stderr: &stderr, open: openSession, newGenerator: rapidGenerator}
+	c := newCLI(&stdout, &stderr)
 
 	code := c.main(t.Context(), []string{"replay", "--target", targetFile, "--out", "out", "--launch-arg", "--bug=12", sequence})
 

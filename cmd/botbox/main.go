@@ -13,8 +13,7 @@ import (
 )
 
 func main() {
-	c := &cli{stdout: os.Stdout, stderr: os.Stderr, open: openSession, newGenerator: rapidGenerator}
-	os.Exit(c.interruptible(os.Args[1:]))
+	os.Exit(newCLI(os.Stdout, os.Stderr).interruptible(os.Args[1:]))
 }
 
 // interruptible runs the invocation until SIGINT, SIGTERM or SIGHUP interrupts

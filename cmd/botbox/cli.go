@@ -74,8 +74,8 @@ func rapidGenerator(t *target.Target) (Generator, []string, error) {
 	return g.Draw, g.LeftAlone(), nil
 }
 
-// cli is one invocation. Its writers, its generator and its test cluster are
-// injected, so the unit tier needs no API server.
+// cli is one invocation. Its writers, its generator, its test cluster and its
+// clock are injected, so the unit tier needs no API server.
 type cli struct {
 	stdout, stderr io.Writer
 	open           func(options, *target.Target) (session, error)
@@ -83,6 +83,13 @@ type cli struct {
 	// pkg/generate's does: reading the target's CRDs costs I/O, drawing does
 	// not.
 	newGenerator func(*target.Target) (Generator, []string, error)
+	now          func() time.Time
+	discard      func(out *run.Output, n int) error
+}
+
+func newCLI(stdout, stderr io.Writer) *cli {
+	return &cli{stdout: stdout, stderr: stderr, open: openSession, newGenerator: rapidGenerator,
+		now: time.Now, discard: (*run.Output).Discard}
 }
 
 // session executes sequences against one test cluster. Runs share it, because
@@ -159,7 +166,7 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	if err != nil {
 		return c.fail(err)
 	}
-	start := time.Now()
+	start := c.now()
 	out, err := run.OpenOutput(opts.out, opts.invocationSeed(runs[0].sequence), start)
 	if err != nil {
 		return c.fail(err)
@@ -173,7 +180,7 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	} else {
 		code = c.runAll(ctx, opts, s, exercised, runs, out, record)
 	}
-	record.finish(ctx, code, time.Now())
+	record.finish(ctx, code, c.now())
 	c.warn(record.write(out.Dir()))
 	if opts.junit != "" {
 		c.warn(record.writeJUnit(opts.junit, out.Dir()))
@@ -216,10 +223,10 @@ func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Tar
 		number := i + 1
 		fmt.Fprintf(c.stdout, "run %d: seed %d, %s\n", number, planned.sequence.Seed, planned.source())
 		dir := out.RunDir(number)
-		started := time.Now()
+		started := c.now()
 		result, err := s.execute(ctx, t, planned.sequence, dir, run.Engine{})
 		ran := &record.Runs[i]
-		ran.ran(result, time.Since(started))
+		ran.ran(result, c.now().Sub(started))
 		code := exitCode(result, err)
 		if code == exitViolation {
 			violation, notes := c.reportFailure(ctx, opts, s, t, planned, result, number, dir)
@@ -233,7 +240,7 @@ func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Tar
 			return c.failRun(number, planned, dir, err)
 		}
 		ran.Outcome = outcomePassed
-		if err := out.Discard(number); err != nil {
+		if err := c.discard(out, number); err != nil {
 			return c.stop(record, err)
 		}
 	}

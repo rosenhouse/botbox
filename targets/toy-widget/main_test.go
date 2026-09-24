@@ -93,6 +93,18 @@ func TestRunRejectsABugOutsideTheCatalog(t *testing.T) {
 	}
 }
 
+func TestRunRejectsOnlyANegativeResync(t *testing.T) {
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "no-such-kubeconfig"))
+
+	for resync, rejected := range map[string]bool{"-1s": true, "0s": false} {
+		err := run([]string{"--resync=" + resync}, io.Discard)
+
+		if got := err != nil && strings.Contains(err.Error(), "--resync="+resync); got != rejected {
+			t.Errorf("run returned %v for --resync=%s, want it rejected: %v.", err, resync, rejected)
+		}
+	}
+}
+
 func TestRunPrintsTheUsageForHelp(t *testing.T) {
 	printed := &strings.Builder{}
 

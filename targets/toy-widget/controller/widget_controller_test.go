@@ -1,14 +1,18 @@
 package controller
 
 import (
+	"context"
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	toyv1 "github.com/rosenhouse/botbox/targets/toy-widget/api/v1"
@@ -76,6 +80,46 @@ func TestStatusForReportsAChangeOnlyWhenOneIsNeeded(t *testing.T) {
 	widget.Generation = 2
 	if _, changed := statusFor(widget, 3); !changed {
 		t.Error("statusFor kept a stale observedGeneration.")
+	}
+}
+
+// A controller that resyncs on a timer requeues itself and writes its status
+// on every tick, changed or not. Without the timer, a converged Widget costs
+// nothing.
+func TestResyncRequeuesAndWritesTheStatusEachTime(t *testing.T) {
+	for _, tc := range []struct {
+		resync       time.Duration
+		statusWrites int
+	}{
+		{resync: 0, statusWrites: 0},
+		{resync: 15 * time.Second, statusWrites: 1},
+	} {
+		t.Run(tc.resync.String(), func(t *testing.T) {
+			converged := newWidget(0)
+			converged.Finalizers = []string{Finalizer}
+			converged.Status = toyv1.WidgetStatus{Ready: 0, ObservedGeneration: 1}
+			statusWrites := 0
+			countStatusWrites := interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResource string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					statusWrites++
+					return c.SubResource(subResource).Patch(ctx, obj, patch, opts...)
+				},
+			}
+			r := fixture(t, 0, countStatusWrites, converged)
+			r.Resync = tc.resync
+
+			result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(converged)})
+
+			if err != nil {
+				t.Fatalf("Reconcile returned an error: %v", err)
+			}
+			if result.RequeueAfter != tc.resync {
+				t.Errorf("Reconcile asked to requeue after %v, want %v.", result.RequeueAfter, tc.resync)
+			}
+			if statusWrites != tc.statusWrites {
+				t.Errorf("Reconcile wrote the status %d times, want %d.", statusWrites, tc.statusWrites)
+			}
+		})
 	}
 }
 

@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/client-go/util/workqueue"
+
 	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
@@ -33,9 +35,23 @@ func TestG6FiresPastTheThreshold(t *testing.T) {
 	if !strings.Contains(violation.Statement, "get") || !strings.Contains(violation.Statement, "w-0") {
 		t.Errorf("The statement is %q, want it to name the request the target repeated.", violation.Statement)
 	}
+	if want := "thresholds.errloop allows 5"; !strings.Contains(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to name the threshold: %q.", violation.Statement, want)
+	}
 	if len(violation.Requests) != errLoop+1 {
 		t.Fatalf("The evidence holds %d requests, want all %d of the loop.", len(violation.Requests), errLoop+1)
 	}
+}
+
+// A loop every T_settle/N_errloop puts a failure at each end of T_settle, and
+// both count.
+func TestG6CountsFailuresAtBothEndsOfTheWindow(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		requests(time.Second, settleTimeout/errLoop, errLoop+1, failedGet("w-0", 404)).
+		through(8 * time.Second)
+
+	fired(t, invariant.NoErrorLoop, in)
 }
 
 func TestG6CountsServerErrorsToo(t *testing.T) {
@@ -132,17 +148,42 @@ func TestG6IgnoresFailuresAnOpSplits(t *testing.T) {
 }
 
 func TestG6TakesTheThresholdSection6DefaultsWhenTheTargetDeclaresNone(t *testing.T) {
-	in := loop(target.DefaultThresholds.ErrLoop, failedGet("w-0", 404)).through(40 * time.Second)
+	in := loop(10, failedGet("w-0", 404)).through(40 * time.Second)
 	in.Target.Thresholds = target.Thresholds{}
 	in.Target.Timeouts = target.Timeouts{}
 
 	silent(t, invariant.NoErrorLoop, in)
 
-	in = loop(target.DefaultThresholds.ErrLoop+1, failedGet("w-0", 404)).through(40 * time.Second)
+	in = loop(11, failedGet("w-0", 404)).through(40 * time.Second)
 	in.Target.Thresholds = target.Thresholds{}
 	in.Target.Timeouts = target.Timeouts{}
 
 	fired(t, invariant.NoErrorLoop, in)
+}
+
+// controller-runtime's default rate limiter doubles a failing item's delay
+// from 5ms, so the densest 30s holds 13 identical failures however long the
+// loop runs, and G6 sees them at a threshold of 12 or less, such as the
+// default.
+func TestG6SeesControllerRuntimesDefaultBackoff(t *testing.T) {
+	limiter := workqueue.DefaultTypedControllerRateLimiter[string]()
+	backingOff := newRun().op(invariant.OpCreate, 0)
+	for at := time.Second; at < 2*time.Minute; at += limiter.When("w-0") {
+		backingOff.request(at, failedGet("w-0", 404))
+	}
+	in := backingOff.through(3 * time.Minute)
+	in.Target.Timeouts = target.Timeouts{}
+
+	in.Target.Thresholds = target.Thresholds{}
+	fired(t, invariant.NoErrorLoop, in)
+
+	in.Target.Thresholds = target.Thresholds{ErrLoop: 13}
+	silent(t, invariant.NoErrorLoop, in)
+
+	in.Target.Thresholds = target.Thresholds{ErrLoop: 12}
+	if violation := fired(t, invariant.NoErrorLoop, in); len(violation.Requests) != 13 {
+		t.Errorf("G6 quotes %d failures, want the 13 in the densest 30s.", len(violation.Requests))
+	}
 }
 
 func TestG6ReadsALogTheProxyStampedOutOfOrder(t *testing.T) {

@@ -263,6 +263,7 @@ func TestLoadRejects(t *testing.T) {
 		{"timeout of zero", minimalTarget + "timeouts:\n  stable: 0s\n", "", []string{"stable", "positive"}},
 		{"negative timeout", minimalTarget + "timeouts:\n  delete: -1s\n", "", []string{"delete", "positive"}},
 		{"errloop of zero", minimalTarget + "thresholds:\n  errloop: 0\n", "", []string{"errloop", "positive"}},
+		{"negative quiet", minimalTarget + "thresholds:\n  quiet: -1\n", "", []string{"quiet -1", "negative"}},
 		// A settle wait carves T_stable of quiet out of T_settle, so these
 		// leave the target no time to react and every op expires. The wants
 		// carry the durations: the temp directory's path holds the case name,
@@ -376,7 +377,7 @@ func TestLoadDefaults(t *testing.T) {
 	if loaded.Timeouts != wantTimeouts {
 		t.Errorf("Load defaulted timeouts to %+v, want %+v.", loaded.Timeouts, wantTimeouts)
 	}
-	if want := (target.Thresholds{ErrLoop: 20}); loaded.Thresholds != want {
+	if want := (target.Thresholds{ErrLoop: 10}); loaded.Thresholds != want {
 		t.Errorf("Load defaulted thresholds to %+v, want %+v.", loaded.Thresholds, want)
 	}
 
@@ -437,8 +438,36 @@ func TestLoadDefaultsEachTimeoutSeparately(t *testing.T) {
 	if loaded.Timeouts != want {
 		t.Errorf("Load read timeouts %+v, want %+v.", loaded.Timeouts, want)
 	}
-	if loaded.Thresholds.ErrLoop != 20 {
-		t.Errorf("Load read errloop %d, want the default 20.", loaded.Thresholds.ErrLoop)
+	if loaded.Thresholds.ErrLoop != 10 {
+		t.Errorf("Load read errloop %d, want the default 10.", loaded.Thresholds.ErrLoop)
+	}
+}
+
+// A threshold the target leaves out takes its default.
+func TestLoadThresholds(t *testing.T) {
+	defaults := target.DefaultThresholds
+	t.Cleanup(func() { target.DefaultThresholds = defaults })
+	target.DefaultThresholds = target.Thresholds{ErrLoop: 9, Quiet: 4}
+	for _, tc := range []struct {
+		declared string
+		want     target.Thresholds
+	}{
+		{"thresholds:\n  quiet: 3\n", target.Thresholds{ErrLoop: 9, Quiet: 3}},
+		{"thresholds:\n  quiet: 0\n  errloop: 7\n", target.Thresholds{ErrLoop: 7, Quiet: 0}},
+		{"thresholds:\n  errloop: 7\n", target.Thresholds{ErrLoop: 7, Quiet: 4}},
+	} {
+		t.Run(tc.declared, func(t *testing.T) {
+			path := writeTarget(t, minimalTarget+tc.declared, map[string]string{"widget.yaml": sampleWidget})
+
+			loaded, err := target.Load(path)
+
+			if err != nil {
+				t.Fatalf("Load rejected the thresholds: %v", err)
+			}
+			if loaded.Thresholds != tc.want {
+				t.Errorf("Load read thresholds %+v, want %+v.", loaded.Thresholds, tc.want)
+			}
+		})
 	}
 }
 

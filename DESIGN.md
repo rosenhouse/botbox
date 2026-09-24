@@ -219,10 +219,10 @@ The Runner executes one sequence:
    deletion either, because its ops did not all run. Then
    force-remove any finalizer still present in the run namespace; the report notes each one
    (D37). G3 judged the deletion window, which closed before this. Delete every remaining
-   object
-   in the namespace that botbox or the target created. Stop the target if it was started
-   for this run. Delete the namespace. Namespace names are never reused, so a namespace
-   that never finishes terminating (envtest, §5.8) is harmless.
+   object in the namespace of a kind the target declares or a fixture has, because a later
+   run's target may watch every namespace. Stop the target if it was started for this run.
+   Delete the namespace. Namespace names are never reused, so a namespace that never
+   finishes terminating (envtest, §5.8) is harmless.
 
 Cleanup between runs never restarts the API server, because rapid's shrinker re-invokes
 the test function many times.
@@ -316,12 +316,12 @@ real targets; the toy target sets much shorter ones (§9).
 
 | ID | Name | Statement | Signal |
 |---|---|---|---|
-| **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault (§5.5), the target makes no further API request for `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io` leases, since leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
-| **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
+| **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault (§5.5), the target makes no more than `N_quiet` (default 0) API requests in `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io` leases, since leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
+| **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. A status write whose content is unchanged moves no resourceVersion, so G2 counts status subresource writes from the proxy log, and more than `N_quiet` of them is churn. `N_quiet` never excuses a resourceVersion that moves. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
-| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
+| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 10) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
 
 **The quiet window.** G1 and G2 judge the `T_stable` that follows a settle wait, which
 ends where the run converged or where the wait gave up (§5.5). Measuring
@@ -372,6 +372,16 @@ clean satisfies G3 at that instant, which is how a target that cleans up promptl
 judged rather than left unjudged: the run stops watching long before `T_delete` is up. An
 object a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (D38).
 
+**Periodic work.** A controller that resyncs on a timer makes requests after it has
+converged, often a write that changes nothing. `N_quiet` is how many of those one quiet
+window may hold, per target (§8.1). A tick every `interval` puts at most
+`floor(T_stable / interval) + 1` ticks in one window, so `N_quiet` is that times the
+requests one tick makes, summed over every timer the target runs, such as one per CR. A
+write that changes something still moves a resourceVersion, which G2 reports whatever
+`N_quiet` is. Any `N_quiet` above zero also lets a slow loop of that many requests per
+window through G1. G6 counts a loop only while it fails more than `N_errloop` times
+within `T_settle`, so a slow failing loop can pass both.
+
 **What the proxy cannot see.** G1 and G6 observe only requests that leave the target
 process. Reads served from a client-side cache are invisible, so a reconcile loop that
 makes no API calls is outside what botbox can detect.
@@ -383,6 +393,14 @@ is AlreadyExists, which says the object is there, so a target that keeps re-crea
 looping and G6 counts it; so is a 409 on any other verb. G6 also counts a failing watch,
 which G1 excludes: G1 ignores a watch because a watch that hangs is the target waiting,
 while a watch that fails returns at once and repeating it is a loop.
+
+**Backoff.** controller-runtime's default rate limiter doubles a failing request's delay
+from 5 ms. A loop on one object therefore fails 10 times in its first 5 s, 11 times by
+5.1 s, and 13 times in its densest 30 s, however long it runs. The default `N_errloop`
+sees it once it has run 5.1 s under one spec. A `T_settle` of 5 s holds only 10, so it
+needs an `N_errloop` of 9 or less, which is why the toy declares 5 (§9). A loop on a
+fixed interval longer than `T_settle / N_errloop` escapes G6, and a readiness verdict or
+G1 often names it instead (§5.7).
 
 **Notes.** A check that could not judge something records a note naming it: G3 for a
 deletion whose deadline the run did not reach, that a fault reached into, or that botbox
@@ -519,7 +537,8 @@ timeouts:                                     # optional; defaults in §6
   stable: 10s
   delete: 60s
 thresholds:                                   # optional; defaults in §6
-  errloop: 20                                 # N_errloop for G6
+  errloop: 10                                 # N_errloop for G6
+  quiet: 0                                    # N_quiet for G1 and G2
 ```
 
 A settle wait ends once the Ready predicate holds and nothing has changed for `stable`,
@@ -583,6 +602,7 @@ type Target struct {
     Generate      GenerateSpec
     Launch        LaunchSpec
     Timeouts      Timeouts
+    Thresholds    Thresholds
 }
 
 type Property struct {
@@ -661,6 +681,11 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   present. In CEL, `!has(status.ready) || status.ready <= managed.filter(o, o.kind ==
   "ConfigMap").size()`.
 - `timeouts: {settle: 5s, stable: 2s, delete: 10s}`. The toy converges in milliseconds.
+- `thresholds: {errloop: 5}`. B5's backoff repeats its failing request 10 times in the
+  toy's 5 s `T_settle` (§6, backoff).
+- `--resync=<duration>` requeues every Widget on that interval and writes its status each
+  time, changed or not. The envtest tier runs it at 900 ms, which fails G1 under the
+  default `N_quiet` and passes under `quiet: 3` (§6, periodic work).
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 
@@ -919,12 +944,12 @@ the proxy; the `Image` launcher. Separate design addendum.
 
 ## 14. Open questions
 
-1. Does G2 need a per-target exemption list for controllers that write heartbeat-style
-   status fields? external-secrets under `refreshPolicy: Periodic` is the first real
-   target that writes them, and only at an interval longer than `T_stable` does G2 see
-   them: a shorter one keeps the settle wait from converging, and G4 reports it first
-   (D40). D40 answered this target with a target-side setting. The question stands for a
-   controller that offers no such setting.
+1. Does G2 need a per-target exemption for a status field that a controller rewrites
+   with a new value on a timer, such as a heartbeat? `N_quiet` admits writes that change
+   nothing (D@39), and a write that moves a resourceVersion is churn. external-secrets
+   under `refreshPolicy: Periodic` writes such a field, and D40 answered it with a
+   target-side setting. The question stands for a controller that offers no such
+   setting.
 2. How is a cluster-scoped primary CR (ClusterIssuer-like) isolated per run?
 3. Should a later phase run the target's admission webhook in envtest, so that generation
    can widen beyond `generate.mutate`?
@@ -1263,3 +1288,25 @@ built from source and run as a black-box binary.
   hook compared. A row of a whole object names no path, because `equalIgnore` cannot ignore
   an object. The line botbox prints quotes the first row with a path, since that is what an
   adopter pastes, and names its object where the statement names another.
+- **D@39 A target declares how many requests a quiet window may hold.** G1 failed a
+  controller that resyncs on a timer, because one request in the `T_stable` after
+  convergence was a violation, and a target could not declare the timer.
+  `thresholds.quiet`, `N_quiet`, default 0, bounds G1's count of requests in one quiet
+  window and G2's count of status writes in it. It mirrors `errloop`: one number keeps G1 a
+  bound on the request rate. A declared resync interval would need botbox to find each
+  tick's burst, and an opt-out would drop G1 and G2 whole. One number covers both checks,
+  because a tick that rewrites an unchanged status is both a request and a status write.
+  It never excuses a resourceVersion that moves, so a heartbeat that changes a field is
+  still churn (§14 question 1). An `N_quiet` above zero lets a slow loop through G1, and
+  G6 catches only a loop that fails often enough (D@46). The toy's `--resync` runs under
+  envtest with `quiet: 3` and with the default.
+- **D@46 `N_errloop` defaults to 10, and the teardown deletes the fixtures.**
+  controller-runtime's default backoff fails 11 times by 5.1 s and 13 times in the densest
+  30 s, so G6 missed such a loop at 20. A lower default can fail a correct controller that
+  retries one request fast, so the adopted examples set the bar. The worst count of one
+  failing request within 30 s was 3 over 23 external-secrets runs and 2 over 13
+  cert-manager runs, on drawn seeds, pinned sequences and controls. Before the teardown
+  deleted the fixtures, external-secrets reached 26 by the seventh run of one invocation.
+  It reconciled each earlier run's SecretStore, left in a namespace envtest never deletes,
+  and the API server refused every Event it created there. A `T_settle` of 5 s still
+  needs 9 or less (§6, backoff).

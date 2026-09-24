@@ -24,5 +24,6 @@ timeouts:
   settle: 5s
   stable: 2s
   delete: 10s
+# B5's backoff repeats its failing request 10 times within settle.
 thresholds:
   errloop: 5

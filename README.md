@@ -133,7 +133,7 @@ crds:
 primary: cert-manager.io/v1/Certificate       # the resource CR ops act on
 sample: certificate.yaml                      # a valid primary CR; generation mutates copies of it
 fixtures:
-  - issuer.yaml                               # applied to the run namespace before op 0
+  - issuer.yaml                               # applied to the run namespace before op 0, deleted after the last
 manages:                                      # group/version/Kind, or v1/Kind for the core group
   - v1/Secret
   - cert-manager.io/v1/CertificateRequest
@@ -150,12 +150,30 @@ timeouts:                                     # optional; 30s, 10s and 60s by de
   settle: 30s                                 # the whole budget for one spec change
   stable: 10s                                 # the quiet it has to end in, carved out of settle
   delete: 60s                                 # how long a deletion has to come clean
+thresholds:                                   # optional; 10 and 0 by default
+  errloop: 10                                 # how often one failing request may repeat within settle
+  quiet: 0                                    # how many requests one stable window may hold
 ```
 
-A slow controller needs a wider `settle`, and a chatty one a narrower `stable`. The quiet
-window sits inside the settle budget, so the controller has `settle - stable` to stop
-writing. A `stable` at least as wide as `settle` leaves it none, so botbox refuses to load
-that target rather than reporting G4 against your controller.
+A slow controller needs a wider `settle`. The quiet window sits inside the settle budget,
+so the controller has `settle - stable` to stop writing. A `stable` at least as wide as
+`settle` leaves it none, so botbox refuses to load that target rather than reporting G4
+against your controller. A narrower `stable` also shortens the windows G1 and G2 judge.
+
+A controller that resyncs on a timer makes requests after it has converged, and G1 fails
+it by default. `quiet` is how many requests one `stable` window may hold. A window holds
+at most one tick more than `stable` divided by the interval, rounded down. Multiply those
+ticks by the requests one tick makes, and add up every timer your controller runs, such
+as one per CR. A 15s resync that makes one request needs `quiet: 1` under the default
+`stable`. `quiet` also bounds the status writes that change nothing, which G2 counts. A
+write that changes something fails G2 whatever `quiet` is, or G4 if the timer is faster
+than `stable`, because the settle wait then never sees `stable` of quiet. Keep `quiet` as
+low as your timer allows, since G1 lets a slow loop of that many requests through.
+
+G6 fails a controller that repeats one failing request more than `errloop` times within
+`settle`. controller-runtime's default backoff repeats one 11 times in its first 5.1s,
+which the default catches. A 5s `settle` holds only 10 of them, so it needs `errloop: 9`
+or less.
 
 envtest runs no garbage collector, so botbox runs its own over the kinds your target
 declares. It deletes an object once every owner the object names is gone. It finds an owner
@@ -325,7 +343,7 @@ Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generi
 
 | ID | Checks |
 |---|---|
-| G1 | Bounded reconciliation. The target's request rate falls to zero under an unchanged spec. |
+| G1 | Bounded reconciliation. Under an unchanged spec, one quiet window holds no more requests than `quiet` allows, zero by default. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
 | G3 | Clean deletion. Deleting the CR removes everything it manages and clears its finalizers. |
 | G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops. |

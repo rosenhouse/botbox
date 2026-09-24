@@ -14,7 +14,8 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/client-go/kubernetes"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
@@ -106,6 +107,7 @@ func TestRunner(t *testing.T) {
 
 	t.Run("drives the toy through a sequence and checkpoints where the design says", func(t *testing.T) {
 		toy := loadTarget(t, binary)
+		toy.Fixtures = append(toy.Fixtures, fixtureSecret())
 		check := &recordingChecker{}
 		dir := t.TempDir()
 
@@ -342,24 +344,27 @@ func requireOpsTookEffect(t *testing.T, check *recordingChecker, result run.Resu
 }
 
 // requireNamespaceEmpty asserts what the teardown left: a namespace holding
-// none of the run's objects. envtest never finishes terminating one, so its
-// contents stay readable (DESIGN.md §5.8).
+// none of the run's ConfigMaps and Secrets. envtest never finishes terminating
+// one, so its contents stay readable (DESIGN.md §5.8).
 func requireNamespaceEmpty(t *testing.T, ctx context.Context, config *rest.Config, namespace string) {
 	t.Helper()
 	if namespace == "" {
 		t.Fatal("The run recorded no namespace.")
 	}
-	client, err := kubernetes.NewForConfig(config)
+	client, err := dynamic.NewForConfig(config)
 	if err != nil {
 		t.Fatalf("Building a client failed: %v", err)
 	}
-	remaining, err := client.CoreV1().ConfigMaps(namespace).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("Listing what the run left failed: %v", err)
-	}
-	for _, configMap := range remaining.Items {
-		if configMap.DeletionTimestamp == nil {
-			t.Errorf("The run namespace still holds the ConfigMap %s.", configMap.Name)
+	for _, resource := range []string{"configmaps", "secrets"} {
+		remaining, err := client.Resource(schema.GroupVersionResource{Version: "v1", Resource: resource}).
+			Namespace(namespace).List(ctx, metav1.ListOptions{})
+		if err != nil {
+			t.Fatalf("Listing the %s the run left failed: %v", resource, err)
+		}
+		for _, object := range remaining.Items {
+			if object.GetDeletionTimestamp() == nil {
+				t.Errorf("The run namespace still holds the %s %s.", resource, object.GetName())
+			}
 		}
 	}
 }

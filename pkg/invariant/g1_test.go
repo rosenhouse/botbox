@@ -59,6 +59,72 @@ func TestG1FiresOnARequestInTheQuietWindow(t *testing.T) {
 	}
 }
 
+// A target that resyncs on a timer declares how many requests one window may
+// hold.
+func TestG1PassesAtTheQuietThreshold(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		settled(2*time.Second, invariant.Converged).
+		requests(2500*time.Millisecond, time.Second, 2, get("w-0")).
+		through(14 * time.Second)
+	in.Target.Thresholds.Quiet = 2
+
+	silent(t, invariant.BoundedReconciliation, in)
+}
+
+func TestG1FiresPastTheQuietThreshold(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		settled(2*time.Second, invariant.Converged).
+		requests(2500*time.Millisecond, 400*time.Millisecond, 4, get("w-0")).
+		through(14 * time.Second)
+	in.Target.Thresholds.Quiet = 2
+
+	violation := fired(t, invariant.BoundedReconciliation, in)
+
+	if want := "made 4 API requests"; !strings.Contains(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to say it %s.", violation.Statement, want)
+	}
+	if want := "thresholds.quiet allows 2"; !strings.Contains(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to name the threshold: %q.", violation.Statement, want)
+	}
+	if want := at(3300 * time.Millisecond); !violation.At.Equal(want) {
+		t.Errorf("The violation is at %v, want the request that went past the threshold, at %v.", violation.At, want)
+	}
+}
+
+// Only the loader refuses a negative quiet, so a target built in code can
+// carry one.
+func TestG1ReadsANegativeQuietAsZero(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		settled(2*time.Second, invariant.Converged).
+		request(3*time.Second, get("w-0")).
+		through(14 * time.Second)
+	in.Target.Thresholds.Quiet = -1
+
+	violation := fired(t, invariant.BoundedReconciliation, in)
+
+	if want := "thresholds.quiet allows 0"; !strings.Contains(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to name the threshold: %q.", violation.Statement, want)
+	}
+}
+
+// The threshold bounds one window, not the run.
+func TestG1AppliesTheQuietThresholdToEachWindowApart(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		settled(2*time.Second, invariant.Converged).
+		requests(2500*time.Millisecond, time.Second, 2, get("w-0")).
+		op(invariant.OpUpdate, 5*time.Second).
+		settled(6*time.Second, invariant.Converged).
+		requests(6500*time.Millisecond, time.Second, 2, get("w-0")).
+		through(14 * time.Second)
+	in.Target.Thresholds.Quiet = 2
+
+	silent(t, invariant.BoundedReconciliation, in)
+}
+
 // A settle wait that expires ends T_settle after the op, and the window
 // follows it there.
 func TestG1FiresOnARequestAfterAnExpiredSettle(t *testing.T) {

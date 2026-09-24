@@ -132,9 +132,9 @@ const deleteTheFixtureOverASettle = `{
   ]
 }`
 
-// recreatingChecker judges as the engine does, and then, at op at's
-// checkpoint, creates the fixture ConfigMap as something other than botbox
-// might.
+// recreatingChecker judges as the engine does. At the checkpoint of the op
+// that at names, it then creates the fixture ConfigMap, as something other
+// than botbox might.
 type recreatingChecker struct {
 	configMaps dynamic.NamespaceableResourceInterface
 	at         int

@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
@@ -121,6 +120,33 @@ const deleteTheFixture = `{
     {"i": 2, "t": "settle"}
   ]
 }`
+
+const deleteTheFixtureOverASettle = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "deleteFixture", "kind": "v1/ConfigMap", "name": "fixture", "until": {"op": 3}},
+    {"i": 2, "t": "settle"},
+    {"i": 3, "t": "settle"}
+  ]
+}`
+
+// recreatingChecker judges as the engine does, and then, at op at's
+// checkpoint, creates the fixture ConfigMap as something other than botbox
+// might.
+type recreatingChecker struct {
+	configMaps dynamic.NamespaceableResourceInterface
+	at         int
+}
+
+func (c recreatingChecker) Check(in run.Input) (run.Findings, error) {
+	findings, err := run.Engine{}.Check(in)
+	if last := in.Timeline.Checkpoints[len(in.Timeline.Checkpoints)-1]; err == nil && last.Op == c.at {
+		_, err = c.configMaps.Namespace(in.Timeline.Namespace).Create(context.Background(), fixtureConfigMap(), metav1.CreateOptions{})
+	}
+	return findings, err
+}
 
 // checkpointState is what a check saw when it ran.
 type checkpointState struct {
@@ -588,13 +614,13 @@ func TestRunner(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Building a client failed: %v", err)
 		}
-		recreateOnDelete(t, client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}), fixtureName)
+		check := recreatingChecker{configMaps: client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}), at: 2}
 
-		_, err = run.Run(ctx, toy, readSequence(t, deleteTheFixture), run.Options{
-			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		_, err = run.Run(ctx, toy, readSequence(t, deleteTheFixtureOverASettle), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: check,
 		})
 
-		want := "op 2 (settle): something created the fixture v1/ConfigMap fixture again after botbox deleted it"
+		want := "op 3 (settle): something created the fixture v1/ConfigMap fixture again after botbox deleted it"
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("The run returned %v, want an error saying %q.", err, want)
 		}
@@ -778,36 +804,6 @@ func releaseOnDelete(t *testing.T, resource dynamic.NamespaceableResourceInterfa
 			time.Sleep(delay)
 			_, _ = resource.Namespace(object.GetNamespace()).Patch(ctx, name, types.MergePatchType,
 				[]byte(`{"metadata":{"finalizers":null}}`), metav1.PatchOptions{})
-		}
-	}()
-	t.Cleanup(func() {
-		cancel()
-		watcher.Stop()
-		<-done
-	})
-}
-
-// recreateOnDelete creates the object of that name again, in any namespace,
-// as soon as it is deleted.
-func recreateOnDelete(t *testing.T, resource dynamic.NamespaceableResourceInterface, name string) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(context.Background())
-	watcher, err := resource.Watch(ctx, metav1.ListOptions{FieldSelector: "metadata.name=" + name})
-	if err != nil {
-		t.Fatalf("Watching for %s failed: %v", name, err)
-	}
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for event := range watcher.ResultChan() {
-			object, ok := event.Object.(*unstructured.Unstructured)
-			if !ok || event.Type != watch.Deleted {
-				continue
-			}
-			again := &unstructured.Unstructured{Object: map[string]any{"data": object.Object["data"]}}
-			again.SetGroupVersionKind(object.GroupVersionKind())
-			again.SetName(name)
-			_, _ = resource.Namespace(object.GetNamespace()).Create(ctx, again, metav1.CreateOptions{})
 		}
 	}()
 	t.Cleanup(func() {

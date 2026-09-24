@@ -34,6 +34,7 @@ type Op struct {
 	// Kind, ordered by creationTimestamp then name. Kind and Name select a
 	// fixture op's fixture.
 	Kind string `json:"kind,omitempty"`
+	Nth  *int   `json:"index,omitempty"`
 	Name string `json:"name,omitempty"`
 	// Obj is what create and recreate create.
 	Obj *unstructured.Unstructured `json:"obj,omitempty"`
@@ -41,7 +42,6 @@ type Op struct {
 	Patch map[string]any `json:"patch,omitempty"`
 	// Fault is the fault a fault op injects.
 	Fault *Fault `json:"spec,omitempty"`
-	Nth   *int   `json:"index,omitempty"`
 	// Until is where botbox creates the fixture of a deleteFixture op again.
 	Until *Until `json:"until,omitempty"`
 	// NoSettle skips the Runner's implicit settle wait (DESIGN.md §5.5).

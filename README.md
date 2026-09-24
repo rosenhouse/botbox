@@ -383,8 +383,11 @@ its path into `equalIgnore` as written. A Secret's values appear there as marker
 Once a settle wait has converged, botbox restarts a controller that exits, as a kubelet
 would: at once, then after 10s, doubling up to 5 minutes. The run prints a note for each
 exit, quoting the line the controller wrote as it stopped. A settle wait does not converge
-while the controller waits to restart, nor until a restarted controller has run for
-`stable`. A controller that crashes again that soon after each restart never converges,
+while the controller waits to restart. Nor does it converge until the controller has
+requested a resource outside leader election since it last started and then run for
+`stable`, because botbox has no other sign that it is back. A controller therefore has
+`settle` to come back from a restart and settle, as at the start of a run. A controller
+that crashes again within `stable` of each restart never converges,
 even where it wrote its converged state first, so G4 reports it and quotes the last exit.
 A controller that exits during a fault, or while it recovers from one, has `settle` past
 its restart to converge. G7 notes a `deleteManaged` after a restart that follows an exit as
@@ -421,6 +424,10 @@ A settle wait expired. What follows `expired with no fault active` says why:
 - `ready held from … on, but the target was waiting to restart`, or `but the target
   restarted in the last stable`, means your controller exited. The line counts the exits
   since it last converged and quotes the last.
+- `ready held from … on, but the target had requested no resource outside leader election
+  since …` means your controller had not come back from a restart, or had not started, when
+  the wait gave up. `until the last stable` means it came back too late to run for
+  `stable` before then. A controller slow to start needs a wider `settle`.
 
 After a `delete`, the run waits up to `timeouts.delete` for the CR to go and then up to
 `settle` for the rest to settle, so a slow cleanup needs no wider `settle`. A `recreate`

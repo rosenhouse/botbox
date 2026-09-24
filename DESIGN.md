@@ -118,10 +118,9 @@ Implementations:
   first time, then after 10 s, doubling up to 5 min. It tells the Runner why the target
   stopped and when it starts again. `Stop` and `Restart` are not exits, and `Stop` ends
   supervision. `Status` says whether a supervised target is waiting to restart, and when
-  the process now running started. botbox does not probe the target for health. The
-  settle wait after the first op absorbs startup, but one after a `Restart`, or after
-  `Supervise` restarts the target, can converge before the target is back, which G7
-  allows for (§6).
+  the process now running started. botbox does not probe the target for health. A settle
+  wait does not converge until the process now running has requested a resource outside
+  leader election, which only a running target does (§5.5).
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
 - `Image` — run a container image against a kind cluster, with the proxy in-cluster or
   reached by port-forward. Phase 2 (§10, M8).
@@ -237,7 +236,8 @@ The Runner executes one sequence:
    `Ready` never held, held and then stopped, or held while the namespace kept changing
    within `T_stable`; a CR was still being deleted; or no CR was left to be ready. Where
    `Ready` held while the target waited to restart, or restarted within `T_stable`, it says
-   that instead. Where `Ready` held and nothing changed within `T_stable`, it says that.
+   that instead, and likewise where the target had not yet shown it runs, or first did
+   within `T_stable`. Where `Ready` held and nothing changed within `T_stable`, it says that.
    The Runner and the engine raise it with one function, so they agree. A fault excuses it
    while active, which is once the proxy has applied it and until the proxy stops (D36),
    and while the target is still owed time to recover from it (§6). A `recreate` whose old
@@ -254,8 +254,12 @@ The Runner executes one sequence:
    `sequence.json`, unless the target wrote that its port was taken. Once a wait has
    converged, the target has shown it runs, and the Launcher supervises it (§5.1). The run
    notes each exit and the line the target wrote as it stopped. A wait does not converge
-   while the target waits to restart, and a restart counts as a change, so a restarted
-   target runs for `T_stable` before a wait converges. A target that exits again within
+   while the target waits to restart, nor until the process now running has shown it runs
+   by requesting a resource outside leader election. botbox has no other sign that a target
+   is back, and a controller lists what it watches as it starts. A start and that first
+   request count as changes, so a restarted target runs for `T_stable` past its return
+   before a wait converges. It thus has `T_settle` to come back and settle, as at the run's
+   start. A target that never comes back fails G4. A target that exits again within
    `T_stable` of each restart therefore never converges, even where it wrote its converged
    state first, and its wait expires as a G4 that counts the exits since the target last
    converged and quotes the last. A target that runs longer between exits can converge in
@@ -571,7 +575,8 @@ target was still owed time to recover from a fault. It also notes an op that fol
 restart, by a `Restart` op or by `Supervise` after an exit, where the target requested
 nothing between the last restart and the op but leader election's leases and lease
 candidates, and paths that name no resource. botbox has no other sign that the target is
-back (§5.1), and a process starting up or waiting to lead requests only those. It notes an
+back (§5.1), and a process starting up or waiting to lead requests only those. A settle
+wait that converged after the restart rules this out (§5.5). It notes an
 op where the target exited, or waited to restart, during the op or its wait. Where several
 of these apply, the note names the first. A violation quotes the object's history and the
 managed objects where the wait ended, which show an object recreated under a new name.
@@ -604,7 +609,7 @@ Details the example does not show:
   `deleteManaged` that deleted something and no fault's window between them (§6). Put a
   `settle` op after a `restart`, and one before it unless the op before it settles. G7
   judges a `deleteManaged` after a `restart` only once the target has requested a
-  resource outside leader election, which a `settle` op between them gives it time to do.
+  resource outside leader election, which a `settle` op between them waits for.
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
 - A fault's `match.verb` is one of `get`, `list`, `watch`, `create`, `update`, `patch`,
@@ -919,8 +924,8 @@ for it. B11 is the deterministic form of §5.6's "a transient state is made perm
 `Fault`", so that settle wait expires whatever the windows are. A `Restart` heals B11,
 because the belief lives in the process. B12's row creates the Widget at a count of 2,
 then sets 0 and settles once more. An exit before a settle wait has converged is a harness
-error (§5.5), and a restart that exits again more than `T_stable` after it started looks
-converged to the wait it lands in. `fault.json`, the README's fault example, holds a
+error (§5.5), and a restart that exits again more than `T_stable` after its first request
+looks converged to the wait it lands in. `fault.json`, the README's fault example, holds a
 fault that outlasts the sequence. The envtest tier runs it, not the matrix: the toy with
 no bug recovers once the teardown clears the fault, and B11 fails G4 there.
 
@@ -1705,3 +1710,18 @@ built from source and run as a black-box binary.
   that wait ends is judged there. A harness error there hid B13 from G3 on generated runs.
   The op cannot create its CR while the old one stays, so one that no check reports stays a
   harness error.
+- **D@77 A settle wait converges only once the target has shown it runs since it last
+  started.** Nothing changes while a restarted target starts up, so a settle wait after a
+  `Restart`, or after `Supervise` restarted the target, converged before the target was
+  back. The correct toy behind a wrapper that delayed each restart by 5 s came back inside
+  the quiet window after a `deleteManaged` and failed G1 there. With a 2.2 s delay and a
+  `T_stable` of 1 s, it failed P1 instead. A wait now converges only once the process
+  running now has requested a resource outside leader election, the sign G7 reads (D60),
+  and that request counts as a change, so the target's startup falls inside the wait. A
+  controller lists what it watches as it starts, so a correct one makes such a request.
+  The rule covers the first process too, since a `ready` that holds without the target
+  could otherwise end op 0's wait before the target started. A target has `T_settle` to
+  come back and settle, as at the run's start. One that is not back by then fails G4,
+  which says so, and the 5 s wrapper under the toy's 5 s `T_settle` now fails there.
+  Leaving G1 and G2 unjudged in the window after an op G7 notes was rejected, because it
+  judges less.

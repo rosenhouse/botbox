@@ -650,10 +650,12 @@ Details the example does not show:
 - `updateFixture` applies `patch` as a JSON merge patch to the fixture of `kind` and `name`,
   and settles: `{"i": 1, "t": "updateFixture", "kind": "v1/Secret", "name": "token",
   "patch": {"data": {"token": "abcd"}}}`.
-- `deleteFixture` deletes the fixture of `kind` and `name`, and botbox creates it again, as
-  it last wrote it, before the op `until` names acts: `{"i": 2, "t": "deleteFixture",
-  "kind": "v1/Secret", "name": "token", "until": {"op": 3}}`. `until.op` names a later op, up
-  to the last, and no op before it acts on that fixture. A `deleteFixture` does not settle.
+- `deleteFixture` deletes the fixture of `kind` and `name` and waits up to `T_delete` for it
+  to go, and botbox creates it again, as it last wrote it, before the op `until` names acts:
+  `{"i": 2, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 3}}`.
+  A fixture still there where the wait ends, held by a finalizer, ends the run as a harness
+  error that names the finalizers. `until.op` names a later op, up to the last, and no op
+  before it acts on that fixture. A `deleteFixture` does not settle.
   A fixture op names a fixture the target declares, or the run ends as a configuration
   error.
 - `recreate` is a delete, a wait for the object to disappear, and a create of `obj`. An
@@ -1782,7 +1784,9 @@ built from source and run as a black-box binary.
 - **D@47 A sequence changes and deletes fixtures.** No op touched a fixture, so botbox never
   tried a referenced Secret that changes or an Issuer that disappears, and a controller that
   reads such an object without watching it passed. `updateFixture` merge-patches a fixture,
-  and `deleteFixture` deletes one until the op its `until` names. A target names in
+  and `deleteFixture` deletes one until the op its `until` names. It waits for the fixture to
+  go, since a target may hold it with a finalizer, as external-secrets does its SecretStore,
+  and botbox cannot create it again until it has gone. A target names in
   `generate.fixtures` the fixtures generation may delete and the strings it may set, since
   built-in kinds carry no schema botbox reads. A drawn value is a short word a Secret's
   `data` also reads as base64. Generation restores a deleted fixture before the next op that

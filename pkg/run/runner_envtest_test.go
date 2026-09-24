@@ -111,6 +111,16 @@ const changeThenDeleteTheFixture = `{
   ]
 }`
 
+const deleteTheFixture = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "deleteFixture", "kind": "v1/ConfigMap", "name": "fixture", "until": {"op": 2}},
+    {"i": 2, "t": "settle"}
+  ]
+}`
+
 // checkpointState is what a check saw when it ran.
 type checkpointState struct {
 	op          int
@@ -528,6 +538,48 @@ func TestRunner(t *testing.T) {
 		}
 	})
 
+	// A target may hold a fixture's deletion with a finalizer of its own, as
+	// external-secrets does its SecretStore's.
+	t.Run("restores a deleted fixture once a finalizer lets it go", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		held := fixtureConfigMap()
+		held.SetFinalizers([]string{"example.com/hold"})
+		toy.Fixtures = append(toy.Fixtures, held)
+		client, err := dynamic.NewForConfig(testCluster.Config())
+		if err != nil {
+			t.Fatalf("Building a client failed: %v", err)
+		}
+		releaseOnDelete(t, client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}), fixtureName, time.Second)
+
+		result, err := run.Run(ctx, toy, readSequence(t, deleteTheFixture), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy runs without a bug.", result.Violation)
+		}
+	})
+
+	t.Run("ends the run where a finalizer holds a deleted fixture past T_delete", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		toy.Timeouts.Delete = 2 * time.Second
+		held := fixtureConfigMap()
+		held.SetFinalizers([]string{"example.com/hold"})
+		toy.Fixtures = append(toy.Fixtures, held)
+
+		_, err := run.Run(ctx, toy, readSequence(t, deleteTheFixture), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		want := "op 1 (deleteFixture): the fixture v1/ConfigMap fixture was still there 2s after botbox deleted it, held by the finalizers [example.com/hold]"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("The run returned %v, want an error saying %q.", err, want)
+		}
+	})
+
 	t.Run("notes an owner the collector cannot resolve", func(t *testing.T) {
 		toy := loadTarget(t, binary)
 		ownedBySecret := fixtureConfigMap()
@@ -677,6 +729,35 @@ func putBackFinalizer(t *testing.T, resource dynamic.NamespaceableResourceInterf
 			}
 			// The API server refuses a finalizer new to an object being deleted.
 			_, _ = resource.Namespace(object.GetNamespace()).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		watcher.Stop()
+		<-done
+	})
+}
+
+// releaseOnDelete takes the finalizers off the object of that name, in any
+// namespace, once it has been under deletion for the delay.
+func releaseOnDelete(t *testing.T, resource dynamic.NamespaceableResourceInterface, name string, delay time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	watcher, err := resource.Watch(ctx, metav1.ListOptions{FieldSelector: "metadata.name=" + name})
+	if err != nil {
+		t.Fatalf("Watching for %s failed: %v", name, err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for event := range watcher.ResultChan() {
+			object, ok := event.Object.(*unstructured.Unstructured)
+			if !ok || object.GetDeletionTimestamp() == nil || len(object.GetFinalizers()) == 0 {
+				continue
+			}
+			time.Sleep(delay)
+			_, _ = resource.Namespace(object.GetNamespace()).Patch(ctx, name, types.MergePatchType,
+				[]byte(`{"metadata":{"finalizers":null}}`), metav1.PatchOptions{})
 		}
 	}()
 	t.Cleanup(func() {

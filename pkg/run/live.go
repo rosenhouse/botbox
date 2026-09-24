@@ -197,9 +197,31 @@ func (l *liveRun) patchFixture(ctx context.Context, gvk schema.GroupVersionKind,
 	return nil
 }
 
+// deleteFixture deletes the fixture and waits T_delete for it to go, so that
+// botbox can create it again.
 func (l *liveRun) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind, name string) error {
-	if err := l.of(gvk).Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+	fixtures := l.of(gvk)
+	if err := fixtures.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
 		return fmt.Errorf("deleting the fixture %s %s: %w", kindName(gvk), name, err)
+	}
+	var held []string
+	deadline := time.Now().Add(l.target.Timeouts.Delete)
+	gone, err := l.await(ctx, func() time.Time { return deadline }, func() (bool, error) {
+		fixture, err := fixtures.Get(ctx, name, metav1.GetOptions{})
+		if apierrors.IsNotFound(err) {
+			return true, nil
+		}
+		if err == nil {
+			held = fixture.GetFinalizers()
+		}
+		return false, err
+	})
+	switch {
+	case err != nil:
+		return fmt.Errorf("waiting for the fixture %s %s to go: %w", kindName(gvk), name, err)
+	case !gone:
+		return fmt.Errorf("the fixture %s %s was still there %v after botbox deleted it, held by the finalizers %v",
+			kindName(gvk), name, l.target.Timeouts.Delete, held)
 	}
 	return nil
 }

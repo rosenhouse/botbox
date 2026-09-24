@@ -419,16 +419,16 @@ func (r *runner) recreate(ctx context.Context, op Op) error {
 	if err := r.haveCR(); err != nil {
 		return err
 	}
-	deleted := r.now()
+	due := r.now().Add(r.target.Timeouts.Delete)
 	if err := r.h.deleteCR(ctx, r.cr); err != nil {
 		return err
 	}
 	wait := Wait{Window: Window{Start: r.now()}}
 	gone, err := r.h.awaitCRGone(ctx, r.cr, func() time.Time {
-		if owed := r.owed(); owed.After(deleted.Add(r.target.Timeouts.Delete)) {
+		if owed := r.owed(); owed.After(due) {
 			return owed
 		}
-		return deleted.Add(r.target.Timeouts.Delete)
+		return due
 	})
 	switch {
 	case err != nil:

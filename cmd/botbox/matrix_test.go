@@ -441,7 +441,7 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 				t.Errorf("botbox matrix wrote %s, want no matrix of a run that errored.", out)
 			}
 			erred, finished := session.dirs[len(session.dirs)-1], session.dirs[:len(session.dirs)-1]
-			if want := "botbox: " + test.want + "\n  the run's files are in " + erred + "\n  reproduce it with\n"; !strings.Contains(stderr, want) {
+			if want := "botbox: " + test.want + "\n  the run's files are in " + erred + "\n  run it again with\n"; !strings.Contains(stderr, want) {
 				t.Errorf("botbox matrix reported\n%s\nwant\n%s", stderr, want)
 			}
 			commands := replayed(t, stderr)

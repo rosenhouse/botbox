@@ -79,7 +79,7 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 		if failed := c.exerciseRow(ctx, s, exercised, &rows[i], dir); failed != nil {
 			c.fail(opts.named(ctx, failed.err))
 			c.showRunFiles(failed.dir)
-			fmt.Fprintf(c.stderr, "  reproduce it with\n    %s\n", opts.replayRun(rows[i], failed.bugArgs))
+			fmt.Fprintf(c.stderr, "  run it again with\n    %s\n", opts.replayRun(rows[i], failed.bugArgs))
 			return exitError
 		}
 	}

@@ -338,10 +338,15 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 
 func TestTheCIRecipeFixesSeedsOnPullRequestsAndDrawsThemNightly(t *testing.T) {
 	w := readWorkflow(t, ciRecipe)
-	for _, event := range []string{"pull_request", "schedule"} {
-		if _, ok := w.On[event]; !ok {
-			t.Errorf("the recipe does not run on %s", event)
-		}
+	if _, ok := w.On["pull_request"]; !ok {
+		t.Error("the recipe does not run on pull_request")
+	}
+	schedule, _ := w.On["schedule"].([]any)
+	if len(schedule) == 0 || slices.ContainsFunc(schedule, func(entry any) bool {
+		timing, _ := entry.(map[string]any)
+		return timing["cron"] == nil
+	}) {
+		t.Errorf("the recipe's schedule is %v, not a list of crons, and Actions rejects such a workflow", w.On["schedule"])
 	}
 	seeded := map[string]bool{}
 	for _, s := range botboxRuns(t, recipeSteps(t)) {

@@ -94,11 +94,21 @@ const createThenDeleteManaged = `{
   ]
 }`
 
+const twoWidgets = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget-2"}, "spec": {"count": 1}}}
+  ]
+}`
+
 // checkpointState is what a check saw when it ran.
 type checkpointState struct {
 	op          int
 	converged   bool
 	managed     []string
+	managedCRs  []string
 	ready       int64
 	widgetWatch int
 }
@@ -115,6 +125,9 @@ func (c *recordingChecker) Check(in run.Input) (run.Findings, error) {
 	state := checkpointState{op: last.Op, converged: last.Converged}
 	for _, managed := range in.Objects.Managed() {
 		state.managed = append(state.managed, managed.Name)
+		if managed.GVK == in.Target.Primary {
+			state.managedCRs = append(state.managedCRs, managed.Name)
+		}
 	}
 	for _, cr := range in.Objects.Current(in.Target.Primary) {
 		state.ready, _, _ = unstructured.NestedInt64(cr.Object.Object, "status", "ready")
@@ -279,6 +292,29 @@ func TestRunner(t *testing.T) {
 		if passed := result.Timeline.Deletion.Start.Sub(deleted); passed <= toy.Timeouts.Delete {
 			t.Errorf("The teardown began %v after the first Widget's delete, so G3 never judged its deadline %v on.",
 				passed, toy.Timeouts.Delete)
+		}
+	})
+
+	t.Run("never counts a CR it created as managed, where the target manages its primary kind", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		toy.Manages = append(toy.Manages, toy.Primary)
+		check := &recordingChecker{}
+
+		_, err := run.Run(ctx, toy, readSequence(t, twoWidgets), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: check,
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if _, checked := check.at(1); !checked {
+			t.Fatalf("The checks ran after the ops %v, want op 1, which creates widget-2.", check.ops())
+		}
+		for _, state := range check.checkpoints {
+			if len(state.managedCRs) > 0 {
+				t.Errorf("After op %d the run counted the Widgets %v as managed, want none: botbox created them.",
+					state.op, state.managedCRs)
+			}
 		}
 	})
 

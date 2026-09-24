@@ -322,6 +322,14 @@ func fixtureConfigMap() *unstructured.Unstructured {
 	return fixture
 }
 
+// fixtureSecret is of a kind the toy does not declare.
+func fixtureSecret() *unstructured.Unstructured {
+	fixture := &unstructured.Unstructured{}
+	fixture.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Secret"})
+	fixture.SetName(fixtureName)
+	return fixture
+}
+
 func createCollectedConfigMap(t *testing.T, ctx context.Context, h *run.Harness, widget *unstructured.Unstructured) {
 	t.Helper()
 	owned := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{

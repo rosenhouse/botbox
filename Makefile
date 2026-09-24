@@ -403,7 +403,7 @@ test-kind-runs: build
 	@$(KIND_BOTBOX) --seed $(KIND_SEED) --runs $(KIND_RUNS) \
 		|| { echo "test-kind: a drawn seed failed."; exit 1; }
 	$(call negative-control,test-kind,$(KIND_BOTBOX) --launch-arg --bug=3 targets/toy-widget/sequences/b3.json,G3 the v1/ConfigMap widget-0 was still there)
-	$(call negative-control,test-kind,$(KIND_BOTBOX) --launch-arg --bug=8 targets/toy-widget/sequences/b8.json,run 1: P1)
+	$(call negative-control,test-kind,$(KIND_BOTBOX) --launch-arg --bug=8 targets/toy-widget/sequences/b8.json,G7 the v1/ConfigMap widget-0 that op 1 (deleteManaged) deleted never came back)
 
 .PHONY: fmt
 fmt:

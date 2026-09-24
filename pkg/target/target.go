@@ -85,13 +85,14 @@ func (l LaunchSpec) Check() error {
 // Timeouts are the run's waits (DESIGN.md §6).
 type Timeouts struct{ Settle, Stable, Delete time.Duration }
 
-// Thresholds hold N_errloop for G6 (DESIGN.md §6).
-type Thresholds struct{ ErrLoop int }
+// Thresholds hold N_errloop for G6, and the requests G1 and the status writes
+// G2 allow in one quiet window (DESIGN.md §6).
+type Thresholds struct{ ErrLoop, Quiet int }
 
 // Defaults for a target that declares neither block (DESIGN.md §6).
 var (
 	DefaultTimeouts   = Timeouts{Settle: 30 * time.Second, Stable: 10 * time.Second, Delete: 60 * time.Second}
-	DefaultThresholds = Thresholds{ErrLoop: 20}
+	DefaultThresholds = Thresholds{ErrLoop: 10}
 )
 
 // DefaultReady is the readiness predicate of DESIGN.md §6, used by a target
@@ -106,8 +107,11 @@ type Target struct {
 	Sample        *unstructured.Unstructured
 	Fixtures      []*unstructured.Unstructured
 	Manages       []schema.GroupVersionKind
-	Selector      labels.Selector
-	Ready         ReadyFunc
+	// NotRecreated are the managed kinds the target leaves deleted, which G7
+	// does not require back.
+	NotRecreated []schema.GroupVersionKind
+	Selector     labels.Selector
+	Ready        ReadyFunc
 	// ReadyExpr is the text Ready came from: the declared CEL, the default, or
 	// go:<name>.
 	ReadyExpr string

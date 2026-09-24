@@ -112,14 +112,16 @@ Implementations:
   `launch.env` sets variables over the environment the target inherits from botbox, and
   may not set `KUBECONFIG`. The target's stdout and stderr go to `target.log` in the run
   directory. `Restart` sends SIGKILL, waits for the process to be reaped, then execs
-  again, so fixed ports and lock files are released. `Supervise` restarts the target
-  whenever it exits on its own, as a kubelet restarts a container: at once the first time,
-  then after 10 s, doubling up to 5 min. It tells the Runner why the target stopped and
-  when it starts again. `Stop` and `Restart` are not exits, and `Stop` ends supervision.
-  `Status` says whether a supervised target is waiting to restart, and when the process
-  now running started.
-  botbox does not probe the target for health; the settle wait after the first op absorbs
-  startup.
+  again, so fixed ports and lock files are released. A killed process never releases a
+  leader-election lease, so a target runs with leader election off. `Supervise` restarts
+  the target whenever it exits on its own, as a kubelet restarts a container: at once the
+  first time, then after 10 s, doubling up to 5 min. It tells the Runner why the target
+  stopped and when it starts again. `Stop` and `Restart` are not exits, and `Stop` ends
+  supervision. `Status` says whether a supervised target is waiting to restart, and when
+  the process now running started. botbox does not probe the target for health. The
+  settle wait after the first op absorbs startup, but one after a `Restart`, or after
+  `Supervise` restarts the target, can converge before the target is back, which G7
+  allows for (§6).
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
 - `Image` — run a container image against a kind cluster, with the proxy in-cluster or
   reached by port-forward. Phase 2 (§10, M8).
@@ -160,7 +162,8 @@ Two details that matter for any client-go based target:
 Watch-event dropping requires parsing the watch stream (chunked JSON, or length-delimited
 protobuf frames for typed clients) and filtering events. This is the hardest fault and
 lands in phase 2 (§10, M8). Until then, `DeleteManaged` ops simulate a missed event by
-deleting an object behind the target's back.
+deleting an object behind the target's back, and G7 requires the target to recreate it
+(§6).
 
 ### 5.3 Observer
 
@@ -221,38 +224,45 @@ The Runner executes one sequence:
    managed objects (§6). Apply the target's fixtures. Start the target via the Launcher.
 2. Apply ops in order. After each op that mutates the CR or a managed object, wait up to
    `T_settle` for convergence unless the op sets `noSettle`, and longer while the target is
-   still owed time to recover from a fault that stopped (§6). The wait ends once the
-   `Ready` predicate holds and neither the CR nor a managed object has changed for
-   `T_stable`, so a checkpoint lands after the target's reaction, not before it. A wait
-   that expires while no fault excuses it records a G4 violation, which says why from the
-   Observer's history of the wait: `Ready` never held, held and then stopped, or held while
-   the namespace kept changing within `T_stable`; or no CR was left to be ready. Where
+   still owed time to recover from a fault that stopped (§6) or to delete a primary CR. The
+   wait ends once the `Ready` predicate holds, no primary CR is being deleted, and neither
+   the CR nor a managed object has changed for `T_stable`, so a checkpoint lands after the
+   target's reaction, not before it. After a deletion of the primary CR, the wait may run
+   until the deletion's G3 deadline, or `T_settle` past the instant the CR went if it went
+   by then. A `recreate` waits `T_delete` for its old CR to go, and longer while the target
+   is owed time as above. A CR still there where that wait ends is judged there, as an
+   expired settle wait is. A wait in which a CR outlived a G3 deadline that no fault
+   reached into is G3's to judge (§6). Any other wait that expires while no fault excuses
+   it records a G4 violation, which says why from the Observer's history of the wait:
+   `Ready` never held, held and then stopped, or held while the namespace kept changing
+   within `T_stable`; a CR was still being deleted; or no CR was left to be ready. Where
    `Ready` held while the target waited to restart, or restarted within `T_stable`, it says
    that instead. Where `Ready` held and nothing changed within `T_stable`, it says that.
    The Runner and the engine raise it with one function, so they agree. A fault excuses it
    while active, which is once the proxy has applied it and until the proxy stops (D36),
-   and while the target is still owed time to recover from it (§6). Until a settle wait has
-   converged, normally op 0's, a wait also ends where the target's process exits, and the
-   Runner checks the target is running before it applies each op. A target that stopped
-   then ends the run as a harness error naming the op it was at (§11): a bad flag or a
-   taken port reads the same way, and the ops behind it would run against nothing. The
-   error quotes the line in `target.log` that says why: the line the last Go panic opens
-   with, or else the last line above any stack trace, since a logger's trace ends in a
-   frame. The log holds every process a `restart` started, and the last one is the one that
-   stopped. Where botbox had created the CR and the target had requested a resource, the
-   error says the CR may have crashed the target and names the run's `sequence.json`,
-   unless the target wrote that its port was taken. Once a wait has converged, the target
-   has shown it runs, and the Launcher supervises it (§5.1). The run notes each exit and
-   the line the target wrote as it stopped. A wait does not converge while the target waits
-   to restart, and a restart counts as a change, so a restarted target runs for `T_stable`
-   before a wait converges. A target that exits again within `T_stable` of each restart
-   therefore never converges, even where it wrote its converged state first, and its wait
-   expires as a G4 that counts the exits since the target last converged and quotes the
-   last. A target that runs longer between exits can converge in between, until a backoff
-   outlasts a wait. A target that converges after an exit passes. An exit a fault excuses
-   owes the target `T_settle` past its restart (§6). Any other restart gives it no more
-   time, and its startup requests count toward G1 where they land in a quiet window (§6). A
-   restart that fails ends the run as the harness error above.
+   and while the target is still owed time to recover from it (§6). A `recreate` whose old
+   CR stays where no check reports it cannot go on, so the run ends as a harness error.
+   Until a settle wait has converged, normally op 0's, a wait also ends where the target's
+   process exits, and the Runner checks the target is running before it applies each op. A
+   target that stopped then ends the run as a harness error naming the op it was at (§11):
+   a bad flag or a taken port reads the same way, and the ops behind it would run against
+   nothing. The error quotes the line in `target.log` that says why: the line the last Go
+   panic opens with, or else the last line above any stack trace, since a logger's trace
+   ends in a frame. The log holds every process a `restart` started, and the last one is
+   the one that stopped. Where botbox had created the CR and the target had requested a
+   resource, the error says the CR may have crashed the target and names the run's
+   `sequence.json`, unless the target wrote that its port was taken. Once a wait has
+   converged, the target has shown it runs, and the Launcher supervises it (§5.1). The run
+   notes each exit and the line the target wrote as it stopped. A wait does not converge
+   while the target waits to restart, and a restart counts as a change, so a restarted
+   target runs for `T_stable` before a wait converges. A target that exits again within
+   `T_stable` of each restart therefore never converges, even where it wrote its converged
+   state first, and its wait expires as a G4 that counts the exits since the target last
+   converged and quotes the last. A target that runs longer between exits can converge in
+   between, until a backoff outlasts a wait. A target that converges after an exit passes.
+   An exit a fault excuses owes the target `T_settle` past its restart (§6). Any other
+   restart gives it no more time, and its startup requests count toward G1 where they land
+   in a quiet window (§6). A restart that fails ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
@@ -266,13 +276,14 @@ The Runner executes one sequence:
    nothing up, so the run ends as that harness error rather than at a verdict on the
    deletion. G3 judges a target that is waiting to restart, and the notes carry its exits.
    A run that ended at a harness error judges no deletion either, because its ops did not
-   all run. Then
-   force-remove any finalizer still present in the run namespace; the report notes each one
-   (D37). G3 judged the deletion window, which closed before this. Delete every remaining
-   object
-   in the namespace that botbox or the target created. Stop the target if it was started
-   for this run. Delete the namespace. Namespace names are never reused, so a namespace
-   that never finishes terminating (envtest, §5.8) is harmless.
+   all run. Then delete every remaining object in the namespace of a kind the target
+   declares or a fixture has, because a later run's target may watch every namespace. Then
+   force-remove any finalizer still on one, which the report notes (D37). G3 judged the
+   deletion window, which closed before this. The deletion comes first because the API
+   server refuses a finalizer new to an object being deleted, so a running target cannot
+   put back one it owns. Stop the target if it was started for this run. Delete the
+   namespace. Namespace names are never reused, so a namespace that never finishes
+   terminating (envtest, §5.8) is harmless.
 
 Cleanup between runs never restarts the API server, because rapid's shrinker re-invokes
 the test function many times.
@@ -398,12 +409,13 @@ real targets; the toy target sets much shorter ones (§9).
 
 | ID | Name | Statement | Signal |
 |---|---|---|---|
-| **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault (§5.5), the target makes no further API request for `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io` leases, since leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
-| **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. Status subresource writes that do not change content count as churn. A status write whose content is unchanged does not move resourceVersion, so it is counted from the proxy log. | Observer + proxy log |
+| **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault or a deletion (§5.5), the target makes no more than `N_quiet` (default 0) API requests in `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io`, whose leases and lease candidates leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
+| **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. A status write whose content is unchanged moves no resourceVersion, so G2 counts status subresource writes from the proxy log, and more than `N_quiet` of them is churn. `N_quiet` never excuses a resourceVersion that moves. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
-| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 20) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
+| **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 10) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
+| **G7** | Self-healing | An object a `DeleteManaged` op deleted exists again, by kind and name, when the settle wait after the op ends: on convergence, or at `T_settle` or later after a fault or a deletion (§5.5). Its content may differ. A kind the target lists in `notRecreated` is exempt (§8.1). | Observer |
 
 **The quiet window.** G1 and G2 judge the `T_stable` that follows a settle wait, which
 ends where the run converged or where the wait gave up (§5.5). Measuring
@@ -428,11 +440,11 @@ from that convergence if it came later, to the instant the last of them stopped.
 wait does not give up before that time has passed, and one that expired is excused only
 while a fault is active or that time is still owed. A spec change made within that time is
 judged at the later of the two deadlines. A settle wait that converged sooner ends that
-time early. A target that exits while a fault excuses it, as controller-runtime does when
-it loses leader election, then waits out the restart's backoff (§5.1), which botbox chose.
-G4 gives it `T_settle` past that restart too, and does not judge a window the exit falls
-in, as it does not judge one a fault reaches into. Only a fault excuses an exit, so a
-crash loop that a fault set off still fails G4.
+time early. A target that exits while a fault excuses it, as controller-runtime with
+leader election on does when it loses its lease, then waits out the restart's backoff
+(§5.1), which botbox chose. G4 gives it `T_settle` past that restart too, and does not
+judge a window the exit falls in, as it does not judge one a fault reaches into. Only a
+fault excuses an exit, so a crash loop that a fault set off still fails G4.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -441,9 +453,10 @@ is not judged, rather than judged early: judging early would hold the target to 
 window than §6 gives it, and where the boundary falls would depend on harness timing. G3
 is the exception, since §5.5 step 4 opens its window deliberately, and §4's teardown
 checkpoint still evaluates properties. A primary CR with a deletionTimestamp need not
-satisfy `Ready`: it is being deleted, so G3 judges it, not G4. A settle wait still waits
-for `Ready`, so a wait can expire on such a CR, and its G4 then blames the CR's
-finalizers, not `Ready`.
+satisfy `Ready`: it is being deleted, so G3 judges it, not G4. A settle wait waits for such
+a CR to go, until its G3 deadline (§5.5), so a wait in which it outlived that deadline ends
+where G3 can judge it, and G4 leaves that wait to G3. Where a fault reached into the
+deletion, G3 only notes it, and G4 judges the wait.
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
 namespace that neither botbox nor the cluster created. Fixtures and the primary CR are
@@ -460,10 +473,22 @@ required for it.
 **Deletion.** Owned children are removed by the cluster's garbage collector (real on kind,
 emulated on envtest, §5.8). G3 therefore fails on orphans, meaning children with no
 ownerReference to the CR, and on finalizers that never clear. The teardown watches the
-namespace until it is clean or `T_delete` expires (§5.5 step 4). A namespace that came
-clean satisfies G3 at that instant, which is how a target that cleans up promptly is
-judged rather than left unjudged: the run stops watching long before `T_delete` is up. An
-object a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (D38).
+namespace until it is clean or `T_delete` expires (§5.5 step 4). The settle wait after a
+`delete` op waits for the CR to go, as a `recreate` does (§5.5 step 2), so G3 judges that
+deletion where the wait ends if the CR outlived `T_delete`. A namespace that came clean
+satisfies G3 at that instant, which is how a target that cleans up promptly is judged
+rather than left unjudged: the run stops watching long before `T_delete` is up. An object
+a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (D38).
+
+**Periodic work.** A controller that resyncs on a timer makes requests after it has
+converged, often a write that changes nothing. `N_quiet` is how many of those one quiet
+window may hold, per target (§8.1). A tick every `interval` puts at most
+`floor(T_stable / interval) + 1` ticks in one window, so `N_quiet` is that times the
+requests one tick makes, summed over every timer the target runs, such as one per CR. A
+write that changes something still moves a resourceVersion, which G2 reports whatever
+`N_quiet` is. Any `N_quiet` above zero also lets a slow loop of that many requests per
+window through G1. G6 counts a loop only while it fails more than `N_errloop` times
+within `T_settle`, so a slow failing loop can pass both.
 
 **What the proxy cannot see.** G1 and G6 observe only requests that leave the target
 process. Reads served from a client-side cache are invisible, so a reconcile loop that
@@ -477,24 +502,35 @@ looping and G6 counts it; so is a 409 on any other verb. G6 also counts a failin
 which G1 excludes: G1 ignores a watch because a watch that hangs is the target waiting,
 while a watch that fails returns at once and repeating it is a loop.
 
+**Backoff.** controller-runtime's default rate limiter doubles a failing request's delay
+from 5 ms. A loop on one object therefore fails 10 times in its first 5 s, 11 times by
+5.1 s, and 13 times in its densest 30 s, however long it runs. The default `N_errloop`
+sees it once it has run 5.1 s under one spec. A `T_settle` of 5 s holds only 10, so it
+needs an `N_errloop` of 9 or less, which is why the toy declares 5 (§9). A loop on a
+fixed interval longer than `T_settle / N_errloop` escapes G6, and a readiness verdict or
+G1 often names it instead (§5.7).
+
 **Notes.** A check that could not judge something records a note naming it: G3 for a
 deletion whose deadline the run did not reach, that a fault reached into, or that botbox
 took an object inside, G5 for a `Restart` missing a snapshot or with a change of botbox's
-or a fault between its snapshots. The Runner carries the last checkpoint's notes out and
-`botbox` prints them at the end of the run, because a check that was skipped otherwise
-reads like one that passed. G5 also notes an `equalIgnore` path it could not follow
-(§8.1), since it then compares a field the target meant it to skip. The Runner also notes
-each ownerReference the collector could not resolve (§5.8), since the object that carries
-it stays, and G3 would report it without saying why. It notes each fault op whose fault
-the proxy applied to no request, since that fault tested nothing (D36). It notes each
-exit of the target it restarted (§5.5), since a run that passes shows no other sign of it.
-A G4 report on envtest also notes the managed kinds whose status envtest never changes
-(§5.8), since G4 may fail for that alone. botbox prints that note once, when the
-invocation starts, rather than with a run's notes.
+or a fault between its snapshots, and G7 for an object a `DeleteManaged` deleted that did
+not come back, where the op followed such a change before the run converged or followed a
+`Restart` the target had not yet answered, or where a fault reached into the op or its
+wait or the target was still owed time to recover from one where the wait ended. The
+Runner carries the last checkpoint's notes out and `botbox` prints them at the end of the
+run, because a check that was skipped otherwise reads like one that passed. G5 also notes
+an `equalIgnore` path it could not follow (§8.1), since it then compares a field the
+target meant it to skip. The Runner also notes each ownerReference the collector could not
+resolve (§5.8), since the object that carries it stays, and G3 would report it without
+saying why. It notes each fault op whose fault the proxy applied to no request, since that
+fault tested nothing (D36). It notes each exit of the target it restarted (§5.5), since a
+run that passes shows no other sign of it. A G4 report on envtest also notes the managed
+kinds whose status envtest never changes (§5.8), since G4 may fail for that alone. botbox
+prints that note once, when the invocation starts, rather than with a run's notes.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
-manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
-the settle wait, which the predicate ends. The default is
+manages. G4 needs a `Ready` predicate. G1, G2, G5 and G7 need none of their own, but they
+read the settle wait, which the predicate ends. The default is
 `has(status.observedGeneration) && status.observedGeneration == metadata.generation`, and
 a target whose primary CR lacks that field must declare `ready` (§8.4).
 
@@ -519,6 +555,26 @@ and the remaining ownerReferences. A target excludes further paths with `equalIg
 written in the form of the paths above (§8.1). Along an ignored path, a map or a list
 left empty counts as absent, so an ignored annotation that only one side carries compares
 equal. An item that `[*]` names stays even when left empty, so the items still count.
+
+**G7 evaluation.** G7 is evaluated once per `DeleteManaged` op that deleted something,
+where the settle wait after it ends, which is always before the teardown boundary. Its
+window is that wait: up to `T_settle` or later after a fault or a deletion, closing once
+`Ready` holds with `T_stable` of quiet behind it (§5.5). Where `Ready` holds without the
+object, the target therefore has `T_stable` to recreate it. An object of the deleted one's
+kind and name satisfies G7, whatever its UID and content, since a recreated object carries
+a new UID. Where none exists, G7 does not judge an op where no primary CR is live, or
+where the CR is being deleted, when the wait ends: nothing asks for the object back. It
+notes an op where botbox changed the CR or a managed object after the last settle wait
+that converged, since the target may then have meant to delete the object itself. It notes
+one where a fault was active during the op or its wait, or where the wait ended while the
+target was still owed time to recover from a fault. It also notes an op that follows a
+restart, by a `Restart` op or by `Supervise` after an exit, where the target requested
+nothing between the last restart and the op but leader election's leases and lease
+candidates, and paths that name no resource. botbox has no other sign that the target is
+back (§5.1), and a process starting up or waiting to lead requests only those. It notes an
+op where the target exited, or waited to restart, during the op or its wait. Where several
+of these apply, the note names the first. A violation quotes the object's history and the
+managed objects where the wait ended, which show an object recreated under a new name.
 
 ## 7. Sequence format
 
@@ -546,7 +602,9 @@ Details the example does not show:
   (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
 - G5 judges a `restart` only between two converged settle waits with no CR op, no
   `deleteManaged` that deleted something and no fault's window between them (§6). Put a
-  `settle` op after a `restart`, and one before it unless the op before it settles.
+  `settle` op after a `restart`, and one before it unless the op before it settles. G7
+  judges a `deleteManaged` after a `restart` only once the target has requested a
+  resource outside leader election, which a `settle` op between them gives it time to do.
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
 - A fault's `match.verb` is one of `get`, `list`, `watch`, `create`, `update`, `patch`,
@@ -560,12 +618,18 @@ Details the example does not show:
   tries faults in op order, the first that applies to a request wins, and each runs out on
   its own `until`.
 - `update` applies `patch` as a JSON merge patch (RFC 7386).
-- `recreate` is a delete, a wait for the object to disappear, and a create of `obj`.
+- `recreate` is a delete, a wait for the object to disappear, and a create of `obj`. An
+  object still there where the wait ends is judged there, and the op creates nothing
+  (§5.5).
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
-  then name. The index is resolved at execution time and the chosen object is recorded by
-  name in the report. An index that resolves to nothing is skipped and reported as a note,
-  since a target that manages fewer objects than the sequence expected is behaving, not
-  failing. A kind the target does not declare in `manages` is a configuration error.
+  then name. The index is resolved at execution time against what the Observer has seen.
+  An index that resolves to nothing is skipped and reported as a note, since a target that
+  manages fewer objects than the sequence expected is behaving, not failing. So is an
+  object already gone when botbox deletes it, which the Observer had not yet seen go: the
+  op deleted nothing, and the note names the object. A kind the target does not declare in
+  `manages` is a configuration error. G7 judges a `deleteManaged` only once the run has
+  converged since botbox last changed something (§6), so put a `settle` op between a
+  `noSettle` op and a `deleteManaged`.
 
 `botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
 embed the minimized sequence in this format.
@@ -590,6 +654,8 @@ fixtures:
   - issuer.yaml                               # applied to the run namespace before op 0
 manages:
   - v1/Secret
+  - cert-manager.io/v1/CertificateRequest
+notRecreated:                                 # managed kinds G7 does not require back
   - cert-manager.io/v1/CertificateRequest
 ready: >-                                     # CEL over metadata, spec, status; must yield bool
   has(status.conditions) && status.conditions.exists(c,
@@ -624,14 +690,16 @@ timeouts:                                     # optional; defaults in §6
   stable: 10s
   delete: 60s
 thresholds:                                   # optional; defaults in §6
-  errloop: 20                                 # N_errloop for G6
+  errloop: 10                                 # N_errloop for G6
+  quiet: 0                                    # N_quiet for G1 and G2
 ```
 
 A settle wait ends once the Ready predicate holds and nothing has changed for `stable`,
-within `settle` (§5.5), so the target has `settle - stable` to react before the quiet
-window has to open. A `stable` at least as wide as `settle` leaves it none, and every op
-that writes then expires. Loading such a target is a configuration error rather than a run
-that reports G4 against a target that did nothing wrong.
+within `settle` or later after a fault or a deletion (§5.5), so the target has
+`settle - stable` to react before the quiet window has to open. A `stable` at least as
+wide as `settle` leaves it none, and every op that writes then expires. Loading such a
+target is a configuration error rather than a run that reports G4 against a target that
+did nothing wrong.
 
 A key target.yaml does not take is a configuration error. It names the key's line and
 dotted path, and the key within two edits of it, or else the keys its block takes. A swap
@@ -665,6 +733,11 @@ optional `selector` (label selector) refines attribution (§6). Paths under `gen
 dotted schema property names, which the CRD schema validates. A Go hook may replace the
 equality predicate as `equal: go:<name>` (§8.4). A hook takes no `equalIgnore`, since
 nothing would read it.
+
+`notRecreated` lists managed kinds the target leaves deleted by design, or recreates under
+a new name, which G7 does not require back (§6). Each must appear in `manages`.
+cert-manager lists CertificateRequest: a request records one issuance, and a Ready
+Certificate whose request is deleted issues no new one.
 
 The primary, every managed kind and every fixture must be namespaced, because a run owns
 one namespace (§5.5, D13). botbox refuses the cluster-scoped ones before the first run, in
@@ -716,6 +789,7 @@ type Target struct {
     Sample        *unstructured.Unstructured
     Fixtures      []*unstructured.Unstructured
     Manages       []schema.GroupVersionKind
+    NotRecreated  []schema.GroupVersionKind             // managed kinds G7 exempts
     Selector      labels.Selector
     Ready         func(*unstructured.Unstructured) bool // compiled from `ready`, or a hook
     ReadyExpr     string                                // `ready` as declared, the default, or go:<name>
@@ -724,6 +798,7 @@ type Target struct {
     Generate      GenerateSpec
     Launch        LaunchSpec
     Timeouts      Timeouts
+    Thresholds    Thresholds
 }
 
 type Property struct {
@@ -799,12 +874,19 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   when none remain. Children also carry ownerReferences, so the collector and the
   finalizer are two independent cleanup paths.
 - The controller sets those ownerReferences **except** where a seeded bug says otherwise.
+- `--cleanup-delay` holds a deleted Widget's finalizer that long past its
+  deletionTimestamp before the cleanup begins. The controller stays correct, only slower.
 - `ready`: `has(status.observedGeneration) && status.observedGeneration ==
   metadata.generation && has(status.ready) && status.ready == spec.count`.
 - `P1`, `when: checkpoint`: `status.ready` never exceeds the number of Widget-owned ConfigMaps
   present. In CEL, `!has(status.ready) || status.ready <= managed.filter(o, o.kind ==
   "ConfigMap").size()`.
 - `timeouts: {settle: 5s, stable: 2s, delete: 10s}`. The toy converges in milliseconds.
+- `thresholds: {errloop: 5}`. B5's backoff repeats its failing request 10 times in the
+  toy's 5 s `T_settle` (§6, backoff).
+- `--resync=<duration>` requeues every Widget on that interval and writes its status each
+  time, changed or not. The envtest tier runs it at 900 ms, which fails G1 under the
+  default `N_quiet` and passes under `quiet: 3` (§6, periodic work).
 - The toy watches only the namespace `WATCH_NAMESPACE` names, where it is set, and its
   target sets it to `$NAMESPACE` (§8.1).
 
@@ -819,11 +901,12 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 | B5 | Treats NotFound on child Get as an error and requeues forever. The Get is an uncached read (`mgr.GetAPIReader()`), so the failing request reaches the proxy | error loop | G6, G1 |
 | B6 | Writes a fresh `status.lastSyncTime` (microsecond precision, so consecutive writes differ) on every reconcile, so every write re-triggers the controller | churn | G1, G2 |
 | B7 | Does not delete children on `count` decrease | scale-down | G4 |
-| B8 | Does not `Own()` ConfigMaps, so a deleted child is never recreated. The toy's `ready` does not depend on the children, so G4 stays true | unobserved-state | P1 (at the checkpoint after a `DeleteManaged` op), G5 (after a `Restart` recreates the child) |
+| B8 | Does not `Own()` ConfigMaps, so a deleted child is never recreated. The toy's `ready` does not depend on the children, so G4 stays true | unobserved-state | G7 and P1 (at the checkpoint after a `DeleteManaged` op), G5 (after a `Restart` recreates the child) |
 | B9 | Removes the finalizer on the first deletion reconcile, before deleting children, and omits ownerReferences on every child, so no path cleans up | cleanup-ordering | G3 |
 | B10 | Writes status only from an in-memory flag set when it created children. After a `Restart` the flag is gone, so a later scale-down converges the children but leaves `status` stale (a scale-up creates a child and re-arms the flag) | intermediate-state | G4 |
 | B11 | Believes a child is present from the moment it asks the API server to create it, and never asks again. The belief outlives whatever removed the child, so a refused create, a scale-down or a `DeleteManaged` leaves the toy one child short for good, with no error and no requeue | unconfirmed-write | G4 |
 | B12 | Once it has written status, logs what percentage of its children are ready, dividing by `count`. It runs without controller-runtime's panic recovery, so a `count` of 0 ends the process after the toy converged. Every restart reconciles the same spec and exits again | crash loop | G4 |
+| B13 | Never runs its cleanup, so a deleted Widget keeps its finalizer and its children for good | stuck-finalizer | G3 |
 
 Three of the classes are Sieve's bug patterns (§13): intermediate-state, stale-state,
 and unobserved-state. The other classes are this repo's own.
@@ -985,7 +1068,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   binary (cached). All four run on every PR. The `-nightly` target beside each example
   runs it on seeds botbox draws, with the negative control. `make test-kind` = the toy
   through `--kubeconfig` against a kind cluster it creates and deletes, on demand. It
-  passes `b0.json` and fixed seeds, and fails B3 on G3 and B8 on P1 as its negative
+  passes `b0.json` and fixed seeds, and fails B3 on G3 and B8 on G7 as its negative
   controls. It installs the pinned kind into `bin/` and needs Docker. The nightly workflow
   runs the same runs with `make test-kind-runs`.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
@@ -1076,12 +1159,12 @@ the proxy; the `Image` launcher. Separate design addendum.
 
 ## 14. Open questions
 
-1. Does G2 need a per-target exemption list for controllers that write heartbeat-style
-   status fields? external-secrets under `refreshPolicy: Periodic` is the first real
-   target that writes them, and only at an interval longer than `T_stable` does G2 see
-   them: a shorter one keeps the settle wait from converging, and G4 reports it first
-   (D40). D40 answered this target with a target-side setting. The question stands for a
-   controller that offers no such setting.
+1. Does G2 need a per-target exemption for a status field that a controller rewrites
+   with a new value on a timer, such as a heartbeat? `N_quiet` admits writes that change
+   nothing (D58), and a write that moves a resourceVersion is churn. external-secrets
+   under `refreshPolicy: Periodic` writes such a field, and D40 answered it with a
+   target-side setting. The question stands for a controller that offers no such
+   setting.
 2. How is a cluster-scoped primary CR (ClusterIssuer-like) isolated per run?
 3. Should a later phase run the target's admission webhook in envtest, so that generation
    can widen beyond `generate.mutate`?
@@ -1458,19 +1541,19 @@ built from source and run as a black-box binary.
   resolve from there. The Runner checks a fault's resource when it applies the fault op,
   not when the run starts, because a target may install its CRDs itself.
 - **D53 botbox restarts a target that exits once it has converged, and a crash loop is a
-  G4.** Controllers are deployed to be restarted, and controller-runtime exits on purpose
-  when it loses leader election, which a fault can cause. A seventh invariant, "the target
-  keeps running", would report such a controller, so botbox restarts the target as a
-  kubelet does, with a kubelet's backoff. A target waiting out the backoff has not
-  converged, and a restart counts as a change, so a target that exits again soon after
-  each restart fails G4, even where it writes the converged state first. A drawn sequence
-  that finds one shrinks. An exit before any wait converged stays a harness error, since a
-  bad flag, a taken port and a crash on op 0's CR look alike there. An exit a fault excuses
-  owes the target `T_settle` past its restart. Otherwise a correct controller that exits
-  once under each of two faults fails G4, because the second restart waits 10 s. Any other
-  restart gives the target no more time, and its startup requests count toward G1 in a
-  quiet window. Excusing them would need a recovery window of their own, and a correct
-  controller rarely exits with no fault active.
+  G4.** Controllers are deployed to be restarted, and controller-runtime with leader
+  election on exits on purpose when it loses its lease, which a fault can cause. A new
+  invariant, "the target keeps running", would report such a controller, so botbox
+  restarts the target as a kubelet does, with a kubelet's backoff. A target waiting out
+  the backoff has not converged, and a restart counts as a change, so a target that exits
+  again soon after each restart fails G4, even where it writes the converged state first.
+  A drawn sequence that finds one shrinks. An exit before any wait converged stays a
+  harness error, since a bad flag, a taken port and a crash on op 0's CR look alike there.
+  An exit a fault excuses owes the target `T_settle` past its restart. Otherwise a correct
+  controller that exits once under each of two faults fails G4, because the second restart
+  waits 10 s. Any other restart gives the target no more time, and its startup requests
+  count toward G1 in a quiet window. Excusing them would need a recovery window of their
+  own, and a correct controller rarely exits with no fault active.
 - **D54 A golden test pins what fixed seeds draw.** Draws come from rapid's
   `Example(seed)`, which rapid documents as fit only for examples and which promises nothing
   across versions. A draw also depends on the CRD schema, the sample, `generate` and
@@ -1543,3 +1626,82 @@ built from source and run as a black-box binary.
   any foreground delete likewise carried a finalizer that only the garbage collector
   removes, so a correctly owned Job failed G3 too. botbox therefore also turns off the API
   server's garbage collector, which adds those finalizers.
+- **D58 A target declares how many requests a quiet window may hold.** G1 failed a
+  controller that resyncs on a timer, because one request in the `T_stable` after
+  convergence was a violation, and a target could not declare the timer.
+  `thresholds.quiet`, `N_quiet`, default 0, bounds G1's count of requests in one quiet
+  window and G2's count of status writes in it. It mirrors `errloop`: one number keeps G1 a
+  bound on the request rate. A declared resync interval would need botbox to find each
+  tick's burst, and an opt-out would drop G1 and G2 whole. One number covers both checks,
+  because a tick that rewrites an unchanged status is both a request and a status write.
+  It never excuses a resourceVersion that moves, so a heartbeat that changes a field is
+  still churn (§14 question 1). An `N_quiet` above zero lets a slow loop through G1, and
+  G6 catches only a loop that fails often enough (D59). The toy's `--resync` runs under
+  envtest with `quiet: 3` and with the default.
+- **D59 `N_errloop` defaults to 10, and the teardown deletes the fixtures.**
+  controller-runtime's default backoff fails 11 times by 5.1 s and 13 times in the densest
+  30 s, so G6 missed such a loop at 20. A lower default can fail a correct controller that
+  retries one request fast, so the adopted examples set the bar. The worst count of one
+  failing request within 30 s was 3 over 23 external-secrets runs and 2 over 13
+  cert-manager runs, on drawn seeds, pinned sequences and controls. Before the teardown
+  deleted the fixtures, external-secrets reached 26 by the seventh run of one invocation.
+  It reconciled each earlier run's SecretStore, left in a namespace envtest never deletes,
+  and the API server refused every Event it created there. A `T_settle` of 5 s still
+  needs 9 or less (§6, backoff).
+- **D60 G7 requires an object `DeleteManaged` deleted to come back.** The op simulates a
+  missed event, and no check asked whether the target recovered from one. Under B8 with
+  the toy's P1 removed, `create` then `deleteManaged v1/ConfigMap` passed every invariant,
+  and G5 saw the missing child only when a `restart` followed. G7 judges each such op
+  where its settle wait ends and asks for an object of the same kind and name, because a
+  recreated object has a new UID and may differ in content. Comparing the converged states
+  on either side, as G5 does, was rejected: cert-manager answers a deleted Secret with a
+  new key and a newly named CertificateRequest. A target lists the kinds it leaves deleted
+  by design in `notRecreated`, a list of its own, so that `manages` stays a list of
+  strings. cert-manager lists CertificateRequest: after `create` and `deleteManaged` of
+  its request, the settle wait converged on 10 s of quiet with the request still gone. Its
+  Secret came back, also after a re-issue, and so did external-secrets' Secret, also after
+  a rename, so neither lists Secret. G7 notes an op that follows a change of botbox's
+  before the run converged, because the target may have meant to delete that object
+  itself, as the toy does on a scale-down. It notes one where a fault was active during
+  the op or its wait, as every check ignores a fault's window, and one whose wait ended
+  while the target was still owed time to recover from a fault. The Runner stops a fault
+  that runs until an op just before it applies the op, and the toy's informer retried its
+  list 4 s after such a fault stopped, when G7 had already failed it. A settle wait that
+  converges ends that time (§6), though an informer may still be backing off. So the toy,
+  restarted into a 4 s fault on ConfigMaps, can still fail G7 on a `deleteManaged` after
+  settle waits that converged. G7 does not judge an op while no CR is live. An object that
+  is back satisfies G7 before any of these, whatever the fault or the change did. A
+  `Restart` gives botbox no sign that the target is back, so a settle wait after one could
+  converge while the target was still starting, or waiting out the lease its killed
+  predecessor held. G7 then failed the correct toy behind a wrapper that delayed each
+  restart by 3 s. A restart by `Supervise` after an exit is no different: G7 failed the
+  correct toy whose first process was killed and whose restart was delayed by 15 s. G7
+  judges an op after either restart only where the target requested a resource outside
+  leader election between the two, whatever the API server answered, since only a running
+  target asks. A request anywhere in the op's wait was rejected as the bar, because a
+  target first heard from late in the wait has had no time to act. G7 also notes an op
+  where the target exited, or waited to restart, during the op or its wait, since the
+  target may then not have been running when the wait ended.
+- **D61 G1 and G7 treat every `coordination.k8s.io` request as leader election.** The
+  group holds only leases and lease candidates. A candidate under coordinated leader
+  election creates and renews its LeaseCandidate whether or not it leads. G1 ignores those
+  requests as it ignores lease requests, and G7 does not take one as a sign that a
+  restarted target is back.
+- **D62 A settle wait gives a CR under deletion its `T_delete`, and G3 judges a CR that
+  outlives it.** The wait after a `delete` op gave the CR `T_settle` to go. The toy with a
+  7 s cleanup, under a `T_settle` of 5 s and a `T_delete` of 10 s, failed G4 on a
+  `create` and a `delete`, and G3 noted that the run ended before its deadline. B13, whose
+  finalizer never clears, failed G4 too, where G3 names the finalizer with its evidence. The
+  wait now waits for the CR to go, until its G3 deadline. Once the CR has gone, the run has
+  `T_settle` to settle, as after a spec change, because the garbage collector deletes the
+  CR's children after it. `T_stable` would not do: a child deleted after the CR restarts
+  the quiet. G3's window stays `T_delete`. A wait in which a CR outlived that deadline is
+  G3's, so G4 does not report it, whichever wait it is. Where a fault reached into the
+  deletion, G3 only notes it, so G4 still judges that wait and blames the finalizers. A CR
+  under deletion is not ready, whatever `Ready` says, because a wait that converged
+  mid-cleanup would put the rest of the cleanup in the quiet window. The toy proves both:
+  with a `--cleanup-delay` past `T_settle` it passes a `create` and a `delete`, and B13
+  fails G3 alone. A `recreate` waits as long for its old CR, and a CR still there where
+  that wait ends is judged there. A harness error there hid B13 from G3 on generated runs.
+  The op cannot create its CR while the old one stays, so one that no check reports stays a
+  harness error.

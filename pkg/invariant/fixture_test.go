@@ -120,11 +120,15 @@ func (r *run) op(opType invariant.OpType, when time.Duration) *run {
 // deletedManaged is a DeleteManaged op and the object it resolved to, which
 // botbox deleted behind the target's back (DESIGN.md §5.4).
 func (r *run) deletedManaged(when time.Duration, name string) *run {
+	return r.deletedManagedOf(when, configMapGVK, name)
+}
+
+func (r *run) deletedManagedOf(when time.Duration, gvk schema.GroupVersionKind, name string) *run {
 	r.in.Ops = append(r.in.Ops, invariant.Op{
 		Index:   len(r.in.Ops),
 		Type:    invariant.OpDeleteManaged,
 		Time:    at(when),
-		Deleted: observe.Key{GVK: configMapGVK, Namespace: namespace, Name: name},
+		Deleted: observe.Key{GVK: gvk, Namespace: namespace, Name: name},
 	})
 	return r
 }
@@ -397,6 +401,23 @@ func lease(verb string) proxy.Request {
 		Verb: verb, Group: "coordination.k8s.io", Version: "v1", Resource: "leases",
 		Namespace: namespace, Name: "toy-widget", Status: 200,
 	}
+}
+
+// leaseCandidate is a request that coordinated leader election makes before the
+// target leads, as well as after.
+func leaseCandidate(verb string) proxy.Request {
+	return proxy.Request{
+		Verb: verb, Group: "coordination.k8s.io", Version: "v1beta1", Resource: "leasecandidates",
+		Namespace: namespace, Name: "toy-widget", Status: 200,
+	}
+}
+
+// leasesElsewhere reads a resource that shares the name of leader election's
+// leases but not their group.
+func leasesElsewhere() proxy.Request {
+	elsewhere := lease("get")
+	elsewhere.Group = "example.com"
+	return elsewhere
 }
 
 // nonResource is a request to a path that names no resource: a health probe,

@@ -36,6 +36,9 @@ type liveRun struct {
 	target    *target.Target
 	client    dynamic.Interface
 	resources map[schema.GroupVersionKind]schema.GroupVersionResource
+	// emptied are the kinds the teardown deletes and forces finalizers off:
+	// the target's and its fixtures'.
+	emptied []schema.GroupVersionKind
 }
 
 var _ harness = (*liveRun)(nil)
@@ -45,15 +48,21 @@ func newLiveRun(h *Harness, t *target.Target) (*liveRun, error) {
 	if err != nil {
 		return nil, fmt.Errorf("building botbox's dynamic client: %w", err)
 	}
+	emptied := t.WatchedKinds()
+	for _, fixture := range t.Fixtures {
+		if gvk := fixture.GroupVersionKind(); !slices.Contains(emptied, gvk) {
+			emptied = append(emptied, gvk)
+		}
+	}
 	resources := map[schema.GroupVersionKind]schema.GroupVersionResource{}
-	for _, gvk := range t.WatchedKinds() {
+	for _, gvk := range emptied {
 		mapping, err := h.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
 			return nil, fmt.Errorf("resolving the resource of %s: %w", kindName(gvk), err)
 		}
 		resources[gvk] = mapping.Resource
 	}
-	return &liveRun{h: h, target: t, client: client, resources: resources}, nil
+	return &liveRun{h: h, target: t, client: client, resources: resources, emptied: emptied}, nil
 }
 
 func (l *liveRun) of(gvk schema.GroupVersionKind) dynamic.ResourceInterface {
@@ -130,8 +139,8 @@ func (l *liveRun) deleteCR(ctx context.Context, name string) error {
 	return nil
 }
 
-func (l *liveRun) awaitCRGone(ctx context.Context, name string) error {
-	gone, err := l.await(ctx, l.target.Timeouts.Delete, func() (bool, error) {
+func (l *liveRun) awaitCRGone(ctx context.Context, name string, until func() time.Time) (bool, error) {
+	gone, err := l.await(ctx, until, func() (bool, error) {
 		_, err := l.crs().Get(ctx, name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return true, nil
@@ -139,12 +148,9 @@ func (l *liveRun) awaitCRGone(ctx context.Context, name string) error {
 		return false, err
 	})
 	if err != nil {
-		return fmt.Errorf("waiting for the CR %s to go: %w", name, err)
+		return false, fmt.Errorf("waiting for the CR %s to go: %w", name, err)
 	}
-	if !gone {
-		return fmt.Errorf("the CR %s was still there %v after its delete", name, l.target.Timeouts.Delete)
-	}
-	return nil
+	return gone, nil
 }
 
 // managedObjects names the managed objects of one kind in the order
@@ -169,11 +175,14 @@ func (l *liveRun) managedObjects(gvk schema.GroupVersionKind) []string {
 	return names
 }
 
-func (l *liveRun) deleteManaged(ctx context.Context, gvk schema.GroupVersionKind, name string) error {
-	if err := l.of(gvk).Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
-		return fmt.Errorf("deleting the managed %s %s: %w", kindName(gvk), name, err)
+func (l *liveRun) deleteManaged(ctx context.Context, gvk schema.GroupVersionKind, name string) (bool, error) {
+	switch err := l.of(gvk).Delete(ctx, name, metav1.DeleteOptions{}); {
+	case apierrors.IsNotFound(err):
+		return false, nil
+	case err != nil:
+		return false, fmt.Errorf("deleting the managed %s %s: %w", kindName(gvk), name, err)
 	}
-	return nil
+	return true, nil
 }
 
 func (l *liveRun) managedCount() int { return len(l.h.Observer.Managed()) }
@@ -181,7 +190,8 @@ func (l *liveRun) managedCount() int { return len(l.h.Observer.Managed()) }
 // awaitClean waits for the target to remove what it manages and for the CR to
 // go, which is what G3 requires within T_delete.
 func (l *liveRun) awaitClean(ctx context.Context, within time.Duration) (bool, error) {
-	return l.await(ctx, within, func() (bool, error) {
+	deadline := time.Now().Add(within)
+	return l.await(ctx, func() time.Time { return deadline }, func() (bool, error) {
 		empty := len(l.h.Observer.Managed()) == 0 && len(l.h.Observer.Current(l.target.Primary)) == 0
 		return empty, nil
 	})
@@ -192,7 +202,7 @@ func (l *liveRun) awaitClean(ctx context.Context, within time.Duration) (bool, e
 func (l *liveRun) forceFinalizers(ctx context.Context) ([]string, error) {
 	var forced []string
 	var failures []error
-	for _, gvk := range l.target.WatchedKinds() {
+	for _, gvk := range l.emptied {
 		list, err := l.of(gvk).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			failures = append(failures, fmt.Errorf("listing the %s left behind: %w", kindName(gvk), err))
@@ -218,7 +228,7 @@ func (l *liveRun) forceFinalizers(ctx context.Context) ([]string, error) {
 // empty deletes what the run left in the namespace (DESIGN.md §5.5).
 func (l *liveRun) empty(ctx context.Context) error {
 	var failures []error
-	for _, gvk := range l.target.WatchedKinds() {
+	for _, gvk := range l.emptied {
 		err := l.of(gvk).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
 			failures = append(failures, fmt.Errorf("deleting the %s left behind: %w", kindName(gvk), err))
@@ -256,16 +266,15 @@ func (l *liveRun) stop(ctx context.Context) error { return l.h.Stop(ctx) }
 
 func (l *liveRun) unresolvedOwners() []cluster.Unresolved { return l.h.unresolved }
 
-// await polls until the condition holds or the window closes, and reports
-// whether it held.
-func (l *liveRun) await(ctx context.Context, within time.Duration, condition func() (bool, error)) (bool, error) {
-	deadline := time.Now().Add(within)
+// await polls until the condition holds or the instant until returns has
+// passed, and reports whether it held.
+func (l *liveRun) await(ctx context.Context, until func() time.Time, condition func() (bool, error)) (bool, error) {
 	for {
 		held, err := condition()
 		if err != nil || held {
 			return held, err
 		}
-		if !time.Now().Before(deadline) {
+		if !time.Now().Before(until()) {
 			return false, nil
 		}
 		if err := sleep(ctx, settlePoll); err != nil {

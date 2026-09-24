@@ -6,9 +6,11 @@ import (
 	"reflect"
 	"slices"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
@@ -82,6 +84,46 @@ func TestStatusForReportsAChangeOnlyWhenOneIsNeeded(t *testing.T) {
 	}
 }
 
+// A controller that resyncs on a timer requeues itself and writes its status
+// on every tick, changed or not. Without the timer, a converged Widget costs
+// nothing.
+func TestResyncRequeuesAndWritesTheStatusEachTime(t *testing.T) {
+	for _, tc := range []struct {
+		resync       time.Duration
+		statusWrites int
+	}{
+		{resync: 0, statusWrites: 0},
+		{resync: 15 * time.Second, statusWrites: 1},
+	} {
+		t.Run(tc.resync.String(), func(t *testing.T) {
+			converged := newWidget(0)
+			converged.Finalizers = []string{Finalizer}
+			converged.Status = toyv1.WidgetStatus{Ready: 0, ObservedGeneration: 1}
+			statusWrites := 0
+			countStatusWrites := interceptor.Funcs{
+				SubResourcePatch: func(ctx context.Context, c client.Client, subResource string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+					statusWrites++
+					return c.SubResource(subResource).Patch(ctx, obj, patch, opts...)
+				},
+			}
+			r := fixture(t, 0, countStatusWrites, converged)
+			r.Resync = tc.resync
+
+			result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(converged)})
+
+			if err != nil {
+				t.Fatalf("Reconcile returned an error: %v", err)
+			}
+			if result.RequeueAfter != tc.resync {
+				t.Errorf("Reconcile asked to requeue after %v, want %v.", result.RequeueAfter, tc.resync)
+			}
+			if statusWrites != tc.statusWrites {
+				t.Errorf("Reconcile wrote the status %d times, want %d.", statusWrites, tc.statusWrites)
+			}
+		})
+	}
+}
+
 // TestCleanUpFindsChildrenTheCacheHasMissed gives the Reconciler a cache that
 // has not seen the child yet, so only a read through APIReader holds the Widget
 // back.
@@ -110,6 +152,55 @@ func TestCleanUpFindsChildrenTheCacheHasMissed(t *testing.T) {
 	if !slices.Contains(deleting.Finalizers, Finalizer) {
 		t.Errorf("cleanUp left the finalizers %v, want it to hold %s until the child is gone.",
 			deleting.Finalizers, Finalizer)
+	}
+}
+
+func TestCleanUpWaitsOutTheCleanupDelay(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		delay       time.Duration
+		deletedAgo  time.Duration
+		wantRequeue time.Duration
+		wantConfigs []string
+	}{
+		{"within the delay", time.Hour, time.Minute, 59 * time.Minute, []string{"w-0"}},
+		{"past the delay", time.Hour, 2 * time.Hour, 0, []string{}},
+		{"no delay, and an API server clock ahead of the controller's", 0, -time.Minute, 0, []string{}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			scheme, err := NewScheme()
+			if err != nil {
+				t.Fatal(err)
+			}
+			widget := deletingWidget(1)
+			widget.DeletionTimestamp = &metav1.Time{Time: time.Now().Add(-testCase.deletedAgo)}
+			configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: widget.Namespace, Name: "w-0"}}
+			if err := controllerutil.SetControllerReference(widget, configMap, scheme); err != nil {
+				t.Fatal(err)
+			}
+			c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(widget, configMap).Build()
+			r := &Reconciler{Client: c, APIReader: c, Scheme: scheme, CleanupDelay: testCase.delay}
+
+			result, err := r.Reconcile(t.Context(), ctrl.Request{NamespacedName: client.ObjectKeyFromObject(widget)})
+
+			if err != nil {
+				t.Fatalf("Reconcile returned an error: %v", err)
+			}
+			if requeue := result.RequeueAfter; requeue > testCase.wantRequeue || requeue < testCase.wantRequeue-time.Minute {
+				t.Errorf("Reconcile asked to requeue after %v, want about %v.", requeue, testCase.wantRequeue)
+			}
+			configMaps := &corev1.ConfigMapList{}
+			if err := c.List(t.Context(), configMaps); err != nil {
+				t.Fatal(err)
+			}
+			names := []string{}
+			for _, item := range configMaps.Items {
+				names = append(names, item.Name)
+			}
+			if !slices.Equal(names, testCase.wantConfigs) {
+				t.Errorf("Reconcile left the ConfigMaps %v, want %v.", names, testCase.wantConfigs)
+			}
+		})
 	}
 }
 

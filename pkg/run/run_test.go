@@ -15,9 +15,13 @@ import (
 
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation"
+	"k8s.io/client-go/dynamic"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/rest"
+	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -232,6 +236,76 @@ func TestNewLiveRunResolvesThroughTheHarnessMapper(t *testing.T) {
 	}
 	if !maps.Equal(live.resources, want) {
 		t.Errorf("The Runner resolved %v, want %v.", live.resources, want)
+	}
+}
+
+// The Runner sets how long a recreate waits for its CR, and moves that time
+// once the Observer sees the deletion.
+func TestAwaitCRGoneWaitsUntilTheInstantTheRunnerGives(t *testing.T) {
+	cr := widget("widget")
+	cr.SetNamespace("botbox-run-1")
+	live := liveOver(widgetsClient(cr))
+	began := time.Now()
+	moved, due := began.Add(100*time.Millisecond), began.Add(300*time.Millisecond)
+	reads := 0
+
+	gone, err := live.awaitCRGone(t.Context(), "widget", func() time.Time {
+		if reads++; reads == 1 {
+			return moved
+		}
+		return due
+	})
+
+	if err != nil || gone {
+		t.Fatalf("The wait returned (%t, %v), want a CR that stayed.", gone, err)
+	}
+	if waited := time.Since(began); waited < due.Sub(began) {
+		t.Errorf("The wait ended %v in, want it to last until %v.", waited, due.Sub(began))
+	}
+}
+
+func TestAwaitCRGoneReportsAReadThatFailed(t *testing.T) {
+	client := widgetsClient()
+	client.PrependReactor("get", "widgets", func(clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("etcd is down")
+	})
+
+	_, err := liveOver(client).awaitCRGone(t.Context(), "widget", time.Now)
+
+	if err == nil || !strings.Contains(err.Error(), "etcd is down") {
+		t.Errorf("The wait returned %v, want the read's error.", err)
+	}
+}
+
+// liveOver is a live run of a toy whose T_delete is too short to matter.
+func liveOver(client dynamic.Interface) *liveRun {
+	return &liveRun{
+		h:         &Harness{Namespace: "botbox-run-1"},
+		target:    &target.Target{Primary: widgetKind, Timeouts: target.Timeouts{Delete: time.Millisecond}},
+		client:    client,
+		resources: map[schema.GroupVersionKind]schema.GroupVersionResource{widgetKind: widgetResource},
+	}
+}
+
+func widgetsClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{widgetResource: "WidgetList"}, objects...)
+}
+
+func TestAwaitCleanWaitsOutItsWindow(t *testing.T) {
+	store := observe.NewStore(observe.Options{Namespace: "botbox-run-1"})
+	cr := widget("widget")
+	cr.SetNamespace("botbox-run-1")
+	store.Record(widgetKind, cr, time.Now())
+	live := &liveRun{h: &Harness{Observer: &observe.Observer{Store: store}}, target: &target.Target{Primary: widgetKind}}
+	began := time.Now()
+
+	clean, err := live.awaitClean(t.Context(), 100*time.Millisecond)
+
+	if err != nil || clean {
+		t.Fatalf("The wait returned (%t, %v), want a namespace that stayed.", clean, err)
+	}
+	if waited := time.Since(began); waited < 100*time.Millisecond {
+		t.Errorf("The wait ended %v in, want it to last 100ms.", waited)
 	}
 }
 

@@ -1,0 +1,40 @@
+{
+  "seed": 20260920,
+  "target": "cert-manager",
+  "ops": [
+    {
+      "i": 0,
+      "t": "create",
+      "obj": {
+        "apiVersion": "cert-manager.io/v1",
+        "kind": "Certificate",
+        "metadata": {
+          "name": "example"
+        },
+        "spec": {
+          "secretName": "example-tls",
+          "commonName": "example.test",
+          "dnsNames": [
+            "example.test"
+          ],
+          "issuerRef": {
+            "kind": "Issuer",
+            "name": "selfsigned"
+          }
+        }
+      }
+    },
+    {
+      "i": 1,
+      "t": "deleteManaged",
+      "kind": "cert-manager.io/v1/CertificateRequest",
+      "index": 0
+    },
+    {
+      "i": 2,
+      "t": "deleteManaged",
+      "kind": "v1/Secret",
+      "index": 0
+    }
+  ]
+}

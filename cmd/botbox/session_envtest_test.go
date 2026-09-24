@@ -102,7 +102,7 @@ func TestKubeconfigModeJudgesOnlyWhatTheTargetDid(t *testing.T) {
 		{name: "the toy with no bug passes", sequence: "b0.json", code: exitOK, want: "every run passed."},
 		{
 			name: "a deleteManaged op takes the toy's own ConfigMap", args: []string{"--launch-arg", "--bug=8"},
-			sequence: "b8.json", code: exitViolation, want: "run 1: P1",
+			sequence: "b8.json", code: exitViolation, want: "G7 the v1/ConfigMap widget-0 that op 1 (deleteManaged) deleted never came back",
 		},
 		{
 			name: "G3 names the toy's orphan", args: []string{"--launch-arg", "--bug=3"},

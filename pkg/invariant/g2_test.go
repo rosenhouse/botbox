@@ -72,6 +72,74 @@ func TestG2FiresOnAStatusWriteThatMovesNoResourceVersion(t *testing.T) {
 	}
 }
 
+// A timer that rewrites an unchanged status is what thresholds.quiet admits.
+func TestG2PassesStatusWritesAtTheQuietThreshold(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(1), status(1, 1))).
+		settled(2*time.Second, invariant.Converged).
+		requests(2500*time.Millisecond, time.Second, 2, statusPatch()).
+		through(14 * time.Second)
+	in.Target.Thresholds.Quiet = 2
+
+	silent(t, invariant.NoChurn, in)
+}
+
+func TestG2FiresOnStatusWritesPastTheQuietThreshold(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(1), status(1, 1))).
+		settled(2*time.Second, invariant.Converged).
+		requests(2500*time.Millisecond, 400*time.Millisecond, 4, statusPatch()).
+		through(14 * time.Second)
+	in.Target.Thresholds.Quiet = 2
+
+	violation := fired(t, invariant.NoChurn, in)
+
+	if want := "made 4 status writes"; !strings.Contains(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to say it %s.", violation.Statement, want)
+	}
+	if want := "thresholds.quiet allows 2"; !strings.Contains(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to name the threshold: %q.", violation.Statement, want)
+	}
+	if want := at(3300 * time.Millisecond); !violation.At.Equal(want) {
+		t.Errorf("The violation is at %v, want the write that went past the threshold, at %v.", violation.At, want)
+	}
+}
+
+func TestG2ReadsANegativeQuietAsZero(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(1), status(1, 1))).
+		settled(2*time.Second, invariant.Converged).
+		request(3*time.Second, statusPatch()).
+		through(14 * time.Second)
+	in.Target.Thresholds.Quiet = -1
+
+	violation := fired(t, invariant.NoChurn, in)
+
+	if want := "thresholds.quiet allows 0"; !strings.Contains(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to name the threshold: %q.", violation.Statement, want)
+	}
+}
+
+// A write that changed something is churn however many the target declares.
+func TestG2IgnoresTheQuietThresholdForAResourceVersionThatMoves(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(1), status(1, 1))).
+		settled(2*time.Second, invariant.Converged).
+		record(3*time.Second, widget("11", spec(1), status(1, 1))).
+		through(14 * time.Second)
+	in.Target.Thresholds.Quiet = 5
+
+	violation := fired(t, invariant.NoChurn, in)
+
+	if len(violation.Versions) != 1 || violation.Versions[0].ResourceVersion != "11" {
+		t.Fatalf("The evidence holds %v, want the Widget at resourceVersion 11.", violation.Versions)
+	}
+}
+
 func TestG2IgnoresChangesBeforeTheQuietWindow(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).

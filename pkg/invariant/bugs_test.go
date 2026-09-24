@@ -32,9 +32,10 @@ func TestTheSeededBugsTripTheChecksTheCatalogNames(t *testing.T) {
 		{bug: "B5", catalog: []string{"G1", "G6"}, fires: []string{"G1", "G4", "G6"}, in: b5()},
 		{bug: "B6", catalog: []string{"G1", "G2"}, fires: []string{"G1", "G2", "G4"}, in: b6()},
 		{bug: "B7", catalog: []string{"G4"}, fires: []string{"G4"}, in: b7()},
-		{bug: "B8", catalog: []string{"G5", "P1"}, fires: []string{"G5", "P1"}, in: b8()},
+		{bug: "B8", catalog: []string{"G5", "G7", "P1"}, fires: []string{"G5", "G7", "P1"}, in: b8()},
 		{bug: "B9", catalog: []string{"G3"}, fires: []string{"G3", "G4"}, in: b9()},
 		{bug: "B10", catalog: []string{"G4"}, fires: []string{"G4", "P1"}, in: b10()},
+		{bug: "B13", catalog: []string{"G3"}, fires: []string{"G3"}, in: b13()},
 	} {
 		t.Run(seeded.bug, func(t *testing.T) {
 			results, err := invariant.Evaluate(seeded.in)
@@ -225,6 +226,17 @@ func b9() invariant.Input {
 		through(22 * time.Second)
 }
 
+// b13 never runs its cleanup. The delete's settle wait gives the Widget until
+// its deletion deadline, and expires with the Widget still there.
+func b13() invariant.Input {
+	return converged().
+		op(invariant.OpDelete, 10*time.Second).
+		record(10100*time.Millisecond, deletedWidget("15", finalizers(cleanup))).
+		checkpoint(20150*time.Millisecond, invariant.Expired).
+		checkpoint(35*time.Second, invariant.NoSettle).
+		through(35 * time.Second)
+}
+
 // restartedAndScaledDown is b10.json up to its scale-down: three children, a
 // restart at 10s and an update of spec.count to 1 before anything settles.
 func restartedAndScaledDown() *run {
@@ -281,6 +293,7 @@ func TestEveryViolationSaysHowMuchEvidenceItChoseFrom(t *testing.T) {
 	}{
 		{"B1", b1()}, {"B2", b2()}, {"B3", b3()}, {"B4", b4()}, {"B5", b5()},
 		{"B6", b6()}, {"B7", b7()}, {"B8", b8()}, {"B9", b9()}, {"B10", b10()},
+		{"B13", b13()},
 	} {
 		t.Run(seeded.bug, func(t *testing.T) {
 			results, err := invariant.Evaluate(seeded.in)

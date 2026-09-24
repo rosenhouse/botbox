@@ -267,6 +267,10 @@ func TestLoadRejects(t *testing.T) {
 		{"sample that is not YAML", minimalTarget, "name: \"unterminated\n", []string{"widget.yaml"}},
 		{"missing crds path", minimalTarget + "crds: [nosuch/]\n", "", []string{"crds", "nosuch"}},
 		{"managed group read as a version", minimalTarget + "manages:\n  - apps/Deployment\n", "", []string{"manages", "apps"}},
+		{"a kind not recreated that is not managed", minimalTarget + "manages: [v1/ConfigMap]\nnotRecreated: [v1/Secret]\n", "",
+			[]string{"notRecreated", "v1/Secret", "manages"}},
+		{"a malformed kind not recreated", minimalTarget + "manages: [v1/ConfigMap]\nnotRecreated: [ConfigMap]\n", "",
+			[]string{"notRecreated", `"ConfigMap"`, "want group/version/Kind"}},
 		{"duplicate property id", minimalTarget + "properties:\n  - id: P1\n    cel: 'true'\n  - id: P1\n    cel: 'false'\n", "", []string{"P1", "twice"}},
 		{"property without cel", minimalTarget + "properties:\n  - id: P1\n", "", []string{"P1", "cel"}},
 		{"equal written as CEL", minimalTarget + "equal: 'a == b'\n", "", []string{"equal", "go:"}},
@@ -277,6 +281,7 @@ func TestLoadRejects(t *testing.T) {
 		{"timeout of zero", minimalTarget + "timeouts:\n  stable: 0s\n", "", []string{"stable", "positive"}},
 		{"negative timeout", minimalTarget + "timeouts:\n  delete: -1s\n", "", []string{"delete", "positive"}},
 		{"errloop of zero", minimalTarget + "thresholds:\n  errloop: 0\n", "", []string{"errloop", "positive"}},
+		{"negative quiet", minimalTarget + "thresholds:\n  quiet: -1\n", "", []string{"quiet -1", "negative"}},
 		{"a launch env that sets the kubeconfig", minimalTargetWithEnv + "    KUBECONFIG: /elsewhere\n", "", []string{"launch.env", "KUBECONFIG"}},
 		{"a launch env name holding an equals sign", minimalTargetWithEnv + "    A=B: x\n", "", []string{"launch.env", `"A=B"`}},
 		{"an empty launch env name", minimalTargetWithEnv + "    '': x\n", "", []string{"launch.env", `""`}},
@@ -578,7 +583,7 @@ func TestLoadDefaults(t *testing.T) {
 	if loaded.Timeouts != wantTimeouts {
 		t.Errorf("Load defaulted timeouts to %+v, want %+v.", loaded.Timeouts, wantTimeouts)
 	}
-	if want := (target.Thresholds{ErrLoop: 20}); loaded.Thresholds != want {
+	if want := (target.Thresholds{ErrLoop: 10}); loaded.Thresholds != want {
 		t.Errorf("Load defaulted thresholds to %+v, want %+v.", loaded.Thresholds, want)
 	}
 
@@ -639,8 +644,55 @@ func TestLoadDefaultsEachTimeoutSeparately(t *testing.T) {
 	if loaded.Timeouts != want {
 		t.Errorf("Load read timeouts %+v, want %+v.", loaded.Timeouts, want)
 	}
-	if loaded.Thresholds.ErrLoop != 20 {
-		t.Errorf("Load read errloop %d, want the default 20.", loaded.Thresholds.ErrLoop)
+	if loaded.Thresholds.ErrLoop != 10 {
+		t.Errorf("Load read errloop %d, want the default 10.", loaded.Thresholds.ErrLoop)
+	}
+}
+
+// A threshold the target leaves out takes its default.
+func TestLoadThresholds(t *testing.T) {
+	defaults := target.DefaultThresholds
+	t.Cleanup(func() { target.DefaultThresholds = defaults })
+	target.DefaultThresholds = target.Thresholds{ErrLoop: 9, Quiet: 4}
+	for _, tc := range []struct {
+		declared string
+		want     target.Thresholds
+	}{
+		{"thresholds:\n  quiet: 3\n", target.Thresholds{ErrLoop: 9, Quiet: 3}},
+		{"thresholds:\n  quiet: 0\n  errloop: 7\n", target.Thresholds{ErrLoop: 7, Quiet: 0}},
+		{"thresholds:\n  errloop: 7\n", target.Thresholds{ErrLoop: 7, Quiet: 4}},
+	} {
+		t.Run(tc.declared, func(t *testing.T) {
+			path := writeTarget(t, minimalTarget+tc.declared, map[string]string{"widget.yaml": sampleWidget})
+
+			loaded, err := target.Load(path)
+
+			if err != nil {
+				t.Fatalf("Load rejected the thresholds: %v", err)
+			}
+			if loaded.Thresholds != tc.want {
+				t.Errorf("Load read thresholds %+v, want %+v.", loaded.Thresholds, tc.want)
+			}
+		})
+	}
+}
+
+func TestLoadNotRecreated(t *testing.T) {
+	path := writeTarget(t, minimalTarget+`manages:
+  - v1/Secret
+  - cert-manager.io/v1/CertificateRequest
+notRecreated:
+  - cert-manager.io/v1/CertificateRequest
+`, map[string]string{"widget.yaml": sampleWidget})
+
+	loaded, err := target.Load(path)
+
+	if err != nil {
+		t.Fatalf("Load rejected notRecreated: %v", err)
+	}
+	want := []schema.GroupVersionKind{{Group: "cert-manager.io", Version: "v1", Kind: "CertificateRequest"}}
+	if !reflect.DeepEqual(loaded.NotRecreated, want) {
+		t.Errorf("Load read notRecreated %v, want %v.", loaded.NotRecreated, want)
 	}
 }
 

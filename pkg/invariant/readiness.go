@@ -49,7 +49,8 @@ func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 }
 
 // readyWalk is what Ready did over a settle wait. Ready holds at an instant
-// where a primary CR is live and every live one satisfies it.
+// where a primary CR is live and every live one satisfies it and is not under
+// deletion.
 type readyWalk struct {
 	// crs is how many primary CRs were live at the end.
 	crs int
@@ -107,7 +108,7 @@ func (w *readyWalk) step(in Input, at time.Time, crs []observe.Version, written 
 		if errors.Is(err, target.ErrNotBool) {
 			return err
 		}
-		if err != nil || !held {
+		if err != nil || !held || cr.DeletionTimestamp != nil {
 			held, w.cr = false, cr
 			break
 		}

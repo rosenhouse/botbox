@@ -80,7 +80,7 @@ func engineInput(in Input) invariant.Input {
 
 // engineOps carries each op's index, which is what a checkpoint names and not
 // the op's position in the timeline, the CR a CR op wrote, and the object a
-// deleteManaged op resolved to: G3 does not credit the target for a cleanup
+// deleteManaged op deleted: G3 does not credit the target for a cleanup
 // botbox performed (DESIGN.md §5.4, D38).
 func engineOps(t *target.Target, timeline Timeline) []invariant.Op {
 	ops := make([]invariant.Op, len(timeline.Ops))
@@ -89,13 +89,13 @@ func engineOps(t *target.Target, timeline Timeline) []invariant.Op {
 		if op.CR != "" {
 			ops[i].CR = observe.Key{GVK: t.Primary, Namespace: timeline.Namespace, Name: op.CR}
 		}
-		if op.Resolved == "" {
+		if op.Deleted == "" {
 			continue
 		}
 		// The kind resolves: the Runner refuses an op whose kind does not, so
-		// nothing it resolved to an object can carry one (DESIGN.md §5.4).
+		// no op that deleted an object can carry one (DESIGN.md §5.4).
 		gvk, _ := managedKind(t, op.Op.Kind)
-		ops[i].Deleted = observe.Key{GVK: gvk, Namespace: timeline.Namespace, Name: op.Resolved}
+		ops[i].Deleted = observe.Key{GVK: gvk, Namespace: timeline.Namespace, Name: op.Deleted}
 	}
 	return ops
 }

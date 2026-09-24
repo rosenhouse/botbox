@@ -134,6 +134,22 @@ func TestRunRejectsABugOutsideTheCatalog(t *testing.T) {
 	}
 }
 
+func TestRunRejectsOnlyANegativeDuration(t *testing.T) {
+	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "no-such-kubeconfig"))
+
+	for _, flag := range []string{"--resync", "--cleanup-delay"} {
+		for value, rejected := range map[string]bool{"-1s": true, "0s": false} {
+			arg := flag + "=" + value
+
+			err := run([]string{arg}, io.Discard)
+
+			if got := err != nil && strings.Contains(err.Error(), arg); got != rejected {
+				t.Errorf("run returned %v for %s, want it rejected: %v.", err, arg, rejected)
+			}
+		}
+	}
+}
+
 func TestRunPrintsTheUsageForHelp(t *testing.T) {
 	printed := &strings.Builder{}
 

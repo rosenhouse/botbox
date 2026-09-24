@@ -16,8 +16,8 @@ const settlePoll = 50 * time.Millisecond
 // holds, and neither the CR nor a managed object has changed, nor the target
 // restarted, for T_stable. It reports whether it converged within T_settle, or
 // by what owed returns if that is later: the target may still be recovering
-// from a fault. A nil owed owes nothing. A wait that expires while no fault
-// excuses it is a G4 violation, which the caller records.
+// from a fault or deleting a CR. A nil owed owes nothing. The caller judges a
+// wait that expires.
 func (h *Harness) Settle(ctx context.Context, owed func() time.Time) (bool, error) {
 	return settle{
 		timeouts: h.target.Timeouts,
@@ -42,8 +42,8 @@ type settle struct {
 	state func(since time.Time) (ready bool, changed time.Time, err error)
 	// stopped is closed once the target's process has stopped.
 	stopped <-chan struct{}
-	// owed is when the target must have recovered from the faults by, which
-	// can move while the wait runs. Nil owes nothing.
+	// owed is when the wait may give up, which can move while the wait runs.
+	// Nil owes nothing.
 	owed func() time.Time
 }
 
@@ -106,14 +106,15 @@ func (h *Harness) state(since time.Time) (bool, time.Time, error) {
 
 // ready reports whether the predicate holds on every primary CR observed. An
 // evaluation error means "not ready", and a result that is not a bool is a
-// configuration error. A run whose CR is gone has nothing left to be ready.
+// configuration error. A CR under deletion is not ready until it is gone, and
+// a run whose CR is gone has nothing left to be ready.
 func ready(predicate target.ReadyFunc, observed []observe.Version) (bool, error) {
 	for _, cr := range observed {
 		ready, err := predicate(cr.Object)
 		if errors.Is(err, target.ErrNotBool) {
 			return false, err
 		}
-		if err != nil || !ready {
+		if err != nil || !ready || cr.DeletionTimestamp != nil {
 			return false, nil
 		}
 	}

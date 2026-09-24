@@ -25,22 +25,23 @@ import (
 // declaration mirrors target.yaml (DESIGN.md §8.1). Decoding is strict, so a
 // misspelled key is a configuration error rather than silence.
 type declaration struct {
-	Name        string                `json:"name"`
-	Version     string                `json:"version"`
-	CRDs        []string              `json:"crds"`
-	Primary     string                `json:"primary"`
-	Sample      string                `json:"sample"`
-	Fixtures    []string              `json:"fixtures"`
-	Manages     []string              `json:"manages"`
-	Selector    string                `json:"selector"`
-	Ready       string                `json:"ready"`
-	Equal       string                `json:"equal"`
-	EqualIgnore []string              `json:"equalIgnore"`
-	Properties  []propertyDeclaration `json:"properties"`
-	Generate    generateDeclaration   `json:"generate"`
-	Launch      LaunchSpec            `json:"launch"`
-	Timeouts    timeoutsDeclaration   `json:"timeouts"`
-	Thresholds  thresholdsDeclaration `json:"thresholds"`
+	Name         string                `json:"name"`
+	Version      string                `json:"version"`
+	CRDs         []string              `json:"crds"`
+	Primary      string                `json:"primary"`
+	Sample       string                `json:"sample"`
+	Fixtures     []string              `json:"fixtures"`
+	Manages      []string              `json:"manages"`
+	NotRecreated []string              `json:"notRecreated"`
+	Selector     string                `json:"selector"`
+	Ready        string                `json:"ready"`
+	Equal        string                `json:"equal"`
+	EqualIgnore  []string              `json:"equalIgnore"`
+	Properties   []propertyDeclaration `json:"properties"`
+	Generate     generateDeclaration   `json:"generate"`
+	Launch       LaunchSpec            `json:"launch"`
+	Timeouts     timeoutsDeclaration   `json:"timeouts"`
+	Thresholds   thresholdsDeclaration `json:"thresholds"`
 }
 
 type propertyDeclaration struct {
@@ -63,6 +64,7 @@ type timeoutsDeclaration struct {
 
 type thresholdsDeclaration struct {
 	ErrLoop *int `json:"errloop"`
+	Quiet   *int `json:"quiet"`
 }
 
 // Load reads target.yaml at path. Paths inside it resolve against the file's
@@ -119,6 +121,16 @@ func load(path string) (*Target, error) {
 			return nil, fmt.Errorf("manages %q: %w", managed, err)
 		}
 		loaded.Manages = append(loaded.Manages, gvk)
+	}
+	for _, kind := range declared.NotRecreated {
+		gvk, err := parseGVK(kind)
+		if err != nil {
+			return nil, fmt.Errorf("notRecreated %q: %w", kind, err)
+		}
+		if !slices.Contains(loaded.Manages, gvk) {
+			return nil, fmt.Errorf("notRecreated %q: the target does not list it under manages", kind)
+		}
+		loaded.NotRecreated = append(loaded.NotRecreated, gvk)
 	}
 
 	if declared.Sample == "" {
@@ -324,6 +336,12 @@ func thresholds(declared thresholdsDeclaration) (Thresholds, error) {
 	}
 	if parsed.ErrLoop <= 0 {
 		return Thresholds{}, fmt.Errorf("thresholds: errloop %d must be positive", parsed.ErrLoop)
+	}
+	if declared.Quiet != nil {
+		parsed.Quiet = *declared.Quiet
+	}
+	if parsed.Quiet < 0 {
+		return Thresholds{}, fmt.Errorf("thresholds: quiet %d must not be negative", parsed.Quiet)
 	}
 	return parsed, nil
 }

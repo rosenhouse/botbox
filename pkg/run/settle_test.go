@@ -7,6 +7,10 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
@@ -204,6 +208,28 @@ func TestSettleGivesUpWhileTheTargetIsNotReady(t *testing.T) {
 	}
 	if elapsed != testTimeouts.Settle {
 		t.Errorf("The wait took %v, want T_settle of %v.", elapsed, testTimeouts.Settle)
+	}
+}
+
+func TestSettleWaitsForACRUnderDeletionToGo(t *testing.T) {
+	cr := widget("widget")
+	holds := func(*unstructured.Unstructured) (bool, error) { return true, nil }
+
+	for _, test := range []struct {
+		name    string
+		deleted *metav1.Time
+		want    bool
+	}{
+		{name: "a live CR", want: true},
+		{name: "a CR under deletion", deleted: &metav1.Time{Time: time.Now()}, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := ready(holds, []observe.Version{{Object: cr, DeletionTimestamp: test.deleted}})
+
+			if err != nil || got != test.want {
+				t.Errorf("ready returned (%t, %v), want %t.", got, err, test.want)
+			}
+		})
 	}
 }
 

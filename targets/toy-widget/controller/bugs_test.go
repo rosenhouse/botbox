@@ -391,6 +391,42 @@ func TestOnlyB12RunsWithoutPanicRecovery(t *testing.T) {
 	}
 }
 
+func TestB13NeverCleansUpADeletedWidget(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		bug         Bug
+		wantWidget  bool
+		wantConfigs []string
+	}{
+		{"the correct controller deletes the child and releases the Widget", 0, false, []string{}},
+		{"B13 keeps both", B13, true, []string{"w-0"}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			scheme, err := NewScheme()
+			if err != nil {
+				t.Fatal(err)
+			}
+			widget := deletingWidget(1)
+			configMap := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: widget.Namespace, Name: "w-0"}}
+			if err := controllerutil.SetControllerReference(widget, configMap, scheme); err != nil {
+				t.Fatal(err)
+			}
+			r := fixture(t, testCase.bug, interceptor.Funcs{}, widget, configMap)
+
+			mustReconcile(t, r, widget)
+			mustReconcile(t, r, widget)
+
+			err = r.Get(t.Context(), client.ObjectKeyFromObject(widget), &toyv1.Widget{})
+			if present := err == nil; present != testCase.wantWidget || (err != nil && !apierrors.IsNotFound(err)) {
+				t.Errorf("Getting the Widget returned %v, want it present: %t.", err, testCase.wantWidget)
+			}
+			if names := childNames(t, r, widget); !slices.Equal(names, testCase.wantConfigs) {
+				t.Errorf("Two deletion reconciles left the ConfigMaps %v, want %v.", names, testCase.wantConfigs)
+			}
+		})
+	}
+}
+
 // refuseTheFirstChildCreate is the fault the sequence b11-fault.json injects,
 // as the fake API server: one refused ConfigMap create and no more.
 func refuseTheFirstChildCreate() interceptor.Funcs {

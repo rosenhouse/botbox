@@ -243,7 +243,7 @@ func deletedRun(clean bool) Input {
 func TestTheChecksDoNotCreditACleanupBotboxPerformed(t *testing.T) {
 	in := deletedRun(true)
 	in.Timeline.Ops = append(in.Timeline.Ops, AppliedOp{
-		Op: Op{Index: 1, Type: OpDeleteManaged, Kind: "v1/ConfigMap"}, At: at(11), Resolved: "widget-0",
+		Op: Op{Index: 1, Type: OpDeleteManaged, Kind: "v1/ConfigMap"}, At: at(11), Deleted: "widget-0",
 	})
 
 	g3 := resultOf(t, in, "G3")
@@ -256,9 +256,9 @@ func TestTheChecksDoNotCreditACleanupBotboxPerformed(t *testing.T) {
 	}
 }
 
-// An op whose index resolved to nothing deleted nothing, so it names no
-// object for G3 to read (DESIGN.md §5.4).
-func TestTheChecksCarryNoObjectForAnOpThatResolvedToNothing(t *testing.T) {
+// An op that deleted nothing names no object for G3 or G7 to read
+// (DESIGN.md §7).
+func TestTheChecksCarryNoObjectForAnOpThatDeletedNothing(t *testing.T) {
 	timeline := Timeline{
 		Namespace: fakeNamespace,
 		Ops: []AppliedOp{{
@@ -269,7 +269,7 @@ func TestTheChecksCarryNoObjectForAnOpThatResolvedToNothing(t *testing.T) {
 	ops := engineOps(checkTarget(), timeline)
 
 	if got := ops[0].Deleted; got != (observe.Key{}) {
-		t.Errorf("The op names the object %+v, and its index resolved to nothing.", got)
+		t.Errorf("The op names the object %+v, and it deleted nothing.", got)
 	}
 }
 
@@ -602,7 +602,7 @@ func TestEvaluateReturnsOneResultPerCheck(t *testing.T) {
 	for _, result := range results {
 		got = append(got, result.ID)
 	}
-	want := []string{"G1", "G2", "G3", "G4", "G5", "G6", "P1"}
+	want := []string{"G1", "G2", "G3", "G4", "G5", "G6", "G7", "P1"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("The engine returned the results %v, want %v.", got, want)
 	}

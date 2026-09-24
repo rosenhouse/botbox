@@ -172,9 +172,11 @@ crds:
 primary: cert-manager.io/v1/Certificate       # the resource CR ops act on
 sample: certificate.yaml                      # a valid primary CR; generation mutates copies of it
 fixtures:
-  - issuer.yaml                               # applied to the run namespace before op 0
+  - issuer.yaml                               # applied to the run namespace before op 0, deleted after the last
 manages:                                      # group/version/Kind, or v1/Kind for the core group
   - v1/Secret
+  - cert-manager.io/v1/CertificateRequest
+notRecreated:                                 # managed kinds your controller leaves deleted
   - cert-manager.io/v1/CertificateRequest
 ready: >-                                     # CEL over metadata, spec, status; must yield bool
   has(status.conditions) && status.conditions.exists(c,
@@ -184,17 +186,36 @@ launch:
   binary: bin/cert-manager-controller       # relative to the working directory, not to this file
   args:
     - --kubeconfig=$KUBECONFIG                # replaced with a kubeconfig for the proxy
+    - --leader-elect=false                    # a target runs with leader election off
     - --enable-certificate-owner-ref=true
 timeouts:                                     # optional; 30s, 10s and 60s by default
   settle: 30s                                 # the whole budget for one spec change
   stable: 10s                                 # the quiet it has to end in, carved out of settle
   delete: 60s                                 # how long a deletion has to come clean
+thresholds:                                   # optional; 10 and 0 by default
+  errloop: 10                                 # how often one failing request may repeat within settle
+  quiet: 0                                    # how many requests one stable window may hold
 ```
 
-A slow controller needs a wider `settle`, and a chatty one a narrower `stable`. The quiet
-window sits inside the settle budget, so the controller has `settle - stable` to stop
-writing. A `stable` at least as wide as `settle` leaves it none, so botbox refuses to load
-that target rather than reporting G4 against your controller.
+A slow controller needs a wider `settle`. The quiet window sits inside the settle budget,
+so the controller has `settle - stable` to stop writing. A `stable` at least as wide as
+`settle` leaves it none, so botbox refuses to load that target rather than reporting G4
+against your controller. A narrower `stable` also shortens the windows G1 and G2 judge.
+
+A controller that resyncs on a timer makes requests after it has converged, and G1 fails
+it by default. `quiet` is how many requests one `stable` window may hold. A window holds
+at most one tick more than `stable` divided by the interval, rounded down. Multiply those
+ticks by the requests one tick makes, and add up every timer your controller runs, such
+as one per CR. A 15s resync that makes one request needs `quiet: 1` under the default
+`stable`. `quiet` also bounds the status writes that change nothing, which G2 counts. A
+write that changes something fails G2 whatever `quiet` is, or G4 if the timer is faster
+than `stable`, because the settle wait then never sees `stable` of quiet. Keep `quiet` as
+low as your timer allows, since G1 lets a slow loop of that many requests through.
+
+G6 fails a controller that repeats one failing request more than `errloop` times within
+`settle`. controller-runtime's default backoff repeats one 11 times in its first 5.1s,
+which the default catches. A 5s `settle` holds only 10 of them, so it needs `errloop: 9`
+or less.
 
 botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
 fixture before the first run, and it refuses a fixture that sets `metadata.namespace`. It
@@ -237,9 +258,15 @@ every kind.
 
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the
-controller's back. A sequence you write yourself can also carry a `fault`, which makes the
-proxy refuse, delay or drop the requests it matches. This is
-`targets/toy-widget/sequences/fault.json`:
+controller's back. G7 then requires your controller to recreate an object of that kind and
+name before the run settles. Where your `ready` still holds without the object, the run settles
+once nothing has changed for `stable`, so your controller has `stable` to recreate it, however
+wide `settle` is. If your controller leaves a kind deleted by design, or recreates it under a
+new name, list the kind under `notRecreated`. cert-manager lists CertificateRequest, because a
+Ready Certificate does not replace a deleted request.
+
+A sequence you write yourself can also carry a `fault`, which makes the proxy refuse, delay or
+drop the requests it matches. This is `targets/toy-widget/sequences/fault.json`:
 
 <!-- embed: targets/toy-widget/sequences/fault.json -->
 ```json
@@ -308,11 +335,13 @@ A sequence file runs as written and is never minimized. This is
 ```
 
 `botbox replay --target target.yaml sequence.json` re-executes one, which is how you re-examine
-a failure, and `make test-example` runs both pinned sequences so they cannot rot.
+a failure, and `make test-example` runs every pinned sequence so none can rot.
 
 In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
 before it settles. G5 compares the states the controller settled in on either side, and leaves a
-note instead of a verdict when another op changed something in between.
+note instead of a verdict when another op changed something in between. G7 likewise notes a
+`deleteManaged` that follows a `restart` before your controller has requested a resource outside
+leader election, since botbox cannot otherwise tell that it is back.
 
 ## Reading a report
 
@@ -358,7 +387,9 @@ while the controller waits to restart, nor until a restarted controller has run 
 `stable`. A controller that crashes again that soon after each restart never converges,
 even where it wrote its converged state first, so G4 reports it and quotes the last exit.
 A controller that exits during a fault, or while it recovers from one, has `settle` past
-its restart to converge.
+its restart to converge. G7 notes a `deleteManaged` after a restart that follows an exit as
+it does one after a `restart`, and notes one where your controller exited, or waited to
+restart, during the op or its settle wait.
 The toy controller converges a count of 0 and then crashes under `--launch-arg --bug=12`,
 and `targets/toy-widget/sequences/b12.json` sets one:
 
@@ -391,8 +422,12 @@ A settle wait expired. What follows `expired with no fault active` says why:
   restarted in the last stable`, means your controller exited. The line counts the exits
   since it last converged and quotes the last.
 
-After a `delete`, `the CR … was still being deleted, held by the finalizers …` means
-nothing removed those finalizers within `settle`. `no CR was left to be ready, but the
+After a `delete`, the run waits up to `timeouts.delete` for the CR to go and then up to
+`settle` for the rest to settle, so a slow cleanup needs no wider `settle`. A `recreate`
+waits as long for the old CR to go before it creates the new one. A CR still there
+`timeouts.delete` after its deletion fails G3, which names the finalizers still on it.
+Where a fault reached into the deletion, G3 cannot judge it, and `the CR … was still being
+deleted, held by the finalizers …` names them instead. `no CR was left to be ready, but the
 namespace never held still …` means something kept writing after the CR was gone.
 
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
@@ -448,16 +483,17 @@ review, replay its `sequence.json` against the base branch's controller.
 
 ## Invariants
 
-Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.
+Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.
 
 | ID | Checks |
 |---|---|
-| G1 | Bounded reconciliation. The target's request rate falls to zero under an unchanged spec. |
+| G1 | Bounded reconciliation. Under an unchanged spec, one quiet window holds no more requests than `quiet` allows, zero by default. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
 | G3 | Clean deletion. Deleting the CR removes everything it manages and clears its finalizers. |
 | G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops. A controller waiting to restart after a crash has not converged. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
+| G7 | Self-healing. An object `deleteManaged` deletes exists again, by kind and name, once the run settles. |
 
 [docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs. Each bug's sequence also runs against the toy with no bug, and CI fails if a check fires there.
 

@@ -50,6 +50,12 @@ type Reconciler struct {
 	// B1Hold is how long B1 holds its premature status; zero behaves as
 	// defaultB1Hold (DESIGN.md §9.1).
 	B1Hold time.Duration
+	// Resync requeues every Widget this often and writes its status each
+	// time, changed or not. Zero turns the timer off.
+	Resync time.Duration
+	// CleanupDelay is how long a deleted Widget keeps its finalizer before
+	// the cleanup begins.
+	CleanupDelay time.Duration
 
 	// createdFor holds the Widgets this process created a child for. Only B10
 	// reads it, and a restart loses it. Reconciles run on one worker (the
@@ -85,6 +91,9 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	}
 
 	if !widget.DeletionTimestamp.IsZero() {
+		if wait := time.Until(widget.DeletionTimestamp.Add(r.CleanupDelay)); r.CleanupDelay > 0 && wait > 0 {
+			return ctrl.Result{RequeueAfter: wait}, nil
+		}
 		return ctrl.Result{}, r.cleanUp(ctx, widget)
 	}
 
@@ -118,7 +127,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	if r.Bug == B10 && !r.createdChildFor(widget) {
 		return ctrl.Result{}, nil // B10 (§9.1): the status follows a flag a restart lost.
 	}
-	if changed {
+	if changed || r.Resync > 0 {
 		if err := r.patchStatus(ctx, widget, status); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -127,7 +136,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		// B12: a count of 0 divides by zero.
 		log.FromContext(ctx).Info("reconciled", "percentReady", 100*status.Ready/widget.Spec.Count)
 	}
-	return ctrl.Result{}, nil
+	return ctrl.Result{RequeueAfter: r.Resync}, nil
 }
 
 // claimChildrenEarly reports the children ready and holds that state, so that a
@@ -356,8 +365,11 @@ func controlledChildren(ctx context.Context, reader client.Reader, widget *toyv1
 // cleanUp deletes the children a deleted Widget still controls and releases the
 // Widget once none remain.
 func (r *Reconciler) cleanUp(ctx context.Context, widget *toyv1.Widget) error {
-	if r.Bug == B9 {
+	switch r.Bug {
+	case B9:
 		return r.releaseWidget(ctx, widget) // B9 (§9.1): the finalizer goes before the children do.
+	case B13:
+		return nil // B13: the cleanup never runs.
 	}
 	controlled, err := controlledChildren(ctx, r.APIReader, widget)
 	if err != nil {

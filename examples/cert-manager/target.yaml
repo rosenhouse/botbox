@@ -12,6 +12,10 @@ fixtures:
 manages:
   - v1/Secret
   - cert-manager.io/v1/CertificateRequest
+# A CertificateRequest records one issuance. A Ready Certificate whose request
+# is deleted issues no new one, so G7 does not require it back.
+notRecreated:
+  - cert-manager.io/v1/CertificateRequest
 # A Certificate carries observedGeneration inside each condition, not at the
 # top level, so readiness is a cross-field comparison (DESIGN.md §8.4).
 ready: >-

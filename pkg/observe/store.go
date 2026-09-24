@@ -148,6 +148,20 @@ func (s *Store) Window(from, to time.Time) []Version {
 	return window
 }
 
+// VersionsOf returns every version of one kind recorded by t, in the order
+// recorded.
+func (s *Store) VersionsOf(gvk schema.GroupVersionKind, t time.Time) []Version {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var versions []Version
+	for _, v := range s.versions {
+		if v.GVK == gvk && !v.Time.After(t) {
+			versions = append(versions, v)
+		}
+	}
+	return versions
+}
+
 // SnapshotAt returns the latest version of every object live at t, ordered by
 // kind and name.
 func (s *Store) SnapshotAt(t time.Time) []Snapshot {

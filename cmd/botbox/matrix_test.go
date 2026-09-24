@@ -142,10 +142,10 @@ func TestMatrixWritesBugAgainstCheck(t *testing.T) {
 	}
 	written := readMatrix(t, out)
 	want := []string{
-		"| Bug | G1 | G2 | G3 | G4 | G5 | G6 | P1 | No bug |",
-		"|---|---|---|---|---|---|---|---|---|",
-		"| B0 |  |  |  |  |  |  |  |  |",
-		"| B1 |  |  |  | ✓ |  | ✓ |  |  |",
+		"| Bug | G1 | G2 | G3 | G4 | G5 | G6 | G7 | P1 | No bug |",
+		"|---|---|---|---|---|---|---|---|---|---|",
+		"| B0 |  |  |  |  |  |  |  |  |  |",
+		"| B1 |  |  |  | ✓ |  | ✓ |  |  |  |",
 	}
 	for _, line := range want {
 		if !slices.Contains(strings.Split(written, "\n"), line) {
@@ -174,7 +174,7 @@ func TestMatrixMarksACheckThatLeftSomethingUnjudged(t *testing.T) {
 		t.Fatalf("botbox matrix exited %d: %s", code, stderr)
 	}
 	written := readMatrix(t, out)
-	if !strings.Contains(written, "| B0 |  |  |  |  | ? |  |  | G5 ? |") {
+	if !strings.Contains(written, "| B0 |  |  |  |  | ? |  |  |  | G5 ? |") {
 		t.Errorf("The matrix is\n%s\nwant B0's G5 cell and its no-bug cell to say G5 judged nothing.", written)
 	}
 	if !strings.Contains(written, "left something unjudged") {
@@ -321,7 +321,7 @@ func TestMatrixFailsWhereASequenceFiresAgainstTheToyWithNoBug(t *testing.T) {
 	if len(commands) != 1 || commands[0].kubeconfig != "kind.kubeconfig" || !slices.Equal(commands[0].launchArgs, []string{"--x=1"}) {
 		t.Errorf("botbox matrix printed the replay commands %+v, want one with the kubeconfig and --x=1 and no --bug.", commands)
 	}
-	if written := readMatrix(t, out); !strings.Contains(written, "| B1 |  |  |  | ✓ |  | ✓ |  | G4 ✓, G6 ✓ |") {
+	if written := readMatrix(t, out); !strings.Contains(written, "| B1 |  |  |  | ✓ |  | ✓ |  |  | G4 ✓, G6 ✓ |") {
 		t.Errorf("The matrix is\n%s\nwant B1's no-bug cell to name the checks that fired.", written)
 	}
 }

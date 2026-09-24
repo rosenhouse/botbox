@@ -2,9 +2,11 @@ package target_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -434,6 +436,8 @@ func TestLoadPointsAtAMisspelledKey(t *testing.T) {
 		// The decoder matches a key whatever its case.
 		{"below a capital", minimalTarget + "Timeouts:\n  setle: 5s\n",
 			[]string{"line 6: Timeouts.setle is not a key; did you mean settle?"}},
+		{"under a fixture generation may change", minimalTarget + "generate:\n  fixtures:\n    secret.yaml:\n      mutat: [data.token]\n",
+			[]string{"line 8: generate.fixtures.secret.yaml.mutat is not a key; did you mean mutate?"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := writeTarget(t, test.yaml, map[string]string{"widget.yaml": sampleWidget})
@@ -693,6 +697,84 @@ notRecreated:
 	want := []schema.GroupVersionKind{{Group: "cert-manager.io", Version: "v1", Kind: "CertificateRequest"}}
 	if !reflect.DeepEqual(loaded.NotRecreated, want) {
 		t.Errorf("Load read notRecreated %v, want %v.", loaded.NotRecreated, want)
+	}
+}
+
+const secretFixtures = `apiVersion: v1
+kind: Secret
+metadata:
+  name: token
+data:
+  token: czNjcjN0
+  app.properties: YT1i
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: other
+data:
+  token: b3RoZXI=
+  app.properties: Yz1k
+`
+
+func TestLoadReadsTheFixturesGenerationMayChange(t *testing.T) {
+	path := writeTarget(t, minimalTarget+`fixtures: [issuer.yaml, secrets.yaml]
+generate:
+  fixtures:
+    secrets.yaml:
+      mutate:
+        - data.token
+        - data["app.properties"]
+`, map[string]string{
+		"widget.yaml":  sampleWidget,
+		"issuer.yaml":  "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: issuer\n",
+		"secrets.yaml": secretFixtures,
+	})
+
+	loaded, err := target.Load(path)
+	if err != nil {
+		t.Fatalf("Load rejected generate.fixtures: %v", err)
+	}
+	var read []string
+	for _, fixture := range loaded.Generate.Fixtures {
+		for _, mutable := range fixture.Mutate {
+			read = append(read, fmt.Sprintf("%s %s %s", fixture.GVK.Kind, fixture.Name, mutable))
+		}
+	}
+	want := []string{
+		"Secret token data.token", `Secret token data["app.properties"]`,
+		"Secret other data.token", `Secret other data["app.properties"]`,
+	}
+	if !slices.Equal(read, want) {
+		t.Errorf("Load read the fixture paths %q, want %q.", read, want)
+	}
+}
+
+func TestLoadRejectsAFixtureGenerationCannotChange(t *testing.T) {
+	for _, test := range []struct {
+		name, generate, want string
+	}{
+		{"a file fixtures does not list", "    absent.yaml: {}\n",
+			"generate.fixtures absent.yaml: fixtures lists no such file"},
+		{"a path that holds no string", "    secrets.yaml:\n      mutate: [data.tokne]\n",
+			"generate.fixtures secrets.yaml: the v1/Secret token holds no string at data.tokne"},
+		{"a path to a map", "    secrets.yaml:\n      mutate: [data]\n",
+			"generate.fixtures secrets.yaml: the v1/Secret token holds no string at data"},
+		{"every value of a map", "    secrets.yaml:\n      mutate: ['data[*]']\n",
+			"generate.fixtures secrets.yaml: the v1/Secret token holds no string at data[*]"},
+		{"a malformed path", "    secrets.yaml:\n      mutate: ['data[0]']\n",
+			`generate.fixtures secrets.yaml: mutate "data[0]": offset 4`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := writeTarget(t, minimalTarget+"fixtures: [secrets.yaml]\ngenerate:\n  fixtures:\n"+test.generate,
+				map[string]string{"widget.yaml": sampleWidget, "secrets.yaml": secretFixtures})
+
+			_, err := target.Load(path)
+
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Errorf("Load returned %v, want an error saying %q.", err, test.want)
+			}
+		})
 	}
 }
 

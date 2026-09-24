@@ -340,8 +340,8 @@ botbox owns the API server a run executes against.
   plane even where `USE_EXISTING_CLUSTER` is set. Before it starts them, botbox looks for
   both binaries where envtest does: `TEST_ASSET_ETCD` and `TEST_ASSET_KUBE_APISERVER`,
   then `KUBEBUILDER_ASSETS`, then `/usr/local/kubebuilder/bin`. botbox looks up a bare
-  name on `PATH`, as envtest does. An empty `KUBEBUILDER_ASSETS` leaves one. botbox names
-  the variable and the path when a binary is missing.
+  name on `PATH`, as envtest does. A `KUBEBUILDER_ASSETS` of `""` or `.` leaves bare names,
+  such as `etcd`. botbox names the variable and the path when a binary is missing.
 - **kubeconfig**. An existing cluster, normally kind. Used by `make test-kind` and, in
   phase 2, by `Image` targets. botbox installs the target's CRDs there, creating or
   replacing each one, and leaves them installed. The cluster runs

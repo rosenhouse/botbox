@@ -515,8 +515,9 @@ func TestRunActsOnTheCREachOpNames(t *testing.T) {
 		Op{Type: OpCreate, Obj: widget("widget")},
 		Op{Type: OpCreate, Obj: widget("widget-2")},
 		Op{Type: OpUpdate, CR: "widget-2", Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
-		Op{Type: OpDelete},
 		Op{Type: OpRecreate, CR: "widget-2", Obj: widget("widget-2")},
+		Op{Type: OpDelete, CR: "widget-2"},
+		Op{Type: OpDelete},
 	)
 
 	result, err := runFake(t, h, nil, sequence)
@@ -528,8 +529,9 @@ func TestRunActsOnTheCREachOpNames(t *testing.T) {
 		"createCR widget", "settle", "supervise",
 		"createCR widget-2", "settle",
 		"patchCR widget-2 map[spec:map[count:5]]", "settle",
-		"deleteCR widget", "settle",
 		"deleteCR widget-2", "awaitCRGone widget-2", "createCR widget-2", "settle",
+		"deleteCR widget-2", "settle",
+		"deleteCR widget", "settle",
 	}
 	if got := h.opCalls(); !slices.Equal(got, want) {
 		t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
@@ -538,7 +540,7 @@ func TestRunActsOnTheCREachOpNames(t *testing.T) {
 	for _, op := range result.Timeline.Ops {
 		crs = append(crs, op.CR)
 	}
-	if want := []string{"widget", "widget-2", "widget-2", "widget", "widget-2"}; !slices.Equal(crs, want) {
+	if want := []string{"widget", "widget-2", "widget-2", "widget-2", "widget-2", "widget"}; !slices.Equal(crs, want) {
 		t.Errorf("The ops name the CRs %q, want %q.", crs, want)
 	}
 }

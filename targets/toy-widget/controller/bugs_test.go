@@ -3,7 +3,9 @@ package controller
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -336,6 +338,56 @@ func TestB11NeverRetriesAChildCreateTheAPIServerRefused(t *testing.T) {
 				t.Errorf("status.ready is %d, want the %d the API server holds.", ready, want)
 			}
 		})
+	}
+}
+
+// B12 converges a count of 0 and only then divides by it, so every reconcile
+// of that spec panics, the first and every one after a restart.
+func TestB12DividesByACountOfZeroOnceItHasConverged(t *testing.T) {
+	for _, testCase := range []struct {
+		name   string
+		bug    Bug
+		panics bool
+	}{
+		{"the correct controller", 0, false},
+		{"B12", B12, true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			widget := newWidget(2)
+			r := fixture(t, testCase.bug, interceptor.Funcs{}, widget)
+			mustReconcile(t, r, widget)
+			setCount(t, r, widget, 0)
+
+			for _, which := range []string{"the reconcile at count 0", "the reconcile after it"} {
+				func() {
+					defer func() {
+						recovered := recover()
+						if panicked := strings.Contains(fmt.Sprint(recovered), "integer divide by zero"); panicked != testCase.panics {
+							t.Errorf("%s panicked with %v; want it to divide by zero: %t.", which, recovered, testCase.panics)
+						}
+					}()
+					mustReconcile(t, r, widget)
+				}()
+			}
+
+			if names := childNames(t, r, widget); len(names) != 0 {
+				t.Errorf("The reconcile at count 0 left the ConfigMaps %v.", names)
+			}
+			observed := readWidget(t, r, widget)
+			if observed.Status.Ready != 0 || observed.Status.ObservedGeneration != observed.Generation {
+				t.Errorf("The reconcile at count 0 left the status %+v of generation %d.", observed.Status, observed.Generation)
+			}
+		})
+	}
+}
+
+// B12 lets a panic end the process, where controller-runtime would recover it.
+func TestOnlyB12RunsWithoutPanicRecovery(t *testing.T) {
+	for _, bug := range []Bug{0, B11, B12} {
+		options := (&Reconciler{Bug: bug}).controllerOptions()
+		if recovers := options.RecoverPanic == nil || *options.RecoverPanic; recovers != (bug != B12) {
+			t.Errorf("Bug %d recovers a panic: %t.", bug, recovers)
+		}
 	}
 }
 

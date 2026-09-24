@@ -96,6 +96,13 @@ func (f FaultWindow) overlaps(from, to time.Time) bool {
 	return !f.Start.After(to) && (f.End.IsZero() || f.End.After(from))
 }
 
+// Exit is one time the target stopped on its own, and when botbox started it
+// again. Why is its error and what the target wrote as it stopped.
+type Exit struct {
+	At, Restart time.Time
+	Why         string
+}
+
 // Input is one run as the checks see it.
 type Input struct {
 	Target   *target.Target
@@ -106,6 +113,7 @@ type Input struct {
 	Ops         []Op
 	Checkpoints []Checkpoint
 	Faults      []FaultWindow
+	Exits       []Exit
 	// Teardown is when botbox began emptying the run namespace
 	// (DESIGN.md §5.5). What changes after it is botbox's own doing, so no
 	// window reaches past it. G3 judges the deletion it opens.

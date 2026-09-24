@@ -37,6 +37,8 @@ type fakeSession struct {
 	// pass is given its verdicts. It reads the directory too, because that is
 	// what tells a replay of the pass from the run of the minimized sequence.
 	fails func(sequence run.Sequence, dir string) *run.Violation
+	// notes are what a run fails answers for notes.
+	notes []string
 	// after runs once a sequence has executed, which is where a test expires
 	// the deadline.
 	after     func()
@@ -45,7 +47,11 @@ type fakeSession struct {
 	dirs      []string
 	args      [][]string
 	closed    bool
+	// refused is what vet answers.
+	refused error
 }
+
+func (s *fakeSession) vet(*target.Target) error { return s.refused }
 
 func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
 	s.sequences = append(s.sequences, sequence)
@@ -67,7 +73,7 @@ func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.
 		return s.results[n], failure
 	}
 	if s.fails != nil {
-		return run.Result{Violation: s.fails(sequence, dir)}, failure
+		return run.Result{Violation: s.fails(sequence, dir), Notes: s.notes}, failure
 	}
 	return run.Result{}, failure
 }
@@ -530,6 +536,34 @@ func TestTheReportCarriesTheMinimizedSequence(t *testing.T) {
 	}
 }
 
+// The notes printed above a violation are of the run it came from, which is
+// the minimized sequence's once that reproduced.
+func TestTheNotesPrintedAreOfTheRunReported(t *testing.T) {
+	violation := run.Violation{ID: "G4", Statement: "the settle wait after op 0 (restart) expired"}
+	drawn, minimized := "the target exited during op 1 (restart)", "the target exited during op 0 (restart)"
+	session := &fakeSession{
+		results: []run.Result{{Violation: &violation, Notes: []string{drawn}}},
+		fails: func(candidate run.Sequence, _ string) *run.Violation {
+			if slices.ContainsFunc(candidate.Ops, func(op run.Op) bool { return op.Type == run.OpRestart }) {
+				return &violation
+			}
+			return nil
+		},
+		notes: []string{minimized},
+	}
+	generate := countingGenerator(nil, run.OpSettle, run.OpRestart, run.OpSettle)
+
+	code, stdout, stderr := invokeWith(t, session, generate,
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	if strings.Contains(stdout, drawn) || !strings.Contains(stdout, "run 1: "+minimized+"\nrun 1: G4") {
+		t.Errorf("botbox run printed\n%s\nwant the minimized run's note above its violation, and not the drawn run's.", stdout)
+	}
+}
+
 // reportedSequence is the sequence report.json embedded.
 func reportedSequence(t *testing.T, dir string) run.Sequence {
 	t.Helper()
@@ -752,15 +786,31 @@ func TestReplayExecutesTheNamedSequenceAndPrintsItsSeed(t *testing.T) {
 // it could not judge (DESIGN.md §6).
 func TestARunPrintsWhatTheChecksCouldNotJudge(t *testing.T) {
 	note := "G3 is not evaluated for the deletion of widget: the run ended before its 10s deadline"
-	session := &fakeSession{results: []run.Result{{Notes: []string{note}}}}
+	for _, ending := range []struct {
+		name      string
+		violation *run.Violation
+		failure   error
+		code      int
+	}{
+		{"a pass", nil, nil, exitOK},
+		{"a violation", &run.Violation{ID: "G4"}, nil, exitViolation},
+		{"a harness error", nil, errors.New("the target is no longer running"), exitError},
+	} {
+		t.Run(ending.name, func(t *testing.T) {
+			session := &fakeSession{
+				results:  []run.Result{{Notes: []string{note}, Violation: ending.violation}},
+				failures: []error{ending.failure},
+			}
 
-	code, stdout, stderr := invoke(t, session, "replay", "--target", toyTargetYAML, "--out", t.TempDir(), writeSequence(t, 1))
+			code, stdout, stderr := invoke(t, session, "replay", "--target", toyTargetYAML, "--out", t.TempDir(), writeSequence(t, 1))
 
-	if code != exitOK {
-		t.Fatalf("botbox replay exited %d: %s", code, stderr)
-	}
-	if !strings.Contains(stdout, note) {
-		t.Errorf("botbox replay printed %q, want the note %q.", stdout, note)
+			if code != ending.code {
+				t.Fatalf("botbox replay exited %d, want %d: %s", code, ending.code, stderr)
+			}
+			if !strings.Contains(stdout, note) {
+				t.Errorf("botbox replay printed %q, want the note %q.", stdout, note)
+			}
+		})
 	}
 }
 
@@ -809,6 +859,50 @@ func TestAHarnessErrorExitsTwo(t *testing.T) {
 	}
 	if !strings.Contains(stderr, "the control plane did not start") {
 		t.Errorf("botbox run reported %q, want the harness error.", stderr)
+	}
+}
+
+func TestATargetTheClusterRefusesEndsTheInvocationBeforeARun(t *testing.T) {
+	refused := errors.New("these are cluster-scoped: the managed rbac.authorization.k8s.io/v1/ClusterRole")
+	for _, args := range [][]string{
+		{"run", "--target", toyTargetYAML, "--out", t.TempDir(), writeSequence(t, 1)},
+		{"matrix", "--target", toyTargetYAML, "--sequences", bugSequences(t, 0), "--out", matrixFile(t)},
+	} {
+		t.Run(args[0], func(t *testing.T) {
+			session := &fakeSession{refused: refused}
+
+			code, _, stderr := invoke(t, session, args...)
+
+			if code != exitError {
+				t.Errorf("botbox %s exited %d, want %d.", args[0], code, exitError)
+			}
+			if !strings.Contains(stderr, refused.Error()) {
+				t.Errorf("botbox %s reported %q, want %q.", args[0], stderr, refused)
+			}
+			if len(session.sequences) != 0 {
+				t.Errorf("botbox %s ran %d sequences against a target the cluster refused.", args[0], len(session.sequences))
+			}
+			if !session.closed {
+				t.Errorf("botbox %s left the session open.", args[0])
+			}
+		})
+	}
+}
+
+// The empty assets directory fails a control plane that starts first.
+func TestOpeningASessionChecksTheLaunchBinaryFirst(t *testing.T) {
+	t.Setenv("KUBEBUILDER_ASSETS", t.TempDir())
+	unbuilt := &target.Target{Launch: target.LaunchSpec{Binary: "bin/no-such-operator"}}
+	for _, opts := range []options{{}, {kubeconfig: filepath.Join(t.TempDir(), "no-such-kubeconfig")}} {
+		s, err := openSession(opts, unbuilt)
+
+		if err == nil {
+			_ = s.close()
+			t.Fatalf("openSession(%+v) accepted a launch.binary that does not exist.", opts)
+		}
+		if !strings.Contains(err.Error(), "launch.binary") {
+			t.Errorf("openSession(%+v) returned %q, want the launch.binary error before anything starts.", opts, err)
+		}
 	}
 }
 

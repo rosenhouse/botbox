@@ -157,6 +157,33 @@ window sits inside the settle budget, so the controller has `settle - stable` to
 writing. A `stable` at least as wide as `settle` leaves it none, so botbox refuses to load
 that target rather than reporting G4 against your controller.
 
+botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
+fixture before the first run, and it refuses a fixture that sets `metadata.namespace`. It
+watches only the run namespace, so it does not see a child your controller creates in
+another namespace.
+
+Each run creates its own namespace, and the kubeconfig botbox hands your controller names
+that namespace. `launch.env` sets variables for your controller. In its values and in
+`launch.args`, botbox replaces the text `$NAMESPACE` with the run namespace and
+`$KUBECONFIG` with the kubeconfig's path. It expands no other spelling, such as
+`$(NAMESPACE)` or `${NAMESPACE}`. An operator-sdk operator watches the namespace that
+`WATCH_NAMESPACE` names, and it may read `POD_NAMESPACE` for leader election:
+
+```yaml
+launch:
+  binary: bin/manager
+  env:
+    WATCH_NAMESPACE: $NAMESPACE
+    POD_NAMESPACE: $NAMESPACE
+```
+
+YAML reads an unquoted `0022` as 18 and `yes` as true, so botbox refuses a name or value
+that YAML would change. Quote such a name or value.
+
+Your controller also inherits botbox's environment, but a report's replay command does not
+record it. Declare what your controller needs in `launch.env`, so that a replay reproduces
+the run.
+
 envtest runs no garbage collector, so botbox runs its own over the kinds your target
 declares. It deletes an object once every owner the object names is gone. It finds an owner
 by group, kind and name, at any version the API server serves, and then compares the UID.
@@ -191,6 +218,9 @@ That includes a fault still active when the sequence ends, like the one above: b
 it and waits for the controller before it tears the run down. The proxy tries faults in op
 order, the first that applies to a request wins, and each runs out on its own `until`. A fault
 that matches no request changes nothing and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
+`match.verb` is a Kubernetes verb such as `create` or `list`, and `match.resource` is the
+plural the API server serves, such as `configmaps`. botbox refuses any other value, because
+the fault would match nothing. A run notes each fault the proxy applied to no request.
 
 Field values come from the CRD's own schema: its numeric ranges, enums, patterns and list
 lengths. A schema that says only `type: string` yields a random word, so the schema is not a
@@ -249,7 +279,8 @@ target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `objects.jsonl` — every version of every object the Observer saw. Each value of a Secret's
   `data` and annotations is a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`.
 - `target.log` — the target's own output.
-- `kubeconfig` — what the target was pointed at, which is the proxy and not the cluster.
+- `kubeconfig` — the kubeconfig the target was given. It points at the proxy rather than the
+  cluster, and names the run namespace.
 
 Equal Secret values share a marker within one invocation, so you can see which value changed
 without learning it. botbox hides nothing else. A Secret's labels, your sample, your CRs and
@@ -270,6 +301,24 @@ whole.
 A G5 report lists each field the restart changed, with its value before and after, and the line
 botbox prints names the first. If your controller stamps one of those fields at startup, paste
 its path into `equalIgnore` as written. A Secret's values appear there as markers too.
+
+Once a settle wait has converged, botbox restarts a controller that exits, as a kubelet
+would: at once, then after 10s, doubling up to 5 minutes. The run prints a note for each
+exit, quoting the line the controller wrote as it stopped. A settle wait does not converge
+while the controller waits to restart, nor until a restarted controller has run for
+`stable`. A controller that crashes again that soon after each restart never converges,
+even where it wrote its converged state first, so G4 reports it and quotes the last exit.
+A controller that exits during a fault, or while it recovers from one, has `settle` past
+its restart to converge.
+The toy controller converges a count of 0 and then crashes under `--launch-arg --bug=12`,
+and `targets/toy-widget/sequences/b12.json` sets one:
+
+```
+run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
+run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
+run 1: G4 the settle wait after op 1 (update) expired with no fault active
+  at 2026-09-23T22:39:39.478931922Z; in 5.037s the target never held its Ready predicate with 2s of quiet behind it; the target managed 0 objects of the kinds it declares; the target exited 2 times since it last converged, last with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
+```
 
 ### When a settle wait fails G4
 
@@ -294,8 +343,28 @@ namespace never held still …` means something kept writing after the CR was go
 
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
 `settle`. Where your controller repeated a failing request, the line names it and its
-count: an error loop that backs off can fail too rarely for G6 to count. A `ready` that yields
+count: an error loop that backs off can fail too rarely for G6 to count. Where your controller
+exited since it last converged, the line counts the exits and quotes the last. A `ready` that yields
 something other than a bool is a configuration error, and botbox exits 2 naming it.
+
+## When botbox exits 2
+
+Exit 2 means botbox could not test your controller, and the message says what to change.
+
+- `KUBEBUILDER_ASSETS` names the directory holding `etcd` and `kube-apiserver`. Install them
+  as [Install](#install) shows, or point `--kubeconfig` at a cluster.
+- A key target.yaml does not take fails with its line, as in `line 6: timeouts.setle is
+  not a key; did you mean settle?`.
+- `launch.binary` is relative to the directory you run botbox from. `crds`, `sample` and
+  `fixtures` are relative to target.yaml.
+- A controller that stops before its first settle wait converges ends the invocation,
+  whether a flag, a taken port or the first CR stopped it. botbox quotes the line it wrote
+  as it stopped, above any stack trace, and `target.log` in the run directory holds the
+  rest. If botbox had created the CR and the controller had requested a resource from the
+  API server, the CR may have crashed it, and the message names the run's `sequence.json`
+  for `botbox replay`. A controller that binds a fixed port, such as a health probe on
+  `:8081`, collides with a second invocation of itself. Give it a free port in
+  `launch.args`, or with `--launch-arg`.
 
 ## Running in CI
 
@@ -328,7 +397,7 @@ Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generi
 | G1 | Bounded reconciliation. The target's request rate falls to zero under an unchanged spec. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
 | G3 | Clean deletion. Deleting the CR removes everything it manages and clears its finalizers. |
-| G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops. |
+| G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops. A controller waiting to restart after a crash has not converged. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
 

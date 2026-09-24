@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -92,6 +93,12 @@ type Harness struct {
 	down   teardown
 	// unresolved is what the collector could not resolve, once it stops.
 	unresolved []cluster.Unresolved
+
+	mu sync.Mutex
+	// exited records each exit of a supervised target, and logQuoted is where
+	// target.log ended at the last of them.
+	exited    []Exit
+	logQuoted int64
 }
 
 // Start brings the run up in the order DESIGN.md §5.5 requires and leaves the
@@ -159,7 +166,7 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 	}
 	h.down.push("stopping the proxy", func(context.Context) error { return h.Proxy.Stop() })
 	kubeconfig := filepath.Join(opts.Dir, kubeconfigFile)
-	if err := h.Proxy.Kubeconfig(kubeconfig); err != nil {
+	if err := h.Proxy.Kubeconfig(kubeconfig, h.Namespace); err != nil {
 		return err
 	}
 
@@ -192,9 +199,11 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 	}
 
 	h.Launcher = launch.NewBinary(launch.Options{
-		Path: h.target.Launch.Binary,
-		Args: h.target.Launch.Args,
-		Log:  targetLog,
+		Path:      h.target.Launch.Binary,
+		Args:      h.target.Launch.Args,
+		Namespace: h.Namespace,
+		Env:       h.target.Launch.Env,
+		Log:       targetLog,
 	})
 	if err := h.Launcher.Start(ctx, kubeconfig); err != nil {
 		return err

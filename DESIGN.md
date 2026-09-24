@@ -97,18 +97,27 @@ type Launcher interface {
     Start(ctx context.Context, kubeconfig string) error // kubeconfig points at the proxy
     Stop(ctx context.Context) error                     // graceful: SIGTERM, then SIGKILL after a grace period
     Restart(ctx context.Context) error                  // crash: SIGKILL, then Start
+    Supervise(onExit func(exit error, restart time.Time)) // from now on, restart the target whenever it exits
     Status() Status                    // is the target still running, and why it stopped if not
-    Exited() <-chan struct{}           // closed once the running target has stopped
+    Exited() <-chan struct{}           // closed once the target has stopped and will not start again
 }
 ```
 
 Implementations:
 
 - `Binary` — the primary launcher and the only one required through M6. Exec a local
-  binary. botbox writes a kubeconfig whose server is the proxy URL, exports it as
-  `KUBECONFIG`, and substitutes `$KUBECONFIG` in `launch.args`. The target's stdout and
-  stderr go to `target.log` in the run directory. `Restart` sends SIGKILL, waits for the
-  process to be reaped, then execs again, so fixed ports and lock files are released.
+  binary. botbox writes a kubeconfig whose server is the proxy URL and whose context names
+  the run namespace, and exports it as `KUBECONFIG`. It substitutes `$KUBECONFIG` and
+  `$NAMESPACE`, the run namespace, in `launch.args` and in the values of `launch.env`.
+  `launch.env` sets variables over the environment the target inherits from botbox, and
+  may not set `KUBECONFIG`. The target's stdout and stderr go to `target.log` in the run
+  directory. `Restart` sends SIGKILL, waits for the process to be reaped, then execs
+  again, so fixed ports and lock files are released. `Supervise` restarts the target
+  whenever it exits on its own, as a kubelet restarts a container: at once the first time,
+  then after 10 s, doubling up to 5 min. It tells the Runner why the target stopped and
+  when it starts again. `Stop` and `Restart` are not exits, and `Stop` ends supervision.
+  `Status` says whether a supervised target is waiting to restart, and when the process
+  now running started.
   botbox does not probe the target for health; the settle wait after the first op absorbs
   startup.
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
@@ -201,10 +210,28 @@ The Runner executes one sequence:
    `Ready` held and nothing changed within `T_stable`, it says that. The Runner and the
    engine raise it with one function, so they agree. A fault excuses it while active, which
    is once the proxy has applied it and until the proxy stops (D36), and while the target
-   is still owed time to recover from it (§6). A wait also ends
-   where the target's process exits, and the Runner checks the target is running before it
-   applies each op. A target that stopped ends the run as a harness error naming the op it
-   was at (§11), because the ops behind it would run against nothing.
+   is still owed time to recover from it (§6). Until a settle wait has converged, normally
+   op 0's, a wait also ends where the target's process exits, and the Runner checks the
+   target is running before it applies each op. A target that stopped then ends the run as
+   a harness error naming the op it was at (§11): a bad flag or a taken port reads the same
+   way, and the ops behind it would run against nothing. The error quotes the line in
+   `target.log` that says why: the line the last Go panic opens with, or else the last line
+   above any stack trace, since a logger's trace ends in a frame. The log holds every
+   process a `restart` started, and the last one is the one that stopped. Where botbox had
+   created the CR and the target had requested a resource, the error says the CR may have
+   crashed the target and names the run's `sequence.json`, unless the target wrote that its
+   port was taken. Once a wait has converged, the target has shown it runs, and the
+   Launcher supervises it (§5.1). The run notes each exit and the line the target wrote as
+   it stopped. A wait does not converge while the target waits to restart, and a restart
+   counts as a change, so a restarted target runs for `T_stable` before a wait converges. A
+   target that exits again within `T_stable` of each restart therefore never converges,
+   even where it wrote its converged state first, and its wait expires as a G4 that counts
+   the exits since the target last converged and quotes the last. A target that runs
+   longer between exits can converge in between, until a backoff outlasts a wait. A target
+   that converges after an exit passes. An exit a fault excuses owes the target `T_settle`
+   past its restart (§6). Any other restart gives it no more time, and its startup requests
+   count toward G1 where they land in a quiet window (§6). A restart that fails ends the
+   run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
@@ -214,9 +241,11 @@ The Runner executes one sequence:
    wait is, so the caller's deadline can end it and no later step. A run that ended at a
    violation or a harness error gets none. Then wait `T_stable`, which is the last quiet
    window (§6). Delete the primary CR if it still exists and wait for the G3 window. A
-   target that stopped cleaned nothing up, so the run ends as that harness error rather
-   than at a verdict on the deletion. A run that ended at a harness error judges no
-   deletion either, because its ops did not all run. Then
+   target that stopped for good, before supervision or because a restart failed, cleaned
+   nothing up, so the run ends as that harness error rather than at a verdict on the
+   deletion. G3 judges a target that is waiting to restart, and the notes carry its exits.
+   A run that ended at a harness error judges no deletion either, because its ops did not
+   all run. Then
    force-remove any finalizer still present in the run namespace; the report notes each one
    (D37). G3 judged the deletion window, which closed before this. Delete every remaining
    object
@@ -248,8 +277,10 @@ how many of its ops the run reached, the violated invariant or property with the
 evidence (request log excerpt, object version timeline), the target and versions, the
 seed, and a one-line replay command. That command repeats the target, the kubeconfig and
 every launch argument the run had, quoted so that `sh` and `zsh` read each word as
-written. The run directory also holds recordings of the run (§11), so a report can be
-re-examined without re-running. A readiness verdict and a
+written. It does not record what the target inherits from botbox's environment, so a
+target declares what it needs in `launch.env` (§8.1). The run directory also holds
+recordings of the run (§11), so a report can be re-examined without re-running. A
+readiness verdict and a
 property violation also quote the state of the objects the target managed where it failed,
 in a table of its own, bounded on its own, and say how many there were: a child the
 target never created has no version to quote, and the count is what a report about a
@@ -284,7 +315,11 @@ botbox owns the API server a run executes against.
 - **envtest** (default). botbox starts `kube-apiserver` and `etcd` from
   `KUBEBUILDER_ASSETS` (installed by `setup-envtest`) using
   `sigs.k8s.io/controller-runtime/pkg/envtest` inside `pkg/cluster`. This is the one
-  harness package allowed to import controller-runtime (§11).
+  harness package allowed to import controller-runtime (§11). Before it starts them,
+  botbox looks for both binaries where envtest does: `TEST_ASSET_ETCD` and
+  `TEST_ASSET_KUBE_APISERVER`, then `KUBEBUILDER_ASSETS`, then `/usr/local/kubebuilder/bin`.
+  botbox looks up a bare name on `PATH`, as envtest does. An empty `KUBEBUILDER_ASSETS`
+  leaves one. botbox names the variable and the path when a binary is missing.
 - **kubeconfig**. An existing cluster, normally kind. Used by the nightly tier and, in
   phase 2, by `Image` targets.
 
@@ -346,7 +381,11 @@ from that convergence if it came later, to the instant the last of them stopped.
 wait does not give up before that time has passed, and one that expired is excused only
 while a fault is active or that time is still owed. A spec change made within that time is
 judged at the later of the two deadlines. A settle wait that converged sooner ends that
-time early.
+time early. A target that exits while a fault excuses it, as controller-runtime does when
+it loses leader election, then waits out the restart's backoff (§5.1), which botbox chose.
+G4 gives it `T_settle` past that restart too, and does not judge a window the exit falls
+in, as it does not judge one a fault reaches into. Only a fault excuses an exit, so a
+crash loop that a fault set off still fails G4.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -392,7 +431,9 @@ or a fault between its snapshots. The Runner carries the last checkpoint's notes
 reads like one that passed. G5 also notes an `equalIgnore` path it could not follow
 (§8.1), since it then compares a field the target meant it to skip. The Runner also notes
 each ownerReference the collector could not resolve (§5.8), since the object that carries
-it stays, and G3 would report it without saying why.
+it stays, and G3 would report it without saying why. It notes each fault op whose fault
+the proxy applied to no request, since that fault tested nothing (D36). It notes each
+exit of the target it restarted (§5.5), since a run that passes shows no other sign of it.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2 and G5 need none of their own, but they read
@@ -451,6 +492,13 @@ Details the example does not show:
   `settle` op after a `restart`, and one before it unless the op before it settles.
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
+- A fault's `match.verb` is one of `get`, `list`, `watch`, `create`, `update`, `patch`,
+  `delete` and `deletecollection`, the verbs the proxy records. Its `match.resource` is
+  the plural the API server serves, such as `configmaps`, because the proxy records that.
+  The Runner asks discovery for it when it applies the fault op, so a CRD the target
+  installed counts, and a name the API server does not serve ends the run as a
+  configuration error. It names no subresource, since a fault on `widgets` also matches
+  the requests to `widgets/status`.
 - Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
   tries faults in op order, the first that applies to a request wins, and each runs out on
   its own `until`.
@@ -528,11 +576,47 @@ window has to open. A `stable` at least as wide as `settle` leaves it none, and 
 that writes then expires. Loading such a target is a configuration error rather than a run
 that reports G4 against a target that did nothing wrong.
 
+A key target.yaml does not take is a configuration error. It names the key's line and
+dotted path, and the key within two edits of it, or else the keys its block takes. A swap
+of two adjacent letters counts as one edit.
+
+`crds`, `sample` and `fixtures` are relative to the directory holding target.yaml.
+`launch.binary` is relative to the directory botbox runs in, or a name on `PATH`, because
+`launch.args` and any relative path the target opens itself resolve from there too. botbox
+checks that it can execute `launch.binary` before it starts a control plane.
+
+`launch.env` sets environment variables for the target, over those it inherits from botbox.
+Its values and `launch.args` take two placeholders: `$KUBECONFIG`, the path of the
+kubeconfig botbox writes, and `$NAMESPACE`, the run namespace, which that kubeconfig also
+names (§5.1). botbox replaces each occurrence of either text and expands no other spelling,
+such as `$(NAMESPACE)`. botbox sets no namespace variable of its own, because frameworks
+name it differently. An operator-sdk operator declares:
+
+```yaml
+launch:
+  binary: bin/manager
+  env:
+    WATCH_NAMESPACE: $NAMESPACE
+    POD_NAMESPACE: $NAMESPACE
+```
+
+YAML 1.1 reads an unquoted `0022` as 18 and `ON` as true. A `launch.env` name or value that
+decoding would change is a configuration error, as is one that holds NUL.
+
 `manages` names kinds as `group/version/Kind`, with `v1/Kind` for the core group. An
 optional `selector` (label selector) refines attribution (§6). Paths under `generate` are
 dotted schema property names, which the CRD schema validates. A Go hook may replace the
 equality predicate as `equal: go:<name>` (§8.4). A hook takes no `equalIgnore`, since
 nothing would read it.
+
+The primary, every managed kind and every fixture must be namespaced, because a run owns
+one namespace (§5.5, D13). botbox refuses the cluster-scoped ones before the first run, in
+two checks that each name every kind they refuse: one when it loads the target, for the
+kinds its `crds` define, and one once the control plane is up, for the rest. botbox
+observes only the run namespace, so it does not see a child the target creates in another.
+botbox creates the CR and each fixture in the run namespace. A fixture sets no
+`metadata.namespace`, because the target may look for it in the namespace it names. The
+CR may set one, which botbox replaces, because the target finds a CR by watching.
 
 `equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
 holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
@@ -661,6 +745,8 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   present. In CEL, `!has(status.ready) || status.ready <= managed.filter(o, o.kind ==
   "ConfigMap").size()`.
 - `timeouts: {settle: 5s, stable: 2s, delete: 10s}`. The toy converges in milliseconds.
+- The toy watches only the namespace `WATCH_NAMESPACE` names, where it is set, and its
+  target sets it to `$NAMESPACE` (§8.1).
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 
@@ -677,6 +763,7 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 | B9 | Removes the finalizer on the first deletion reconcile, before deleting children, and omits ownerReferences on every child, so no path cleans up | cleanup-ordering | G3 |
 | B10 | Writes status only from an in-memory flag set when it created children. After a `Restart` the flag is gone, so a later scale-down converges the children but leaves `status` stale (a scale-up creates a child and re-arms the flag) | intermediate-state | G4 |
 | B11 | Believes a child is present from the moment it asks the API server to create it, and never asks again. The belief outlives whatever removed the child, so a refused create, a scale-down or a `DeleteManaged` leaves the toy one child short for good, with no error and no requeue | unconfirmed-write | G4 |
+| B12 | Once it has written status, logs what percentage of its children are ready, dividing by `count`. It runs without controller-runtime's panic recovery, so a `count` of 0 ends the process after the toy converged. Every restart reconciles the same spec and exits again | crash loop | G4 |
 
 Three of the classes are Sieve's bug patterns (§13): intermediate-state, stale-state,
 and unobserved-state. The other classes are this repo's own.
@@ -687,7 +774,10 @@ B11's row scales down and back up: the belief outlives the child the toy itself 
 The unconfirmed write needs a fault, and §10 M6's acceptance test runs `b11-fault.json`
 for it. B11 is the deterministic form of §5.6's "a transient state is made permanent by a
 `Fault`", so that settle wait expires whatever the windows are. A `Restart` heals B11,
-because the belief lives in the process. `fault.json`, the README's fault example, holds a
+because the belief lives in the process. B12's row creates the Widget at a count of 2,
+then sets 0 and settles once more. An exit before a settle wait has converged is a harness
+error (§5.5), and a restart that exits again more than `T_stable` after it started looks
+converged to the wait it lands in. `fault.json`, the README's fault example, holds a
 fault that outlasts the sequence. The envtest tier runs it, not the matrix: the toy with
 no bug recovers once the teardown clears the fault, and B11 fails G4 there.
 
@@ -817,15 +907,16 @@ the proxy; the `Image` launcher. Separate design addendum.
   seed opens a directory in the same second. Each failing run writes `run-<n>/` under it
   with `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl`,
   `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
-  where the deadline ended the shrink pass before its result could be run there. Passing
-  runs are not persisted. `objects.jsonl` writes each value of a Secret's `data` and
-  annotations as a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The
-  HMAC key is drawn per invocation and never written, so equal values share a marker
-  within one invocation and a marker reveals only the value's length. The Observer's
-  history keeps the values, so G5 compares them exactly, and its report quotes the
-  markers. Nothing else is redacted: a Secret's labels, every other object, `target.log`,
-  `sequence.json`, and a report's sequence and replay command hold what the target, the
-  sample and the command line gave them (D49).
+  where the deadline ended the shrink pass before its result could be run there. The
+  `kubeconfig` names the proxy and the run namespace. Passing runs are not persisted.
+  `objects.jsonl` writes each value of a Secret's `data` and annotations as a marker such
+  as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is drawn per
+  invocation and never written, so equal values share a marker within one invocation and a
+  marker reveals only the value's length. The Observer's history keeps the values, so G5
+  compares them exactly, and its report quotes the markers. Nothing else is redacted: a
+  Secret's labels, every other object, `target.log`, `sequence.json`, and a report's
+  sequence and replay command hold what the target, the sample and the command line gave
+  them (D49).
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -841,8 +932,8 @@ the proxy; the `Image` launcher. Separate design addendum.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
   (five lines); install; quickstart against cert-manager, then what the second example
-  adds; writing `target.yaml` for your own controller; reading a report; a CI recipe for
-  adopters; a one-line-per-invariant table linking to §6; a closing "Design and
+  adds; writing `target.yaml` for your own controller; reading a report; what to change
+  when botbox exits 2; a CI recipe for adopters; a one-line-per-invariant table linking to §6; a closing "Design and
   internals" link to this document and to
   `docs/bug-matrix.md`. A fenced block preceded by `<!-- embed: <path> -->` has content,
   excluding the two fence lines, byte-identical to that file including its trailing
@@ -1144,9 +1235,9 @@ built from source and run as a black-box binary.
   one fault op left G1 to G4 and G6 unjudged from then on, and a fault matching a resource
   the target never touches did the same. The proxy now reports what it did with each
   fault, and the window runs from the first request it faulted to the request or the
-  instant the trigger ran out. A fault that matched no request has no window: it changed
-  nothing, so it excuses nothing. This is the vacuity §9.1's control row exists to catch,
-  one layer up: a run that reports nothing because nothing was judged.
+  instant the trigger ran out. A fault the proxy applied to no request has no window: it
+  changed nothing, so it excuses nothing. This is the vacuity §9.1's control row exists to
+  catch, one layer up: a run that reports nothing because nothing was judged.
 - **D40 The external-secrets sample sets `refreshPolicy: OnChange`.** Under the CRD's
   `Periodic` the controller rewrites the ExternalSecret's status on every
   `refreshInterval`. Which check reports those writes depends on the interval. At `10s`,
@@ -1263,3 +1354,49 @@ built from source and run as a black-box binary.
   hook compared. A row of a whole object names no path, because `equalIgnore` cannot ignore
   an object. The line botbox prints quotes the first row with a path, since that is what an
   adopter pastes, and names its object where the statement names another.
+- **D@37 A target learns the run namespace from botbox.** Each run takes a fresh
+  namespace (§5.5), and an operator-sdk operator watches only the namespace
+  `WATCH_NAMESPACE` names. botbox substituted only `$KUBECONFIG`, and its kubeconfig named
+  no namespace, so such an operator watched the wrong one and every run failed G4 with 0
+  managed objects. The placeholder `$NAMESPACE` and the key `launch.env` now carry the run
+  namespace. The kubeconfig's context names it too, and kube-rs, clientcmd and kubectl read
+  it there with no configuration. botbox exports no `WATCH_NAMESPACE` of its own, because
+  the name differs by framework and operator-sdk reads an empty one as every namespace. The
+  target still inherits botbox's environment, since it may need `PATH`, `HOME` or proxy
+  settings, but the replay command does not record it. `launch.env` is in the target file,
+  which the replay reads. The toy reads `WATCH_NAMESPACE`, so every toy run depends on the
+  substitution. Only the bare spellings expand. Refusing `${...}` would break a `sh -c`
+  script that reads `${KUBECONFIG}`. The loader refuses a `launch.env` name or value that
+  YAML 1.1 decoding would change, such as `0022` or `ON`, and accepts one that decodes to
+  its own text, such as `8080`.
+- **D@54 A configuration mistake fails before a control plane starts, where it can, and
+  names the setting to change.** A new user's first mistakes surfaced late or with no hint.
+  envtest reported `fork/exec /usr/local/kubebuilder/bin/etcd` and named neither
+  `KUBEBUILDER_ASSETS` nor setup-envtest. A misspelled key gave `json: unknown field` with
+  no line. A missing `launch.binary` and a cluster-scoped kind failed only once the control
+  plane was up, and the cluster-scoped kinds one at a time. A stopped target's quote was the
+  last frame of its stack trace. A fault on `configmap` matched nothing and said nothing.
+  botbox now looks for the control plane where envtest does, checks `launch.binary` first,
+  names a bad key's line and nearest key, and quotes the line above a stack trace. It
+  refuses every cluster-scoped primary, managed kind and fixture in one error per check:
+  from the CRD files at load time, and through discovery before the first run for built-in
+  kinds, which no file describes. D13 stands, and now covers managed kinds and fixtures. A
+  fixture that sets a namespace is refused rather than moved, because the target may look
+  for it there, while the target finds a moved CR by watching. `launch.binary` keeps the
+  working directory as its base, because `launch.args` and the target's own relative paths
+  resolve from there. The Runner checks a fault's resource when it applies the fault op,
+  not when the run starts, because a target may install its CRDs itself.
+- **D@50 botbox restarts a target that exits once it has converged, and a crash loop is a
+  G4.** Controllers are deployed to be restarted, and controller-runtime exits on purpose
+  when it loses leader election, which a fault can cause. A seventh invariant, "the target
+  keeps running", would report such a controller, so botbox restarts the target as a
+  kubelet does, with a kubelet's backoff. A target waiting out the backoff has not
+  converged, and a restart counts as a change, so a target that exits again soon after
+  each restart fails G4, even where it writes the converged state first. A drawn sequence
+  that finds one shrinks. An exit before any wait converged stays a harness error, since a
+  bad flag, a taken port and a crash on op 0's CR look alike there. An exit a fault excuses
+  owes the target `T_settle` past its restart. Otherwise a correct controller that exits
+  once under each of two faults fails G4, because the second restart waits 10 s. Any other
+  restart gives the target no more time, and its startup requests count toward G1 in a
+  quiet window. Excusing them would need a recovery window of their own, and a correct
+  controller rarely exits with no fault active.

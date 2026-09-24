@@ -67,6 +67,7 @@ func engineInput(in Input) invariant.Input {
 		Ops:         engineOps(in.Target, in.Timeline),
 		Checkpoints: engineCheckpoints(in.Timeline.Checkpoints),
 		Faults:      engineFaults(in.Timeline.Faults),
+		Exits:       engineExits(in.Timeline.Exits),
 		Teardown:    in.Timeline.Deletion.Start,
 		Quiet:       in.Timeline.Quiet.Start,
 		Cleaned:     in.Timeline.Cleaned,
@@ -126,8 +127,8 @@ func settleResult(checkpoint Checkpoint) invariant.SettleResult {
 }
 
 // engineFaults hands over the windows the proxy applied a fault in. A fault
-// that matched no request has no window: it changed nothing about the run, so
-// it excuses nothing (DESIGN.md §6, D36).
+// the proxy applied to no request has no window: it changed nothing about the
+// run, so it excuses nothing (DESIGN.md §6, D36).
 func engineFaults(windows []Window) []invariant.FaultWindow {
 	var faults []invariant.FaultWindow
 	for _, window := range windows {
@@ -137,6 +138,14 @@ func engineFaults(windows []Window) []invariant.FaultWindow {
 		faults = append(faults, invariant.FaultWindow{Start: window.Start, End: window.End})
 	}
 	return faults
+}
+
+func engineExits(exits []Exit) []invariant.Exit {
+	engine := make([]invariant.Exit, len(exits))
+	for i, exit := range exits {
+		engine[i] = invariant.Exit{At: exit.At, Restart: exit.Restart, Why: exit.String()}
+	}
+	return engine
 }
 
 // part writes how much of the evidence the line quotes, which is less than the

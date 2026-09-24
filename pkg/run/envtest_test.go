@@ -26,6 +26,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	corev1client "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -106,6 +107,31 @@ func TestHarness(t *testing.T) {
 
 		deleteWidget(t, ctx, h, widget)
 		requireNamespaceEmptied(t, ctx, h, widget)
+	})
+
+	t.Run("hands the target the run namespace", func(t *testing.T) {
+		sh := loadTarget(t, "/bin/sh")
+		sh.Launch.Args = []string{"-c", `echo "arg=$1 env=$WATCH_NAMESPACE"; exec sleep 600`, "sh", "--namespace=$NAMESPACE"}
+		sh.Launch.Env = map[string]string{"WATCH_NAMESPACE": "$NAMESPACE"}
+		dir := t.TempDir()
+
+		h := startHarness(t, ctx, sh, testCluster.Config(), dir)
+
+		want := "arg=--namespace=" + h.Namespace + " env=" + h.Namespace + "\n"
+		eventually(t, func() error {
+			logged, err := os.ReadFile(filepath.Join(dir, "target.log"))
+			if err != nil || string(logged) != want {
+				return fmt.Errorf("target.log holds %q (%v), want %q", logged, err, want)
+			}
+			return nil
+		})
+		kubeconfig, err := clientcmd.LoadFromFile(filepath.Join(dir, "kubeconfig"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if namespace, _, err := clientcmd.NewDefaultClientConfig(*kubeconfig, nil).Namespace(); namespace != h.Namespace {
+			t.Errorf("The kubeconfig names the namespace %q (%v), want %s.", namespace, err, h.Namespace)
+		}
 	})
 
 	t.Run("takes back what it started when the target cannot start", func(t *testing.T) {

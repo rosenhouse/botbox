@@ -6,12 +6,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
+	yamlv2 "go.yaml.in/yaml/v2"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -63,8 +66,8 @@ type thresholdsDeclaration struct {
 }
 
 // Load reads target.yaml at path. Paths inside it resolve against the file's
-// own directory, except launch.binary, which resolves against the repository
-// root (DESIGN.md §8.1).
+// own directory, except launch.binary, which resolves against the working
+// directory (DESIGN.md §8.1).
 func Load(path string) (*Target, error) {
 	loaded, err := load(path)
 	if err != nil {
@@ -80,6 +83,9 @@ func load(path string) (*Target, error) {
 	}
 	var declared declaration
 	if err := yaml.UnmarshalStrict(data, &declared); err != nil {
+		if located := unknownKey(data); located != nil {
+			return nil, located
+		}
 		return nil, err
 	}
 	dir := filepath.Dir(path)
@@ -131,11 +137,25 @@ func load(path string) (*Target, error) {
 		return nil, fmt.Errorf("sample %s: holds %s, not the primary %s", samplePath, gvk, loaded.Primary)
 	}
 	for _, fixture := range declared.Fixtures {
-		objects, err := loadObjects(resolve(dir, fixture))
+		fixturePath := resolve(dir, fixture)
+		objects, err := loadObjects(fixturePath)
 		if err != nil {
 			return nil, fmt.Errorf("fixture: %w", err)
 		}
+		for _, object := range objects {
+			if namespace := object.GetNamespace(); namespace != "" {
+				return nil, fmt.Errorf("fixture %s: %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace, and the target may look for this one in %s",
+					fixturePath, object.GetKind(), object.GetName(), namespace, namespace)
+			}
+		}
 		loaded.Fixtures = append(loaded.Fixtures, objects...)
+	}
+	crds, err := ReadCRDs(loaded.CRDs)
+	if err != nil {
+		return nil, fmt.Errorf("crds: %w", err)
+	}
+	if err := loaded.refuseClusterScoped(clusterScopedByCRD(crds)); err != nil {
+		return nil, err
 	}
 
 	if declared.Selector != "" {
@@ -185,6 +205,9 @@ func load(path string) (*Target, error) {
 	if loaded.Launch.Binary == "" {
 		return nil, errors.New("launch.binary is required")
 	}
+	if err := checkEnv(data, loaded.Launch.Env); err != nil {
+		return nil, fmt.Errorf("launch.env: %w", err)
+	}
 
 	if loaded.Timeouts, err = timeouts(declared.Timeouts); err != nil {
 		return nil, err
@@ -223,6 +246,38 @@ func loadProperty(declared propertyDeclaration) (Property, error) {
 		return Property{}, fmt.Errorf("property %s: %w", declared.ID, err)
 	}
 	return Property{ID: declared.ID, Description: declared.Description, Eval: eval, When: when}, nil
+}
+
+// checkEnv compares env, as decoded, with the text of target.yaml. Decoding
+// reads an unquoted 0022 as the number 18 and ON as true.
+func checkEnv(data []byte, env map[string]string) error {
+	var written struct {
+		Launch struct {
+			Env map[string]string `yaml:"env"`
+		} `yaml:"launch"`
+	}
+	if err := yamlv2.Unmarshal(data, &written); err != nil {
+		return err
+	}
+	for _, name := range slices.Sorted(maps.Keys(written.Launch.Env)) {
+		value, decoded := env[name]
+		switch {
+		case !decoded:
+			return fmt.Errorf("YAML reads the name %s as something else; quote it", name)
+		case value != written.Launch.Env[name]:
+			return fmt.Errorf("YAML reads %s: %s as %s; quote the value", name, written.Launch.Env[name], value)
+		case name == "KUBECONFIG":
+			return errors.New("botbox sets KUBECONFIG itself, to the kubeconfig it writes")
+		case name == "" || strings.ContainsAny(name, "=\x00"):
+			return fmt.Errorf("%q is not a variable name", name)
+		case strings.Contains(value, "\x00"):
+			return fmt.Errorf("the value of %s holds a NUL", name)
+		}
+	}
+	if len(env) != len(written.Launch.Env) {
+		return errors.New("write launch and env in lower case")
+	}
+	return nil
 }
 
 func timeouts(declared timeoutsDeclaration) (Timeouts, error) {

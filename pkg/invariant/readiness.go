@@ -26,9 +26,9 @@ func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 	changes := in.versionsIn(at.Add(-stable), at)
 	violation := Violation{
 		ID: "G4",
-		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active: in %s, %s%s",
+		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active: in %s, %s%s%s",
 			in.describeOp(checkpoint.Op), at.Sub(began).Round(time.Millisecond), walk.why(began, stable, changes),
-			in.repeated(began, at)),
+			in.repeated(began, at), in.exited(at)),
 		At: at,
 	}.quotingRequests(Recent(requestsUpTo(in.Requests, at))).
 		quotingManaged(Sample(in.stateAt(at).managed(in)))
@@ -180,6 +180,20 @@ func (in Input) repeated(from, to time.Time) string {
 		return ""
 	}
 	return fmt.Sprintf("; the target repeated the failing request %s %d times, the last answered %d", worst, counts[worst], last.Status)
+}
+
+// exited counts the exits since the target last converged by at, and quotes
+// the last. A target that keeps exiting never converges.
+func (in Input) exited(at time.Time) string {
+	since := in.lastConverged(at)
+	exits := slices.DeleteFunc(slices.Clone(in.Exits), func(exit Exit) bool {
+		return exit.At.Before(since) || exit.At.After(at)
+	})
+	if len(exits) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("; the target exited %s since it last converged, last with %s",
+		count(len(exits), "time"), exits[len(exits)-1].Why)
 }
 
 func requestsUpTo(requests []proxy.Request, t time.Time) []proxy.Request {

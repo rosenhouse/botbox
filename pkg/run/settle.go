@@ -13,11 +13,11 @@ import (
 const settlePoll = 50 * time.Millisecond
 
 // Settle waits for the target's reaction (DESIGN.md §5.5): the Ready predicate
-// holds and neither the CR nor a managed object has changed for T_stable. It
-// reports whether it converged within T_settle, or by what owed returns if
-// that is later: the target may still be recovering from a fault. A nil owed
-// owes nothing. A wait that expires while no fault excuses it is a G4
-// violation, which the caller records.
+// holds, and neither the CR nor a managed object has changed, nor the target
+// restarted, for T_stable. It reports whether it converged within T_settle, or
+// by what owed returns if that is later: the target may still be recovering
+// from a fault. A nil owed owes nothing. A wait that expires while no fault
+// excuses it is a G4 violation, which the caller records.
 func (h *Harness) Settle(ctx context.Context, owed func() time.Time) (bool, error) {
 	return settle{
 		timeouts: h.target.Timeouts,
@@ -37,8 +37,8 @@ type settle struct {
 	poll     time.Duration
 	now      func() time.Time
 	sleep    func(context.Context, time.Duration) error
-	// state reports whether the target is ready, and when the run namespace
-	// last changed, which is never before since. Its error ends the wait.
+	// state reports whether the target is ready, and when the run last
+	// changed, which is never before since. Its error ends the wait.
 	state func(since time.Time) (ready bool, changed time.Time, err error)
 	// stopped is closed once the target's process has stopped.
 	stopped <-chan struct{}
@@ -55,6 +55,10 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 			return false, err
 		}
 		now := s.now()
+		// A target that stopped will never converge, so the wait ends there.
+		if closed(s.stopped) {
+			return false, nil
+		}
 		if ready && !now.Before(changed.Add(s.timeouts.Stable)) {
 			return true, nil
 		}
@@ -64,8 +68,7 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 				deadline = owed
 			}
 		}
-		// A target that stopped will never converge, so the wait ends there.
-		if !now.Before(deadline) || closed(s.stopped) {
+		if !now.Before(deadline) {
 			return false, nil
 		}
 		if err := s.sleep(ctx, s.poll); err != nil {
@@ -83,16 +86,22 @@ func closed(c <-chan struct{}) bool {
 	}
 }
 
-// state reads the Observer. Readiness is read first, so that a change arriving
-// during the read counts against stability rather than for it. The op that
-// opened the wait changed the CR, which is why stability runs from since.
+// state reads the launcher and the Observer. Readiness is read first, so that
+// a change arriving during the read counts against stability rather than for
+// it. The op that opened the wait changed the CR, which is why stability runs
+// from since. A target waiting to restart is down, and a restart counts as a
+// change.
 func (h *Harness) state(since time.Time) (bool, time.Time, error) {
+	target := h.Launcher.Status()
 	ready, err := ready(h.target.Ready, h.Observer.Current(h.target.Primary))
 	changed := since
 	if window := h.Observer.Window(since, time.Now()); len(window) > 0 {
 		changed = window[len(window)-1].Time
 	}
-	return ready, changed, err
+	if target.Started.After(changed) {
+		changed = target.Started
+	}
+	return ready && !target.Restarting, changed, err
 }
 
 // ready reports whether the predicate holds on every primary CR observed. An

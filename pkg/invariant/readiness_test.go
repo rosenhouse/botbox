@@ -116,6 +116,27 @@ func TestAnExpiredWaitSaysWhatKeptTheNamespaceFromHoldingStill(t *testing.T) {
 	}
 }
 
+// A crash loop never converges. Its wait counts the exits since the target
+// last converged, up to the wait's end, and quotes the last.
+func TestAnExpiredWaitQuotesTheLastExitSinceTheTargetConverged(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(1), status(1, 1))).
+		exit(2*time.Second, 2*time.Second).
+		checkpoint(3*time.Second, invariant.Converged).
+		op(invariant.OpUpdate, 4*time.Second).
+		record(4*time.Second, widget("11", spec(2), generation(2), status(1, 1))).
+		exit(5*time.Second, 5*time.Second).
+		exit(6*time.Second, 16*time.Second).
+		checkpoint(9*time.Second, invariant.Expired).
+		exit(10*time.Second, 10*time.Second).
+		through(12 * time.Second)
+
+	violation := expiredWait(t, in)
+
+	requireStatement(t, violation, "; the target exited 2 times since it last converged, last with the exit at 6s")
+}
+
 // Ready holds on the CR as it was when the wait began, which the Observer
 // recorded before then.
 func TestAnExpiredWaitReadsTheCRAsTheWaitFoundIt(t *testing.T) {

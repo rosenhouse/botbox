@@ -92,13 +92,13 @@ func (p *Proxy) Stop() error {
 	return nil
 }
 
-// Kubeconfig writes a kubeconfig that points at the proxy and carries no
-// credentials, for the launcher to hand the target.
-func (p *Proxy) Kubeconfig(path string) error {
+// Kubeconfig writes a kubeconfig that points at the proxy, names namespace and
+// carries no credentials, for the launcher to hand the target.
+func (p *Proxy) Kubeconfig(path, namespace string) error {
 	const name = "botbox"
 	config := clientcmdapi.Config{
 		Clusters:       map[string]*clientcmdapi.Cluster{name: {Server: p.URL()}},
-		Contexts:       map[string]*clientcmdapi.Context{name: {Cluster: name}},
+		Contexts:       map[string]*clientcmdapi.Context{name: {Cluster: name, Namespace: namespace}},
 		CurrentContext: name,
 	}
 	if err := clientcmd.WriteToFile(config, path); err != nil {

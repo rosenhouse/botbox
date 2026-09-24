@@ -68,7 +68,11 @@ func TestLoadToyWidget(t *testing.T) {
 	if len(toy.Generate.Mutate) != 0 || len(toy.Generate.Overlay) != 0 {
 		t.Errorf("Load read generate %+v from a target that declares none.", toy.Generate)
 	}
-	wantLaunch := target.LaunchSpec{Binary: "bin/toy-widget", Args: []string{"--kubeconfig=$KUBECONFIG", "--bug=0"}}
+	wantLaunch := target.LaunchSpec{
+		Binary: "bin/toy-widget",
+		Args:   []string{"--kubeconfig=$KUBECONFIG", "--bug=0"},
+		Env:    map[string]string{"WATCH_NAMESPACE": "$NAMESPACE"},
+	}
 	if !reflect.DeepEqual(toy.Launch, wantLaunch) {
 		t.Errorf("Load read launch %+v, want %+v.", toy.Launch, wantLaunch)
 	}
@@ -216,6 +220,15 @@ sample: widget.yaml
 launch: {binary: bin/min}
 `
 
+// minimalTargetWithEnv ends in an open launch.env block.
+const minimalTargetWithEnv = `name: min
+primary: toy.botbox/v1/Widget
+sample: widget.yaml
+launch:
+  binary: bin/min
+  env:
+`
+
 func TestLoadRejects(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
@@ -225,6 +238,7 @@ func TestLoadRejects(t *testing.T) {
 	}{
 		{"unknown field", minimalTarget + "reday: 'true'\n", "", []string{"reday"}},
 		{"unknown nested field", minimalTarget + "timeouts:\n  settel: 5s\n", "", []string{"settel"}},
+		{"a list where a string goes", minimalTarget + "version: [v1]\n", "", []string{"version", "array"}},
 		{"primary without a version", "name: min\nprimary: Widget\nsample: widget.yaml\nlaunch: {binary: bin/min}\n", "", []string{"primary", "Widget"}},
 		{"primary group read as a version", "name: min\nprimary: apps/Deployment\nsample: widget.yaml\nlaunch: {binary: bin/min}\n", "", []string{"primary", "apps"}},
 		{"managed kind with too many slashes", minimalTarget + "manages:\n  - a/b/c/d\n", "", []string{"manages", "a/b/c/d"}},
@@ -263,6 +277,21 @@ func TestLoadRejects(t *testing.T) {
 		{"timeout of zero", minimalTarget + "timeouts:\n  stable: 0s\n", "", []string{"stable", "positive"}},
 		{"negative timeout", minimalTarget + "timeouts:\n  delete: -1s\n", "", []string{"delete", "positive"}},
 		{"errloop of zero", minimalTarget + "thresholds:\n  errloop: 0\n", "", []string{"errloop", "positive"}},
+		{"a launch env that sets the kubeconfig", minimalTargetWithEnv + "    KUBECONFIG: /elsewhere\n", "", []string{"launch.env", "KUBECONFIG"}},
+		{"a launch env name holding an equals sign", minimalTargetWithEnv + "    A=B: x\n", "", []string{"launch.env", `"A=B"`}},
+		{"an empty launch env name", minimalTargetWithEnv + "    '': x\n", "", []string{"launch.env", `""`}},
+		{"a launch env that sets the kubeconfig after another name", minimalTargetWithEnv + "    A: x\n    KUBECONFIG: /elsewhere\n", "", []string{"launch.env", "KUBECONFIG"}},
+		{"a zero byte in a launch env name", minimalTargetWithEnv + "    \"A\\0B\": x\n", "", []string{"launch.env", `"A\x00B"`}},
+		{"a zero byte in a launch env value", minimalTargetWithEnv + "    A: \"x\\0y\"\n", "", []string{"launch.env", "value of A", "NUL"}},
+		{"an octal launch env value", minimalTargetWithEnv + "    UMASK: 0022\n", "", []string{"launch.env", "UMASK: 0022 as 18;", "quote"}},
+		{"a decimal launch env value", minimalTargetWithEnv + "    VERSION: 1.10\n", "", []string{"launch.env", "VERSION: 1.10 as 1.1;", "quote"}},
+		{"a yes launch env value", minimalTargetWithEnv + "    VERBOSE: yes\n", "", []string{"launch.env", "VERBOSE: yes as true;", "quote"}},
+		{"an ON launch env name", minimalTargetWithEnv + "    ON: x\n", "", []string{"launch.env", "name ON", "quote"}},
+		{"an octal launch env value merged in", minimalTargetWithEnv + "    <<: {UMASK: 0022}\n", "", []string{"launch.env", "UMASK: 0022 as 18;"}},
+		// Decoding matches keys regardless of case, but the check reads the
+		// text under launch and env alone.
+		{"a launch env in capitals", strings.Replace(minimalTargetWithEnv, "  env:", "  Env:", 1) + "    UMASK: 0022\n", "", []string{"launch.env", "write launch and env in lower case"}},
+		{"a launch in capitals", strings.Replace(minimalTargetWithEnv, "launch:", "Launch:", 1) + "    UMASK: 0022\n", "", []string{"launch.env", "write launch and env in lower case"}},
 		// A settle wait carves T_stable of quiet out of T_settle, so these
 		// leave the target no time to react and every op expires. The wants
 		// carry the durations: the temp directory's path holds the case name,
@@ -316,7 +345,7 @@ func TestLoadRejectsAMissingFile(t *testing.T) {
 }
 
 // TestLoadReportsTheResolvedPath covers the mistake of writing a path relative
-// to the repository root where target.yaml's own directory is the base.
+// to the working directory where target.yaml's own directory is the base.
 func TestLoadReportsTheResolvedPath(t *testing.T) {
 	path := writeTarget(t, "name: min\nprimary: toy.botbox/v1/Widget\nsample: targets/toy-widget/widget.yaml\n", nil)
 
@@ -330,8 +359,8 @@ func TestLoadReportsTheResolvedPath(t *testing.T) {
 }
 
 // TestLoadResolvesPathsAgainstTheTargetDirectory pins the two different bases
-// of DESIGN.md §8.1: files sit beside target.yaml, the binary sits under the
-// repository root.
+// of DESIGN.md §8.1: files sit beside target.yaml, and the binary is relative
+// to the working directory.
 func TestLoadResolvesPathsAgainstTheTargetDirectory(t *testing.T) {
 	path := writeTarget(t, `name: min
 primary: toy.botbox/v1/Widget
@@ -343,7 +372,7 @@ launch:
 `, map[string]string{
 		"widget.yaml":  sampleWidget,
 		"fixture.yaml": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: fixture\n---\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: also-a-fixture\n",
-		"crds/w.yaml":  "# the loader resolves the path without reading it\n",
+		"crds/w.yaml":  "# a comment and no CRD\n",
 	})
 	dir := filepath.Dir(path)
 	t.Chdir(t.TempDir())
@@ -360,7 +389,180 @@ launch:
 		t.Errorf("Load read %d fixtures, want 2.", len(loaded.Fixtures))
 	}
 	if loaded.Launch.Binary != "bin/min" {
-		t.Errorf("Load resolved launch.binary to %q; it is relative to the repository root.", loaded.Launch.Binary)
+		t.Errorf("Load resolved launch.binary to %q; it is relative to the working directory.", loaded.Launch.Binary)
+	}
+}
+
+func TestLoadPointsAtAMisspelledKey(t *testing.T) {
+	for _, test := range []struct {
+		name, yaml string
+		want       []string
+	}{
+		{"at the top", minimalTarget + "reday: 'true'\n",
+			[]string{"line 5: reday is not a key; did you mean ready?"}},
+		{"in capitals", minimalTarget + "Reday: 'true'\n",
+			[]string{"line 5: Reday is not a key; did you mean ready?"}},
+		{"in a block", minimalTarget + "timeouts:\n  setle: 5s\n",
+			[]string{"line 6: timeouts.setle is not a key; did you mean settle?"}},
+		{"in a list item", minimalTarget + "properties:\n  - id: P1\n    cell: 'true'\n",
+			[]string{"line 7: properties[0].cell is not a key; did you mean cel?"}},
+		{"with no key near it", minimalTarget + "timeouts:\n  zzz: 5s\n",
+			[]string{"line 6: timeouts.zzz is not a key; timeouts takes settle, stable and delete"}},
+		{"with no key near it at the top", minimalTarget + "zzz: 1\n",
+			[]string{"line 5: zzz is not a key; target.yaml takes name, version, crds,", "timeouts and thresholds"}},
+		{"after keys any map takes", minimalTarget + "generate:\n  overlay:\n    spec.count: {maximum: 3}\n" +
+			"thresholds:\n  errlop: 5\n",
+			[]string{"line 9: thresholds.errlop is not a key; did you mean errloop?"}},
+		{"after a merge", minimalTarget + "timeouts:\n  <<: {settle: 5s}\n  stabel: 2s\n",
+			[]string{"line 7: timeouts.stabel is not a key; did you mean stable?"}},
+		{"three edits away", minimalTarget + "timeouts:\n  setxxx: 5s\n",
+			[]string{"line 6: timeouts.setxxx is not a key; timeouts takes settle, stable and delete"}},
+		{"as near to delete as to settle", minimalTarget + "timeouts:\n  detele: 5s\n",
+			[]string{"did you mean settle?"}},
+		// A swap of two adjacent letters is one edit.
+		{"with two letters swapped", minimalTarget + "timeouts:\n  satble: 5s\n",
+			[]string{"line 6: timeouts.satble is not a key; did you mean stable?"}},
+		{"with the two letters of a short key swapped", minimalTarget + "properties:\n  - di: P1\n",
+			[]string{"line 6: properties[0].di is not a key; did you mean id?"}},
+		{"too short to be near", minimalTarget + "properties:\n  - xy: P1\n",
+			[]string{"line 6: properties[0].xy is not a key; properties[0] takes id, description, cel and when"}},
+		// The decoder matches a key whatever its case.
+		{"below a capital", minimalTarget + "Timeouts:\n  setle: 5s\n",
+			[]string{"line 6: Timeouts.setle is not a key; did you mean settle?"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := writeTarget(t, test.yaml, map[string]string{"widget.yaml": sampleWidget})
+
+			_, err := target.Load(path)
+
+			if err == nil {
+				t.Fatal("Load accepted a key target.yaml does not take.")
+			}
+			for _, want := range test.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("Load returned %q, want %q.", err, want)
+				}
+			}
+		})
+	}
+}
+
+// clusterScopedCRDs define a cluster-scoped Widget and Gadget and a
+// namespaced Thing. Another group's Thing is cluster-scoped.
+const clusterScopedCRDs = `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+spec:
+  group: elsewhere.botbox
+  names: {kind: Thing, plural: things}
+  scope: Cluster
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+spec:
+  group: toy.botbox
+  names: {kind: Widget, plural: widgets}
+  scope: Cluster
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+spec:
+  group: toy.botbox
+  names: {kind: Gadget, plural: gadgets}
+  scope: Cluster
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+spec:
+  group: toy.botbox
+  names: {kind: Thing, plural: things}
+  scope: Namespaced
+`
+
+func TestLoadRefusesEveryClusterScopedKindItsCRDsDefine(t *testing.T) {
+	path := writeTarget(t, minimalTarget+`crds: [crds/]
+manages: [toy.botbox/v1/Gadget, toy.botbox/v1/Thing, v1/ConfigMap]
+fixtures: [fixtures.yaml]
+`, map[string]string{
+		"widget.yaml":    sampleWidget,
+		"crds/toys.yaml": clusterScopedCRDs,
+		"fixtures.yaml":  "apiVersion: toy.botbox/v1\nkind: Gadget\nmetadata:\n  name: shared-gadget\n---\napiVersion: toy.botbox/v1\nkind: Thing\nmetadata:\n  name: a-thing\n",
+	})
+
+	_, err := target.Load(path)
+
+	if err == nil {
+		t.Fatal("Load accepted cluster-scoped kinds.")
+	}
+	for _, want := range []string{"cluster-scoped", "primary toy.botbox/v1/Widget", "managed toy.botbox/v1/Gadget", "fixture toy.botbox/v1/Gadget shared-gadget"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load returned %q, which does not name %q.", err, want)
+		}
+	}
+	for _, namespaced := range []string{"Thing", "a-thing", "ConfigMap"} {
+		if strings.Contains(err.Error(), namespaced) {
+			t.Errorf("Load returned %q, which names the namespaced %s.", err, namespaced)
+		}
+	}
+}
+
+func TestLoadReadsEveryManifestExtensionOfACRDDirectory(t *testing.T) {
+	for _, file := range []string{"crds/widget.json", "crds/widget.yml"} {
+		path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{
+			"widget.yaml": sampleWidget,
+			file: `{"apiVersion": "apiextensions.k8s.io/v1", "kind": "CustomResourceDefinition",
+				"spec": {"group": "toy.botbox", "names": {"kind": "Widget", "plural": "widgets"}, "scope": "Cluster"}}`,
+		})
+
+		_, err := target.Load(path)
+
+		if err == nil || !strings.Contains(err.Error(), "primary toy.botbox/v1/Widget") {
+			t.Errorf("Load returned %v, want it to refuse the cluster-scoped Widget %s defines.", err, file)
+		}
+	}
+}
+
+func TestLoadRejectsACRDFileThatIsNotYAML(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{
+		"widget.yaml":   sampleWidget,
+		"crds/bad.yaml": "spec: [unterminated\n",
+	})
+
+	_, err := target.Load(path)
+
+	if err == nil || !strings.Contains(err.Error(), "bad.yaml") {
+		t.Errorf("Load returned %v, want an error naming bad.yaml.", err)
+	}
+}
+
+func TestLoadRefusesAFixtureThatNamesANamespace(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"fixtures: [issuer.yaml]\n", map[string]string{
+		"widget.yaml": sampleWidget,
+		"issuer.yaml": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: ca\n  namespace: default\n",
+	})
+
+	_, err := target.Load(path)
+
+	if err == nil {
+		t.Fatal("Load accepted a fixture that names a namespace.")
+	}
+	for _, want := range []string{"issuer.yaml", "ca", "metadata.namespace", "drop it", "the target may look for this one in default"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load returned %q, which does not say %q.", err, want)
+		}
+	}
+}
+
+func TestLoadLaunchEnv(t *testing.T) {
+	path := writeTarget(t, minimalTargetWithEnv+"    WATCH_NAMESPACE: $NAMESPACE\n    EMPTY: ''\n    UNSET:\n    UMASK: '0022'\n    PORT: 8080\n",
+		map[string]string{"widget.yaml": sampleWidget})
+
+	loaded, err := target.Load(path)
+	if err != nil {
+		t.Fatalf("Load rejected launch.env: %v", err)
+	}
+	want := map[string]string{"WATCH_NAMESPACE": "$NAMESPACE", "EMPTY": "", "UNSET": "", "UMASK": "0022", "PORT": "8080"}
+	if !reflect.DeepEqual(loaded.Launch.Env, want) {
+		t.Errorf("Load read launch.env %v, want %v.", loaded.Launch.Env, want)
 	}
 }
 

@@ -230,6 +230,26 @@ func TestSettleEndsWhereTheTargetStopped(t *testing.T) {
 	}
 }
 
+// A target that stopped as its state came to rest did not converge: its exit
+// came first.
+func TestSettleDoesNotConvergeOnATargetThatStopped(t *testing.T) {
+	c := newClock()
+	start := c.now
+	stopped := make(chan struct{})
+	diesAsItSettles := func(since time.Time) (bool, time.Time) {
+		if c.now.Sub(start) == testTimeouts.Stable {
+			close(stopped)
+		}
+		return true, since
+	}
+
+	converged, _, err := waitOn(t, t.Context(), c, diesAsItSettles, stopped)
+
+	if err != nil || converged {
+		t.Errorf("The wait returned (%t, %v), want no convergence: the target stopped.", converged, err)
+	}
+}
+
 func TestSettleEndsWithTheContext(t *testing.T) {
 	c := newClock()
 	ctx, cancel := context.WithCancel(t.Context())

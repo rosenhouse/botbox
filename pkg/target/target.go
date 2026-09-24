@@ -4,9 +4,17 @@
 package target
 
 import (
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -52,11 +60,26 @@ type GenerateSpec struct {
 
 // LaunchSpec says how to run the target (DESIGN.md §5.1).
 type LaunchSpec struct {
-	// Binary is relative to the repository root, which is the working directory.
+	// Binary is relative to the working directory, or a name on PATH.
 	Binary string `json:"binary"`
-	// Args carry $KUBECONFIG wherever the launcher must substitute the
-	// kubeconfig path.
-	Args []string `json:"args"`
+	// Args and the values of Env carry $KUBECONFIG and $NAMESPACE wherever the
+	// launcher must substitute the kubeconfig path and the run namespace.
+	Args []string          `json:"args"`
+	Env  map[string]string `json:"env"`
+}
+
+// Check reports a binary that botbox could not exec.
+func (l LaunchSpec) Check() error {
+	_, err := exec.LookPath(l.Binary)
+	switch {
+	case err == nil:
+		return nil
+	case errors.Is(err, fs.ErrNotExist) && !filepath.IsAbs(l.Binary):
+		wd, _ := os.Getwd()
+		return fmt.Errorf("launch.binary: %w; the path is relative to the working directory %s, not to target.yaml", err, wd)
+	default:
+		return fmt.Errorf("launch.binary: %w", err)
+	}
 }
 
 // Timeouts are the run's waits (DESIGN.md §6).
@@ -97,6 +120,45 @@ type Target struct {
 	Launch      LaunchSpec
 	Timeouts    Timeouts
 	Thresholds  Thresholds
+}
+
+// CheckScopes refuses every kind of the target's that the mapper serves at
+// cluster scope. It leaves a kind the mapper does not know to the run.
+func (t *Target) CheckScopes(mapper meta.RESTMapper) error {
+	return t.refuseClusterScoped(func(gvk schema.GroupVersionKind) bool {
+		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+		return err == nil && mapping.Scope.Name() == meta.RESTScopeNameRoot
+	})
+}
+
+// refuseClusterScoped names every cluster-scoped kind the target declares.
+func (t *Target) refuseClusterScoped(clusterScoped func(schema.GroupVersionKind) bool) error {
+	var found []string
+	if clusterScoped(t.Primary) {
+		found = append(found, "the primary "+kindName(t.Primary))
+	}
+	for _, gvk := range t.Manages {
+		if clusterScoped(gvk) {
+			found = append(found, "the managed "+kindName(gvk))
+		}
+	}
+	for _, fixture := range t.Fixtures {
+		if gvk := fixture.GroupVersionKind(); clusterScoped(gvk) {
+			found = append(found, fmt.Sprintf("the fixture %s %s", kindName(gvk), fixture.GetName()))
+		}
+	}
+	if len(found) == 0 {
+		return nil
+	}
+	return fmt.Errorf("a run owns one namespace, so botbox cannot test these cluster-scoped kinds: %s", strings.Join(found, ", "))
+}
+
+// kindName writes a kind as target.yaml declares it.
+func kindName(gvk schema.GroupVersionKind) string {
+	if gvk.Group == "" {
+		return gvk.Version + "/" + gvk.Kind
+	}
+	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
 }
 
 // WatchedKinds are the kinds botbox watches: the primary CR and every managed

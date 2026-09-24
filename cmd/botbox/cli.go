@@ -85,6 +85,8 @@ type cli struct {
 // session executes sequences against one test cluster. Runs share it, because
 // starting a control plane costs seconds (DESIGN.md §5.5).
 type session interface {
+	// vet refuses a target the cluster cannot run, before any run starts.
+	vet(t *target.Target) error
 	execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error)
 	close() error
 }
@@ -144,6 +146,9 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		return c.fail(err)
 	}
 	defer func() { c.warn(s.close()) }()
+	if err := s.vet(exercised); err != nil {
+		return c.fail(err)
+	}
 	out, err := run.OpenOutput(opts.out, opts.invocationSeed(runs[0].sequence), time.Now())
 	if err != nil {
 		return c.fail(err)
@@ -164,14 +169,13 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		fmt.Fprintf(c.stdout, "run %d: seed %d, %s\n", number, planned.sequence.Seed, planned.source())
 		dir := out.RunDir(number)
 		result, err := s.execute(ctx, exercised, planned.sequence, dir, run.Engine{})
-		for _, note := range result.Notes {
-			fmt.Fprintf(c.stdout, "run %d: %s\n", number, note)
-		}
-		switch exitCode(result, err) {
-		case exitError:
-			return c.fail(opts.named(ctx, err))
-		case exitViolation:
+		code := exitCode(result, err)
+		if code == exitViolation {
 			return c.reportFailure(ctx, opts, s, exercised, planned, result, number, dir)
+		}
+		c.printNotes(number, result.Notes)
+		if code == exitError {
+			return c.fail(opts.named(ctx, err))
 		}
 		if err := out.Discard(number); err != nil {
 			return c.fail(err)
@@ -235,6 +239,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	if !failed.generated() {
 		// The caller's file is a better thing to replay than a copy of it.
 		c.warn(c.writeReport(dir, opts, t, failed.path, failed.sequence, result))
+		c.printNotes(number, result.Notes)
 		c.report(number, violation, dir)
 		return exitViolation
 	}
@@ -243,6 +248,8 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	})
 	reported := shrunk
 	simplified := simpler(shrunk, failed.sequence)
+	// notes are the reported run's. The report adds notes of its own below.
+	notes := result.Notes
 	switch {
 	case ctx.Err() != nil && simplified:
 		// The deadline ended the pass before the smaller sequence could be
@@ -263,7 +270,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 			"the deadline ended minimization before it found a smaller sequence: this is the sequence botbox drew")
 	case simplified:
 		if again := c.rerun(ctx, opts, s, t, shrunk, dir); again.Violation != nil {
-			result, violation = again, *again.Violation
+			result, violation, notes = again, *again.Violation, again.Notes
 		} else {
 			// The recordings are of the rerun, so the report counts its ops.
 			result.Timeline = again.Timeline
@@ -281,6 +288,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	c.warn(run.WriteRunSequence(dir, reported))
 	c.warn(c.writeReport(dir, opts, t, filepath.Join(dir, sequenceFile), reported, result))
 	// The violation is reported once the directory holds the run it belongs to.
+	c.printNotes(number, notes)
 	c.report(number, violation, dir)
 	fmt.Fprintf(c.stdout, "  the sequence is %s, in %s\n", ops(reported), filepath.Join(dir, sequenceFile))
 	return exitViolation
@@ -387,6 +395,12 @@ func ops(s run.Sequence) string {
 // newSeed is the seed of a run the caller gave none for. Every run prints its
 // seed, so that the failure is reproducible from it (DESIGN.md §11).
 func newSeed() int64 { return rand.Int64() }
+
+func (c *cli) printNotes(number int, notes []string) {
+	for _, note := range notes {
+		fmt.Fprintf(c.stdout, "run %d: %s\n", number, note)
+	}
+}
 
 func (c *cli) report(number int, violation run.Violation, dir string) {
 	fmt.Fprintf(c.stdout, "run %d: %s %s\n", number, violation.ID, violation.Statement)
@@ -575,6 +589,9 @@ type clusterSession struct {
 }
 
 func openSession(opts options, t *target.Target) (session, error) {
+	if err := t.Launch.Check(); err != nil {
+		return nil, err
+	}
 	if opts.kubeconfig != "" {
 		config, err := clientcmd.BuildConfigFromFlags("", opts.kubeconfig)
 		if err != nil {
@@ -587,6 +604,16 @@ func openSession(opts options, t *target.Target) (session, error) {
 		return nil, err
 	}
 	return &clusterSession{config: started.Config(), stop: started.Stop}, nil
+}
+
+// vet refuses the kinds the cluster serves at cluster scope, which the target's
+// CRDs cannot show for a built-in kind.
+func (s *clusterSession) vet(t *target.Target) error {
+	mapper, err := cluster.NewRESTMapper(s.config)
+	if err != nil {
+		return err
+	}
+	return t.CheckScopes(mapper)
 }
 
 func (s *clusterSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {

@@ -1,10 +1,13 @@
 package run
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"maps"
 	"net/http"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -16,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/rest"
 
+	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
@@ -214,7 +218,7 @@ func TestTheHarnessReadsAReadyThatYieldsNoBoolAsAnError(t *testing.T) {
 	yieldsAnInt := &target.Target{Primary: widgetKind, Ready: func(*unstructured.Unstructured) (bool, error) {
 		return false, &target.EvalError{Predicate: "ready", Expr: "status.ready", Err: fmt.Errorf("%w: it yielded int64", target.ErrNotBool)}
 	}}
-	h := &Harness{target: yieldsAnInt, Observer: &observe.Observer{Store: store}}
+	h := &Harness{target: yieldsAnInt, Observer: &observe.Observer{Store: store}, Launcher: launcherReporting{status: launch.Status{Running: true}}}
 
 	_, _, err := h.state(time.Now())
 
@@ -263,5 +267,105 @@ func TestReady(t *testing.T) {
 				t.Errorf("ready returned the error %v, want one: %t.", err, test.wantErr)
 			}
 		})
+	}
+}
+
+// launcherReporting is a launcher that only reports status.
+type launcherReporting struct {
+	launch.Launcher
+	status launch.Status
+}
+
+func (l launcherReporting) Status() launch.Status { return l.status }
+
+// harnessOver reads a quiet, empty run namespace and the target as status says.
+func harnessOver(status launch.Status) *Harness {
+	return &Harness{
+		target:   &target.Target{Primary: widgetKind},
+		Observer: &observe.Observer{Store: observe.NewStore(observe.Options{Namespace: "botbox-run-1"})},
+		Launcher: launcherReporting{status: status},
+	}
+}
+
+// A target waiting out a restart backoff is down, whatever state it left.
+func TestATargetWaitingToRestartIsNotReady(t *testing.T) {
+	since := time.Now()
+	for _, test := range []struct {
+		name   string
+		status launch.Status
+		ready  bool
+	}{
+		{"running", launch.Status{Running: true, Started: since.Add(-time.Minute)}, true},
+		{"waiting to restart", launch.Status{Running: true, Restarting: true, Started: since.Add(-time.Minute)}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ready, _, err := harnessOver(test.status).state(since)
+
+			if err != nil || ready != test.ready {
+				t.Errorf("A target %s reads as ready: %t (%v), want %t.", test.name, ready, err, test.ready)
+			}
+		})
+	}
+}
+
+// A restarted target has to hold still for T_stable too, or a wait converges
+// before the new process has done anything.
+func TestARestartCountsAsAChange(t *testing.T) {
+	since := time.Now().Add(-time.Minute)
+	restarted := since.Add(time.Second)
+
+	_, changed, err := harnessOver(launch.Status{Running: true, Started: restarted}).state(since)
+
+	if err != nil || !changed.Equal(restarted) {
+		t.Errorf("The run last changed at %v (%v), want the restart at %v.", changed, err, restarted)
+	}
+}
+
+// Each exit of a supervised target is recorded with the line its own process
+// wrote as it stopped, though every process writes to one log.
+func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
+	dir := t.TempDir()
+	panicked := filepath.Join(dir, "panicked")
+	log, err := os.Create(filepath.Join(dir, targetLogFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { log.Close() })
+	binary := launch.NewBinary(launch.Options{
+		Path: "/bin/sh",
+		Args: []string{"-c", `if [ -e "$0" ]; then echo "E0923 lost the lease"; exit 1; fi
+			echo "panic: first"; echo "goroutine 1 [running]:"; : > "$0"; exit 2`, panicked},
+		Log:     log,
+		Backoff: launch.MaxBackoff,
+	})
+	t.Cleanup(func() { _ = binary.Stop(context.Background()) })
+	live := &liveRun{h: &Harness{dir: dir, Launcher: binary}}
+	if err := binary.Start(t.Context(), "kubeconfig"); err != nil {
+		t.Fatal(err)
+	}
+
+	live.supervise()
+
+	for deadline := time.Now().Add(10 * time.Second); len(live.exits()) < 2 && time.Now().Before(deadline); {
+		time.Sleep(5 * time.Millisecond)
+	}
+	exits := live.exits()
+	if len(exits) != 2 {
+		t.Fatalf("The harness recorded the exits %+v, want the first and the one after its restart.", exits)
+	}
+	for i, want := range []struct {
+		status, said string
+		backoff      time.Duration
+	}{
+		{"exit status 2", "panic: first", 0},
+		{"exit status 1", "E0923 lost the lease", launch.MaxBackoff},
+	} {
+		exit := exits[i]
+		if exit.Said != want.said || exit.Err == nil || exit.Err.Error() != want.status || exit.At.IsZero() {
+			t.Errorf("Exit %d is %+v, want %s after the target wrote %q.", i+1, exit, want.status, want.said)
+		}
+		if down := exit.Restart.Sub(exit.At); down > want.backoff || down < want.backoff-time.Second {
+			t.Errorf("Exit %d restarts %v after it, want %v.", i+1, down, want.backoff)
+		}
 	}
 }

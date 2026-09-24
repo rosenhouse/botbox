@@ -4,11 +4,15 @@ import (
 	"errors"
 	"flag"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/runtime"
 
 	"github.com/rosenhouse/botbox/pkg/target"
 	"github.com/rosenhouse/botbox/targets/toy-widget/controller"
@@ -57,6 +61,43 @@ func TestRestConfigFallsBackToTheEnvironment(t *testing.T) {
 	}
 	if config.Host != "https://environment.example" {
 		t.Errorf("restConfig used the server %q, want the one from $KUBECONFIG.", config.Host)
+	}
+}
+
+func TestManagerOptionsWatchOnlyWatchNamespace(t *testing.T) {
+	t.Setenv("WATCH_NAMESPACE", "botbox-run-x")
+
+	watched := managerOptions(nil, "0").Cache.DefaultNamespaces
+
+	if namespaces := slices.Collect(maps.Keys(watched)); !slices.Equal(namespaces, []string{"botbox-run-x"}) {
+		t.Errorf("The manager watches %v, want only botbox-run-x.", namespaces)
+	}
+}
+
+func TestManagerOptionsKeepTheSchemeAndMetricsAddress(t *testing.T) {
+	scheme := runtime.NewScheme()
+
+	options := managerOptions(scheme, "127.0.0.1:0")
+
+	if options.Scheme != scheme {
+		t.Error("The manager does not use the scheme it was given.")
+	}
+	if options.Metrics.BindAddress != "127.0.0.1:0" {
+		t.Errorf("The manager binds metrics at %q, want 127.0.0.1:0.", options.Metrics.BindAddress)
+	}
+}
+
+func TestManagerOptionsElectNoLeader(t *testing.T) {
+	if managerOptions(nil, "0").LeaderElection {
+		t.Error("The manager runs leader election, which a single replica does not need.")
+	}
+}
+
+func TestManagerOptionsWatchEveryNamespaceWithoutWatchNamespace(t *testing.T) {
+	t.Setenv("WATCH_NAMESPACE", "")
+
+	if watched := managerOptions(nil, "0").Cache.DefaultNamespaces; watched != nil {
+		t.Errorf("The manager watches %v, want every namespace.", watched)
 	}
 }
 

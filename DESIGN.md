@@ -971,9 +971,6 @@ the proxy; the `Image` launcher. Separate design addendum.
   `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
   where the deadline ended the shrink pass before its result could be run there. The
   `kubeconfig` names the proxy and the run namespace. Passing runs are not persisted.
-  `botbox matrix` writes each run to a directory under the system's temporary directory
-  and deletes it once the checks have read it. A run that ends in a harness error keeps
-  its directory, and the error names it.
   `objects.jsonl` writes each value of a Secret's `data` and annotations as a marker such
   as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is drawn per
   invocation and never written, so equal values share a marker within one invocation and a
@@ -981,7 +978,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   compares them exactly, and its report quotes the markers. Nothing else is redacted: a
   Secret's labels, every other object, `target.log`, `sequence.json`, and a report's
   sequence and replay command hold what the target, the sample and the command line gave
-  them (D49).
+  them (D49). `botbox matrix` writes each run to a directory under the system's temporary
+  directory and deletes it once the checks have read it. A run that errs keeps its
+  directory, and the error names it.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
@@ -1549,5 +1548,5 @@ built from source and run as a black-box binary.
 - **D@68 A matrix run that errs keeps its files.** The matrix deleted its temporary
   directory on every exit, so a harness error named a `target.log` that was gone. A run
   that errs now keeps its directory, and every other run's is deleted once the checks
-  have read it. The directory stays temporary, because the matrix's `--out` names a file,
-  and a matrix that finishes leaves nothing behind.
+  have read it. The directory stays under the system's temporary directory, because the
+  matrix's `--out` names a file. A matrix that finishes leaves nothing there.

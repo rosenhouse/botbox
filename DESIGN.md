@@ -1078,29 +1078,30 @@ the proxy; the `Image` launcher. Separate design addendum.
   recordings are not kept.
   Once `run` or `replay` has read or drawn its sequences, it writes `summary.json` and
   `summary.md` into the invocation's directory. It writes them again as each run starts,
-  once a run finds a violation, and when the invocation ends, before it stops the
-  cluster. Until then, the invocation and the run under way are `unfinished`, and the
-  summary gives no exit code, so a SIGKILL or a crash leaves the runs that finished. An
-  interrupt that arrives while the cluster stops rewrites them, since botbox then dies of
-  it. They give botbox's version, the target, the seed, the `--launch-arg` values, the
-  cluster, the deadline, the outcome (`passed`, `violation`, `error`, `interrupted` or
-  `unfinished`), the exit code, and what stopped the invocation where no run did. Each
-  planned run has its seed, its sequence file if it had one, its outcome (those five or
-  `not run`), its duration, its ops, how many it applied, its ops by type, how many fault
-  ops the proxy applied and how many requests it faulted, its checkpoints, the target's
-  exits, its notes and its sequence (§7). These describe the run of the planned sequence.
-  A failing run also has its `run-<n>/`, relative to the summary, and its error, or the
-  violation and notes its report carries. Until the shrink pass ends, those are the run's
-  own, and `run-<n>/` holds no report. `summary.md` leaves out the ops by type, the
+  once a run finds a violation, before it runs a minimized sequence again, and when the
+  invocation ends, before it stops the cluster. Until then, the invocation and the run
+  under way are `unfinished`, and the summary gives no exit code, so a SIGKILL or a crash
+  leaves the runs that finished. An interrupt that arrives while the cluster stops
+  rewrites them, since botbox then dies of it. They give botbox's version, the target, the
+  seed, the `--launch-arg` values, the cluster, the deadline, the outcome (`passed`,
+  `violation`, `error`, `interrupted` or `unfinished`), the exit code, and what stopped
+  the invocation where no run did. Each planned run has its seed, its sequence file if it
+  had one, its outcome (those five or `not run`), its duration, its ops, how many it
+  applied, its ops by type, how many fault ops the proxy applied and how many requests it
+  faulted, its checkpoints, the target's exits, its notes and its sequence (§7). These
+  describe the run of the planned sequence. A failing run also has its `run-<n>/`,
+  relative to the summary, and its error, or the violation and notes its report carries.
+  Until botbox writes the report, those are the run's own, and `run-<n>/` holds no report.
+  While botbox runs the minimized sequence there, `summary.md` and the JUnit file say
+  `run-<n>/` holds a partial run of it. `summary.md` leaves out the ops by type, the
   checkpoints, what each exit said and the sequences. `summary.json` carries `schema: 1`,
   which changes when a field changes meaning or goes away. `--junit FILE` writes the runs
   as JUnit XML with the summary, creating the file's directory: one testsuite, a testcase
   per planned run, a `failure` typed with the check's ID for a violation, an `error` for a
-  run that did not finish, `skipped` for a run that never started, and an `error`
-  testcase named `botbox` for what stopped the invocation where no run did, or for an
-  invocation that has not finished. The testsuite of an invocation that has not finished
-  gives no time. An invocation that stops before it has a directory writes that testcase
-  alone.
+  run that did not finish, `skipped` for a run that never started, and an `error` testcase
+  named `botbox` for what stopped the invocation where no run did, or for an invocation
+  that has not finished. The testsuite of an invocation that has not finished gives no
+  time. An invocation that stops before it has a directory writes that testcase alone.
   botbox replaces each file whole, and warns of one it cannot write.
   `objects.jsonl` writes each value of a Secret's `data` and annotations as a marker such
   as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is drawn per

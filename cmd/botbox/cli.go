@@ -248,7 +248,10 @@ func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Tar
 			// Minimizing can take minutes, so the summary keeps the find first.
 			ran.found(*result.Violation, reportNotes(opts, t, result), dir)
 			_ = c.save(record, opts, out.Dir())
-			violation, notes := c.reportFailure(ctx, opts, s, t, planned, result, number, dir)
+			violation, notes := c.reportFailure(ctx, opts, s, t, planned, result, number, dir, func() {
+				ran.rerunning = true
+				_ = c.save(record, opts, out.Dir())
+			})
 			ran.found(violation, notes, dir)
 			return exitViolation
 		}
@@ -337,10 +340,11 @@ func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, e
 
 // reportFailure minimizes a sequence botbox drew and leaves it in the run
 // directory with the evidence of a run of it (DESIGN.md §5.5). A sequence the
-// caller wrote is reported as it was written. It returns the violation and
-// notes the report carries.
+// caller wrote is reported as it was written. It calls rerunning before it
+// runs the minimized sequence, and returns the violation and notes the report
+// carries.
 func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *target.Target,
-	failed planned, result run.Result, number int, dir string) (run.Violation, []string) {
+	failed planned, result run.Result, number int, dir string, rerunning func()) (run.Violation, []string) {
 	violation := *result.Violation
 	if !failed.generated() {
 		// The caller's file is a better thing to replay than a copy of it.
@@ -375,6 +379,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 		result.Notes = append(result.Notes, ended(ctx)+
 			" ended minimization before it found a smaller sequence: this is the sequence botbox drew")
 	case simplified:
+		rerunning()
 		again, err := c.rerun(ctx, opts, s, t, shrunk, dir)
 		switch {
 		case again.Violation != nil:

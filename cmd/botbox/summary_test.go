@@ -755,6 +755,49 @@ func TestTheSummaryRecordsAViolationBeforeMinimizing(t *testing.T) {
 	}
 }
 
+// botbox runs the minimized sequence again into the run's directory, which
+// then no longer holds the run's evidence alone.
+func TestTheSummarySaysWhenBotboxRunsTheMinimizedSequenceAgain(t *testing.T) {
+	out := t.TempDir()
+	junit := filepath.Join(t.TempDir(), "junit.xml")
+	g4 := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{}
+	var md string
+	var failure *parsedProblem
+	session.fails = func(sequence run.Sequence, dir string) *run.Violation {
+		if rerun := len(session.dirs) > 1 && dir == session.dirs[0]; rerun {
+			written, _ := os.ReadFile(filepath.Join(summaryDir(t, out), "summary.md"))
+			md = string(written)
+			suite, _ := readJUnit(t, junit)
+			failure = suite.Cases[0].Failure
+		}
+		if len(sequence.Ops) < 2 {
+			return nil
+		}
+		return &g4
+	}
+
+	code, _, stderr := invokeWith(t, session, countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle),
+		"run", "--target", toyTargetYAML, "--out", out, "--runs", "1", "--seed", "1", "--junit", junit)
+
+	if code != exitViolation {
+		t.Fatalf("botbox run exited %d, want %d: %s", code, exitViolation, stderr)
+	}
+	if md == "" {
+		t.Fatal("botbox never ran the minimized sequence again.")
+	}
+	if want := "`run-1/` holds a partial run of the minimized sequence.\n"; !strings.Contains(md, want) {
+		t.Errorf("While botbox ran the minimized sequence again, summary.md was\n%s\nwant it to say %q.", md, want)
+	}
+	if want := "run-1 holds a partial run of the minimized sequence."; failure == nil || !strings.HasSuffix(failure.Body, want) {
+		t.Errorf("While botbox ran the minimized sequence again, its JUnit testcase failed with %+v, want a body that ends %q.", failure, want)
+	}
+	written, err := os.ReadFile(filepath.Join(summaryDir(t, out), "summary.md"))
+	if want := "`run-1/` holds the report and the evidence.\n"; err != nil || !strings.Contains(string(written), want) {
+		t.Errorf("Once botbox finished, summary.md was\n%s\nwant it to say %q.", written, want)
+	}
+}
+
 // botbox dies of a signal that arrives as the cluster stops, so the summary
 // has to say so.
 func TestAnInterruptAfterEveryRunPassedRewritesTheSummary(t *testing.T) {

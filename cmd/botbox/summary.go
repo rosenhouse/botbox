@@ -80,6 +80,9 @@ type runSummary struct {
 	Error           string             `json:"error,omitempty"`
 	Dir             string             `json:"dir,omitempty"`
 	Sequence        run.Sequence       `json:"sequence"`
+	// rerunning is set once botbox starts to run the minimized sequence into
+	// Dir.
+	rerunning bool
 }
 
 // exitSummary is one time the target stopped on its own.
@@ -179,11 +182,13 @@ func (r *runSummary) found(violation run.Violation, notes []string, dir string) 
 	r.Dir = filepath.Base(dir)
 }
 
-// holds is what a failing run's directory holds. The report comes once the
-// shrink pass ends.
-func holds(reported bool) string {
-	if reported {
+// holds is what a failing run's directory holds. The report comes last.
+func (r runSummary) holds(reported bool) string {
+	switch {
+	case reported:
 		return "the report and the evidence"
+	case r.rerunning:
+		return "a partial run of the minimized sequence"
 	}
 	return "the evidence"
 }

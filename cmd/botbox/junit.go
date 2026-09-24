@@ -124,7 +124,7 @@ func (r runSummary) junit(class, dir string, reported bool) junitCase {
 	switch r.Outcome {
 	case outcomeViolation:
 		c.Failure = &junitProblem{Type: r.Violation.ID, Message: r.Violation.Statement,
-			Body: files + " holds " + holds(reported) + "."}
+			Body: files + " holds " + r.holds(reported) + "."}
 		if r.Violation.Evidence != "" {
 			c.Failure.Body = r.Violation.Evidence + "\n" + c.Failure.Body
 		}

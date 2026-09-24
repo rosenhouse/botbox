@@ -113,7 +113,7 @@ func (r runSummary) details(md *strings.Builder, reported bool) {
 		if r.Violation.Evidence != "" {
 			fmt.Fprintf(md, "\n%s\n", r.Violation.Evidence)
 		}
-		fmt.Fprintf(md, "\n`%s/` holds %s.\n", r.Dir, holds(reported))
+		fmt.Fprintf(md, "\n`%s/` holds %s.\n", r.Dir, r.holds(reported))
 	case r.Error != "":
 		fmt.Fprintf(md, "\n%s\n", r.Error)
 		if r.Dir != "" {

@@ -32,6 +32,8 @@ func (c *cli) interruptible(args []string) int {
 	}
 	go func() {
 		sig := <-signals
+		// The signal may have killed whatever reads botbox's output.
+		signal.Ignore(syscall.SIGPIPE)
 		signal.Stop(signals)
 		fmt.Fprintln(c.stderr, "botbox: an interrupt arrived, so botbox is stopping what it started. Interrupt again to exit now and leave it running.")
 		cancel(interrupt{sig.(syscall.Signal)})

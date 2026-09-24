@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -62,6 +63,9 @@ type botboxProcess struct {
 	closed         string
 	stdout, stderr *output
 	lines          chan string
+	// readers are the ends of botbox's output pipes that the test reads.
+	readers []*os.File
+	reading sync.WaitGroup
 }
 
 // output keeps what botbox wrote to one stream, and passes each line on.
@@ -107,14 +111,18 @@ func startBotbox(t *testing.T, takes time.Duration, prefix ...string) *botboxPro
 	b.cmd = exec.Command(args[0], args[1:]...)
 	b.cmd.Env = append(os.Environ(), asBotbox+"=1", closedFile+"="+b.closed, closeTakes+"="+takes.String())
 	b.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	b.cmd.Stdout, b.cmd.Stderr = b.stdout, b.stderr
-	if err := b.cmd.Start(); err != nil {
+	stdout, stderr := b.pipe(t, b.stdout), b.pipe(t, b.stderr)
+	b.cmd.Stdout, b.cmd.Stderr = stdout, stderr
+	err = b.cmd.Start()
+	_, _ = stdout.Close(), stderr.Close()
+	if err != nil {
 		t.Fatal(err)
 	}
 	exited := make(chan struct{})
 	go func() {
 		defer close(exited)
 		_ = b.cmd.Wait()
+		b.reading.Wait()
 	}()
 	b.exited = exited
 	t.Cleanup(func() {
@@ -122,6 +130,26 @@ func startBotbox(t *testing.T, takes time.Duration, prefix ...string) *botboxPro
 		<-exited
 	})
 	return b
+}
+
+// pipe passes what botbox writes to one stream on to out.
+func (b *botboxProcess) pipe(t *testing.T, out *output) *os.File {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.readers = append(b.readers, reader)
+	b.reading.Go(func() { _, _ = io.Copy(out, reader) })
+	return writer
+}
+
+// stopReading closes the pipes botbox writes to, as a Ctrl-C does to the tee
+// that reads them.
+func (b *botboxProcess) stopReading() {
+	for _, reader := range b.readers {
+		_ = reader.Close()
+	}
 }
 
 // waitFor waits for botbox to print a line holding want.
@@ -204,6 +232,23 @@ func TestASignalStopsBotboxAndThenKillsIt(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// botbox 2>&1 | tee log: a Ctrl-C kills tee too, and botbox writes on.
+func TestAnInterruptOutlivesTheReaderOfItsOutput(t *testing.T) {
+	b := startBotbox(t, 0)
+	b.waitFor(t, "run 1:")
+	b.stopReading()
+
+	b.signal(t, syscall.SIGINT, true)
+
+	status := b.exit(t, 10*time.Second)
+	if !status.Signaled() || status.Signal() != syscall.SIGINT {
+		t.Errorf("botbox ended with %v, want death by SIGINT.", status)
+	}
+	if !b.closedItsSession() {
+		t.Error("botbox never closed its session.")
 	}
 }
 

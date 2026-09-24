@@ -80,9 +80,10 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
 	for i := range rows {
-		if erred, err := c.exerciseRow(ctx, s, exercised, &rows[i], dir); err != nil {
-			c.fail(opts.named(ctx, err))
-			kept = c.showRunFiles(erred)
+		if failed := c.exerciseRow(ctx, s, exercised, &rows[i], dir); failed != nil {
+			c.fail(opts.named(ctx, failed.err))
+			kept = c.showRunFiles(failed.dir)
+			fmt.Fprintf(c.stderr, "  reproduce it with\n    %s\n", opts.replayRun(rows[i], failed.bugArgs))
 			return exitError
 		}
 	}
@@ -94,40 +95,42 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	return c.judge(opts, rows)
 }
 
-// exerciseRow runs the row's sequence under its bug, and then without it. It
-// returns the directory of a run that erred.
-func (c *cli) exerciseRow(ctx context.Context, s session, t *target.Target, row *bugRow, dir string) (string, error) {
-	var err error
+// erred is a matrix run that could not finish.
+type erred struct {
+	bugArgs []string
+	dir     string
+	err     error
+}
+
+// exerciseRow runs the row's sequence under its bug, and then without it.
+func (c *cli) exerciseRow(ctx context.Context, s session, t *target.Target, row *bugRow, dir string) *erred {
+	var failed *erred
 	if row.bug != control {
-		bugged := filepath.Join(dir, row.name())
-		if row.bugged, err = c.exerciseUnder(ctx, s, t, row, row.bugArgs(), bugged); err != nil {
-			return bugged, err
+		if row.bugged, failed = c.exerciseUnder(ctx, s, t, row, row.bugArgs(), filepath.Join(dir, row.name())); failed != nil {
+			return failed
 		}
 	}
-	correct := filepath.Join(dir, row.name()+"-no-bug")
-	if row.correct, err = c.exerciseUnder(ctx, s, t, row, nil, correct); err != nil {
-		return correct, err
-	}
+	row.correct, failed = c.exerciseUnder(ctx, s, t, row, nil, filepath.Join(dir, row.name()+"-no-bug"))
 	if row.bug == control {
 		row.bugged = row.correct
 	}
-	return "", nil
+	return failed
 }
 
 // exerciseUnder runs the row's sequence with bugArgs appended to the target's
 // launch args, and records what the checks found over the whole run. It
 // removes the run's files unless the run erred.
-func (c *cli) exerciseUnder(ctx context.Context, s session, t *target.Target, row *bugRow, bugArgs []string, dir string) (checked, error) {
+func (c *cli) exerciseUnder(ctx context.Context, s session, t *target.Target, row *bugRow, bugArgs []string, dir string) (checked, *erred) {
 	exercised := *t
 	exercised.Launch.Args = slices.Concat(t.Launch.Args, bugArgs)
 	ran := row.describe(bugArgs)
 	result, err := s.execute(ctx, &exercised, row.sequence, dir, observing{})
 	if err != nil {
-		return checked{}, fmt.Errorf("%s: %w", ran, err)
+		return checked{}, &erred{bugArgs, dir, fmt.Errorf("%s: %w", ran, err)}
 	}
 	results, err := run.Evaluate(result.Recorded)
 	if err != nil {
-		return checked{}, fmt.Errorf("%s: %w", ran, err)
+		return checked{}, &erred{bugArgs, dir, fmt.Errorf("%s: %w", ran, err)}
 	}
 	c.warn(os.RemoveAll(dir))
 	var found checked
@@ -167,10 +170,15 @@ func (c *cli) judge(opts options, rows []bugRow) int {
 
 // unexpected reports a run that broke the acceptance, and how to run it again.
 func (c *cli) unexpected(opts options, row bugRow, found checked, bugArgs []string) {
-	replay := opts
-	replay.launchArgs = slices.Concat(opts.launchArgs, bugArgs)
 	fmt.Fprintf(c.stderr, "botbox: %s: %s fired %s; reproduce it with\n  %s\n",
-		row.name(), row.describe(bugArgs), found.summary(), replay.replayCommand(filepath.Join(opts.sequences, row.file)))
+		row.name(), row.describe(bugArgs), found.summary(), opts.replayRun(row, bugArgs))
+}
+
+// replayRun is the command that runs the row's sequence again with bugArgs.
+func (o options) replayRun(row bugRow, bugArgs []string) string {
+	replay := o
+	replay.launchArgs = slices.Concat(o.launchArgs, bugArgs)
+	return replay.replayCommand(filepath.Join(o.sequences, row.file))
 }
 
 func (r bugRow) name() string { return "B" + strconv.Itoa(r.bug) }

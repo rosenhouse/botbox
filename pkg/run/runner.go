@@ -496,7 +496,7 @@ func (r *runner) apply(ctx context.Context, op Op) (string, error) {
 // applyToFixture changes or deletes a fixture. The fixture is botbox's, so a
 // deleted one is not the target's to recreate.
 func (r *runner) applyToFixture(ctx context.Context, op Op) error {
-	fixture, declared := r.fixtures[op.Kind+" "+op.Name]
+	fixture, declared := r.fixtures[op.fixture()]
 	if !declared {
 		return fmt.Errorf("the target declares no fixture %s %s", op.Kind, op.Name)
 	}
@@ -519,7 +519,7 @@ func (r *runner) restoreFixtures(ctx context.Context, op int) (bool, error) {
 	for _, deleted := range r.deleted {
 		if deleted.Until.Op > op {
 			gone = append(gone, deleted)
-		} else if err := r.h.createFixture(ctx, r.fixtures[deleted.Kind+" "+deleted.Name]); err != nil {
+		} else if err := r.h.createFixture(ctx, r.fixtures[deleted.fixture()]); err != nil {
 			return true, err
 		}
 	}

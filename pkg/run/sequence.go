@@ -213,6 +213,10 @@ func (s Sequence) Validate() error {
 	return s.validateFixtures()
 }
 
+// fixture names a fixture op's fixture as DESIGN.md §7 writes a kind, then its
+// name.
+func (o Op) fixture() string { return o.Kind + " " + o.Name }
+
 // validateFixtures reports a deleted fixture that does not come back by the
 // last op, and an op on a fixture while it is deleted.
 func (s Sequence) validateFixtures() error {
@@ -221,7 +225,7 @@ func (s Sequence) validateFixtures() error {
 		if op.Type != OpUpdateFixture && op.Type != OpDeleteFixture {
 			continue
 		}
-		fixture := op.Kind + " " + op.Name
+		fixture := op.fixture()
 		if deleted, gone := deletedBy[fixture]; gone && i < deleted.Until.Op {
 			return fmt.Errorf("op %d acts on the fixture %s, which op %d deleted until op %d", i, fixture, deleted.Index, deleted.Until.Op)
 		}

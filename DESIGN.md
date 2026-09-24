@@ -622,9 +622,9 @@ Details the example does not show:
   where they name none, so a sequence of one CR named as the sample names none. A `create`
   names its CR in `obj`, and a `recreate` creates the CR it deletes. These are
   configuration errors: an `obj` with no `metadata.name`, an op on a CR that no earlier
-  `create` or `recreate` creates, an `update` or `delete` of a CR deleted since, a
-  `recreate` whose `obj` names another CR, and a `create` of a CR that no `delete` has
-  removed since.
+  `create` or `recreate` creates, an `update` or `delete` of a CR deleted since it was last
+  created, a `recreate` whose `obj` names another CR, and a `create` of a CR that no
+  `delete` has removed since.
 - A sequence ends with an op that settles, or nothing judges the state it leaves behind
   (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
 - G5 judges a `restart` only between two converged settle waits with no fault's window

@@ -357,7 +357,7 @@ a failure, and `make test-example` runs every pinned sequence so none can rot.
 A `create` names its CR in `obj`. An `update`, `delete` or `recreate` acts on the CR named as
 your sample unless it names another in `cr`, such as `{"i": 2, "t": "delete", "cr":
 "example-2"}`. botbox refuses an op on a CR that no op before it creates, and an `update` or
-`delete` of a CR an op before it deleted.
+`delete` of a CR deleted since it was last created.
 
 In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
 before it settles. G5 compares the states the controller settled in on either side, and leaves a

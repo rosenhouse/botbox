@@ -2,6 +2,7 @@ package invariant_test
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -659,11 +660,13 @@ func TestG4QuotesNoVersionRecordedAfterTheVerdict(t *testing.T) {
 
 func TestG4JudgesEveryCR(t *testing.T) {
 	for _, c := range []struct {
-		name  string
-		first *unstructured.Unstructured
+		name     string
+		first    *unstructured.Unstructured
+		notReady []string
 	}{
-		{"beside a ready one", widget("10", spec(1), status(1, 1))},
-		{"beside one under deletion", widget("10", spec(1), finalizers(cleanup), deleting(500*time.Millisecond))},
+		{"beside a ready one", widget("10", spec(1), status(1, 1)), []string{"w2"}},
+		{"beside one under deletion", widget("10", spec(1), finalizers(cleanup), deleting(500*time.Millisecond)), []string{"w2"}},
+		{"beside another not ready", widget("10", spec(1)), []string{"w", "w2"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			in := newRun().withSecondWidget().
@@ -673,11 +676,32 @@ func TestG4JudgesEveryCR(t *testing.T) {
 				record(1100*time.Millisecond, secondWidget("20", spec(2))).
 				through(7 * time.Second)
 
-			violation := fired(t, invariant.Convergence, in)
+			result := evaluate(t, invariant.Convergence, in)
 
-			if !strings.Contains(violation.Statement, "the CR w2 was not ready") {
-				t.Errorf("The statement is %q, want it to name w2.", violation.Statement)
+			var notReady []string
+			for _, statement := range statements(result) {
+				name, _, _ := strings.Cut(strings.TrimPrefix(statement, "the CR "), " was not ready")
+				notReady = append(notReady, name)
+			}
+			if !slices.Equal(notReady, c.notReady) {
+				t.Errorf("G4 reported %q, want the CRs %v not ready.", statements(result), c.notReady)
 			}
 		})
+	}
+}
+
+// Another CR's objects may keep a CR from ready, so G4 quotes every CR's.
+func TestG4QuotesTheObjectsOfEveryCR(t *testing.T) {
+	in := newRun().withSecondWidget().
+		op(invariant.OpCreate, 0).
+		record(100*time.Millisecond, widget("10", spec(1), status(1, 1)), child("w-0", "11")).
+		opOn(invariant.OpCreate, time.Second, secondName).
+		record(1100*time.Millisecond, secondWidget("20", spec(2))).
+		through(7 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	if !slices.Contains(state(violation), "w-0") {
+		t.Errorf("G4 quotes %v, want the child of w, which may be what keeps w2 from ready.", state(violation))
 	}
 }

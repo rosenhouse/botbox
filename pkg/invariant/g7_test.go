@@ -202,6 +202,10 @@ func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 			exit(8900*time.Millisecond, 9100*time.Millisecond).
 			op(invariant.OpSettle, 9*time.Second)),
 			"G7 is not evaluated for op 2 (deleteManaged): the target had requested no resource outside leader election between the restart after its exit during op 0 (create) and it"},
+		{"with a supervised restart after an exit as a later op ran", deletedAfter(converged().
+			op(invariant.OpSettle, 9*time.Second).
+			exit(9*time.Second, 9100*time.Millisecond)),
+			"G7 is not evaluated for op 2 (deleteManaged): the target had requested no resource outside leader election between the restart after its exit during op 1 (settle) and it"},
 		{"with a supervised restart after a restart op", deletedAfter(converged().
 			op(invariant.OpRestart, 8*time.Second).
 			request(8500*time.Millisecond, get("w-1")).
@@ -280,6 +284,18 @@ func TestG7NotesAnObjectDeletedWhileTheTargetWasStopped(t *testing.T) {
 			exit(10500*time.Millisecond, 20500*time.Millisecond).
 			checkpoint(15*time.Second, invariant.Expired).
 			through(15 * time.Second)},
+		{"restarted as the op ran", deleted(converged().exit(9*time.Second, 10*time.Second)).
+			checkpoint(12100*time.Millisecond, invariant.Converged).
+			through(12100 * time.Millisecond)},
+		{"exited as the wait ended", deleted(converged()).
+			exit(12100*time.Millisecond, 12100*time.Millisecond).
+			checkpoint(12100*time.Millisecond, invariant.Converged).
+			through(12100 * time.Millisecond)},
+		{"restarted during the op, before its wait began", deleted(converged()).
+			exit(10050*time.Millisecond, 10050*time.Millisecond).
+			checkpoint(12100*time.Millisecond, invariant.Converged).
+			waitBegan(10100 * time.Millisecond).
+			through(12100 * time.Millisecond)},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			noted(t, invariant.SelfHealing, c.in, wantNote)

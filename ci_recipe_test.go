@@ -221,6 +221,15 @@ func TestTheCIRecipeCachesWhatItInstalls(t *testing.T) {
 	}
 }
 
+func TestTheCIRecipeInstallsEachToolItRunsAtAPin(t *testing.T) {
+	commands := runText(recipeSteps(t))
+	for _, tool := range []string{"botbox", "setup-envtest"} {
+		if !regexp.MustCompile(`go install "?\S+/` + regexp.QuoteMeta(tool) + `@\$\{?\w+_VERSION\b`).MatchString(commands) {
+			t.Errorf("the recipe runs %s and does not go install it at a $..._VERSION pin", tool)
+		}
+	}
+}
+
 func TestTheCIRecipeExportsTheControlPlaneOrFails(t *testing.T) {
 	steps := recipeSteps(t)
 	i := slices.IndexFunc(steps, func(s step) bool { return strings.Contains(s.Run, "KUBEBUILDER_ASSETS=") })

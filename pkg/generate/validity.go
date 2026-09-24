@@ -3,6 +3,7 @@ package generate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	apiextensions "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions"
@@ -87,8 +88,8 @@ const fieldDraws = 100
 // the field, and otherwise says why it refused them.
 func (c *crdRules) acceptsADraw(sample *unstructured.Unstructured, f field) (err error) {
 	defer func() {
-		if recovered := recover(); recovered != nil {
-			err = fmt.Errorf("botbox cannot draw a value its schema allows: %v", recovered)
+		if recover() != nil {
+			err = errors.New("botbox cannot draw a value its schema allows; a set longer than its enum, or a pattern nothing matches, does this")
 		}
 	}()
 	return rapid.Custom(func(t *rapid.T) error {

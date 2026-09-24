@@ -64,10 +64,14 @@ func TestNewReportsAFieldBotboxCannotDraw(t *testing.T) {
 	if err == nil {
 		t.Fatal("New accepted generate.mutate spec.tags, which botbox cannot draw.")
 	}
-	for _, want := range []string{"generate.mutate spec.tags", "cannot draw"} {
+	for _, want := range []string{"generate.mutate spec.tags", "cannot draw", "a set longer than its enum"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("New reported %q, which does not mention %q.", err, want)
 		}
+	}
+	// rapid's own reason names its internals, not the bound to relax.
+	if strings.Contains(err.Error(), "tries") {
+		t.Errorf("New reported %q, which quotes rapid.", err)
 	}
 
 	loaded.Generate.Mutate = nil

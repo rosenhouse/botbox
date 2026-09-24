@@ -227,7 +227,8 @@ func TestConfigurationErrorsExitTwo(t *testing.T) {
 		{name: "replay with two sequences", args: []string{"replay", "--target", toyTargetYAML, sequence, sequence}, want: "one sequence"},
 		{name: "--runs with a named sequence", args: []string{"run", "--target", toyTargetYAML, "--runs", "5", sequence}, want: "--runs"},
 		{name: "no runs at all", args: []string{"run", "--target", toyTargetYAML, "--runs", "0"}, want: "--runs"},
-		{name: "a deadline of no time", args: []string{"replay", "--target", toyTargetYAML, "--deadline", "0s", sequence}, want: "--deadline is 0s"},
+		{name: "a deadline of no time", args: []string{"replay", "--target", toyTargetYAML, "--deadline", "0s", sequence},
+			want: "--deadline is 0s, and an invocation needs time to run: leave the flag out, and botbox derives one\n"},
 		{name: "a deadline in the past", args: []string{"matrix", "--target", toyTargetYAML, "--sequences", ".", "--deadline", "-1m"}, want: "--deadline is -1m0s"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -861,7 +862,7 @@ func TestADeadlineTooLongToCountIsTheLongest(t *testing.T) {
 	}
 }
 
-func TestAGivenDeadlineIsTheInvocations(t *testing.T) {
+func TestAGivenDeadlineIsUsedAsGiven(t *testing.T) {
 	session := &fakeSession{}
 	before := time.Now()
 

@@ -603,7 +603,7 @@ func parse(args []string) (options, []string, error) {
 		return opts, nil, errors.New("the --target flag is required")
 	}
 	if opts.deadlineGiven && opts.deadline <= 0 {
-		return opts, nil, fmt.Errorf("--deadline is %s, and an invocation needs time to run. Without --deadline, botbox allows what the runs can take", opts.deadline)
+		return opts, nil, fmt.Errorf("--deadline is %s, and an invocation needs time to run: leave the flag out, and botbox derives one", opts.deadline)
 	}
 	if opts.command == "run" {
 		if err := opts.validateRuns(len(sequences)); err != nil {

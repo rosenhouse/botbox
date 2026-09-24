@@ -67,7 +67,7 @@ func sampleSummary(t *testing.T) *summary {
 		t.Fatal(err)
 	}
 	start := time.Date(2026, 9, 24, 1, 2, 3, 0, time.UTC)
-	opts := options{command: "run", target: toyTargetYAML, launchArgs: []string{"--bug=3"},
+	opts := options{command: "run", target: toyTargetYAML, launchArgs: []string{"--bug=3", "--name=a b"},
 		seed: 7, seedGiven: true, deadline: 5 * time.Minute, deadlineGiven: true}
 	runs := []planned{{sequence: widgetSequence(7)}, {sequence: widgetSequence(8)}, {sequence: widgetSequence(9)}}
 	s := newSummary(opts, toy, runs, start)
@@ -96,7 +96,8 @@ func sampleSummary(t *testing.T) *summary {
 		ID: "G3", Statement: "the target deletes what it manages once the CR is deleted",
 		At:       start.Add(55 * time.Second),
 		Evidence: "the v1/ConfigMap widget-1 was still there 10s after the CR was deleted",
-	}, []string{"the proxy applied the fault of op 1 to no request"}, filepath.Join("botbox-out", "20260924T010203Z-7", "run-2"))
+	}, []string{"the proxy applied the fault of op 1 to no request", `P1 "status.ready <= 3 && has(spec)" is not evaluated`},
+		filepath.Join("botbox-out", "20260924T010203Z-7", "run-2"))
 
 	s.finish(context.Background(), exitViolation, start.Add(58*time.Second))
 	return s
@@ -117,22 +118,31 @@ func TestSummaryMarkdown(t *testing.T) {
 		ending func(t *testing.T, s *summary)
 	}{
 		{"violation", func(*testing.T, *summary) {}},
+		{"bare-violation", func(_ *testing.T, s *summary) { s.Runs[1].Violation.Evidence = "" }},
 		{"deadline", func(t *testing.T, s *summary) {
 			s.Runs[1] = newSummary(options{}, &target.Target{}, []planned{{sequence: widgetSequence(8)}}, s.Start).Runs[0]
 			s.Runs[1].Run, s.Runs[1].File = 2, "sequences/a|b.json"
-			s.Error = "the --deadline of 5m0s stopped the invocation after 1 of 3 runs"
+			s.Target.Version, s.DeadlineDerived = "", true
+			s.Error = "the derived deadline of 5m0s stopped the invocation after 1 of 3 runs"
 			s.finish(t.Context(), exitError, s.Finish)
 		}},
 		{"interrupted", func(t *testing.T, s *summary) {
-			s.Runs[1].Violation, s.Runs[1].Notes = nil, nil
+			s.Runs[1].Violation, s.Runs[1].Notes, s.Runs[1].Dir = nil, nil, ""
 			dir := filepath.Join(t.TempDir(), "run-2")
 			if err := os.Mkdir(dir, 0o755); err != nil {
 				t.Fatal(err)
 			}
 			s.Runs[1].stopped(errRunInterrupted, dir)
+			delete(s.Runs[2].OpTypes, run.OpFault)
+			s.LaunchArgs, s.Deadline = nil, 0
 			ctx, cancel := context.WithCancelCause(t.Context())
 			cancel(interrupt{syscall.SIGINT})
 			s.finish(ctx, exitError, s.Finish)
+		}},
+		{"unfinished", func(t *testing.T, s *summary) {
+			s.Runs[1].Violation, s.Runs[1].Notes, s.Runs[1].Dir = nil, nil, ""
+			s.Runs[1].stopped(errors.New("op 0 (create): the target is no longer running"), filepath.Join(t.TempDir(), "run-2"))
+			s.finish(t.Context(), exitError, s.Finish)
 		}},
 	} {
 		t.Run(test.golden, func(t *testing.T) {
@@ -272,8 +282,8 @@ func TestAPassingInvocationWritesItsSummary(t *testing.T) {
 		if ran.Ops != 3 || !reflect.DeepEqual(ran.OpTypes, map[string]int{"restart": 1, "settle": 2}) {
 			t.Errorf("The summary counts %d ops, %v, want 3: a restart and 2 settles.", ran.Ops, ran.OpTypes)
 		}
-		if duration, err := time.ParseDuration(ran.Duration); err != nil || duration < 0 {
-			t.Errorf("The summary says run %d took %q, want a duration: %v", i+1, ran.Duration, err)
+		if duration, err := time.ParseDuration(ran.Duration); err != nil || duration < 0 || duration != duration.Round(time.Millisecond) {
+			t.Errorf("The summary says run %d took %q, want a duration in milliseconds: %v", i+1, ran.Duration, err)
 		}
 		if got, want := sequenceOf(t, ran), marshalled(t, session.sequences[i]); got != want {
 			t.Errorf("The summary holds run %d's sequence as\n%s\nwant what it executed:\n%s", i+1, got, want)
@@ -290,11 +300,16 @@ func TestAPassingInvocationWritesItsSummary(t *testing.T) {
 func TestTheSummaryNamesTheSequenceFilesItRan(t *testing.T) {
 	out := t.TempDir()
 	path := writeSequence(t, 8675309)
+	junit := filepath.Join(t.TempDir(), "junit.xml")
 
-	code, _, stderr := invoke(t, &fakeSession{}, "replay", "--target", toyTargetYAML, "--out", out, "--kubeconfig", "kind.kubeconfig", path)
+	code, _, stderr := invoke(t, &fakeSession{}, "replay", "--target", toyTargetYAML, "--out", out, "--kubeconfig", "kind.kubeconfig",
+		"--junit", junit, path)
 
 	if code != exitOK {
 		t.Fatalf("botbox replay exited %d: %s", code, stderr)
+	}
+	if suite, _ := readJUnit(t, junit); len(suite.Cases) != 1 || suite.Cases[0].Name != "run 1: "+path {
+		t.Errorf("The JUnit testcases are %+v, want one named for %s.", suite.Cases, path)
 	}
 	written := readSummary(t, out)
 	if written.Command != "replay" || written.Cluster != "kubeconfig" || written.Seed != 8675309 {
@@ -306,6 +321,81 @@ func TestTheSummaryNamesTheSequenceFilesItRan(t *testing.T) {
 	}
 	if len(written.Runs) != 1 || written.Runs[0].File != path || written.Runs[0].Seed != 8675309 {
 		t.Errorf("The summary lists %+v, want the one run of %s.", written.Runs, path)
+	}
+}
+
+// A failing run's summary says what its report says, which may be of the
+// minimized sequence's run.
+func TestTheSummaryCarriesTheReportsViolationAndNotes(t *testing.T) {
+	drawn := run.Violation{ID: "G4", Statement: "the target converges", Evidence: "the settle wait after op 2 expired"}
+	minimized := run.Violation{ID: "G4", Statement: "the target converges", Evidence: "the settle wait after op 0 expired"}
+	onRestart := func(candidate run.Sequence, _ string) *run.Violation {
+		if slices.ContainsFunc(candidate.Ops, func(op run.Op) bool { return op.Type == run.OpRestart }) {
+			return &minimized
+		}
+		return nil
+	}
+	for _, test := range []struct {
+		name      string
+		session   func(cancel context.CancelCauseFunc) *fakeSession
+		args      []string
+		violation run.Violation
+		notes     []string
+	}{
+		{name: "a sequence file",
+			session: func(context.CancelCauseFunc) *fakeSession {
+				return &fakeSession{results: []run.Result{{Violation: &drawn, Notes: []string{"a note of the run"}}}}
+			},
+			args:      []string{writeSequence(t, 1)},
+			violation: drawn, notes: []string{"a note of the run"}},
+		{name: "a minimized sequence",
+			session: func(context.CancelCauseFunc) *fakeSession {
+				return &fakeSession{results: []run.Result{{Violation: &drawn, Notes: []string{"a note of the drawn run"}}},
+					fails: onRestart, notes: []string{"a note of the minimized run"}}
+			},
+			args:      []string{"--runs", "1", "--seed", "1"},
+			violation: minimized, notes: []string{"a note of the minimized run"}},
+		{name: "minimization an interrupt ended",
+			session: func(cancel context.CancelCauseFunc) *fakeSession {
+				s := &fakeSession{results: []run.Result{{Violation: &drawn}}}
+				s.after = func() { cancel(interrupt{syscall.SIGINT}) }
+				return s
+			},
+			args:      []string{"--runs", "1", "--seed", "1"},
+			violation: drawn, notes: []string{"an interrupt ended minimization before it found a smaller sequence: this is the sequence botbox drew"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(t.Context())
+			defer cancel(nil)
+			out := t.TempDir()
+			generate := countingGenerator(nil, run.OpSettle, run.OpRestart, run.OpSettle)
+
+			invokeCtx(t, ctx, test.session(cancel), generate, slices.Concat([]string{"run", "--target", toyTargetYAML, "--out", out}, test.args)...)
+
+			ran := readSummary(t, out).Runs[0]
+			if ran.Violation == nil || ran.Violation.Evidence != test.violation.Evidence || !slices.Equal(ran.Notes, test.notes) {
+				t.Errorf("The summary lists run 1's violation as %+v and its notes as %q, want %+v and %q.",
+					ran.Violation, ran.Notes, test.violation, test.notes)
+			}
+		})
+	}
+}
+
+func TestARunThatMadeNoDirectoryNamesNone(t *testing.T) {
+	out := t.TempDir()
+	junit := filepath.Join(t.TempDir(), "junit.xml")
+	session := &fakeSession{failures: []error{errors.New("the sequence is for another target")}, writesNothing: true}
+
+	code, _, stderr := invoke(t, session, "replay", "--target", toyTargetYAML, "--out", out, "--junit", junit, writeSequence(t, 1))
+
+	if code != exitError {
+		t.Fatalf("botbox replay exited %d, want %d: %s", code, exitError, stderr)
+	}
+	if ran := readSummary(t, out).Runs[0]; ran.Outcome != "error" || ran.Dir != "" {
+		t.Errorf("The summary lists the run as %s in %q, want an error and no directory.", ran.Outcome, ran.Dir)
+	}
+	if suite, _ := readJUnit(t, junit); suite.Cases[0].Error == nil || suite.Cases[0].Error.Body != "" {
+		t.Errorf("The JUnit testcase errs with %+v, want no directory named.", suite.Cases[0].Error)
 	}
 }
 

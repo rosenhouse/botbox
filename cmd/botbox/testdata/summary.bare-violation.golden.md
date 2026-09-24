@@ -16,8 +16,6 @@ botbox v0.0.0-test ran 2 of 3 runs from seed 7 on envtest, with `--launch-arg --
 
 the target deletes what it manages once the CR is deleted
 
-the v1/ConfigMap widget-1 was still there 10s after the CR was deleted
-
 `run-2/` holds the report and the evidence.
 
 - the proxy applied the fault of op 1 to no request

@@ -9,7 +9,8 @@
   },
   "seed": 7,
   "launchArgs": [
-    "--bug=3"
+    "--bug=3",
+    "--name=a b"
   ],
   "cluster": "envtest",
   "deadline": "5m0s",
@@ -100,7 +101,8 @@
       "faultedRequests": 0,
       "checkpoints": 2,
       "notes": [
-        "the proxy applied the fault of op 1 to no request"
+        "the proxy applied the fault of op 1 to no request",
+        "P1 \"status.ready <= 3 && has(spec)\" is not evaluated"
       ],
       "violation": {
         "id": "G3",

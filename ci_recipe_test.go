@@ -138,7 +138,7 @@ func TestTheCIRecipeAndTheREADMEInstallTheMakefilesPins(t *testing.T) {
 }
 
 // pinDrift says where commands name a pin other than the Makefile's, reading a
-// $name through vars. It also says which pins they never name.
+// $name or ${name} through vars. It also says which pins they never name.
 func pinDrift(commands string, vars, pins map[string]string) []string {
 	var drift []string
 	for _, pin := range []struct{ name, pattern string }{
@@ -151,16 +151,22 @@ func pinDrift(commands string, vars, pins map[string]string) []string {
 			drift = append(drift, "no command names "+pin.name)
 		}
 		for _, m := range matches {
-			value := strings.Trim(m[1], `"`)
-			if name, isVar := strings.CutPrefix(value, "$"); isVar {
-				value = vars[name]
-			}
+			value := os.Expand(strings.Trim(m[1], `"`), func(name string) string { return vars[name] })
 			if value != pins[pin.name] {
 				drift = append(drift, fmt.Sprintf("%q names %q, and the Makefile's %s is %q", m[0], value, pin.name, pins[pin.name]))
 			}
 		}
 	}
 	return drift
+}
+
+func TestPinDriftReadsBracedAndQuotedVariables(t *testing.T) {
+	pins := map[string]string{"SETUP_ENVTEST_VERSION": "v1", "ENVTEST_K8S_VERSION": "1.0.0", "ENVTEST_INDEX_URL": "https://index"}
+	commands := `go install "example.com/setup-envtest@${SETUP_ENVTEST_VERSION}"
+setup-envtest use "${ENVTEST_K8S_VERSION}" --index "$ENVTEST_INDEX_URL"`
+	if drift := pinDrift(commands, pins, pins); drift != nil {
+		t.Errorf("pinDrift found %q", drift)
+	}
 }
 
 // makefilePins are the Makefile's variables, each $(NAME) in them expanded.

@@ -113,7 +113,10 @@ type options struct {
 // main returns what botbox exits with. An invocation a signal interrupted
 // returns 128 plus the signal's number, as a shell reports it.
 func (c *cli) main(ctx context.Context, args []string) int {
-	code := c.dispatch(ctx, args)
+	return exitStatus(ctx, c.dispatch(ctx, args))
+}
+
+func exitStatus(ctx context.Context, code int) int {
 	if stop, ok := interruption(ctx); ok {
 		return 128 + int(stop.signal)
 	}
@@ -140,7 +143,8 @@ func (c *cli) dispatch(ctx context.Context, args []string) int {
 }
 
 // exercise executes the sequences the caller named, or the ones botbox draws
-// from the seed, and stops at the first that fails.
+// from the seed, and stops at the first that fails. Once the runs are planned,
+// the invocation's directory records how each ended.
 func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	exercised, err := target.Load(opts.target)
 	if err != nil {
@@ -154,56 +158,89 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	if err != nil {
 		return c.fail(err)
 	}
+	start := time.Now()
+	out, err := run.OpenOutput(opts.out, opts.invocationSeed(runs[0].sequence), start)
+	if err != nil {
+		return c.fail(err)
+	}
 
+	record := newSummary(opts, exercised, runs, start)
+	var code int
 	s, err := c.startSession(opts, exercised)
 	if err != nil {
-		return c.fail(err)
+		code = c.stop(record, err)
+	} else {
+		code = c.runAll(ctx, opts, s, exercised, runs, out, record)
 	}
-	defer func() { c.warn(s.close()) }()
-	if err := s.vet(exercised); err != nil {
-		return c.fail(err)
+	record.finish(ctx, code, time.Now())
+	c.warn(record.write(out.Dir()))
+	// A second signal kills botbox at once, and stopping the cluster takes
+	// seconds, so the summary comes first.
+	if s != nil {
+		c.warn(s.close())
 	}
-	out, err := run.OpenOutput(opts.out, opts.invocationSeed(runs[0].sequence), time.Now())
-	if err != nil {
-		return c.fail(err)
+	return code
+}
+
+// runAll executes the runs in order, records each, and stops at the first
+// that fails.
+func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Target,
+	runs []planned, out *run.Output, record *summary) int {
+	if err := s.vet(t); err != nil {
+		return c.stop(record, err)
 	}
 	sequences := make([]run.Sequence, len(runs))
 	for i, planned := range runs {
 		sequences[i] = planned.sequence
 	}
-	c.derive(&opts, exercised, sequences, runs[0].generated())
+	c.derive(&opts, t, sequences, runs[0].generated())
+	record.deadline(opts)
 
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
 	for i, planned := range runs {
 		if _, ok := interruption(ctx); ok {
-			return c.fail(fmt.Errorf("an interrupt stopped the invocation after %d of %d runs", i, len(runs)))
+			return c.stop(record, fmt.Errorf("an interrupt stopped the invocation after %d of %d runs", i, len(runs)))
 		}
 		// The deadline is the invocation's budget (DESIGN.md §11): the next
 		// run does not start. The first always starts, so a spent deadline is
 		// blamed on a run. An invocation the deadline stopped tested less than
 		// asked, so it does not pass.
 		if i > 0 && ctx.Err() != nil {
-			return c.fail(fmt.Errorf("%s stopped the invocation after %d of %d runs", opts.deadlineName(), i, len(runs)))
+			return c.stop(record, fmt.Errorf("%s stopped the invocation after %d of %d runs", opts.deadlineName(), i, len(runs)))
 		}
 		number := i + 1
 		fmt.Fprintf(c.stdout, "run %d: seed %d, %s\n", number, planned.sequence.Seed, planned.source())
 		dir := out.RunDir(number)
-		result, err := s.execute(ctx, exercised, planned.sequence, dir, run.Engine{})
+		started := time.Now()
+		result, err := s.execute(ctx, t, planned.sequence, dir, run.Engine{})
+		ran := &record.Runs[i]
+		ran.ran(result, time.Since(started))
 		code := exitCode(result, err)
 		if code == exitViolation {
-			return c.reportFailure(ctx, opts, s, exercised, planned, result, number, dir)
+			violation, notes := c.reportFailure(ctx, opts, s, t, planned, result, number, dir)
+			ran.found(violation, notes, dir)
+			return exitViolation
 		}
 		c.printNotes(number, result.Notes)
 		if code == exitError {
-			return c.failRun(number, planned, dir, opts.named(ctx, err))
+			err = opts.named(ctx, err)
+			ran.stopped(err, dir)
+			return c.failRun(number, planned, dir, err)
 		}
+		ran.Outcome = outcomePassed
 		if err := out.Discard(number); err != nil {
-			return c.fail(err)
+			return c.stop(record, err)
 		}
 	}
 	fmt.Fprintln(c.stdout, "every run passed.")
 	return exitOK
+}
+
+// stop ends the invocation on an error no run carries.
+func (c *cli) stop(record *summary, err error) int {
+	record.Error = err.Error()
+	return c.fail(err)
 }
 
 // planned is one run's sequence and the file it was read from. botbox drew
@@ -256,16 +293,17 @@ func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, e
 
 // reportFailure minimizes a sequence botbox drew and leaves it in the run
 // directory with the evidence of a run of it (DESIGN.md §5.5). A sequence the
-// caller wrote is reported as it was written.
+// caller wrote is reported as it was written. It returns the violation and
+// notes the report carries.
 func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *target.Target,
-	failed planned, result run.Result, number int, dir string) int {
+	failed planned, result run.Result, number int, dir string) (run.Violation, []string) {
 	violation := *result.Violation
 	if !failed.generated() {
 		// The caller's file is a better thing to replay than a copy of it.
 		c.warn(c.writeReport(dir, opts, t, failed.path, failed.sequence, result))
 		c.printNotes(number, result.Notes)
 		c.report(number, violation, dir)
-		return exitViolation
+		return violation, result.Notes
 	}
 	shrunk := run.Shrink(ctx, failed.sequence, violation, func(ctx context.Context, candidate run.Sequence) (run.Result, error) {
 		return s.execute(ctx, t, candidate, filepath.Join(dir, shrinkDir), run.Engine{})
@@ -322,7 +360,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	c.printNotes(number, notes)
 	c.report(number, violation, dir)
 	fmt.Fprintf(c.stdout, "  the sequence is %s, in %s\n", ops(reported), filepath.Join(dir, sequenceFile))
-	return exitViolation
+	return violation, result.Notes
 }
 
 // rerun executes the minimized sequence into the run directory, so that the
@@ -496,13 +534,15 @@ func exitCode(result run.Result, err error) int {
 	}
 }
 
+var errRunInterrupted = errors.New("an interrupt stopped the run")
+
 // named blames an interrupt, or the deadline, for a run its context cut short.
 // §11 makes the deadline exit 2, which a reader has to be able to tell from a
 // broken target. The context botbox built from the deadline is what it asks.
 // The teardown's cleanup runs on a budget of its own.
 func (o options) named(ctx context.Context, err error) error {
 	if _, ok := interruption(ctx); ok && errors.Is(err, context.Canceled) {
-		return errors.New("an interrupt stopped the run")
+		return errRunInterrupted
 	}
 	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return err

@@ -64,6 +64,10 @@ type fakeSession struct {
 	closed       bool
 	// refused is what vet answers.
 	refused error
+	// unopened fails opening the session.
+	unopened error
+	// closing runs as the session closes.
+	closing func()
 	// deadlines are when each execute's context ends.
 	deadlines []time.Time
 }
@@ -104,6 +108,9 @@ func (s *fakeSession) execute(ctx context.Context, t *target.Target, sequence ru
 }
 
 func (s *fakeSession) close() error {
+	if s.closing != nil {
+		s.closing()
+	}
 	s.closed = true
 	return nil
 }
@@ -130,6 +137,9 @@ func invokeCtx(t *testing.T, ctx context.Context, fake *fakeSession,
 		stderr: &stderr,
 		open: func(options, *target.Target) (session, error) {
 			fake.stderrAtOpen = stderr.String()
+			if fake.unopened != nil {
+				return nil, fake.unopened
+			}
 			return fake, nil
 		},
 		newGenerator: newGenerator,

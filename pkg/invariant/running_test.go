@@ -56,6 +56,8 @@ func TestWaitOwedRunsPastTheReturnFromARestartOp(t *testing.T) {
 			at: 7 * time.Second, want: 8 * time.Second},
 		{name: "back only T_settle after it", run: restarted().running(8 * time.Second), at: 9 * time.Second, want: 8 * time.Second},
 		{name: "a restart at the instant asked about", run: restarted().running(3500 * time.Millisecond), at: 3 * time.Second},
+		{name: "a restart and a later op", run: restarted().running(6500*time.Millisecond).op(invariant.OpUpdate, 7*time.Second),
+			at: 8 * time.Second, want: 11500 * time.Millisecond},
 		{name: "two restarts", run: restarted().running(3500*time.Millisecond).op(invariant.OpRestart, 5*time.Second).running(9 * time.Second),
 			at: 10 * time.Second, want: 14 * time.Second},
 	} {

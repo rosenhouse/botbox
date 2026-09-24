@@ -307,7 +307,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 		c.warn(c.writeReport(dir, opts, t, failed.path, failed.sequence, result))
 		c.printNotes(number, result.Notes)
 		c.report(number, violation, dir)
-		return violation, result.Notes
+		return violation, reportNotes(opts, t, result)
 	}
 	shrunk := run.Shrink(ctx, failed.sequence, violation, func(ctx context.Context, candidate run.Sequence) (run.Result, error) {
 		return s.execute(ctx, t, candidate, filepath.Join(dir, shrinkDir), run.Engine{})
@@ -364,7 +364,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	c.printNotes(number, notes)
 	c.report(number, violation, dir)
 	fmt.Fprintf(c.stdout, "  the sequence is %s, in %s\n", ops(reported), filepath.Join(dir, sequenceFile))
-	return violation, result.Notes
+	return violation, reportNotes(opts, t, result)
 }
 
 // rerun executes the minimized sequence into the run directory, so that the
@@ -427,16 +427,12 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 		return err
 	}
 	violation := *result.Violation
-	notes := result.Notes
-	if limit := envtestLimit(opts, t); limit != "" && violation.ID == "G4" {
-		notes = append(notes, limit)
-	}
 	return report.Write(dir, report.Report{
 		Check:            report.Check{ID: violation.ID, Statement: violation.Statement, At: violation.At, Evidence: violation.Evidence},
 		Target:           report.Target{Name: t.Name, Version: t.Version},
 		Botbox:           version(),
 		Seed:             sequence.Seed,
-		Notes:            notes,
+		Notes:            reportNotes(opts, t, result),
 		Replay:           opts.replayCommand(replay),
 		Sequence:         encoded,
 		Applied:          len(result.Timeline.Ops),
@@ -453,6 +449,14 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 		DifferencesTotal: violation.DifferencesTotal,
 		Compared:         violation.Compared,
 	})
+}
+
+// reportNotes are the notes of a failing run's report.
+func reportNotes(opts options, t *target.Target, result run.Result) []string {
+	if limit := envtestLimit(opts, t); limit != "" && result.Violation.ID == "G4" {
+		return slices.Concat(result.Notes, []string{limit})
+	}
+	return result.Notes
 }
 
 // warn reports what went wrong beside a finding, which stands whether or not

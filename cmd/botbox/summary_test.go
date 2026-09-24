@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
 	"github.com/rosenhouse/botbox/pkg/proxy"
+	"github.com/rosenhouse/botbox/pkg/report"
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
@@ -337,13 +339,33 @@ func TestTheSummaryCarriesTheReportsViolationAndNotes(t *testing.T) {
 		}
 		return nil
 	}
+	workloads, err := target.Load(workloadsTargetYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	envtestWarning := envtestLimit(options{}, workloads)
 	for _, test := range []struct {
 		name      string
 		session   func(cancel context.CancelCauseFunc) *fakeSession
+		target    string
 		args      []string
 		violation run.Violation
 		notes     []string
 	}{
+		{name: "a G4 of a sequence file on envtest",
+			session: func(context.CancelCauseFunc) *fakeSession {
+				return &fakeSession{results: []run.Result{{Violation: &drawn, Notes: []string{"a note of the run"}}}}
+			},
+			target:    workloadsTargetYAML,
+			args:      []string{writeSequence(t, 1)},
+			violation: drawn, notes: []string{"a note of the run", envtestWarning}},
+		{name: "a G4 of a minimized sequence on envtest",
+			session: func(context.CancelCauseFunc) *fakeSession {
+				return &fakeSession{results: []run.Result{{Violation: &drawn}}, fails: onRestart, notes: []string{"a note of the minimized run"}}
+			},
+			target:    workloadsTargetYAML,
+			args:      []string{"--runs", "1", "--seed", "1"},
+			violation: minimized, notes: []string{"a note of the minimized run", envtestWarning}},
 		{name: "a sequence file",
 			session: func(context.CancelCauseFunc) *fakeSession {
 				return &fakeSession{results: []run.Result{{Violation: &drawn, Notes: []string{"a note of the run"}}}}
@@ -371,16 +393,33 @@ func TestTheSummaryCarriesTheReportsViolationAndNotes(t *testing.T) {
 			defer cancel(nil)
 			out := t.TempDir()
 			generate := countingGenerator(nil, run.OpSettle, run.OpRestart, run.OpSettle)
+			session := test.session(cancel)
 
-			invokeCtx(t, ctx, test.session(cancel), generate, slices.Concat([]string{"run", "--target", toyTargetYAML, "--out", out}, test.args)...)
+			invokeCtx(t, ctx, session, generate, slices.Concat([]string{"run", "--target", cmp.Or(test.target, toyTargetYAML), "--out", out}, test.args)...)
 
 			ran := readSummary(t, out).Runs[0]
 			if ran.Violation == nil || ran.Violation.Evidence != test.violation.Evidence || !slices.Equal(ran.Notes, test.notes) {
 				t.Errorf("The summary lists run 1's violation as %+v and its notes as %q, want %+v and %q.",
 					ran.Violation, ran.Notes, test.violation, test.notes)
 			}
+			if reported := reportedNotes(t, session.dirs[0]); !slices.Equal(ran.Notes, reported) {
+				t.Errorf("The summary lists run 1's notes as %q, and its report %q.", ran.Notes, reported)
+			}
 		})
 	}
+}
+
+func reportedNotes(t *testing.T, dir string) []string {
+	t.Helper()
+	encoded, err := os.ReadFile(filepath.Join(dir, report.JSONFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var reported struct{ Notes []string }
+	if err := json.Unmarshal(encoded, &reported); err != nil {
+		t.Fatal(err)
+	}
+	return reported.Notes
 }
 
 func TestARunThatMadeNoDirectoryNamesNone(t *testing.T) {

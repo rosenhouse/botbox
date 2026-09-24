@@ -227,6 +227,8 @@ func TestConfigurationErrorsExitTwo(t *testing.T) {
 		{name: "replay with two sequences", args: []string{"replay", "--target", toyTargetYAML, sequence, sequence}, want: "one sequence"},
 		{name: "--runs with a named sequence", args: []string{"run", "--target", toyTargetYAML, "--runs", "5", sequence}, want: "--runs"},
 		{name: "no runs at all", args: []string{"run", "--target", toyTargetYAML, "--runs", "0"}, want: "--runs"},
+		{name: "a deadline of no time", args: []string{"replay", "--target", toyTargetYAML, "--deadline", "0s", sequence}, want: "--deadline is 0s"},
+		{name: "a deadline in the past", args: []string{"matrix", "--target", toyTargetYAML, "--sequences", ".", "--deadline", "-1m"}, want: "--deadline is -1m0s"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			code, _, stderr := invoke(t, &fakeSession{}, test.args...)
@@ -834,8 +836,19 @@ func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
 // Runs whose waits no duration can count get the longest deadline, not one
 // that has already passed.
 func TestADeadlineTooLongToCountIsTheLongest(t *testing.T) {
-	faults := slices.Repeat([]run.OpType{run.OpFault}, 64)
-	generate := countingGenerator(nil, slices.Concat([]run.OpType{run.OpCreate}, faults, []run.OpType{run.OpSettle})...)
+	generate := func(t *target.Target) (Generator, []string, error) {
+		return func(seed int64) (run.Sequence, error) {
+			ops := []run.Op{{Type: run.OpCreate}}
+			for range 64 {
+				ops = append(ops, run.Op{Type: run.OpFault, Fault: &run.Fault{Action: run.Action{Error: 500}, Until: run.Trigger{Count: 1}}})
+			}
+			ops = append(ops, run.Op{Type: run.OpSettle})
+			for i := range ops {
+				ops[i].Index = i
+			}
+			return run.Sequence{Seed: seed, Target: t.Name, Ops: ops}, nil
+		}, nil, nil
+	}
 	session := &fakeSession{}
 
 	code, stdout, stderr := invokeWith(t, session, generate, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "2")

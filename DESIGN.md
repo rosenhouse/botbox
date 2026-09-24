@@ -190,7 +190,7 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   passes the CRD as the API server judges the CR botbox wrote: defaults, value
   validations, list types and `x-kubernetes-validations` rules, transition rules included.
   The check does not see the status the controller writes, so a CRD rule that reads status
-  can still refuse a draw. The generator runs the API server's own code for this (D@48). A
+  can still refuse a draw. The generator runs the API server's own code for this (D55). A
   create keeps a drawn field only if the CRD accepts it. A refused update is drawn again up
   to eight times, then becomes a `Settle`. Judging consumes no randomness. The sample must
   pass its CRD.
@@ -210,7 +210,7 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
 Every sequence is serializable to JSON (§7) so it can be replayed without rapid. A seed
 names a sequence for one build of botbox and one target declaration. A golden test records
 what the seeds the repository runs by number draw, so a change to a draw is deliberate
-(D@55).
+(D54).
 
 ### 5.5 Runner
 
@@ -379,7 +379,7 @@ Consequences:
   only its kubelet confirms the delete, so G3 fails on one the target manages. When
   `manages` names one of these kinds, an envtest invocation says so once, before the
   control plane starts, and names `--kubeconfig` and kind. A G4 report repeats it among
-  its notes. botbox does not emulate these controllers (D@35).
+  its notes. botbox does not emulate these controllers (D57).
 - **No finalizers that only `kube-controller-manager` removes.** botbox starts the API
   server with its garbage collector off, and with the `StorageObjectInUseProtection`
   admission plugin disabled beside envtest's own `ServiceAccount`. A delete of anything
@@ -1109,7 +1109,7 @@ built from source and run as a black-box binary.
   Certificate was deleted, its Secret and CertificateRequest were still present despite
   ownerReferences, and the namespace stayed `Terminating`.
 - **D6 Attribution by namespace.** Everything in the run namespace that botbox or a
-  fixture did not create is the target's. Amended by D@36 for a cluster with a controller
+  fixture did not create is the target's. Amended by D56 for a cluster with a controller
   manager.
 - **D7 G2 covers the set of managed objects; G5 is measured within one run.** G2 as
   first written missed new objects appearing (B2). G5 as first written compared two runs,
@@ -1423,7 +1423,7 @@ built from source and run as a black-box binary.
   hook compared. A row of a whole object names no path, because `equalIgnore` cannot ignore
   an object. The line botbox prints quotes the first row with a path, since that is what an
   adopter pastes, and names its object where the statement names another.
-- **D@37 A target learns the run namespace from botbox.** Each run takes a fresh
+- **D51 A target learns the run namespace from botbox.** Each run takes a fresh
   namespace (§5.5), and an operator-sdk operator watches only the namespace
   `WATCH_NAMESPACE` names. botbox substituted only `$KUBECONFIG`, and its kubeconfig named
   no namespace, so such an operator watched the wrong one and every run failed G4 with 0
@@ -1438,7 +1438,7 @@ built from source and run as a black-box binary.
   script that reads `${KUBECONFIG}`. The loader refuses a `launch.env` name or value that
   YAML 1.1 decoding would change, such as `0022` or `ON`, and accepts one that decodes to
   its own text, such as `8080`.
-- **D@54 A configuration mistake fails before a control plane starts, where it can, and
+- **D52 A configuration mistake fails before a control plane starts, where it can, and
   names the setting to change.** A new user's first mistakes surfaced late or with no hint.
   envtest reported `fork/exec /usr/local/kubebuilder/bin/etcd` and named neither
   `KUBEBUILDER_ASSETS` nor setup-envtest. A misspelled key gave `json: unknown field` with
@@ -1455,7 +1455,7 @@ built from source and run as a black-box binary.
   working directory as its base, because `launch.args` and the target's own relative paths
   resolve from there. The Runner checks a fault's resource when it applies the fault op,
   not when the run starts, because a target may install its CRDs itself.
-- **D@50 botbox restarts a target that exits once it has converged, and a crash loop is a
+- **D53 botbox restarts a target that exits once it has converged, and a crash loop is a
   G4.** Controllers are deployed to be restarted, and controller-runtime exits on purpose
   when it loses leader election, which a fault can cause. A seventh invariant, "the target
   keeps running", would report such a controller, so botbox restarts the target as a
@@ -1469,7 +1469,7 @@ built from source and run as a black-box binary.
   restart gives the target no more time, and its startup requests count toward G1 in a
   quiet window. Excusing them would need a recovery window of their own, and a correct
   controller rarely exits with no fault active.
-- **D@55 A golden test pins what fixed seeds draw.** Draws come from rapid's
+- **D54 A golden test pins what fixed seeds draw.** Draws come from rapid's
   `Example(seed)`, which rapid documents as fit only for examples and which promises nothing
   across versions. A draw also depends on the CRD schema, the sample, `generate` and
   `manages`. The Makefile, the README and the envtest tier rely on what particular seeds
@@ -1477,7 +1477,7 @@ built from source and run as a black-box binary.
   external-secrets. A change to generation or to rapid that moves a draw fails until the
   test is rerun with `-update`. The README tells CI to pin botbox to a commit and to replay
   a failing `sequence.json` against the base branch.
-- **D@48 Generation keeps the CRD's own rules, judged by the API server's code.** The
+- **D55 Generation keeps the CRD's own rules, judged by the API server's code.** The
   generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
   rule `self.maxUnavailable <= self.count`, 15 of 100 drawn sequences broke it, and the
   first refusal ended the invocation with exit 2 and no word of where the sequence was.
@@ -1504,7 +1504,7 @@ built from source and run as a black-box binary.
   alone, so New also reports a field that only another field's change makes valid. A
   sample that accepts the field fixes that. No sample accepts both of two exclusive
   fields, so `generate.mutate` names only one of them.
-- **D@36 A kubeconfig cluster gets the CRDs, and a run excludes what the cluster put in its
+- **D56 A kubeconfig cluster gets the CRDs, and a run excludes what the cluster put in its
   namespace.** On kind, `--kubeconfig` installed no CRDs, so the first run failed to
   resolve the primary kind. With the CRD applied by hand, the toy with no bug failed G3 on
   `kube-root-ca.crt`: `deleteManaged` took that ConfigMap as the oldest, and
@@ -1522,7 +1522,7 @@ built from source and run as a black-box binary.
   envtest also read `USE_EXISTING_CLUSTER`, which pointed botbox's default mode, collector
   emulation and all, at whatever `KUBECONFIG` named. `cluster.Start` now turns that off.
   `make test-kind` runs on kind v0.33.0 and its default node image, Kubernetes 1.37.0.
-- **D@35 botbox names the kinds envtest never moves, and envtest adds no finalizer that
+- **D57 botbox names the kinds envtest never moves, and envtest adds no finalizer that
   only the controller manager removes.** An operator whose `ready` waited on its
   Deployment's `availableReplicas` failed G4 on every envtest run, and botbox said nothing
   about why. envtest runs no `kube-controller-manager` and no kubelet, so the Deployment's

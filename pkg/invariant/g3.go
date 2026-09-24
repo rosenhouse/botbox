@@ -18,7 +18,7 @@ import (
 func CleanDeletion(in Input) (Result, error) {
 	out := Result{ID: "G3"}
 	for _, deleted := range in.crDeletions() {
-		deadline := deleted.at.Add(in.timeouts().Delete)
+		deadline := deleted.deadline
 		out.noteWhatBotboxTook(in, deleted, deadline)
 		switch {
 		case in.cleanedBy(deadline): // The namespace emptied, so nothing was left.
@@ -78,22 +78,34 @@ func (in Input) cleanedBy(t time.Time) bool {
 }
 
 // deletion is one deletion of the primary CR, timestamped as the Observer saw
-// it: metadata.deletionTimestamp holds whole seconds only.
+// it: metadata.deletionTimestamp holds whole seconds only. Its deadline is
+// T_delete later.
 type deletion struct {
-	key observe.Key
-	uid types.UID
-	at  time.Time
+	key          observe.Key
+	uid          types.UID
+	at, deadline time.Time
 }
 
-func (in Input) crDeletions() []deletion {
+// held is the deleted CR where the state still holds it by its finalizers.
+func (s state) held(deleted deletion) (observe.Version, bool) {
+	cr, found := s.version(deleted.key)
+	return cr, found && cr.UID == deleted.uid && len(cr.Finalizers) > 0
+}
+
+func (in Input) crDeletions() []deletion { return in.crDeletionsBy(in.end()) }
+
+func (in Input) crDeletionsBy(t time.Time) []deletion {
+	if in.History == nil {
+		return nil
+	}
 	var deletions []deletion
 	seen := map[types.UID]bool{}
-	for _, v := range in.versions() {
-		if v.GVK != in.Target.Primary || seen[v.UID] || (v.DeletionTimestamp == nil && !v.Deleted) {
+	for _, v := range in.History.VersionsOf(in.Target.Primary, t) {
+		if seen[v.UID] || (v.DeletionTimestamp == nil && !v.Deleted) {
 			continue
 		}
 		seen[v.UID] = true
-		deletions = append(deletions, deletion{key: v.Key, uid: v.UID, at: v.Time})
+		deletions = append(deletions, deletion{key: v.Key, uid: v.UID, at: v.Time, deadline: v.Time.Add(in.timeouts().Delete)})
 	}
 	return deletions
 }
@@ -104,7 +116,7 @@ func (in Input) crDeletions() []deletion {
 func (out *Result) reportLeftovers(in Input, deleted deletion, deadline time.Time) {
 	states := in.statesAt([]time.Time{deleted.at, deadline})
 	when, since := states[0], states[1]
-	if cr, found := since.version(deleted.key); found && cr.UID == deleted.uid && len(cr.Finalizers) > 0 {
+	if cr, held := since.held(deleted); held {
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the CR %s still carried the finalizers %v %s after its deletion",
 				cr.Name, cr.Finalizers, in.timeouts().Delete),

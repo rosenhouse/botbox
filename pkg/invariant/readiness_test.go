@@ -152,8 +152,8 @@ func TestAnExpiredWaitJudgesTheCRFromTheWriteOn(t *testing.T) {
 	}
 }
 
-// Ready need not hold on a CR being deleted, so a wait that ends on one names
-// what holds it. Where Ready holds, the churn is why the wait expired.
+// A settle wait waits for a CR under deletion to go, whether or not Ready
+// holds on it, so a wait that ends on one names what holds it.
 func TestAnExpiredWaitSaysTheCRWasStillBeingDeleted(t *testing.T) {
 	stuck := []option{spec(3), finalizers("example.com/stuck", "toy"), deleting(2 * time.Second)}
 	deleted := func() *run {
@@ -181,7 +181,7 @@ func TestAnExpiredWaitSaysTheCRWasStillBeingDeleted(t *testing.T) {
 				record(2001*time.Millisecond, widget("11", append(stuck, status(3, 1))...)).
 				record(5500*time.Millisecond, child("w-0", "12")).
 				record(6500*time.Millisecond, child("w-0", "13")),
-			"in 5s, ready held from 0s on, but the namespace never held still for stable (2s): 2 changes",
+			stillDeleting,
 		},
 	} {
 		t.Run(c.name, func(t *testing.T) {

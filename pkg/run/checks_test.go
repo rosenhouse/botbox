@@ -588,7 +588,7 @@ func TestEvaluateReturnsOneResultPerCheck(t *testing.T) {
 	for _, result := range results {
 		got = append(got, result.ID)
 	}
-	want := []string{"G1", "G2", "G3", "G4", "G5", "G6", "P1"}
+	want := []string{"G1", "G2", "G3", "G4", "G5", "G6", "G7", "P1"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Errorf("The engine returned the results %v, want %v.", got, want)
 	}

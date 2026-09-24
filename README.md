@@ -137,6 +137,8 @@ fixtures:
 manages:                                      # group/version/Kind, or v1/Kind for the core group
   - v1/Secret
   - cert-manager.io/v1/CertificateRequest
+notRecreated:                                 # managed kinds your controller leaves deleted
+  - cert-manager.io/v1/CertificateRequest
 ready: >-                                     # CEL over metadata, spec, status; must yield bool
   has(status.conditions) && status.conditions.exists(c,
     c.type == "Ready" && c.status == "True"
@@ -145,6 +147,7 @@ launch:
   binary: bin/cert-manager-controller       # relative to the working directory, not to this file
   args:
     - --kubeconfig=$KUBECONFIG                # replaced with a kubeconfig for the proxy
+    - --leader-elect=false                    # a target runs with leader election off
     - --enable-certificate-owner-ref=true
 timeouts:                                     # optional; 30s, 10s and 60s by default
   settle: 30s                                 # the whole budget for one spec change
@@ -188,9 +191,15 @@ every kind.
 
 Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
 `settle`, `restart` and `deleteManaged`, which deletes one managed object behind the
-controller's back. A sequence you write yourself can also carry a `fault`, which makes the
-proxy refuse, delay or drop the requests it matches. This is
-`targets/toy-widget/sequences/fault.json`:
+controller's back. G7 then requires your controller to recreate an object of that kind and
+name before the run settles. Where your `ready` still holds without the object, the run settles
+once nothing has changed for `stable`, so your controller has `stable` to recreate it, however
+wide `settle` is. If your controller leaves a kind deleted by design, or recreates it under a
+new name, list the kind under `notRecreated`. cert-manager lists CertificateRequest, because a
+Ready Certificate does not replace a deleted request.
+
+A sequence you write yourself can also carry a `fault`, which makes the proxy refuse, delay or
+drop the requests it matches. This is `targets/toy-widget/sequences/fault.json`:
 
 <!-- embed: targets/toy-widget/sequences/fault.json -->
 ```json
@@ -247,11 +256,13 @@ A sequence file runs as written and is never minimized. This is
 ```
 
 `botbox replay --target target.yaml sequence.json` re-executes one, which is how you re-examine
-a failure, and `make test-example` runs both pinned sequences so they cannot rot.
+a failure, and `make test-example` runs every pinned sequence so none can rot.
 
 In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
 before it settles. G5 compares the states the controller settled in on either side, and leaves a
-note instead of a verdict when another op changed something in between.
+note instead of a verdict when another op changed something in between. G7 likewise notes a
+`deleteManaged` that follows a `restart` before your controller has requested a resource outside
+leader election, since botbox cannot otherwise tell that it is back.
 
 ## Reading a report
 
@@ -306,8 +317,12 @@ A settle wait expired. What follows `expired with no fault active` says why:
   status field rewritten on every reconcile, such as a timestamp, does this.
 - `ready held until …` means `ready` held and then stopped holding.
 
-After a `delete`, `the CR … was still being deleted, held by the finalizers …` means
-nothing removed those finalizers within `settle`. `no CR was left to be ready, but the
+After a `delete`, the run waits up to `timeouts.delete` for the CR to go and then up to
+`settle` for the rest to settle, so a slow cleanup needs no wider `settle`. A `recreate`
+waits as long for the old CR to go before it creates the new one. A CR still there
+`timeouts.delete` after its deletion fails G3, which names the finalizers still on it.
+Where a fault reached into the deletion, G3 cannot judge it, and `the CR … was still being
+deleted, held by the finalizers …` names them instead. `no CR was left to be ready, but the
 namespace never held still …` means something kept writing after the CR was gone.
 
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
@@ -339,7 +354,7 @@ a failure is the change under review and not a new draw, and draw fresh seeds on
 
 ## Invariants
 
-Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.
+Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.
 
 | ID | Checks |
 |---|---|
@@ -349,6 +364,7 @@ Six generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generi
 | G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
+| G7 | Self-healing. An object `deleteManaged` deletes exists again, by kind and name, once the run settles. |
 
 [docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs. Each bug's sequence also runs against the toy with no bug, and CI fails if a check fires there.
 

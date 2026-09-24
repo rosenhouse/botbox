@@ -84,8 +84,11 @@ type Target struct {
 	Sample        *unstructured.Unstructured
 	Fixtures      []*unstructured.Unstructured
 	Manages       []schema.GroupVersionKind
-	Selector      labels.Selector
-	Ready         ReadyFunc
+	// NotRecreated are the managed kinds the target leaves deleted, which G7
+	// does not require back.
+	NotRecreated []schema.GroupVersionKind
+	Selector     labels.Selector
+	Ready        ReadyFunc
 	// ReadyExpr is the text Ready came from: the declared CEL, the default, or
 	// go:<name>.
 	ReadyExpr string

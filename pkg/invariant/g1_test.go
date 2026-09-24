@@ -9,7 +9,8 @@ import (
 )
 
 // G1 ignores a watch whether it hung or failed; G6 counts the one that failed.
-// Leader election reads its lease as well as writing it, and §6 excludes both.
+// Leader election reads its lease as well as writing it, and renews a lease
+// candidate. G1 excludes all of these.
 func TestG1PassesWhenOnlyWatchesAndLeaseTrafficRemain(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
@@ -18,9 +19,20 @@ func TestG1PassesWhenOnlyWatchesAndLeaseTrafficRemain(t *testing.T) {
 		request(3200*time.Millisecond, failedWatch(429)).
 		request(3500*time.Millisecond, lease("update")).
 		request(3700*time.Millisecond, lease("get")).
+		request(3900*time.Millisecond, leaseCandidate("update")).
 		through(14 * time.Second)
 
 	silent(t, invariant.BoundedReconciliation, in)
+}
+
+func TestG1CountsAResourceNamedLeasesInAnotherGroup(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		settled(2*time.Second, invariant.Converged).
+		request(3*time.Second, leasesElsewhere()).
+		through(14 * time.Second)
+
+	fired(t, invariant.BoundedReconciliation, in)
 }
 
 // A health probe, and the discovery reads behind a RESTMapper refresh, name no

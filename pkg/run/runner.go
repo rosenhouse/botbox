@@ -251,7 +251,9 @@ type harness interface {
 	createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error)
 	patchCR(ctx context.Context, name string, patch map[string]any) error
 	deleteCR(ctx context.Context, name string) error
-	awaitCRGone(ctx context.Context, name string) error
+	// awaitCRGone waits for the CR to go until the instant until returns has
+	// passed, and reports whether it went.
+	awaitCRGone(ctx context.Context, name string, until func() time.Time) (bool, error)
 	// managedObjects names the managed objects of one kind, ordered by
 	// creationTimestamp then name (DESIGN.md §7).
 	managedObjects(gvk schema.GroupVersionKind) []string
@@ -357,6 +359,9 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 		applied.CR = r.cr
 	}
 	r.timeline.Ops = append(r.timeline.Ops, applied)
+	if stayed := (*crStayed)(nil); errors.As(err, &stayed) {
+		return r.judgeStayed(op, stayed)
+	}
 	if err != nil {
 		return err
 	}
@@ -407,19 +412,52 @@ func (r *runner) create(ctx context.Context, op Op) error {
 	return nil
 }
 
-// recreate deletes the CR, waits for it to disappear and creates the op's
-// object (DESIGN.md §7).
+// recreate deletes the CR, waits for it to go and creates the op's object. The
+// wait lasts T_delete, or longer while the run is owed time. A CR still there
+// where the wait ends is judged there.
 func (r *runner) recreate(ctx context.Context, op Op) error {
 	if err := r.haveCR(); err != nil {
 		return err
 	}
+	due := r.now().Add(r.target.Timeouts.Delete)
 	if err := r.h.deleteCR(ctx, r.cr); err != nil {
 		return err
 	}
-	if err := r.h.awaitCRGone(ctx, r.cr); err != nil {
+	wait := Wait{Window: Window{Start: r.now()}}
+	gone, err := r.h.awaitCRGone(ctx, r.cr, func() time.Time {
+		if owed := r.owed(); owed.After(due) {
+			return owed
+		}
+		return due
+	})
+	switch {
+	case err != nil:
+		return err
+	case gone:
+		return r.create(ctx, op)
+	}
+	wait.Window.End = r.now()
+	return &crStayed{cr: r.cr, wait: wait}
+}
+
+// crStayed is a recreate whose CR was still there where the wait for it to go
+// ended.
+type crStayed struct {
+	cr   string
+	wait Wait
+}
+
+func (s *crStayed) Error() string {
+	return fmt.Sprintf("the CR %s was still there %v after its delete", s.cr, s.wait.Window.End.Sub(s.wait.Window.Start).Round(time.Second))
+}
+
+// judgeStayed checkpoints where a recreate's wait for its CR ended. A CR that
+// no check reports there is a harness error, since the op cannot go on.
+func (r *runner) judgeStayed(op Op, stayed *crStayed) error {
+	if err := r.judge(op.Index, stayed.wait, invariant.Input.Excused); err != nil || r.violation != nil {
 		return err
 	}
-	return r.create(ctx, op)
+	return stayed
 }
 
 func (r *runner) haveCR() error {
@@ -458,12 +496,11 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		return err
 	}
 	r.timeline.Ops[len(r.timeline.Ops)-1].Settled = &wait
-	excused := r.faultsAndWaits().Recovering(wait.Window.End)
-	return r.judge(op.Index, wait, excused)
+	return r.judge(op.Index, wait, invariant.Input.Excused)
 }
 
 // wait waits up to T_settle for the target to converge, or longer while it is
-// owed time to recover from the faults.
+// owed time to recover from the faults or to finish a deletion.
 func (r *runner) wait(ctx context.Context) (Wait, error) {
 	wait := Wait{Window: Window{Start: r.now()}}
 	converged, err := r.h.settle(ctx, r.owed)
@@ -471,23 +508,27 @@ func (r *runner) wait(ctx context.Context) (Wait, error) {
 	return wait, err
 }
 
-// owed is when the target must have recovered from the faults by, as the
-// checks judge it.
-func (r *runner) owed() time.Time { return r.faultsAndWaits().Owed(r.now()) }
+// owed is when a settle wait may give up, as the checks judge it.
+func (r *runner) owed() time.Time {
+	now := r.now()
+	return r.asOf(now).WaitOwed(now)
+}
 
-// faultsAndWaits is what the checks read of the run's faults and settle waits.
-func (r *runner) faultsAndWaits() invariant.Input {
+// asOf is what the checks read of the run at t.
+func (r *runner) asOf(t time.Time) invariant.Input {
 	r.readFaultWindows()
 	return invariant.Input{
 		Target:      r.target,
+		History:     r.h.objects(),
 		Checkpoints: engineCheckpoints(r.timeline.Checkpoints),
 		Faults:      engineFaults(r.timeline.Faults),
+		End:         t,
 	}
 }
 
-// judge checkpoints where a settle wait ended. A wait that expired where the
-// faults did not excuse it is a G4 violation, which ends the run.
-func (r *runner) judge(op int, wait Wait, excused bool) error {
+// judge checkpoints where a settle wait ended. A wait that expired unexcused
+// is a G4 violation, which ends the run.
+func (r *runner) judge(op int, wait Wait, excused func(invariant.Input, invariant.Checkpoint) bool) error {
 	if !wait.Converged {
 		// A target that is gone cannot converge, so that is the harness's
 		// failure to report, not the target's to answer for.
@@ -495,8 +536,9 @@ func (r *runner) judge(op int, wait Wait, excused bool) error {
 			return r.targetStopped(status)
 		}
 	}
-	return r.checkpoint(Checkpoint{At: wait.Window.End, Began: wait.Window.Start, Op: op, Converged: wait.Converged},
-		!wait.Converged && !excused)
+	checkpoint := Checkpoint{At: wait.Window.End, Began: wait.Window.Start, Op: op, Converged: wait.Converged}
+	expired := !wait.Converged && !excused(r.asOf(checkpoint.At), engineCheckpoint(checkpoint))
+	return r.checkpoint(checkpoint, expired)
 }
 
 // targetStopped is the harness error for a target that is no longer running.
@@ -654,15 +696,15 @@ func (r *runner) clearFaults() {
 
 // awaitRecovery waits for a target still owed time to recover from the faults.
 func (r *runner) awaitRecovery(ctx context.Context) error {
-	if r.violation != nil || r.failed || !r.faultsAndWaits().Recovering(r.now()) {
+	if now := r.now(); r.violation != nil || r.failed || !r.asOf(now).Recovering(now) {
 		return nil
 	}
 	wait, err := r.wait(ctx)
 	if err == nil {
 		r.timeline.Recovery = &wait
 		// The faults are cleared, and the wait ran until the time they left
-		// the target was up, so nothing excuses it.
-		err = r.judge(Recovery, wait, false)
+		// the target was up, so no fault excuses it.
+		err = r.judge(Recovery, wait, invariant.Input.DeletionOverdue)
 	}
 	if err != nil {
 		r.failed = true

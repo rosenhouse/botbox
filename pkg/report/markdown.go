@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
@@ -64,7 +65,7 @@ func (d document) markdown() []byte {
 }
 
 // versionHeader names the columns both version tables carry.
-var versionHeader = []string{"time", "kind", "name", "resourceVersion", "generation", "observed", "finalizers", "deleted"}
+var versionHeader = []string{"time", "kind", "name", "resourceVersion", "generation", "observed", "finalizers", "deletionTimestamp", "deleted"}
 
 // quotedLine says what the violation quoted of a timeline and what the bound
 // left out. A check bounds its evidence before the report sees it, at the
@@ -142,7 +143,7 @@ func versionRows(versions []observe.Version) [][]string {
 		rows[i] = []string{
 			stamp(version.Time), kindName(version.GVK), version.Name, version.ResourceVersion,
 			strconv.FormatInt(version.Generation, 10), observed(version.ObservedGeneration),
-			strings.Join(version.Finalizers, ", "), yes(version.Deleted),
+			strings.Join(version.Finalizers, ", "), deletionTimestamp(version.DeletionTimestamp), yes(version.Deleted),
 		}
 	}
 	return rows
@@ -189,6 +190,13 @@ func observed(generation *int64) string {
 		return ""
 	}
 	return strconv.FormatInt(*generation, 10)
+}
+
+func deletionTimestamp(at *metav1.Time) string {
+	if at == nil {
+		return ""
+	}
+	return stamp(at.Time)
 }
 
 func table(md *strings.Builder, header []string, rows [][]string) {

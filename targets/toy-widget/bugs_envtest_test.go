@@ -239,6 +239,33 @@ func TestSeededBugs(t *testing.T) {
 			return nil
 		})
 	})
+
+	t.Run("B12 keeps a deleted Widget and its children", func(t *testing.T) {
+		namespace := createNamespace(t, ctx, c)
+		runReconciler(t, testCluster, namespace, controller.B12)
+		widget := createWidgetIn(t, ctx, c, namespace, "w", 1)
+		requireChildren(t, ctx, c, widget, 1)
+		requireSettled(t, ctx, c, widget)
+
+		if err := c.Delete(ctx, widget); err != nil {
+			t.Fatal(err)
+		}
+
+		// The correct controller releases the Widget in milliseconds.
+		consistently(t, 2*time.Second, func() error {
+			held := &toyv1.Widget{}
+			if err := c.Get(ctx, client.ObjectKeyFromObject(widget), held); err != nil {
+				return fmt.Errorf("reading the Widget: %w", err)
+			}
+			if !slices.Contains(held.Finalizers, controller.Finalizer) {
+				return fmt.Errorf("the Widget carries the finalizers %v", held.Finalizers)
+			}
+			if names, err := configMapNames(ctx, c, namespace); err != nil || !slices.Equal(names, []string{"w-0"}) {
+				return fmt.Errorf("the namespace holds the ConfigMaps %v (%v), want w-0", names, err)
+			}
+			return nil
+		})
+	})
 }
 
 // runReconciler runs one seeded bug's reconciler over one namespace and returns

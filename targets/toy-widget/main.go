@@ -37,6 +37,7 @@ func run(args []string, out io.Writer) error {
 	bugID := flags.Int("bug", 0, fmt.Sprintf("seeded bug to run, 0 to %d; 0 is the correct controller (DESIGN.md §9.1)", controller.MaxBug))
 	metricsAddress := flags.String("metrics-bind-address", "0", "address the metrics server binds to; 0 disables it")
 	resync := flags.Duration("resync", 0, "requeue every Widget this often and write its status each time; 0 disables it")
+	cleanupDelay := flags.Duration("cleanup-delay", 0, "how long a deleted Widget keeps its finalizer before the controller cleans up")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(out)
@@ -72,12 +73,13 @@ func run(args []string, out io.Writer) error {
 	}
 
 	reconciler := &controller.Reconciler{
-		Client:    manager.GetClient(),
-		APIReader: manager.GetAPIReader(),
-		Scheme:    manager.GetScheme(),
-		Bug:       bug,
-		B1Hold:    b1Hold,
-		Resync:    *resync,
+		Client:       manager.GetClient(),
+		APIReader:    manager.GetAPIReader(),
+		Scheme:       manager.GetScheme(),
+		Bug:          bug,
+		B1Hold:       b1Hold,
+		Resync:       *resync,
+		CleanupDelay: *cleanupDelay,
 	}
 	if err := reconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("setting up the controller: %w", err)

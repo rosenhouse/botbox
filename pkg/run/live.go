@@ -134,8 +134,8 @@ func (l *liveRun) deleteCR(ctx context.Context, name string) error {
 	return nil
 }
 
-func (l *liveRun) awaitCRGone(ctx context.Context, name string) error {
-	gone, err := l.await(ctx, l.target.Timeouts.Delete, func() (bool, error) {
+func (l *liveRun) awaitCRGone(ctx context.Context, name string, until func() time.Time) (bool, error) {
+	gone, err := l.await(ctx, until, func() (bool, error) {
 		_, err := l.crs().Get(ctx, name, metav1.GetOptions{})
 		if apierrors.IsNotFound(err) {
 			return true, nil
@@ -143,12 +143,9 @@ func (l *liveRun) awaitCRGone(ctx context.Context, name string) error {
 		return false, err
 	})
 	if err != nil {
-		return fmt.Errorf("waiting for the CR %s to go: %w", name, err)
+		return false, fmt.Errorf("waiting for the CR %s to go: %w", name, err)
 	}
-	if !gone {
-		return fmt.Errorf("the CR %s was still there %v after its delete", name, l.target.Timeouts.Delete)
-	}
-	return nil
+	return gone, nil
 }
 
 // managedObjects names the managed objects of one kind in the order
@@ -185,7 +182,8 @@ func (l *liveRun) managedCount() int { return len(l.h.Observer.Managed()) }
 // awaitClean waits for the target to remove what it manages and for the CR to
 // go, which is what G3 requires within T_delete.
 func (l *liveRun) awaitClean(ctx context.Context, within time.Duration) (bool, error) {
-	return l.await(ctx, within, func() (bool, error) {
+	deadline := time.Now().Add(within)
+	return l.await(ctx, func() time.Time { return deadline }, func() (bool, error) {
 		empty := len(l.h.Observer.Managed()) == 0 && len(l.h.Observer.Current(l.target.Primary)) == 0
 		return empty, nil
 	})
@@ -241,16 +239,15 @@ func (l *liveRun) stop(ctx context.Context) error { return l.h.Stop(ctx) }
 
 func (l *liveRun) unresolvedOwners() []cluster.Unresolved { return l.h.unresolved }
 
-// await polls until the condition holds or the window closes, and reports
-// whether it held.
-func (l *liveRun) await(ctx context.Context, within time.Duration, condition func() (bool, error)) (bool, error) {
-	deadline := time.Now().Add(within)
+// await polls until the condition holds or the instant until returns has
+// passed, and reports whether it held.
+func (l *liveRun) await(ctx context.Context, until func() time.Time, condition func() (bool, error)) (bool, error) {
 	for {
 		held, err := condition()
 		if err != nil || held {
 			return held, err
 		}
-		if !time.Now().Before(deadline) {
+		if !time.Now().Before(until()) {
 			return false, nil
 		}
 		if err := sleep(ctx, settlePoll); err != nil {

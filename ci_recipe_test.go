@@ -323,11 +323,28 @@ func TestTheCIRecipeGivesEachStepWhatItNeedsOnACacheHitAndAMiss(t *testing.T) {
 }
 
 func TestTheCIRecipeInstallsEachToolItRunsAtAPin(t *testing.T) {
-	commands := runText(recipeSteps(t))
-	for _, tool := range []string{"botbox", "setup-envtest"} {
-		if !regexp.MustCompile(`go install "?\S+/` + regexp.QuoteMeta(tool) + `@\$\{?\w+_VERSION\b`).MatchString(commands) {
-			t.Errorf("the recipe runs %s and does not go install it at a $..._VERSION pin", tool)
+	module := regexp.MustCompile(`(?m)^module (\S+)$`).FindStringSubmatch(readFile(t, "go.mod"))
+	setupEnvtest := regexp.MustCompile(`go install (\S+/setup-envtest)@\$\(SETUP_ENVTEST_VERSION\)`).FindStringSubmatch(readFile(t, "Makefile"))
+	if module == nil || setupEnvtest == nil {
+		t.Fatal("go.mod names no module, or the Makefile does not go install setup-envtest")
+	}
+	want := []string{
+		"install " + module[1] + "/cmd/botbox@" + readWorkflow(t, ciRecipe).Env["BOTBOX_VERSION"],
+		"install " + setupEnvtest[1] + "@" + makefilePins(t)["SETUP_ENVTEST_VERSION"],
+	}
+	var got []string
+	for _, s := range recipeSteps(t) {
+		if !strings.Contains(s.Run, "go install") {
+			continue
 		}
+		_, output, err := runStep(t, s, "go", `echo "$*${GOBIN:+ into $GOBIN}${GOPATH:+ under $GOPATH}"`)
+		if err != nil {
+			t.Fatalf("%q: %v\n%s", s.Run, err, output)
+		}
+		got = append(got, strings.Split(strings.TrimSpace(string(output)), "\n")...)
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("the recipe runs go %q, not %q, which puts each tool in ~/go/bin at its pin", got, want)
 	}
 }
 
@@ -337,8 +354,6 @@ func TestTheCIRecipeExportsTheControlPlaneOrFails(t *testing.T) {
 	if i < 0 {
 		t.Fatal("no step exports KUBEBUILDER_ASSETS")
 	}
-	script := steps[i].Run
-
 	for _, test := range []struct {
 		name, setupEnvtest, wantEnv string
 		wantErr                     bool
@@ -351,7 +366,7 @@ func TestTheCIRecipeExportsTheControlPlaneOrFails(t *testing.T) {
 		{name: "setup-envtest fails", setupEnvtest: "exit 1", wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			exported, output, err := runStep(t, script, "setup-envtest", test.setupEnvtest)
+			exported, output, err := runStep(t, steps[i], "setup-envtest", test.setupEnvtest)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("the step returned %v, and wanted an error: %t\n%s", err, test.wantErr, output)
 			}
@@ -362,9 +377,9 @@ func TestTheCIRecipeExportsTheControlPlaneOrFails(t *testing.T) {
 	}
 }
 
-// runStep runs a step's script with a stub for one command, and returns what
-// the script wrote to GITHUB_ENV.
-func runStep(t *testing.T, script, command, stub string) (exported string, output []byte, err error) {
+// runStep runs a recipe step's script under the recipe's env alone, with a
+// stub for one command, and returns what the script wrote to GITHUB_ENV.
+func runStep(t *testing.T, s step, command, stub string) (exported string, output []byte, err error) {
 	t.Helper()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, command), []byte("#!/bin/sh\n"+stub+"\n"), 0o755); err != nil {
@@ -372,9 +387,14 @@ func runStep(t *testing.T, script, command, stub string) (exported string, outpu
 	}
 	githubEnv := filepath.Join(dir, "github-env")
 	// Actions runs a step with no shell key as bash -e.
-	step := exec.Command("bash", "-e", "-c", script)
-	step.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv)
-	output, err = step.CombinedOutput()
+	cmd := exec.Command("bash", "-e", "-c", s.Run)
+	cmd.Env = []string{"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"), "GITHUB_ENV=" + githubEnv}
+	for _, env := range []map[string]string{readWorkflow(t, ciRecipe).Env, recipeJob(t).Env, s.Env} {
+		for name, value := range env {
+			cmd.Env = append(cmd.Env, name+"="+value)
+		}
+	}
+	output, err = cmd.CombinedOutput()
 	env, _ := os.ReadFile(githubEnv)
 	return string(env), output, err
 }
@@ -385,7 +405,7 @@ func TestTheCIRecipeFailsWhenBotboxFinds(t *testing.T) {
 		t.Error("the recipe sets continue-on-error, which can pass a find and skip the upload")
 	}
 	for _, s := range botboxRuns(t, recipe.Steps) {
-		if _, output, err := runStep(t, s.Run, "botbox", "exit 1"); err == nil {
+		if _, output, err := runStep(t, s, "botbox", "exit 1"); err == nil {
 			t.Errorf("%q passes when botbox fails\n%s", s.Run, output)
 		}
 	}

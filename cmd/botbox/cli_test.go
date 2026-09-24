@@ -787,7 +787,7 @@ launch:
 }
 
 // growingGenerator draws a create and as many settles as the seed, so that no
-// two runs can take as long.
+// two runs take the same time.
 func growingGenerator(t *target.Target) (Generator, []string, error) {
 	return func(seed int64) (run.Sequence, error) {
 		sequence := run.Sequence{Seed: seed, Target: t.Name, Ops: []run.Op{{Type: run.OpCreate}}}

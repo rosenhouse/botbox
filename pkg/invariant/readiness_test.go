@@ -187,6 +187,7 @@ func TestAnExpiredWaitSaysTheTargetHadNotShownItRuns(t *testing.T) {
 	}{
 		{"after a restart op", restarted(), sinceTheRestart},
 		{"after a restart op, with leader election alone", restarted().requests(3100*time.Millisecond, time.Second, 4, lease("update")), sinceTheRestart},
+		{"after a restart op, with a request after the wait alone", restarted().running(9 * time.Second), sinceTheRestart},
 		{"after a supervised restart", readyCR().running(1100*time.Millisecond).op(invariant.OpSettle, 3*time.Second).exit(4*time.Second, 4*time.Second),
 			"but the target had requested no resource outside leader election since the restart after its exit during op 0 (settle); " +
 				"the target exited 1 time since it last converged, last with the exit at 4s"},

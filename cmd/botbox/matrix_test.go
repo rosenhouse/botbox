@@ -442,11 +442,16 @@ func TestMatrixDerivesItsDeadlineFromItsRuns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sequences := bugSequences(t, 0)
+	longer := run.Sequence{Seed: 1, Target: "toy-widget", Ops: []run.Op{{Type: run.OpSettle}, {Index: 1, Type: run.OpSettle}}}
+	if err := run.WriteSequence(filepath.Join(sequences, "b1.json"), longer); err != nil {
+		t.Fatal(err)
+	}
 	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)}}
 	before := time.Now()
 
 	code, stdout, stderr := invoke(t, session, "matrix",
-		"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", matrixFile(t))
+		"--target", toyTargetYAML, "--sequences", sequences, "--out", matrixFile(t))
 
 	after := time.Now()
 	if code != exitOK {

@@ -786,9 +786,20 @@ launch:
 	return path
 }
 
-// Ten runs at the default timeouts outlast a fixed deadline of 4m. Without
-// --deadline, the runs get what they can take, and a sequence botbox drew gets
-// time to be minimized.
+// growingGenerator draws a create and as many settles as the seed, so that no
+// two runs can take as long.
+func growingGenerator(t *target.Target) (Generator, []string, error) {
+	return func(seed int64) (run.Sequence, error) {
+		sequence := run.Sequence{Seed: seed, Target: t.Name, Ops: []run.Op{{Type: run.OpCreate}}}
+		for i := range int(seed) {
+			sequence.Ops = append(sequence.Ops, run.Op{Index: i + 1, Type: run.OpSettle})
+		}
+		return sequence, nil
+	}, nil, nil
+}
+
+// Without --deadline, the runs get what they can take, and a sequence botbox
+// drew gets time to be minimized.
 func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
 	targetFile := targetWithoutTimeouts(t)
 	loaded, err := target.Load(targetFile)
@@ -796,6 +807,11 @@ func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
 		t.Fatal(err)
 	}
 	sequence := writeSequence(t, 1)
+	longer := filepath.Join(t.TempDir(), "longer.json")
+	settles := []run.Op{{Type: run.OpSettle}, {Index: 1, Type: run.OpSettle}}
+	if err := run.WriteSequence(longer, run.Sequence{Seed: 2, Target: "toy-widget", Ops: settles}); err != nil {
+		t.Fatal(err)
+	}
 	named := "the deadline is %[1]s: this run can take that long at the target's timeouts. --deadline sets another.\n"
 	for _, test := range []struct {
 		name       string
@@ -806,6 +822,8 @@ func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
 		{"drawn runs", []string{"run", "--runs", "10", "--seed", "1"}, 4 * time.Minute,
 			"the deadline is %[1]s: these 10 runs can take %[2]s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.\n"},
 		{"a named sequence", []string{"run", sequence}, 0, named},
+		{"named sequences", []string{"run", sequence, longer}, 0,
+			"the deadline is %[1]s: these 2 runs can take that long at the target's timeouts. --deadline sets another.\n"},
 		{"a replay", []string{"replay", sequence}, 0, named},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -813,7 +831,7 @@ func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
 			args := slices.Concat(test.args[:1], []string{"--target", targetFile, "--out", t.TempDir()}, test.args[1:])
 			before := time.Now()
 
-			code, stdout, stderr := invokeWith(t, session, countingGenerator(nil, run.OpCreate, run.OpSettle), args...)
+			code, stdout, stderr := invokeWith(t, session, growingGenerator, args...)
 
 			after := time.Now()
 			if code != exitOK {

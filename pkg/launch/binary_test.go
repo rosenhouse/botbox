@@ -202,7 +202,10 @@ func TestStopTerminatesGracefully(t *testing.T) {
 
 func TestStopEscalatesToSIGKILL(t *testing.T) {
 	grace := 200 * time.Millisecond
-	binary, log := newBinary(t, grace, `trap "" TERM; echo pid=$$; `+forever)
+	// The reap after SIGKILL waits for the log to close, and Stop gives it the
+	// grace period too. So the shell execs sleep, which keeps SIGTERM ignored,
+	// rather than leave a child holding the log open.
+	binary, log := newBinary(t, grace, `trap "" TERM; echo pid=$$; exec sleep 60`)
 	mustStart(t, binary)
 	pid := pidFromLog(t, log)
 

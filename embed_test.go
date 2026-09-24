@@ -34,15 +34,16 @@ func TestMarkdownEmbedsMatchTheirFiles(t *testing.T) {
 	}
 }
 
-// The M4 acceptance: the README shows the script CI runs (DESIGN.md §10).
-func TestREADMEEmbedsTheQuickstart(t *testing.T) {
+// The README shows the files an adopter copies, and so cannot drift from them.
+func TestREADMEEmbedsWhatAnAdopterCopies(t *testing.T) {
 	doc, err := os.ReadFile("README.md")
 	if err != nil {
 		t.Fatal(err)
 	}
-	marker := embedMarker + " examples/cert-manager/quickstart.sh -->"
-	if !strings.Contains(string(doc), marker) {
-		t.Errorf("README.md does not embed the quickstart: no %q", marker)
+	for _, path := range []string{"examples/cert-manager/quickstart.sh", "examples/ci/github-actions.yml"} {
+		if marker := embedMarker + " " + path + " -->"; !strings.Contains(string(doc), marker) {
+			t.Errorf("README.md does not embed %s: no %q", path, marker)
+		}
 	}
 }
 

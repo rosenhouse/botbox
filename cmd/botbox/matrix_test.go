@@ -400,7 +400,14 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 			replay:   "b0.json",
 		},
 		{
-			name:    "in the checks",
+			name:    "in the checks under the bug",
+			results: []run.Result{recorded(t, true), recordedWithABrokenProperty(t)},
+			want:    "b1.json under --bug=1: evaluating property P1: the predicate broke",
+			replay:  "b1.json",
+			bugArgs: []string{"--bug=1"},
+		},
+		{
+			name:    "in the checks without the bug",
 			results: []run.Result{recorded(t, true), recorded(t, false), recordedWithABrokenProperty(t)},
 			want:    "b1.json without --bug=1: evaluating property P1: the predicate broke",
 			replay:  "b1.json",

@@ -269,6 +269,14 @@ func TestG7NotesAnObjectAFaultMayHaveKeptAway(t *testing.T) {
 			fault(4*time.Second, 9990*time.Millisecond).
 			checkpoint(12100*time.Millisecond, invariant.Converged).
 			through(12100 * time.Millisecond), wantNote},
+		{"after a restart the target had not answered", converged().
+			op(invariant.OpRestart, 9*time.Second).
+			deletedManaged(10*time.Second, "w-0").
+			remove(10100*time.Millisecond, child("w-0", "15")).
+			fault(10050*time.Millisecond, 11*time.Second).
+			checkpoint(16*time.Second, invariant.Expired).
+			through(16 * time.Second),
+			"G7 is not evaluated for op 2 (deleteManaged): a fault was active"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			noted(t, invariant.SelfHealing, c.in, c.want)

@@ -473,8 +473,9 @@ while the target was still owed time to recover from a fault. It also notes an o
 follows a `Restart` where the target requested nothing between the two but leader
 election's leases and lease candidates, and paths that name no resource. botbox has no
 other sign that the target is back (§5.1), and a process starting up or waiting to lead
-requests only those. A violation quotes the object's history and the managed objects where
-the wait ended, which show an object recreated under a new name.
+requests only those. Where several of these apply, the note names the first. A violation
+quotes the object's history and the managed objects where the wait ended, which show an
+object recreated under a new name.
 
 ## 7. Sequence format
 

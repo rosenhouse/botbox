@@ -945,9 +945,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   must name and the `_CRDS_SHA256` of its checked-in CRDs, so a moved tag or an edited
   asset fails rather than passing quietly. Values live in the Makefile. The README's Install
   block and the CI recipe repeat the envtest pins for adopters to copy. The recipe also
-  repeats go.mod's Go version, and the runner and action releases of `.github/workflows/`.
-  `make test` holds each copy to its source. Bumps are their own PRs, never mixed with
-  features.
+  repeats go.mod's module and Go version, and the runner and action releases of
+  `.github/workflows/`. `make test` holds each copy to its source. Each `--deadline` in the
+  recipe gives a run at least the time that the Makefile's example tiers give one. Bumps
+  are their own PRs, never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
   import it. The rule covers the root module; the spike modules under `docs/spikes/` are
   separate and exempt. Everything else uses client-go and apimachinery.

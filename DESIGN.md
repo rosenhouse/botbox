@@ -1597,5 +1597,5 @@ built from source and run as a black-box binary.
   triggers run out one after another each extend the wait the one before extended, so
   the deadline doubles each time faults stop. A `delete` gets `T_delete` because #70 lets
   a wait after it run to the CR's G3 deadline. At §6's timeouts the deadline runs to tens
-  of minutes, so botbox prints it. An explicit `--deadline` must be positive
-  and is used as given.
+  of minutes, so botbox prints it. An explicit `--deadline` must be positive and is used
+  as given.

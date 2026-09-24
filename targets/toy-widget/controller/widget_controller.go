@@ -79,7 +79,7 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Bug != B8 {
 		builder = builder.Owns(&corev1.ConfigMap{}) // B8 (§9.1): without this watch, a deleted child goes unnoticed.
 	}
-	if r.LabelFrom != "" && r.Bug != B14 {
+	if r.Bug != B14 {
 		// B14: without this watch, a changed label reaches no child.
 		builder = builder.Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.widgetsCopying))
 	}

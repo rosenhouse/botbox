@@ -67,7 +67,7 @@ func stepUsing(t *testing.T, steps []step, action string) step {
 		}
 	}
 	if len(found) != 1 {
-		t.Fatalf("%s has %d steps that use %s, not one", ciRecipe, len(found), action)
+		t.Fatalf("%d steps use %s, not one", len(found), action)
 	}
 	return found[0]
 }
@@ -290,8 +290,38 @@ func TestTheCIRecipeFixesSeedsOnPullRequestsAndDrawsThemNightly(t *testing.T) {
 	}
 }
 
+func TestNightlyFindsSayHowToRestoreTheirEvidence(t *testing.T) {
+	reports := 0
+	for name, job := range readWorkflow(t, ".github/workflows/nightly.yml").Jobs {
+		for _, s := range job.Steps {
+			if !strings.Contains(s.Run, "gh issue create") {
+				continue
+			}
+			reports++
+			upload := stepUsing(t, job.Steps, "actions/upload-artifact")
+			hint := downloadHint.FindStringSubmatch(s.Run)
+			if hint == nil {
+				t.Errorf("job %s files an issue that does not say how to download its evidence", name)
+				continue
+			}
+			expand := func(text string) string {
+				return os.Expand(text, func(v string) string { return s.Env[v] })
+			}
+			if expand(hint[1]) != upload.With["name"] {
+				t.Errorf("job %s: %q names an artifact other than %s", name, hint[0], upload.With["name"])
+			}
+			if expand(hint[2]) != strings.TrimSuffix(upload.With["path"], "/") {
+				t.Errorf("job %s: %q puts the evidence elsewhere than %s, where a report's replay command reads it", name, hint[0], upload.With["path"])
+			}
+		}
+	}
+	if reports == 0 {
+		t.Fatal("no nightly job files an issue")
+	}
+}
+
 // downloadHint matches a gh command that downloads one artifact into a directory.
-var downloadHint = regexp.MustCompile(`gh run download \S+ --name (\S+) --dir (\S+)`)
+var downloadHint = regexp.MustCompile(`gh run download \S+ --name ([\w.$/-]+) --dir ([\w.$/-]+)`)
 
 func runText(steps []step) string {
 	var commands []string

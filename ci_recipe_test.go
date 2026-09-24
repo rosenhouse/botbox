@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -21,14 +22,14 @@ const ciRecipe = "examples/ci/github-actions.yml"
 // reads the on key as a string, as Actions does. A YAML 1.1 parser reads it as
 // true.
 type workflow struct {
-	On          map[string]any    `yaml:"on"`
+	On          any               `yaml:"on"`
 	Env         map[string]string `yaml:"env"`
-	Permissions map[string]string `yaml:"permissions"`
+	Permissions any               `yaml:"permissions"`
 	Jobs        map[string]job    `yaml:"jobs"`
 }
 
 type job struct {
-	RunsOn          string `yaml:"runs-on"`
+	RunsOn          any    `yaml:"runs-on"`
 	ContinueOnError any    `yaml:"continue-on-error"`
 	TimeoutMinutes  any    `yaml:"timeout-minutes"`
 	Steps           []step `yaml:"steps"`
@@ -47,11 +48,29 @@ type step struct {
 
 func readWorkflow(t *testing.T, path string) workflow {
 	t.Helper()
-	var w workflow
-	if err := yaml.Unmarshal([]byte(readFile(t, path)), &w); err != nil {
+	w, err := parseWorkflow(readFile(t, path))
+	if err != nil {
 		t.Fatalf("parsing %s: %v", path, err)
 	}
 	return w
+}
+
+func parseWorkflow(content string) (workflow, error) {
+	var w workflow
+	err := yaml.Unmarshal([]byte(content), &w)
+	return w, err
+}
+
+func TestParseWorkflowReadsEachFormOfOnPermissionsAndRunsOn(t *testing.T) {
+	for _, content := range []string{
+		"on: push\npermissions: read-all\njobs: {a: {runs-on: ubuntu-latest}}\n",
+		"on: [push]\njobs: {a: {runs-on: [self-hosted, linux]}}\n",
+		"on: {push: {}}\npermissions: {contents: read}\njobs: {a: {runs-on: {group: large}}}\n",
+	} {
+		if _, err := parseWorkflow(content); err != nil {
+			t.Errorf("parsing %q: %v", content, err)
+		}
+	}
 }
 
 func recipeJob(t *testing.T) job {
@@ -350,17 +369,28 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 	}
 }
 
+// recipeEvents are the events the recipe runs on, each with its settings.
+func recipeEvents(t *testing.T) map[string]any {
+	t.Helper()
+	on := readWorkflow(t, ciRecipe).On
+	events, ok := on.(map[string]any)
+	if !ok {
+		t.Fatalf("the recipe's on key is %v, not a map of events", on)
+	}
+	return events
+}
+
 func TestTheCIRecipeFixesSeedsOnPullRequestsAndDrawsThemNightly(t *testing.T) {
-	w := readWorkflow(t, ciRecipe)
-	if _, ok := w.On["pull_request"]; !ok {
+	on := recipeEvents(t)
+	if _, ok := on["pull_request"]; !ok {
 		t.Error("the recipe does not run on pull_request")
 	}
-	schedule, _ := w.On["schedule"].([]any)
+	schedule, _ := on["schedule"].([]any)
 	if len(schedule) == 0 || slices.ContainsFunc(schedule, func(entry any) bool {
 		timing, _ := entry.(map[string]any)
 		return timing["cron"] == nil
 	}) {
-		t.Errorf("the recipe's schedule is %v, not a list of crons, and Actions rejects such a workflow", w.On["schedule"])
+		t.Errorf("the recipe's schedule is %v, not a list of crons, and Actions rejects such a workflow", on["schedule"])
 	}
 	seeded := map[string]bool{}
 	for _, s := range botboxRuns(t, recipeSteps(t)) {
@@ -459,15 +489,15 @@ func TestTheCIRecipeRunsWhereThisRepositorysWorkflowsRun(t *testing.T) {
 	runners, releases := map[string]bool{}, map[string]bool{}
 	for _, path := range paths {
 		for _, j := range readWorkflow(t, path).Jobs {
-			runners[j.RunsOn] = true
+			runners[fmt.Sprint(j.RunsOn)] = true
 			for _, s := range j.Steps {
 				releases[actionRelease(s.Uses)] = true
 			}
 		}
 	}
 	recipe := recipeJob(t)
-	if !runners[recipe.RunsOn] {
-		t.Errorf("the recipe runs its bash steps on %q, and this repository's workflows run only on %v", recipe.RunsOn, slices.Sorted(maps.Keys(runners)))
+	if !runners[fmt.Sprint(recipe.RunsOn)] {
+		t.Errorf("the recipe runs its bash steps on %v, and this repository's workflows run only on %v", recipe.RunsOn, slices.Sorted(maps.Keys(runners)))
 	}
 	for _, s := range recipe.Steps {
 		if s.Uses != "" && !releases[actionRelease(s.Uses)] {
@@ -489,7 +519,7 @@ func TestTheCIRecipeChecksOutTheRepositoryWithAReadOnlyToken(t *testing.T) {
 	if len(recipe.Steps) == 0 || !strings.HasPrefix(recipe.Steps[0].Uses, "actions/checkout@") {
 		t.Error("the job's first step does not check out the repository")
 	}
-	if permissions := readWorkflow(t, ciRecipe).Permissions; !maps.Equal(permissions, map[string]string{"contents": "read"}) {
+	if permissions := readWorkflow(t, ciRecipe).Permissions; !reflect.DeepEqual(permissions, map[string]any{"contents": "read"}) {
 		t.Errorf("the job's token has %v, more than it needs to read the repository", permissions)
 	}
 }

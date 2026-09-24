@@ -68,6 +68,8 @@ type fakeSession struct {
 	unopened error
 	// closing runs as the session closes.
 	closing func()
+	// unclosed is what close returns.
+	unclosed error
 	// deadlines are when each execute's context ends.
 	deadlines []time.Time
 	// now is botbox's clock, where it is not the real one.
@@ -116,7 +118,7 @@ func (s *fakeSession) close() error {
 		s.closing()
 	}
 	s.closed = true
-	return nil
+	return s.unclosed
 }
 
 // invoke runs the CLI over args with a fake session, and returns its exit code

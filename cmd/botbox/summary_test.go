@@ -343,6 +343,46 @@ func TestAPassingRunBotboxCannotDiscardStopsTheInvocation(t *testing.T) {
 	}
 }
 
+func TestASummaryBotboxCannotWriteOnlyWarns(t *testing.T) {
+	var taken []string
+	session := &fakeSession{}
+	// A directory in the way fails the write.
+	session.after = func() {
+		for _, name := range []string{"summary.json", "summary.md"} {
+			path := filepath.Join(filepath.Dir(session.dirs[0]), name)
+			_ = os.Remove(path)
+			if err := os.Mkdir(path, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			taken = append(taken, path)
+		}
+	}
+
+	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1")
+
+	if code != exitOK {
+		t.Errorf("botbox run exited %d, want %d: the run passed.", code, exitOK)
+	}
+	for _, path := range taken {
+		if n := strings.Count(stderr, "botbox: writing "+path); n != 1 {
+			t.Errorf("botbox run printed\n%s\nwhich says %d times that it could not write %s, want once.", stderr, n, path)
+		}
+	}
+}
+
+func TestAClusterThatDoesNotStopOnlyWarns(t *testing.T) {
+	session := &fakeSession{unclosed: errors.New("the control plane did not stop")}
+
+	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1")
+
+	if code != exitOK {
+		t.Errorf("botbox run exited %d, want %d: the run passed.", code, exitOK)
+	}
+	if want := "botbox: the control plane did not stop\n"; !strings.Contains(stderr, want) {
+		t.Errorf("botbox run printed %q on stderr, want %q.", stderr, want)
+	}
+}
+
 func TestTheSummaryNamesTheSequenceFilesItRan(t *testing.T) {
 	out := t.TempDir()
 	path := writeSequence(t, 8675309)

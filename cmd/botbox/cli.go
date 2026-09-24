@@ -469,6 +469,12 @@ func reportNotes(opts options, t *target.Target, result run.Result) []string {
 // warn reports what went wrong beside a finding, which stands whether or not
 // the run directory could be tidied (DESIGN.md §11).
 func (c *cli) warn(err error) {
+	if joined, ok := err.(interface{ Unwrap() []error }); ok {
+		for _, err := range joined.Unwrap() {
+			c.warn(err)
+		}
+		return
+	}
 	if err != nil {
 		fmt.Fprintln(c.stderr, "botbox:", err)
 	}

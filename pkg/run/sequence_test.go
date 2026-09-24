@@ -189,17 +189,22 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 		{
 			name: "a fault on a subresource",
 			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"resource": "widgets/status"}, "action": {"drop": true}}}`,
-			want: `match.resource "widgets/status" names a subresource; a fault on widgets matches its subresources' requests too`,
+			want: `match.resource "widgets/status" holds a slash; name the plural alone, such as configmaps. A fault on a resource matches its subresources' requests too`,
+		},
+		{
+			name: "a fault on a resource with its version",
+			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"resource": "v1/configmaps"}, "action": {"drop": true}}}`,
+			want: `match.resource "v1/configmaps" holds a slash; name the plural alone, such as configmaps. A fault on a resource matches its subresources' requests too`,
 		},
 		{
 			name: "a fault on a resource with a leading slash",
 			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"resource": "/configmaps"}, "action": {"drop": true}}}`,
-			want: `match.resource "/configmaps" is not a plural such as configmaps`,
+			want: `match.resource "/configmaps" holds a slash; name the plural alone, such as configmaps. A fault on a resource matches its subresources' requests too`,
 		},
 		{
 			name: "a fault on a resource with a trailing slash",
 			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"resource": "configmaps/"}, "action": {"drop": true}}}`,
-			want: `match.resource "configmaps/" is not a plural such as configmaps`,
+			want: `match.resource "configmaps/" holds a slash; name the plural alone, such as configmaps. A fault on a resource matches its subresources' requests too`,
 		},
 		{
 			name: "a restart that skips its settle",

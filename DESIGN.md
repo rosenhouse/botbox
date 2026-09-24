@@ -554,8 +554,8 @@ Details the example does not show:
   the plural the API server serves, such as `configmaps`, because the proxy records that.
   The Runner asks discovery for it when it applies the fault op, so a CRD the target
   installed counts, and a name the API server does not serve ends the run as a
-  configuration error. It names no subresource, since a fault on `widgets` also matches
-  the requests to `widgets/status`.
+  configuration error. It holds no slash, so it names no group, version or subresource. A
+  fault on `widgets` also matches the requests to `widgets/status`.
 - Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
   tries faults in op order, the first that applies to a request wins, and each runs out on
   its own `until`.

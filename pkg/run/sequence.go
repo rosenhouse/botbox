@@ -279,12 +279,9 @@ func (f *Fault) validate() error {
 		return fmt.Errorf("match.verb %q is not one of %s and %s",
 			verb, strings.Join(proxy.Verbs[:last], ", "), proxy.Verbs[last])
 	}
-	if resource, subresource, found := strings.Cut(f.Match.Resource, "/"); found {
-		if resource == "" || subresource == "" {
-			return fmt.Errorf("match.resource %q is not a plural such as configmaps", f.Match.Resource)
-		}
-		return fmt.Errorf("match.resource %q names a subresource; a fault on %s matches its subresources' requests too",
-			f.Match.Resource, resource)
+	if strings.Contains(f.Match.Resource, "/") {
+		return fmt.Errorf("match.resource %q holds a slash; name the plural alone, such as configmaps. "+
+			"A fault on a resource matches its subresources' requests too", f.Match.Resource)
 	}
 	return nil
 }

@@ -58,7 +58,7 @@ type anchor struct {
 func (in Input) convergeAnchors() []anchor {
 	var anchors []anchor
 	for _, op := range in.Ops {
-		if op.Type.changesSpec() {
+		if op.givesInput() {
 			anchors = append(anchors, anchor{at: op.Time, deadline: in.readyBy(op.Time), what: describe(op)})
 		}
 	}
@@ -83,11 +83,12 @@ func (in Input) readyBy(at time.Time) time.Time {
 	return later(settled, owed)
 }
 
-// respecified reports whether a later op changed the spec inside the window,
-// which hands the window to that op.
+// respecified reports whether a later op changed the spec or a fixture inside
+// the window, which hands the window to that op. A target may rightly not be
+// ready while a fixture is deleted.
 func (in Input) respecified(from, to time.Time) bool {
 	return slices.ContainsFunc(in.Ops, func(op Op) bool {
-		return op.Type.changesSpec() && op.Time.After(from) && op.Time.Before(to)
+		return (op.givesInput() || op.Type == OpDeleteFixture) && op.Time.After(from) && op.Time.Before(to)
 	})
 }
 
@@ -123,7 +124,12 @@ func upTo(versions []observe.Version, t time.Time) []observe.Version {
 	return slices.DeleteFunc(slices.Clone(versions), func(v observe.Version) bool { return v.Time.After(t) })
 }
 
-func describe(op Op) string { return fmt.Sprintf("op %d (%s)", op.Index, op.Type) }
+func describe(op Op) string {
+	if op.Restored {
+		return fmt.Sprintf("op %d (%s), where botbox restored a fixture", op.Index, op.Type)
+	}
+	return fmt.Sprintf("op %d (%s)", op.Index, op.Type)
+}
 
 func later(a, b time.Time) time.Time {
 	if b.After(a) {

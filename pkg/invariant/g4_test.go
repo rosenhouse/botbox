@@ -90,6 +90,55 @@ func TestG4IgnoresAWindowALaterSpecChangeCutShort(t *testing.T) {
 	silent(t, invariant.Convergence, in)
 }
 
+func TestG4RequiresConvergenceAfterAFixtureChanges(t *testing.T) {
+	for _, change := range []struct {
+		name  string
+		apply func(*run) *run
+		want  string
+	}{
+		{"an update", func(r *run) *run { return r.op(invariant.OpUpdateFixture, 10*time.Second) }, "op 1 (updateFixture)"},
+		{"a restore", func(r *run) *run { return r.restoring(invariant.OpSettle, 10*time.Second) },
+			"op 1 (settle), where botbox restored a fixture"},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			in := change.apply(newRun().
+				op(invariant.OpCreate, 0).
+				record(time.Second, widget("10", spec(1), status(1, 1)))).
+				record(11*time.Second, widget("11", spec(1), status(0, 1))).
+				through(16 * time.Second)
+
+			violation := fired(t, invariant.Convergence, in)
+
+			if want := "the CR w was not ready 5s after " + change.want; violation.Statement != want {
+				t.Errorf("The statement is %q, want %q.", violation.Statement, want)
+			}
+		})
+	}
+}
+
+// A dependency that is gone may leave the CR rightly not ready, so a change to
+// a fixture hands the window to the next.
+func TestG4IgnoresAWindowAFixtureOpCutShort(t *testing.T) {
+	for _, change := range []struct {
+		name  string
+		apply func(*run) *run
+	}{
+		{"a delete never restored", func(r *run) *run { return r.op(invariant.OpDeleteFixture, time.Second) }},
+		{"an update", func(r *run) *run { return r.op(invariant.OpUpdateFixture, time.Second) }},
+		{"a restore", func(r *run) *run { return r.restoring(invariant.OpSettle, time.Second) }},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			in := change.apply(newRun().
+				op(invariant.OpCreate, 0).
+				record(500*time.Millisecond, widget("10", spec(1), status(0, 1)))).
+				record(5500*time.Millisecond, widget("11", spec(1), status(1, 1))).
+				through(8 * time.Second)
+
+			silent(t, invariant.Convergence, in)
+		})
+	}
+}
+
 // A fault that lasted 3s leaves the target 3s and T_settle to recover.
 func TestG4RequiresConvergenceAfterAFaultStops(t *testing.T) {
 	in := newRun().

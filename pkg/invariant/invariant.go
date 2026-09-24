@@ -26,6 +26,8 @@ const (
 	OpFault         OpType = "fault"
 	OpSettle        OpType = "settle"
 	OpDeleteManaged OpType = "deleteManaged"
+	OpUpdateFixture OpType = "updateFixture"
+	OpDeleteFixture OpType = "deleteFixture"
 )
 
 // changesSpec reports whether the op gives the target a new spec to converge
@@ -37,6 +39,14 @@ func (k OpType) changesSpec() bool {
 // touchesCR reports whether the op changed the primary CR, which opens a new
 // stretch of unchanged spec.
 func (k OpType) touchesCR() bool { return k.changesSpec() || k == OpDelete }
+
+func (k OpType) onFixture() bool { return k == OpUpdateFixture || k == OpDeleteFixture }
+
+// givesInput reports whether the op gave the target a spec or a fixture to
+// converge on.
+func (op Op) givesInput() bool {
+	return op.Type.changesSpec() || op.Type == OpUpdateFixture || op.Restored
+}
 
 // Op is one executed step of the sequence (DESIGN.md §7).
 type Op struct {
@@ -50,10 +60,16 @@ type Op struct {
 	Deleted observe.Key
 	// CR is the primary CR a CR op wrote. Every other op carries the zero Key.
 	CR observe.Key
+	// Restored says botbox created a fixture it had deleted again, just after
+	// the op's Time and before the op's own change.
+	Restored bool
 }
 
-// changesRun reports whether the op changed the CR or a managed object.
-func (op Op) changesRun() bool { return op.Type.touchesCR() || op.Deleted != (observe.Key{}) }
+// changesRun reports whether the op changed the CR, a managed object or a
+// fixture.
+func (op Op) changesRun() bool {
+	return op.Type.touchesCR() || op.Deleted != (observe.Key{}) || op.Type.onFixture() || op.Restored
+}
 
 // SettleResult is how the settle wait a checkpoint follows ended (DESIGN.md §5.5).
 type SettleResult string

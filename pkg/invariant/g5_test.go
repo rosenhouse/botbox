@@ -831,6 +831,9 @@ func TestG5LeavesARestartUnjudgedOnlyForAnOpThatChangesTheRun(t *testing.T) {
 		{"recreate", func(r *run) *run { return r.op(invariant.OpRecreate, 11*time.Second) }, true},
 		{"deleteManaged of w-0", func(r *run) *run { return r.deletedManaged(11*time.Second, "w-0") }, true},
 		{"deleteManaged of nothing", func(r *run) *run { return r.op(invariant.OpDeleteManaged, 11*time.Second) }, false},
+		{"updateFixture", func(r *run) *run { return r.op(invariant.OpUpdateFixture, 11*time.Second) }, true},
+		{"deleteFixture", func(r *run) *run { return r.op(invariant.OpDeleteFixture, 11*time.Second) }, true},
+		{"a settle that restored a fixture", func(r *run) *run { return r.restoring(invariant.OpSettle, 11*time.Second) }, true},
 		{"fault", func(r *run) *run { return r.op(invariant.OpFault, 11*time.Second) }, false},
 		{"settle", func(r *run) *run { return r.op(invariant.OpSettle, 11*time.Second) }, false},
 		{"restart", func(r *run) *run { return r.op(invariant.OpRestart, 11*time.Second) }, false},
@@ -839,7 +842,7 @@ func TestG5LeavesARestartUnjudgedOnlyForAnOpThatChangesTheRun(t *testing.T) {
 			in := changedAround(between.apply)
 
 			if between.confound {
-				noted(t, invariant.RestartStable, in, "for op 0 (restart): op 1 ("+string(in.Ops[1].Type)+") ran")
+				noted(t, invariant.RestartStable, in, "for op 0 (restart): op 1 ("+string(in.Ops[1].Type)+")")
 				return
 			}
 			result := evaluate(t, invariant.RestartStable, in)

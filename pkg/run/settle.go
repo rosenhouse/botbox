@@ -14,11 +14,11 @@ import (
 const settlePoll = 50 * time.Millisecond
 
 // Settle waits for the target's reaction (DESIGN.md §5.5): the Ready predicate
-// holds, and neither the CR nor a managed object has changed, nor the target
-// restarted, for T_stable. It reports whether it converged within T_settle, or
-// by what owed returns if that is later: the target may still be recovering
-// from a fault or deleting a CR. A nil owed owes nothing. The caller judges a
-// wait that expires.
+// holds, the target has shown it runs, and neither the CR nor a managed object
+// has changed, nor the target restarted or come back, for T_stable. It reports
+// whether it converged within T_settle, or by what owed returns if that is
+// later: the target may still be recovering from a fault or deleting a CR. A
+// nil owed owes nothing. The caller judges a wait that expires.
 func (h *Harness) Settle(ctx context.Context, owed func() time.Time) (bool, error) {
 	return settle{
 		timeouts: h.target.Timeouts,

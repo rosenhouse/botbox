@@ -258,15 +258,16 @@ The Runner executes one sequence:
    by requesting a resource outside leader election. botbox has no other sign that a target
    is back, and a controller lists what it watches as it starts. A start and that first
    request count as changes, so a restarted target runs for `T_stable` past its return
-   before a wait converges. It thus has `T_settle` to come back and settle, as at the run's
-   start. A target that never comes back fails G4. A target that exits again within
-   `T_stable` of each restart therefore never converges, even where it wrote its converged
-   state first, and its wait expires as a G4 that counts the exits since the target last
-   converged and quotes the last. A target that runs longer between exits can converge in
-   between, until a backoff outlasts a wait. A target that converges after an exit passes.
-   An exit a fault excuses owes the target `T_settle` past its restart (§6). Any other
-   restart gives it no more time, and its startup requests count toward G1 where they land
-   in a quiet window (§6). A restart that fails ends the run as the harness error above.
+   before a wait converges. A target that exits again within `T_stable` of each restart
+   therefore never converges, even where it wrote its converged state first, and its wait
+   expires as a G4 that counts the exits since the target last converged and quotes the
+   last. A target that runs longer between exits can converge in between, until a backoff
+   outlasts a wait. A target that converges after an exit passes. An exit a fault excuses
+   owes the target `T_settle` past its restart (§6). Any other restart gives it no more
+   time, and its startup requests count toward G1 where they land in a quiet window (§6).
+   After a `Restart` op, the target thus has `T_settle` to come back and settle, as at the
+   run's start, and a target not back when a wait expires fails G4. A restart that fails
+   ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
@@ -576,10 +577,10 @@ restart, by a `Restart` op or by `Supervise` after an exit, where the target req
 nothing between the last restart and the op but leader election's leases and lease
 candidates, and paths that name no resource. botbox has no other sign that the target is
 back (§5.1), and a process starting up or waiting to lead requests only those. A settle
-wait that converged after the restart rules this out (§5.5). It notes an
-op where the target exited, or waited to restart, during the op or its wait. Where several
-of these apply, the note names the first. A violation quotes the object's history and the
-managed objects where the wait ended, which show an object recreated under a new name.
+wait that converged after the restart rules this out (§5.5). It notes an op where the
+target exited, or waited to restart, during the op or its wait. Where several of these
+apply, the note names the first. A violation quotes the object's history and the managed
+objects where the wait ended, which show an object recreated under a new name.
 
 ## 7. Sequence format
 
@@ -1720,8 +1721,8 @@ built from source and run as a black-box binary.
   and that request counts as a change, so the target's startup falls inside the wait. A
   controller lists what it watches as it starts, so a correct one makes such a request.
   The rule covers the first process too, since a `ready` that holds without the target
-  could otherwise end op 0's wait before the target started. A target has `T_settle` to
-  come back and settle, as at the run's start. One that is not back by then fails G4,
-  which says so, and the 5 s wrapper under the toy's 5 s `T_settle` now fails there.
-  Leaving G1 and G2 unjudged in the window after an op G7 notes was rejected, because it
-  judges less.
+  could otherwise end op 0's wait before the target started. After a `Restart` op, a
+  target has `T_settle` to come back and settle, as at the run's start. One not back when
+  a wait expires fails G4, which says so, and the 5 s wrapper under the toy's 5 s
+  `T_settle` now fails there. Leaving G1 and G2 unjudged in the window after an op G7
+  notes was rejected, because it judges less.

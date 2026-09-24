@@ -36,12 +36,9 @@ func TestMarkdownEmbedsMatchTheirFiles(t *testing.T) {
 
 // The README shows the files an adopter copies, and so cannot drift from them.
 func TestREADMEEmbedsWhatAnAdopterCopies(t *testing.T) {
-	doc, err := os.ReadFile("README.md")
-	if err != nil {
-		t.Fatal(err)
-	}
+	doc := readFile(t, "README.md")
 	for _, path := range []string{"examples/cert-manager/quickstart.sh", "examples/ci/github-actions.yml"} {
-		if marker := embedMarker + " " + path + " -->"; !strings.Contains(string(doc), marker) {
+		if marker := embedMarker + " " + path + " -->"; !strings.Contains(doc, marker) {
 			t.Errorf("README.md does not embed %s: no %q", path, marker)
 		}
 	}

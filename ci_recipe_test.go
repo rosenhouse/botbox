@@ -150,10 +150,25 @@ func section(t *testing.T, doc, heading string) string {
 	if !found {
 		t.Fatalf("no %q heading", heading)
 	}
-	if next := regexp.MustCompile(`(?m)^#`).FindStringIndex(after); next != nil {
-		return after[:next[0]]
+	var text strings.Builder
+	fenced := false
+	for _, line := range strings.SplitAfter(after, "\n") {
+		if strings.HasPrefix(line, "```") {
+			fenced = !fenced
+		}
+		if !fenced && strings.HasPrefix(line, "#") {
+			break
+		}
+		text.WriteString(line)
 	}
-	return after
+	return text.String()
+}
+
+func TestSectionEndsAtTheNextHeadingOutsideAFence(t *testing.T) {
+	doc := "# Doc\n\n## Install\n\n```sh\n# a comment\ncommand\n```\n\n### Against kind\n\ntext\n"
+	if got, want := section(t, doc, "## Install"), "\n```sh\n# a comment\ncommand\n```\n\n"; got != want {
+		t.Errorf("section returned %q, not %q", got, want)
+	}
 }
 
 func TestTheCIRecipeCachesWhatItInstalls(t *testing.T) {
@@ -342,8 +357,9 @@ func TestTheCIRecipeSetsEveryVariableItReads(t *testing.T) {
 	set := readWorkflow(t, ciRecipe).Env
 	for _, s := range recipeSteps(t) {
 		var read []string
-		for _, m := range regexp.MustCompile(`\$([A-Z][A-Z0-9_]*)`).FindAllStringSubmatch(s.Run, -1) {
-			if _, local := s.Env[m[1]]; !local && !strings.HasPrefix(m[1], "GITHUB_") {
+		for _, m := range regexp.MustCompile(`\$\{?([A-Z][A-Z0-9_]*)`).FindAllStringSubmatch(s.Run, -1) {
+			_, local := s.Env[m[1]]
+			if !local && !strings.HasPrefix(m[1], "GITHUB_") && !strings.HasPrefix(m[1], "RUNNER_") {
 				read = append(read, m[1])
 			}
 		}

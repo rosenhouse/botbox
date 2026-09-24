@@ -752,22 +752,24 @@ generate:
 
 func TestLoadRejectsAFixtureGenerationCannotChange(t *testing.T) {
 	for _, test := range []struct {
-		name, generate, want string
+		name, generate, fixtures, want string
 	}{
-		{"a file fixtures does not list", "    absent.yaml: {}\n",
+		{"a file fixtures does not list", "    absent.yaml: {}\n", secretFixtures,
 			"generate.fixtures absent.yaml: fixtures lists no such file"},
-		{"a path that holds no string", "    secrets.yaml:\n      mutate: [data.tokne]\n",
+		{"a path that holds no string", "    secrets.yaml:\n      mutate: [data.tokne]\n", secretFixtures,
 			"generate.fixtures secrets.yaml: the v1/Secret token holds no string at data.tokne"},
-		{"a path to a map", "    secrets.yaml:\n      mutate: [data]\n",
+		{"a path to a map", "    secrets.yaml:\n      mutate: [data]\n", secretFixtures,
 			"generate.fixtures secrets.yaml: the v1/Secret token holds no string at data"},
-		{"every value of a map", "    secrets.yaml:\n      mutate: ['data[*]']\n",
-			"generate.fixtures secrets.yaml: the v1/Secret token holds no string at data[*]"},
-		{"a malformed path", "    secrets.yaml:\n      mutate: ['data[0]']\n",
+		{"every value of a map", "    secrets.yaml:\n      mutate: ['data[*]']\n", secretFixtures,
+			`generate.fixtures secrets.yaml: mutate "data[*]": name one string, not [*]`},
+		{"a malformed path", "    secrets.yaml:\n      mutate: ['data[0]']\n", secretFixtures,
 			`generate.fixtures secrets.yaml: mutate "data[0]": offset 4`},
+		{"a fixture with no name", "    secrets.yaml: {}\n", "apiVersion: v1\nkind: Secret\nmetadata:\n  generateName: token-\n",
+			"generate.fixtures secrets.yaml: a v1/Secret there sets no metadata.name, and a fixture op names its fixture"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := writeTarget(t, minimalTarget+"fixtures: [secrets.yaml]\ngenerate:\n  fixtures:\n"+test.generate,
-				map[string]string{"widget.yaml": sampleWidget, "secrets.yaml": secretFixtures})
+				map[string]string{"widget.yaml": sampleWidget, "secrets.yaml": test.fixtures})
 
 			_, err := target.Load(path)
 

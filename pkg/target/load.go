@@ -253,6 +253,9 @@ func mutableFixtures(file string, objects []*unstructured.Unstructured, declared
 	var paths []Path
 	for _, text := range declared {
 		path, err := ParsePath(text)
+		if err == nil && slices.ContainsFunc(path, func(step Step) bool { return step.Each }) {
+			err = errors.New("name one string, not [*]")
+		}
 		if err != nil {
 			return nil, fmt.Errorf("generate.fixtures %s: mutate %q: %w", file, text, err)
 		}
@@ -261,6 +264,10 @@ func mutableFixtures(file string, objects []*unstructured.Unstructured, declared
 	fixtures := make([]MutableFixture, len(objects))
 	for i, object := range objects {
 		fixtures[i] = MutableFixture{GVK: object.GroupVersionKind(), Name: object.GetName(), Mutate: paths}
+		if fixtures[i].Name == "" {
+			return nil, fmt.Errorf("generate.fixtures %s: a %s there sets no metadata.name, and a fixture op names its fixture",
+				file, kindName(fixtures[i].GVK))
+		}
 		for _, path := range paths {
 			if value, _, _ := unstructured.NestedFieldNoCopy(object.Object, path.Keys()...); !isString(value) {
 				return nil, fmt.Errorf("generate.fixtures %s: the %s %s holds no string at %s",

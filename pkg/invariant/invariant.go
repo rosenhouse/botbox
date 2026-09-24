@@ -343,6 +343,17 @@ func (in Input) versionsIn(from, to time.Time) []observe.Version {
 	return window
 }
 
+// opBy returns the last op applied by t.
+func (in Input) opBy(t time.Time) Op {
+	var last Op
+	for _, op := range in.Ops {
+		if !op.Time.After(t) {
+			last = op
+		}
+	}
+	return last
+}
+
 // op returns the op of this index, which is not its position: an Input may
 // carry a subset of the sequence.
 func (in Input) op(index int) (Op, bool) {

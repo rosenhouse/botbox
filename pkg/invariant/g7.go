@@ -39,9 +39,14 @@ func SelfHealing(in Input) (Result, error) {
 				describe(op), object)
 			continue
 		}
-		if restart, starting := in.stillStarting(op); starting {
+		if start, starting := in.stillStarting(op); starting {
 			out.note("for %s: the target had requested no resource outside leader election between %s and it, so it may not yet have been running to recreate the %s",
-				describe(op), describe(restart), object)
+				describe(op), start, object)
+			continue
+		}
+		if in.stopped(op.Time, end) {
+			out.note("for %s: the target exited, or waited to restart, during it or the wait after it, so it may not have been running to recreate the %s",
+				describe(op), object)
 			continue
 		}
 		out.violate(Violation{
@@ -54,23 +59,37 @@ func SelfHealing(in Input) (Result, error) {
 	return out, nil
 }
 
-// stillStarting returns the last Restart before the op if the target requested
-// nothing between the two that shows it running, since botbox has no other sign
-// that a restarted target is back.
-func (in Input) stillStarting(op Op) (Op, bool) {
-	var restart *Op
-	for i, earlier := range in.Ops {
+// stillStarting names the target's last start before the op, a Restart op or
+// the restart after an exit, if the target requested nothing between the two
+// that shows it running, since botbox has no other sign that it is back.
+func (in Input) stillStarting(op Op) (string, bool) {
+	var start time.Time
+	var named string
+	for _, earlier := range in.Ops {
 		if earlier.Type == OpRestart && earlier.Time.Before(op.Time) {
-			restart = &in.Ops[i]
+			start, named = earlier.Time, describe(earlier)
 		}
 	}
-	if restart == nil {
-		return Op{}, false
+	for _, exit := range in.Exits {
+		if exit.Restart.Before(op.Time) && exit.Restart.After(start) {
+			start, named = exit.Restart, "the restart after its exit during "+describe(in.opBy(exit.At))
+		}
+	}
+	if named == "" {
+		return "", false
 	}
 	running := slices.ContainsFunc(in.Requests, func(r proxy.Request) bool {
-		return r.Start.After(restart.Time) && r.Start.Before(op.Time) && showsRunning(r)
+		return r.Start.After(start) && r.Start.Before(op.Time) && showsRunning(r)
 	})
-	return *restart, !running
+	return named, !running
+}
+
+// stopped reports whether the target exited, or waited to restart, at some
+// point in [from, to].
+func (in Input) stopped(from, to time.Time) bool {
+	return slices.ContainsFunc(in.Exits, func(exit Exit) bool {
+		return !exit.At.After(to) && !exit.Restart.Before(from)
+	})
 }
 
 // showsRunning reports whether a request shows the target past starting up. A

@@ -387,7 +387,9 @@ while the controller waits to restart, nor until a restarted controller has run 
 `stable`. A controller that crashes again that soon after each restart never converges,
 even where it wrote its converged state first, so G4 reports it and quotes the last exit.
 A controller that exits during a fault, or while it recovers from one, has `settle` past
-its restart to converge.
+its restart to converge. G7 notes a `deleteManaged` after one of these restarts as it does
+one after a `restart`, and notes one where your controller exited, or waited to restart,
+during the op or its settle wait.
 The toy controller converges a count of 0 and then crashes under `--launch-arg --bug=12`,
 and `targets/toy-widget/sequences/b12.json` sets one:
 

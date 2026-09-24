@@ -119,8 +119,9 @@ Implementations:
   stopped and when it starts again. `Stop` and `Restart` are not exits, and `Stop` ends
   supervision. `Status` says whether a supervised target is waiting to restart, and when
   the process now running started. botbox does not probe the target for health. The
-  settle wait after the first op absorbs startup, but one after a `Restart` can converge
-  before the target is back, which G7 allows for (§6).
+  settle wait after the first op absorbs startup, but one after a `Restart`, or after
+  `Supervise` restarts the target, can converge before the target is back, which G7
+  allows for (§6).
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
 - `Image` — run a container image against a kind cluster, with the proxy in-cluster or
   reached by port-forward. Phase 2 (§10, M8).
@@ -564,15 +565,16 @@ kind and name satisfies G7, whatever its UID and content, since a recreated obje
 a new UID. Where none exists, G7 does not judge an op where no primary CR is live, or
 where the CR is being deleted, when the wait ends: nothing asks for the object back. It
 notes an op where botbox changed the CR or a managed object after the last settle wait
-that converged, since the target may then have meant to delete the object itself. It
-notes one where a fault was active during the op or its wait, or where the wait ended
-while the target was still owed time to recover from a fault. It also notes an op that
-follows a `Restart` where the target requested nothing between the two but leader
-election's leases and lease candidates, and paths that name no resource. botbox has no
-other sign that the target is back (§5.1), and a process starting up or waiting to lead
-requests only those. Where several of these apply, the note names the first. A violation
-quotes the object's history and the managed objects where the wait ended, which show an
-object recreated under a new name.
+that converged, since the target may then have meant to delete the object itself. It notes
+one where a fault was active during the op or its wait, or where the wait ended while the
+target was still owed time to recover from a fault. It also notes an op that follows a
+restart, by a `Restart` op or by `Supervise` after an exit, where the target requested
+nothing between the last restart and the op but leader election's leases and lease
+candidates, and paths that name no resource. botbox has no other sign that the target is
+back (§5.1), and a process starting up or waiting to lead requests only those. It notes an
+op where the target exited, or waited to restart, during the op or its wait. Where several
+of these apply, the note names the first. A violation quotes the object's history and the
+managed objects where the wait ended, which show an object recreated under a new name.
 
 ## 7. Sequence format
 
@@ -1670,10 +1672,14 @@ built from source and run as a black-box binary.
   `Restart` gives botbox no sign that the target is back, so a settle wait after one could
   converge while the target was still starting, or waiting out the lease its killed
   predecessor held. G7 then failed the correct toy behind a wrapper that delayed each
-  restart by 3 s. G7 judges an op after a `Restart` only where the target requested a
-  resource outside leader election between the two, whatever the API server answered,
-  since only a running target asks. A request anywhere in the op's wait was rejected as
-  the bar, because a target first heard from late in the wait has had no time to act.
+  restart by 3 s. A restart by `Supervise` after an exit is no different: G7 failed the
+  correct toy whose first process was killed and whose restart was delayed by 15 s. G7
+  judges an op after either restart only where the target requested a resource outside
+  leader election between the two, whatever the API server answered, since only a running
+  target asks. A request anywhere in the op's wait was rejected as the bar, because a
+  target first heard from late in the wait has had no time to act. G7 also notes an op
+  where the target exited, or waited to restart, during the op or its wait, since the
+  target may then not have been running when the wait ended.
 - **D61 G1 and G7 treat every `coordination.k8s.io` request as leader election.** The
   group holds only leases and lease candidates. A candidate under coordinated leader
   election creates and renews its LeaseCandidate whether or not it leads. G1 ignores those

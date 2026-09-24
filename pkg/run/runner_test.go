@@ -1041,6 +1041,15 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 	}
 }
 
+func TestARecreateWhoseCRStayedSaysHowLongItWaited(t *testing.T) {
+	began := time.Now()
+	stayed := &crStayed{cr: "widget", wait: Wait{Window: Window{Start: began, End: began.Add(10*time.Second + 300*time.Millisecond)}}}
+
+	if got, want := stayed.Error(), "the CR widget was still there 10s after its delete"; got != want {
+		t.Errorf("The error says %q, want %q.", got, want)
+	}
+}
+
 func TestRunReportsAWaitWhoseCRWentBeforeItsDeletionDeadline(t *testing.T) {
 	h := newFakeHarness()
 	h.converged = false

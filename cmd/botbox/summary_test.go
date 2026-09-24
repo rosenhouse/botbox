@@ -70,7 +70,9 @@ func sampleSummary(t *testing.T) *summary {
 	opts := options{command: "run", target: toyTargetYAML, launchArgs: []string{"--bug=3", "--name=a b"},
 		seed: 7, seedGiven: true, deadline: 5 * time.Minute, deadlineGiven: true}
 	runs := []planned{{sequence: widgetSequence(7)}, {sequence: widgetSequence(8)}, {sequence: widgetSequence(9)}}
-	s := newSummary(opts, toy, runs, start)
+	// botbox writes UTC whatever the local zone.
+	berlin := time.FixedZone("CEST", 2*60*60)
+	s := newSummary(opts, toy, runs, start.In(berlin))
 	s.Botbox = "v0.0.0-test"
 	s.deadline(opts)
 
@@ -99,7 +101,7 @@ func sampleSummary(t *testing.T) *summary {
 	}, []string{"the proxy applied the fault of op 1 to no request", `P1 "status.ready <= 3 && has(spec)" is not evaluated`},
 		filepath.Join("botbox-out", "20260924T010203Z-7", "run-2"))
 
-	s.finish(context.Background(), exitViolation, start.Add(58*time.Second+123456*time.Nanosecond))
+	s.finish(context.Background(), exitViolation, start.Add(58*time.Second+123456*time.Nanosecond).In(berlin))
 	return s
 }
 

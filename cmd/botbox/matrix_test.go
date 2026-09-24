@@ -421,7 +421,8 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			t.Setenv("TMPDIR", t.TempDir())
+			tmp := t.TempDir()
+			t.Setenv("TMPDIR", tmp)
 			session := &fakeSession{results: test.results, failures: test.failures}
 			session.after = func() {
 				if err := os.WriteFile(filepath.Join(session.dirs[len(session.dirs)-1], "target.log"), nil, 0o644); err != nil {
@@ -447,6 +448,9 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 			if len(commands) != 1 || !slices.Equal(commands[0].launchArgs, append([]string{"--x=1"}, test.bugArgs...)) ||
 				!slices.Equal(commands[0].sequences, []string{filepath.Join(sequences, test.replay)}) {
 				t.Errorf("botbox matrix printed the replay commands %+v, want one of %s with --x=1 and %v.", commands, test.replay, test.bugArgs)
+			}
+			if !strings.HasPrefix(erred, tmp+string(filepath.Separator)) {
+				t.Errorf("botbox matrix kept %s, want it under %s.", erred, tmp)
 			}
 			if _, err := os.Stat(filepath.Join(erred, "target.log")); err != nil {
 				t.Errorf("botbox matrix removed the target.log of the run that erred: %v", err)
@@ -497,6 +501,11 @@ func TestMatrixCleansUpItsTemporaryDirectory(t *testing.T) {
 
 			if code != test.want {
 				t.Errorf("botbox matrix exited %d, want %d: %s", code, test.want, stderr)
+			}
+			for _, dir := range test.session.dirs {
+				if !strings.HasPrefix(dir, tmp+string(filepath.Separator)) {
+					t.Errorf("botbox matrix ran in %s, want a directory under %s.", dir, tmp)
+				}
 			}
 			if left, err := os.ReadDir(tmp); err != nil || len(left) > 0 {
 				t.Errorf("botbox matrix left %v in the temporary directory (%v), want nothing.", left, err)

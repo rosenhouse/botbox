@@ -446,9 +446,26 @@ jobs:
         with:
           go-version: '1.26'
           cache: false   # true needs a go.sum
-      - run: go install github.com/rosenhouse/botbox/cmd/botbox@$BOTBOX_VERSION
-      - run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$SETUP_ENVTEST_VERSION
-      - run: echo "KUBEBUILDER_ASSETS=$(setup-envtest use $ENVTEST_K8S_VERSION --index $ENVTEST_INDEX_URL -p path)" >>"$GITHUB_ENV"
+      - id: tools
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/bin
+            bin/envtest
+          key: ${{ runner.os }}-${{ runner.arch }}-botbox-${{ env.BOTBOX_VERSION }}-${{ env.SETUP_ENVTEST_VERSION }}-${{ env.ENVTEST_K8S_VERSION }}
+      - if: steps.tools.outputs.cache-hit != 'true'
+        run: |
+          go install github.com/rosenhouse/botbox/cmd/botbox@$BOTBOX_VERSION
+          go install sigs.k8s.io/controller-runtime/tools/setup-envtest@$SETUP_ENVTEST_VERSION
+      - run: echo "KUBEBUILDER_ASSETS=$(setup-envtest use $ENVTEST_K8S_VERSION --index $ENVTEST_INDEX_URL --bin-dir bin/envtest -p path)" >>"$GITHUB_ENV"
+      # Saving before botbox runs fills the cache even when botbox fails.
+      - if: steps.tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/bin
+            bin/envtest
+          key: ${{ steps.tools.outputs.cache-primary-key }}
       - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
       - run: botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m
 ```

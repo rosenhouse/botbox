@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -79,11 +80,7 @@ func readFile(t *testing.T, path string) string {
 
 func TestTheCIRecipeAndTheREADMEInstallTheMakefilesPins(t *testing.T) {
 	pins := makefilePins(t)
-	var commands []string
-	for _, s := range recipeSteps(t) {
-		commands = append(commands, s.Run)
-	}
-	for _, drift := range pinDrift(strings.Join(commands, "\n"), readWorkflow(t, ciRecipe).Env, pins) {
+	for _, drift := range pinDrift(runText(recipeSteps(t)), readWorkflow(t, ciRecipe).Env, pins) {
 		t.Errorf("%s: %s", ciRecipe, drift)
 	}
 
@@ -146,6 +143,64 @@ func section(t *testing.T, doc, heading string) string {
 		return after[:next[0]]
 	}
 	return after
+}
+
+func TestTheCIRecipeCachesWhatItInstalls(t *testing.T) {
+	steps := recipeSteps(t)
+	restore := stepUsing(t, steps, "actions/cache/restore")
+	save := stepUsing(t, steps, "actions/cache/save")
+	commands := runText(steps)
+
+	binDir := regexp.MustCompile(`setup-envtest use .*--bin-dir (\S+)`).FindStringSubmatch(commands)
+	if binDir == nil {
+		t.Fatal("setup-envtest installs the control plane with no --bin-dir, into a directory outside the workspace")
+	}
+	cached := strings.Fields(restore.With["path"])
+	for _, dir := range []string{"~/go/bin", binDir[1]} {
+		if !slices.Contains(cached, dir) {
+			t.Errorf("the cache holds %q and leaves out %s, where the recipe installs", cached, dir)
+		}
+	}
+	if save.With["path"] != restore.With["path"] {
+		t.Errorf("the cache saves %q and restores %q", save.With["path"], restore.With["path"])
+	}
+
+	keyed := []string{"${{ runner.os }}", "${{ runner.arch }}"}
+	for _, m := range regexp.MustCompile(`\$(\w+_VERSION)\b`).FindAllStringSubmatch(commands, -1) {
+		keyed = append(keyed, "${{ env."+m[1]+" }}")
+	}
+	for _, part := range keyed {
+		if !strings.Contains(restore.With["key"], part) {
+			t.Errorf("the cache key %q leaves out %s, so a change to it restores a stale cache", restore.With["key"], part)
+		}
+	}
+
+	missed := "steps." + restore.ID + ".outputs.cache-hit != 'true'"
+	if save.If != missed {
+		t.Errorf("the cache saves if %q, not only on a miss (%s)", save.If, missed)
+	}
+	if want := "${{ steps." + restore.ID + ".outputs.cache-primary-key }}"; save.With["key"] != want {
+		t.Errorf("the cache saves under %q, not %q", save.With["key"], want)
+	}
+	saved := slices.IndexFunc(steps, func(s step) bool { return s.Uses == save.Uses })
+	for i, s := range steps {
+		switch {
+		case strings.Contains(s.Run, "go install") && s.If != missed:
+			t.Errorf("step %d builds with go install on a cache hit too: %q", i, s.Run)
+		case (strings.Contains(s.Run, "go install") || strings.Contains(s.Run, "setup-envtest use")) && i > saved:
+			t.Errorf("step %d installs after the cache is saved: %q", i, s.Run)
+		case strings.Contains(s.Run, "botbox run") && i < saved:
+			t.Errorf("step %d runs botbox before the cache is saved, so a find would leave it unsaved: %q", i, s.Run)
+		}
+	}
+}
+
+func runText(steps []step) string {
+	var commands []string
+	for _, s := range steps {
+		commands = append(commands, s.Run)
+	}
+	return strings.Join(commands, "\n")
 }
 
 func TestTheCIRecipeNeedsNoGoMod(t *testing.T) {

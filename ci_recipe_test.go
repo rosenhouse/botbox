@@ -26,17 +26,19 @@ type workflow struct {
 }
 
 type job struct {
-	RunsOn string `yaml:"runs-on"`
-	Steps  []step `yaml:"steps"`
+	RunsOn          string `yaml:"runs-on"`
+	ContinueOnError any    `yaml:"continue-on-error"`
+	Steps           []step `yaml:"steps"`
 }
 
 type step struct {
-	ID   string            `yaml:"id"`
-	If   string            `yaml:"if"`
-	Uses string            `yaml:"uses"`
-	With map[string]string `yaml:"with"`
-	Env  map[string]string `yaml:"env"`
-	Run  string            `yaml:"run"`
+	ID              string            `yaml:"id"`
+	If              string            `yaml:"if"`
+	ContinueOnError any               `yaml:"continue-on-error"`
+	Uses            string            `yaml:"uses"`
+	With            map[string]string `yaml:"with"`
+	Env             map[string]string `yaml:"env"`
+	Run             string            `yaml:"run"`
 }
 
 func readWorkflow(t *testing.T, path string) workflow {
@@ -254,23 +256,59 @@ func TestTheCIRecipeExportsTheControlPlaneOrFails(t *testing.T) {
 		{name: "setup-envtest fails", setupEnvtest: "exit 1", wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, "setup-envtest"), []byte("#!/bin/sh\n"+test.setupEnvtest+"\n"), 0o755); err != nil {
-				t.Fatal(err)
-			}
-			githubEnv := filepath.Join(dir, "github-env")
-			// Actions runs a step with no shell key as bash -e.
-			step := exec.Command("bash", "-e", "-c", script)
-			step.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv)
-			output, err := step.CombinedOutput()
+			exported, output, err := runStep(t, script, "setup-envtest", test.setupEnvtest)
 			if (err != nil) != test.wantErr {
 				t.Fatalf("the step returned %v, and wanted an error: %t\n%s", err, test.wantErr, output)
 			}
-			if exported, _ := os.ReadFile(githubEnv); string(exported) != test.wantEnv {
+			if exported != test.wantEnv {
 				t.Errorf("the step exported %q, not %q", exported, test.wantEnv)
 			}
 		})
 	}
+}
+
+// runStep runs a step's script with a stub for one command, and returns what
+// the script wrote to GITHUB_ENV.
+func runStep(t *testing.T, script, command, stub string) (exported string, output []byte, err error) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, command), []byte("#!/bin/sh\n"+stub+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	githubEnv := filepath.Join(dir, "github-env")
+	// Actions runs a step with no shell key as bash -e.
+	step := exec.Command("bash", "-e", "-c", script)
+	step.Env = append(os.Environ(), "PATH="+dir+string(os.PathListSeparator)+os.Getenv("PATH"), "GITHUB_ENV="+githubEnv)
+	output, err = step.CombinedOutput()
+	env, _ := os.ReadFile(githubEnv)
+	return string(env), output, err
+}
+
+func TestTheCIRecipeFailsWhenBotboxFinds(t *testing.T) {
+	recipe := recipeJob(t)
+	if recipe.ContinueOnError != nil || slices.ContainsFunc(recipe.Steps, func(s step) bool { return s.ContinueOnError != nil }) {
+		t.Error("the recipe sets continue-on-error, which can pass a find and skip the upload")
+	}
+	for _, s := range botboxRuns(t, recipe.Steps) {
+		if _, output, err := runStep(t, s.Run, "botbox", "exit 1"); err == nil {
+			t.Errorf("%q passes when botbox fails\n%s", s.Run, output)
+		}
+	}
+}
+
+// botboxRuns are the steps that run botbox.
+func botboxRuns(t *testing.T, steps []step) []step {
+	t.Helper()
+	var runs []step
+	for _, s := range steps {
+		if strings.Contains(s.Run, "botbox run") {
+			runs = append(runs, s)
+		}
+	}
+	if len(runs) == 0 {
+		t.Fatal("no step runs botbox")
+	}
+	return runs
 }
 
 func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
@@ -280,18 +318,10 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 		t.Errorf("the evidence uploads if %q, not when botbox fails", upload.If)
 	}
 	uploaded := strings.TrimSuffix(upload.With["path"], "/")
-	runs := 0
-	for _, s := range steps {
-		if !strings.Contains(s.Run, "botbox run") {
-			continue
-		}
-		runs++
+	for _, s := range botboxRuns(t, steps) {
 		if out := regexp.MustCompile(`--out (\S+)`).FindStringSubmatch(s.Run); out == nil || out[1] != uploaded {
 			t.Errorf("%q writes elsewhere than %s, which the job uploads", s.Run, uploaded)
 		}
-	}
-	if runs == 0 {
-		t.Fatal("no step runs botbox")
 	}
 
 	hint := downloadHint.FindStringSubmatch(readFile(t, ciRecipe))
@@ -314,10 +344,7 @@ func TestTheCIRecipeFixesSeedsOnPullRequestsAndDrawsThemNightly(t *testing.T) {
 		}
 	}
 	seeded := map[string]bool{}
-	for _, s := range recipeSteps(t) {
-		if !strings.Contains(s.Run, "botbox run") {
-			continue
-		}
+	for _, s := range botboxRuns(t, recipeSteps(t)) {
 		event := regexp.MustCompile(`^github\.event_name == '(\w+)'$`).FindStringSubmatch(s.If)
 		if event == nil {
 			t.Errorf("%q runs if %q, not on one event", s.Run, s.If)

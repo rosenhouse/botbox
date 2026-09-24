@@ -341,7 +341,8 @@ In a sequence you write, put a `settle` op after a `restart`, and one before it 
 before it settles. G5 compares the states the controller settled in on either side, and leaves a
 note instead of a verdict when another op changed something in between. G7 likewise notes a
 `deleteManaged` that follows a `restart` before your controller has requested a resource outside
-leader election, since botbox cannot otherwise tell that it is back.
+leader election, since botbox cannot otherwise tell that it is back. The `settle` op after the
+`restart` waits for that request.
 
 ## Reading a report
 
@@ -385,12 +386,12 @@ would: at once, then after 10s, doubling up to 5 minutes. The run prints a note 
 exit, quoting the line the controller wrote as it stopped. A settle wait does not converge
 while the controller waits to restart. Nor does it converge until the controller has
 requested a resource outside leader election since it last started and then run for
-`stable`, because botbox has no other sign that it is back. A controller therefore has
-`settle` to come back from a `restart` op and settle, as at the start of a run. A
+`stable`, because botbox has no other sign that it is back. After a `restart` op, a
+controller has `settle` to come back, and `settle` past its return to converge. A
 controller that crashes again within `stable` of each restart never converges, even where
 it wrote its converged state first, so G4 reports it and quotes the last exit.
-A controller that exits during a fault, or while it recovers from one, has `settle` past
-its restart to converge. G7 notes a `deleteManaged` after a restart that follows an exit as
+A controller that exits during a fault, or while it recovers from one, has the same once
+botbox restarts it. G7 notes a `deleteManaged` after a restart that follows an exit as
 it does one after a `restart`, and notes one where your controller exited, or waited to
 restart, during the op or its settle wait.
 The toy controller converges a count of 0 and then crashes under `--launch-arg --bug=12`,
@@ -497,7 +498,7 @@ Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-gene
 | G1 | Bounded reconciliation. Under an unchanged spec, one quiet window holds no more requests than `quiet` allows, zero by default. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
 | G3 | Clean deletion. Deleting the CR removes everything it manages and clears its finalizers. |
-| G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops. A controller waiting to restart, or not yet back from a restart, has not converged. |
+| G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
 | G7 | Self-healing. An object `deleteManaged` deletes exists again, by kind and name, once the run settles. |

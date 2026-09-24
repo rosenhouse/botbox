@@ -262,11 +262,12 @@ The Runner executes one sequence:
    therefore never converges, even where it wrote its converged state first, and its wait
    expires as a G4 that counts the exits since the target last converged and quotes the
    last. A target that runs longer between exits can converge in between, until a backoff
-   outlasts a wait. A target that converges after an exit passes. An exit a fault excuses
-   owes the target `T_settle` past its restart (§6). Any other restart gives it no more
-   time, and its startup requests count toward G1 where they land in a quiet window (§6).
-   After a `Restart` op, the target thus has `T_settle` to come back and settle, as at the
-   run's start, and a target not back when a wait expires fails G4. A restart that fails
+   outlasts a wait. A target that converges after an exit passes. botbox chose when to
+   restart the target after a `Restart` op and after an exit a fault excuses (§6), so a
+   wait gives it `T_settle` past its return from either, where it returns within `T_settle`
+   of the restart, and `T_settle` past the restart where it does not. Any other restart
+   gives it no more time, and its startup requests count toward G1 where they land in a
+   quiet window (§6). A target not back when a wait expires fails G4. A restart that fails
    ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
@@ -417,7 +418,7 @@ real targets; the toy target sets much shorter ones (§9).
 | **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault or a deletion (§5.5), the target makes no more than `N_quiet` (default 0) API requests in `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io`, whose leases and lease candidates leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
 | **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. A status write whose content is unchanged moves no resourceVersion, so G2 counts status subresource writes from the proxy log, and more than `N_quiet` of them is churn. `N_quiet` never excuses a resourceVersion that moves. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
-| **G4** | Convergence | Within `T_settle` after any spec change, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). This is ESR as a test. | Observer + target predicate |
+| **G4** | Convergence | Within `T_settle` after any spec change, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). A `Restart` gives the target `T_settle` past its return. A target waiting to restart, or not back since it last started, has not converged. This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
 | **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 10) times within `T_settle` under a stable spec with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
 | **G7** | Self-healing | An object a `DeleteManaged` op deleted exists again, by kind and name, when the settle wait after the op ends: on convergence, or at `T_settle` or later after a fault or a deletion (§5.5). Its content may differ. A kind the target lists in `notRecreated` is exempt (§8.1). | Observer |
@@ -447,9 +448,10 @@ while a fault is active or that time is still owed. A spec change made within th
 judged at the later of the two deadlines. A settle wait that converged sooner ends that
 time early. A target that exits while a fault excuses it, as controller-runtime with
 leader election on does when it loses its lease, then waits out the restart's backoff
-(§5.1), which botbox chose. G4 gives it `T_settle` past that restart too, and does not
-judge a window the exit falls in, as it does not judge one a fault reaches into. Only a
-fault excuses an exit, so a crash loop that a fault set off still fails G4.
+(§5.1), which botbox chose. G4 gives it `T_settle` past its return from that restart too,
+as after a `Restart` (§5.5), and does not judge a window the exit falls in, as it does not
+judge one a fault reaches into. Only a fault excuses an exit, so a crash loop that a fault
+set off still fails G4.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -1721,8 +1723,10 @@ built from source and run as a black-box binary.
   and that request counts as a change, so the target's startup falls inside the wait. A
   controller lists what it watches as it starts, so a correct one makes such a request.
   The rule covers the first process too, since a `ready` that holds without the target
-  could otherwise end op 0's wait before the target started. After a `Restart` op, a
-  target has `T_settle` to come back and settle, as at the run's start. One not back when
-  a wait expires fails G4, which says so, and the 5 s wrapper under the toy's 5 s
-  `T_settle` now fails there. Leaving G1 and G2 unjudged in the window after an op G7
-  notes was rejected, because it judges less.
+  could otherwise end op 0's wait before the target started. botbox chose to restart the
+  target, so a `Restart` owes it `T_settle` past its return, as an exit a fault excuses
+  does. Counting the startup against the wait's `T_settle`, as op 0 does, failed G4 on
+  the toy behind a 3.5 s delay under its 5 s `T_settle`. A target must return within
+  `T_settle` of the restart, so the 5 s wrapper still fails G4, which says the target was
+  not back. Leaving G1 and G2 unjudged in the window after an op G7 notes was rejected,
+  because it judges less.

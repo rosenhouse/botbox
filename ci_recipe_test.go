@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	yaml "go.yaml.in/yaml/v3"
 )
@@ -455,13 +456,17 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 	if upload.With["if-no-files-found"] == "error" {
 		t.Error("the upload adds an error to a job that failed before botbox wrote anything")
 	}
-	if recipe.TimeoutMinutes != nil || slices.ContainsFunc(steps, func(s step) bool { return s.TimeoutMinutes != nil }) {
-		t.Error("the recipe sets timeout-minutes, which can stop botbox before its --deadline makes it write a report")
-	}
 	uploaded := strings.TrimSuffix(upload.With["path"], "/")
 	for _, s := range botboxRuns(t, steps) {
 		if out := regexp.MustCompile(`--out (\S+)`).FindStringSubmatch(s.Run); out == nil || out[1] != uploaded {
 			t.Errorf("%q writes elsewhere than %s, which the job uploads", s.Run, uploaded)
+		}
+		_, deadline := botboxBudget(t, s)
+		for _, timeout := range []any{recipe.TimeoutMinutes, s.TimeoutMinutes} {
+			minutes, err := strconv.ParseFloat(fmt.Sprint(timeout), 64)
+			if timeout != nil && (err != nil || time.Duration(minutes*float64(time.Minute)) <= deadline) {
+				t.Errorf("timeout-minutes %v can stop %q before its --deadline makes it write a report", timeout, s.Run)
+			}
 		}
 	}
 
@@ -515,14 +520,41 @@ func TestTheCIRecipeFixesSeedsOnPullRequestsAndDrawsThemNightly(t *testing.T) {
 }
 
 func TestTheCIRecipeSizesEachBotboxRun(t *testing.T) {
+	pins := makefilePins(t)
+	perRun := func(tier string) time.Duration {
+		runs, _ := strconv.Atoi(pins[tier+"_RUNS"])
+		deadline, err := time.ParseDuration(pins[tier+"_DEADLINE"])
+		if err != nil || runs == 0 {
+			t.Fatalf("the Makefile's %s_RUNS is %q and its %s_DEADLINE is %q", tier, pins[tier+"_RUNS"], tier, pins[tier+"_DEADLINE"])
+		}
+		return deadline / time.Duration(runs)
+	}
+	floor := min(perRun("EXAMPLE"), perRun("NIGHTLY"))
 	for _, s := range botboxRuns(t, recipeSteps(t)) {
-		runs := regexp.MustCompile(`--runs (\d+)`).FindStringSubmatch(s.Run)
-		if runs == nil || !strings.Contains(s.Run, "--deadline ") {
+		switch runs, deadline := botboxBudget(t, s); {
+		case runs == 0 || deadline == 0:
 			t.Errorf("%q leaves --runs or --deadline to botbox's defaults, and an adopter sizes the two together", s.Run)
-		} else if n, _ := strconv.Atoi(runs[1]); n < 2 {
-			t.Errorf("%q runs %d sequences, and a tier should run several", s.Run, n)
+		case runs < 2:
+			t.Errorf("%q runs %d sequences, and a tier should run several", s.Run, runs)
+		case deadline/time.Duration(runs) < floor:
+			t.Errorf("%q gives each run %s, less than the %s that this repository's example tiers give each run", s.Run, deadline/time.Duration(runs), floor)
 		}
 	}
+}
+
+// botboxBudget is the --runs and --deadline a botbox step passes, or zero.
+func botboxBudget(t *testing.T, s step) (runs int, deadline time.Duration) {
+	t.Helper()
+	if m := regexp.MustCompile(`--runs (\d+)`).FindStringSubmatch(s.Run); m != nil {
+		runs, _ = strconv.Atoi(m[1])
+	}
+	if m := regexp.MustCompile(`--deadline (\S+)`).FindStringSubmatch(s.Run); m != nil {
+		var err error
+		if deadline, err = time.ParseDuration(m[1]); err != nil {
+			t.Fatalf("%q: %v", s.Run, err)
+		}
+	}
+	return runs, deadline
 }
 
 func TestNightlyFindsSayHowToRestoreTheirEvidence(t *testing.T) {

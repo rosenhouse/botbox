@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
+	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
@@ -94,6 +95,19 @@ const restartThenDeleteManaged = `{
     {"i": 1, "t": "restart"},
     {"i": 2, "t": "settle"},
     {"i": 3, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
+  ]
+}`
+
+const changeThenDeleteTheFixture = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "updateFixture", "kind": "v1/ConfigMap", "name": "widget-config", "patch": {"data": {"label": "blue"}}},
+    {"i": 2, "t": "deleteFixture", "kind": "v1/ConfigMap", "name": "widget-config", "until": {"op": 3}},
+    {"i": 3, "t": "settle"},
+    {"i": 4, "t": "restart"},
+    {"i": 5, "t": "settle"}
   ]
 }`
 
@@ -232,6 +246,45 @@ func TestRunner(t *testing.T) {
 		}
 		requireRunFiles(t, out.RunDir(1))
 		requireNamespaceEmpty(t, ctx, testCluster.Config(), result.Timeline.Namespace)
+	})
+
+	t.Run("changes, deletes and restores the toy's fixture, which stays botbox's", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+
+		result, err := run.Run(ctx, toy, readSequence(t, changeThenDeleteTheFixture), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy runs without a bug.", result.Violation)
+		}
+		if len(result.Notes) > 0 {
+			t.Errorf("The run noted %q, want every check to judge.", result.Notes)
+		}
+		store := result.Recorded.Objects
+		fixture := observe.Key{GVK: configMapKind, Namespace: result.Timeline.Namespace, Name: "widget-config"}
+		var labels []string
+		for _, version := range store.History(fixture) {
+			label, _, _ := unstructured.NestedString(version.Object.Object, "data", "label")
+			if version.Deleted {
+				label = "deleted"
+			}
+			labels = append(labels, label)
+		}
+		// The teardown deletes it last.
+		if want := []string{"red", "blue", "deleted", "blue", "deleted"}; !slices.Equal(labels, want) {
+			t.Errorf("The fixture went through %v, want %v.", labels, want)
+		}
+		if store.IsManaged(fixture) {
+			t.Errorf("The fixture botbox restored counts as the target's.")
+		}
+		child := store.HistoryOf(configMapKind, "widget-0")
+		if label, _, _ := unstructured.NestedString(child[len(child)-1].Object.Object, "data", "label"); label != "blue" {
+			t.Errorf("The toy's child last carried the label %q, want the fixture's blue.", label)
+		}
 	})
 
 	// b10.json scales the toy down right after a restart, before anything

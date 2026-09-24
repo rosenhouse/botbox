@@ -240,6 +240,47 @@ func TestSeededBugs(t *testing.T) {
 		})
 	})
 
+	t.Run("B14 leaves its children on a label the ConfigMap no longer holds", func(t *testing.T) {
+		for _, test := range []struct {
+			name string
+			bug  controller.Bug
+		}{
+			{"the correct controller", 0},
+			{"B14", controller.B14},
+		} {
+			t.Run(test.name, func(t *testing.T) {
+				namespace := createNamespace(t, ctx, c)
+				config := &corev1.ConfigMap{
+					ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: "config"},
+					Data:       map[string]string{"label": "red"},
+				}
+				if err := c.Create(ctx, config); err != nil {
+					t.Fatal(err)
+				}
+				runReconciler(t, testCluster, namespace, test.bug, func(r *controller.Reconciler) { r.LabelFrom = "config" })
+				widget := createWidgetIn(t, ctx, c, namespace, "w", 1)
+				requireLabel(t, ctx, c, namespace, "red")
+				requireSettled(t, ctx, c, widget)
+
+				config.Data["label"] = "blue"
+				if err := c.Update(ctx, config); err != nil {
+					t.Fatal(err)
+				}
+
+				if test.bug == 0 {
+					requireLabel(t, ctx, c, namespace, "blue")
+					return
+				}
+				consistently(t, 2*time.Second, func() error {
+					if label := readConfigMap(t, ctx, c, namespace, "w-0").Data["label"]; label != "red" {
+						return fmt.Errorf("w-0 carries the label %q", label)
+					}
+					return nil
+				})
+			})
+		}
+	})
+
 	t.Run("B13 keeps a deleted Widget and its children", func(t *testing.T) {
 		namespace := createNamespace(t, ctx, c)
 		runReconciler(t, testCluster, namespace, controller.B13)
@@ -389,6 +430,21 @@ func requireConfigMaps(t *testing.T, ctx context.Context, c client.Client, names
 		}
 		if !slices.Equal(names, want) {
 			return fmt.Errorf("the namespace holds the ConfigMaps %v, want %v", names, want)
+		}
+		return nil
+	})
+}
+
+// requireLabel waits until the child w-0 carries the label.
+func requireLabel(t *testing.T, ctx context.Context, c client.Client, namespace, want string) {
+	t.Helper()
+	eventually(t, func() error {
+		child := &corev1.ConfigMap{}
+		if err := c.Get(ctx, client.ObjectKey{Namespace: namespace, Name: "w-0"}, child); err != nil {
+			return err
+		}
+		if label := child.Data["label"]; label != want {
+			return fmt.Errorf("w-0 carries the label %q, want %q", label, want)
 		}
 		return nil
 	})

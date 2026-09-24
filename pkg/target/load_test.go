@@ -56,8 +56,8 @@ func TestLoadToyWidget(t *testing.T) {
 	if count, found, err := unstructured.NestedInt64(toy.Sample.Object, "spec", "count"); count != 3 || !found || err != nil {
 		t.Errorf("Load read sample spec.count as (%v, %v, %v), want 3.", count, found, err)
 	}
-	if len(toy.Fixtures) != 0 {
-		t.Errorf("Load read %d fixtures from a target that declares none.", len(toy.Fixtures))
+	if len(toy.Fixtures) != 1 || toy.Fixtures[0].GetName() != "widget-config" {
+		t.Errorf("Load read the fixtures %v, want the ConfigMap widget-config.", toy.Fixtures)
 	}
 	if toy.Selector != nil {
 		t.Errorf("Load read selector %v from a target that declares none.", toy.Selector)
@@ -70,7 +70,7 @@ func TestLoadToyWidget(t *testing.T) {
 	}
 	wantLaunch := target.LaunchSpec{
 		Binary: "bin/toy-widget",
-		Args:   []string{"--kubeconfig=$KUBECONFIG", "--bug=0"},
+		Args:   []string{"--kubeconfig=$KUBECONFIG", "--label-from=widget-config", "--bug=0"},
 		Env:    map[string]string{"WATCH_NAMESPACE": "$NAMESPACE"},
 	}
 	if !reflect.DeepEqual(toy.Launch, wantLaunch) {

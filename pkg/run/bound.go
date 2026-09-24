@@ -8,9 +8,9 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// stopBudget is what stopping a run takes: a grace period after SIGTERM,
-// another after SIGKILL, and deleting the namespace.
-const stopBudget = 2*launch.DefaultGracePeriod + namespaceDeletionBudget
+// stopBudget is what stopping a run takes: stopping the target and deleting
+// the namespace.
+const stopBudget = launch.StopWithin + namespaceDeletionBudget
 
 // Bound is the longest the Runner's waits can make the runs of the sequences
 // take, one after another. A target that exits more than once per fault op
@@ -38,7 +38,7 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 		case OpDelete, OpRecreate:
 			waits += deletion
 		case OpRestart:
-			waits += float64(launch.DefaultGracePeriod)
+			waits += float64(launch.RestartWithin)
 		case OpFault:
 			faults++
 			if op.Fault.Until == (Trigger{}) {

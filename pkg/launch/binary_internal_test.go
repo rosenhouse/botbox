@@ -140,3 +140,35 @@ func TestRestartReportsAProcessItCannotReap(t *testing.T) {
 		t.Error("Restart started a replacement although the old process was never reaped.")
 	}
 }
+
+// Restart and Stop give up on a process they cannot reap within RestartWithin
+// and StopWithin, scaled to the grace period.
+func TestRestartAndStopGiveUpWithinTheirBudgets(t *testing.T) {
+	const scale = 25
+	grace := DefaultGracePeriod / scale
+	for _, test := range []struct {
+		name   string
+		call   func(*Binary) error
+		within time.Duration
+	}{
+		{"Restart", func(b *Binary) error { return b.Restart(context.Background()) }, RestartWithin / scale},
+		{"Stop", func(b *Binary) error { return b.Stop(context.Background()) }, StopWithin / scale},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cmd := exec.Command("/bin/sh", "-c", "trap '' TERM; while :; do sleep 0.1; done")
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
+			binary := NewBinary(Options{Path: "/bin/sh", GracePeriod: grace})
+			binary.running = &process{cmd: cmd, done: make(chan struct{})} // nothing closes done
+			start := time.Now()
+
+			err := test.call(binary)
+
+			if elapsed := time.Since(start); err == nil || elapsed > test.within+grace/2 {
+				t.Errorf("%s returned %v after %v, want it to give up within %v.", test.name, err, elapsed, test.within)
+			}
+		})
+	}
+}

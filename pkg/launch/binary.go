@@ -60,6 +60,13 @@ var ErrExitedZero = errors.New("exit status 0")
 // DefaultGracePeriod is how long Stop waits after SIGTERM before it escalates.
 const DefaultGracePeriod = 5 * time.Second
 
+// At DefaultGracePeriod, Restart takes at most RestartWithin and Stop at most
+// StopWithin.
+const (
+	RestartWithin = DefaultGracePeriod
+	StopWithin    = 2 * DefaultGracePeriod
+)
+
 // A supervised target restarts at once the first time. Each later restart
 // waits twice as long as the one before, from DefaultBackoff up to MaxBackoff.
 const (

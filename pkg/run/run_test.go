@@ -531,7 +531,7 @@ func TestTheRunNamespaceIsDeletedOnTheBudgetBoundGivesIt(t *testing.T) {
 	}
 	select {
 	case budget := <-budgets:
-		if want := stopBudget - 2*launch.DefaultGracePeriod; budget > want || budget < want-time.Second {
+		if want := stopBudget - launch.StopWithin; budget > want || budget < want-time.Second {
 			t.Errorf("Deleting the namespace had %v, want %v.", budget, want)
 		}
 	default:

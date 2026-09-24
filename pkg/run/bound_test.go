@@ -100,16 +100,13 @@ func (w *waitingHarness) awaitClean(ctx context.Context, within time.Duration) (
 	return w.fakeHarness.awaitClean(ctx, within)
 }
 
-// restart waits a grace period for the killed target to be reaped.
 func (w *waitingHarness) restart(ctx context.Context) error {
-	w.at = w.at.Add(launch.DefaultGracePeriod)
+	w.at = w.at.Add(launch.RestartWithin)
 	return w.fakeHarness.restart(ctx)
 }
 
-// stop gives the target a grace period after SIGTERM and another after
-// SIGKILL, then deletes the namespace.
 func (w *waitingHarness) stop(ctx context.Context) error {
-	w.at = w.at.Add(2*launch.DefaultGracePeriod + namespaceDeletionBudget)
+	w.at = w.at.Add(launch.StopWithin + namespaceDeletionBudget)
 	return w.fakeHarness.stop(ctx)
 }
 
@@ -245,7 +242,7 @@ func TestBoundAddsWhatEachOpCanWait(t *testing.T) {
 		{"a delete that does not settle", Op{Type: OpDelete, NoSettle: true}, timeouts.Delete},
 		{"a recreate", Op{Type: OpRecreate, Obj: widget("widget")}, timeouts.Delete + timeouts.Settle},
 		{"a recreate that does not settle", Op{Type: OpRecreate, Obj: widget("widget"), NoSettle: true}, timeouts.Delete},
-		{"a restart", Op{Type: OpRestart}, launch.DefaultGracePeriod},
+		{"a restart", Op{Type: OpRestart}, launch.RestartWithin},
 		{"a deleteManaged", Op{Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)}, timeouts.Settle},
 		{"a settle", settleOp, timeouts.Settle},
 	} {

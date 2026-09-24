@@ -325,13 +325,13 @@ note instead of a verdict when another op changed something in between.
 
 ## Reading a report
 
-Unless botbox cannot read your target or a sequence, it writes `summary.json` and
-`summary.md` into `botbox-out/<timestamp>-<seed>/` as each run starts and when it finishes.
-They list each planned run: its seed, how it ended, the faults the proxy applied, the times
-your controller exited, and what the checks could not judge. A run that was under way when
-botbox was killed reads `unfinished`, unless it had found a violation that botbox was
-minimizing. `summary.json` also holds each run's sequence, for a
-machine. Its `schema` changes when a field changes meaning or goes away
+Once botbox has read or drawn its sequences and made `botbox-out/<timestamp>-<seed>/`, it
+writes `summary.json` and `summary.md` there, and rewrites them as each run starts and when
+it finishes. They list each planned run: its seed, how it ended, the faults the proxy
+applied, the times your controller exited, and what the checks could not judge. A run that
+was under way when botbox was killed reads `unfinished`, unless it had found a violation
+that botbox was minimizing. `summary.json` also holds each run's sequence, for a machine.
+Its `schema` changes when a field changes meaning or goes away
 ([DESIGN.md §11](DESIGN.md#11-repo-conventions)).
 
 A run that violates an invariant prints the ID, what it saw and where the evidence is, then
@@ -451,7 +451,7 @@ Exit 2 means botbox could not test your controller, and the message says what to
 - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
 - run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m
 - if: always()
-  run: cat botbox-out/*/summary.md >>"$GITHUB_STEP_SUMMARY"
+  run: cat botbox-out/*/summary.md >>"$GITHUB_STEP_SUMMARY" || true
 - if: always()
   uses: actions/upload-artifact@v4
   with:

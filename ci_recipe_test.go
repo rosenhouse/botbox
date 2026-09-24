@@ -276,6 +276,7 @@ func TestTheCIRecipeGivesEachStepWhatItNeedsOnACacheHitAndAMiss(t *testing.T) {
 		{regexp.MustCompile(`/botbox@`), nil, []string{"botbox"}},
 		{regexp.MustCompile(`/setup-envtest@`), nil, []string{"setup-envtest"}},
 		{regexp.MustCompile(`setup-envtest use`), []string{"setup-envtest"}, []string{"the control plane"}},
+		{regexp.MustCompile(`setup-envtest use.*\s(-i|--installed-only)\b`), []string{"the control plane"}, nil},
 		{regexp.MustCompile(`KUBEBUILDER_ASSETS=`), nil, []string{"KUBEBUILDER_ASSETS"}},
 		{regexp.MustCompile(`^actions/cache/save@`), cached, nil},
 		{regexp.MustCompile(`go build -o`), nil, []string{"the controller"}},
@@ -286,6 +287,8 @@ func TestTheCIRecipeGivesEachStepWhatItNeedsOnACacheHitAndAMiss(t *testing.T) {
 	for _, event := range slices.Sorted(maps.Keys(recipeEvents(t))) {
 		for _, hit := range []bool{true, false} {
 			t.Run(fmt.Sprintf("%s with cache-hit %t", event, hit), func(t *testing.T) {
+				// A step's outputs are empty until it runs.
+				restored := false
 				runs := func(condition string) bool {
 					if on := regexp.MustCompile(`^github\.event_name == '(\w+)'$`).FindStringSubmatch(condition); on != nil {
 						return on[1] == event
@@ -296,7 +299,7 @@ func TestTheCIRecipeGivesEachStepWhatItNeedsOnACacheHitAndAMiss(t *testing.T) {
 					case "failure()":
 						return false
 					case "steps." + restore.ID + ".outputs.cache-hit != 'true'":
-						return !hit
+						return !hit || !restored
 					}
 					t.Fatalf("the walk cannot evaluate if: %s", condition)
 					return false
@@ -307,8 +310,14 @@ func TestTheCIRecipeGivesEachStepWhatItNeedsOnACacheHitAndAMiss(t *testing.T) {
 						continue
 					}
 					var gives []string
-					if hit && s.Uses == restore.Uses {
-						gives = append(gives, cached...)
+					if s.Uses == restore.Uses {
+						restored = true
+						if hit {
+							gives = append(gives, cached...)
+						}
+					}
+					if hit && strings.Contains(s.Run, "go install") {
+						t.Errorf("step %d builds with go install on a cache hit", i)
 					}
 					for _, effect := range effects {
 						if !effect.usesOrRuns.MatchString(s.Uses + "\n" + s.Run) {
@@ -339,8 +348,12 @@ func TestTheCIRecipeInstallsEachToolItRunsAtAPin(t *testing.T) {
 	if module == nil || setupEnvtest == nil {
 		t.Fatal("go.mod names no module, or the Makefile does not go install setup-envtest")
 	}
+	botbox := readWorkflow(t, ciRecipe).Env["BOTBOX_VERSION"]
+	if !regexp.MustCompile(`^([0-9a-f]{7,40}|<commit>)$`).MatchString(botbox) {
+		t.Errorf("BOTBOX_VERSION is %q, not a commit, so a cache hit restores whichever botbox the first miss built", botbox)
+	}
 	want := []string{
-		"install " + module[1] + "/cmd/botbox@" + readWorkflow(t, ciRecipe).Env["BOTBOX_VERSION"],
+		"install " + module[1] + "/cmd/botbox@" + botbox,
 		"install " + setupEnvtest[1] + "@" + makefilePins(t)["SETUP_ENVTEST_VERSION"],
 	}
 	var got []string
@@ -465,19 +478,32 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 		t.Error("the upload adds an error to a job that failed before botbox wrote anything")
 	}
 	uploaded := strings.TrimSuffix(upload.With["path"], "/")
+	if recipe.TimeoutMinutes != nil {
+		t.Errorf("the job's timeout-minutes %v also counts the steps before botbox, so it can stop botbox before its --deadline makes it write a report", recipe.TimeoutMinutes)
+	}
 	for _, s := range botboxRuns(t, steps) {
 		if out := regexp.MustCompile(`--out (\S+)`).FindStringSubmatch(s.Run); out == nil || out[1] != uploaded {
 			t.Errorf("%q writes elsewhere than %s, which the job uploads", s.Run, uploaded)
 		}
+		if s.TimeoutMinutes == nil {
+			continue
+		}
 		_, deadline := botboxBudget(t, s)
-		for _, timeout := range []any{recipe.TimeoutMinutes, s.TimeoutMinutes} {
-			if timeout == nil {
-				continue
-			}
-			minutes, err := strconv.ParseFloat(fmt.Sprint(timeout), 64)
-			if err != nil || time.Duration(minutes*float64(time.Minute)) <= deadline {
-				t.Errorf("timeout-minutes %v can stop %q before its --deadline makes it write a report", timeout, s.Run)
-			}
+		minutes, err := strconv.ParseFloat(fmt.Sprint(s.TimeoutMinutes), 64)
+		if err != nil || time.Duration(minutes*float64(time.Minute)) <= deadline {
+			t.Errorf("timeout-minutes %v can stop %q before its --deadline makes it write a report", s.TimeoutMinutes, s.Run)
+		}
+	}
+	last := 0
+	for i, s := range steps {
+		if strings.Contains(s.Run, "botbox run") {
+			last = i
+		}
+	}
+	for i, s := range steps {
+		reads := strings.Contains(s.Run, uploaded+"/") || strings.TrimSuffix(s.With["path"], "/") == uploaded
+		if reads && i < last {
+			t.Errorf("step %d reads %s before step %d runs botbox", i, uploaded, last)
 		}
 	}
 

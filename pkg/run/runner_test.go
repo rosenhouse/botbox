@@ -82,6 +82,8 @@ type fakeHarness struct {
 	// retiresInWait has the proxy retire the first fault this long into a
 	// wait, which then runs in real time until the target owes nothing.
 	retiresInWait time.Duration
+	// inWait runs as each wait begins.
+	inWait func()
 	// cancel ends the run's context at the call cancelsAfter names.
 	cancel       context.CancelFunc
 	cancelsAfter string
@@ -117,6 +119,9 @@ func (f *fakeHarness) namespace() string { return fakeNamespace }
 func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time) (bool, error) {
 	if f.applyingInWait != nil {
 		f.applying = f.applyingInWait
+	}
+	if f.inWait != nil {
+		f.inWait()
 	}
 	if f.retiresInWait > 0 {
 		time.Sleep(f.retiresInWait)
@@ -284,6 +289,14 @@ func (f *fakeHarness) recordDeletingCR(name, resourceVersion string, at time.Tim
 	object.SetFinalizers([]string{"example.com/stuck"})
 	object.SetDeletionTimestamp(&metav1.Time{Time: at})
 	f.store.Record(widgetKind, object, at)
+}
+
+// recordGoneCR records the CR's deletion at the instant given.
+func (f *fakeHarness) recordGoneCR(name, resourceVersion string, at time.Time) {
+	object := widget(name)
+	object.SetNamespace(fakeNamespace)
+	object.SetResourceVersion(resourceVersion)
+	f.store.RecordDeletion(widgetKind, object, at)
 }
 
 // recordChild records a managed object of the CR, as the Observer would.
@@ -923,6 +936,27 @@ func TestRunLeavesToG3AWaitThatEndedOnACRPastItsDeletionDeadline(t *testing.T) {
 				t.Errorf("The run checkpointed at %v, want %v.", got, test.want)
 			}
 		})
+	}
+}
+
+func TestRunReportsAWaitWhoseCRWentBeforeItsDeletionDeadline(t *testing.T) {
+	h := newFakeHarness()
+	h.converged = false
+	h.inWait = func() {
+		gone := time.Now().Add(time.Millisecond)
+		deadline := gone.Add(time.Millisecond)
+		h.recordDeletingCR("widget", "11", deadline.Add(-testTimeouts.Delete))
+		h.recordGoneCR("widget", "12", gone)
+		time.Sleep(time.Until(deadline))
+	}
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || result.Violation.ID != "G4" {
+		t.Errorf("The run reported %v, want G4: the CR went before its deletion deadline.", result.Violation)
 	}
 }
 

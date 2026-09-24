@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"testing"
 
@@ -37,6 +38,87 @@ var targets = []struct {
 		[]string{"spec.dnsNames", "spec.duration", "spec.privateKey.algorithm", "spec.privateKey.rotationPolicy"},
 		[]string{"v1/Secret", "cert-manager.io/v1/CertificateRequest"}},
 	{externalSecretsTarget, []string{"spec.refreshInterval", "spec.target.name"}, []string{"v1/Secret"}},
+	{fixturesTarget, []string{"spec.count"}, []string{"v1/ConfigMap"}},
+}
+
+const fixturesTarget = "testdata/fixtures/target.yaml"
+
+// fixtureWord is what a Secret's data reads as base64 and a label takes.
+var fixtureWord = regexp.MustCompile(`^([a-z0-9]{4}){1,3}$`)
+
+func TestFixtureOpsActOnlyWhereTheTargetAllows(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, fixturesTarget), Options{})
+	mutable := map[string][]string{
+		"v1/ConfigMap widget-config": {"data.label", "data.app.properties"},
+		"v1/Secret token":            nil,
+	}
+	drawn := map[run.OpType]int{}
+	rapid.Check(t, func(rt *rapid.T) {
+		for _, op := range g.sequence(rt).Ops {
+			paths, declared := mutable[op.Kind+" "+op.Name]
+			switch op.Type {
+			case run.OpUpdateFixture:
+				changed := differences(nil, op.Patch, "")
+				if len(changed) != 1 || !slices.Contains(paths, changed[0]) {
+					rt.Fatalf("Op %d sets %v of the %s %s, and the target lets generation set %v.", op.Index, changed, op.Kind, op.Name, paths)
+				}
+				if value := leaf(op.Patch); !fixtureWord.MatchString(value) {
+					rt.Fatalf("Op %d sets %q, which a Secret's data does not read as base64.", op.Index, value)
+				}
+			case run.OpDeleteFixture:
+				if !declared {
+					rt.Fatalf("Op %d deletes the %s %s, which generate.fixtures does not name.", op.Index, op.Kind, op.Name)
+				}
+			default:
+				continue
+			}
+			drawn[op.Type]++
+		}
+	})
+	if drawn[run.OpUpdateFixture] == 0 || drawn[run.OpDeleteFixture] == 0 {
+		t.Errorf("Generation drew %v, want both fixture ops.", drawn)
+	}
+}
+
+// leaf is the one string a patch that sets one field sets.
+func leaf(patch map[string]any) string {
+	for _, value := range patch {
+		if nested, isObject := value.(map[string]any); isObject {
+			return leaf(nested)
+		}
+		text, _ := value.(string)
+		return text
+	}
+	return ""
+}
+
+// The target may rightly not be ready while a fixture is gone, so no settle
+// wait runs without it.
+func TestADeletedFixtureComesBackBeforeTheNextOpThatSettles(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, fixturesTarget), Options{})
+	rapid.Check(t, func(rt *rapid.T) {
+		ops := g.sequence(rt).Ops
+		for i, op := range ops {
+			if op.Type != run.OpDeleteFixture {
+				continue
+			}
+			if next := i + 1 + slices.IndexFunc(ops[i+1:], run.Op.Settles); op.Until.Op != next {
+				rt.Fatalf("Op %d deletes a fixture until op %d, and op %d is the next that settles.", i, op.Until.Op, next)
+			}
+		}
+	})
+}
+
+func TestATargetWithoutGenerateFixturesDrawsNoFixtureOp(t *testing.T) {
+	// The toy declares a fixture, and no generate.fixtures.
+	g := newGenerator(t, loadTarget(t, toyTarget), Options{})
+	rapid.Check(t, func(rt *rapid.T) {
+		for _, op := range g.sequence(rt).Ops {
+			if op.Type == run.OpUpdateFixture || op.Type == run.OpDeleteFixture {
+				rt.Fatalf("Op %d is a %s, and the target names no fixture generation may change.", op.Index, op.Type)
+			}
+		}
+	})
 }
 
 func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
@@ -256,8 +338,8 @@ func TestSequencesAreLegalToReplay(t *testing.T) {
 							rt.Fatalf("Op %d deletes the managed object %d, which generation cannot know exists.",
 								op.Index, *op.Nth)
 						}
-						if previous := sequence.Ops[i]; previous.NoSettle {
-							rt.Fatalf("Op %d deletes a managed object after op %d skipped its settle wait.",
+						if previous := sequence.Ops[i]; !previous.Settles() {
+							rt.Fatalf("Op %d deletes a managed object after op %d, which waits for nothing.",
 								op.Index, previous.Index)
 						}
 					}

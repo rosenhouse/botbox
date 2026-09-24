@@ -11,6 +11,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
+	kschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"pgregory.net/rapid"
 
 	"github.com/rosenhouse/botbox/pkg/run"
@@ -37,6 +38,8 @@ type Generator struct {
 	fields    []field
 	leftAlone []string
 	managed   []string
+	// updatable are the fixtures generation may set a string in.
+	updatable []target.MutableFixture
 	maxOps    int
 	sequences *rapid.Generator[run.Sequence]
 }
@@ -82,14 +85,23 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 		g.maxOps = defaultMaxOps
 	}
 	for _, gvk := range t.Manages {
-		name := gvk.Version + "/" + gvk.Kind
-		if gvk.Group != "" {
-			name = gvk.Group + "/" + name
+		g.managed = append(g.managed, kindName(gvk))
+	}
+	for _, fixture := range t.Generate.Fixtures {
+		if len(fixture.Mutate) > 0 {
+			g.updatable = append(g.updatable, fixture)
 		}
-		g.managed = append(g.managed, name)
 	}
 	g.sequences = rapid.Custom(g.sequence)
 	return g, nil
+}
+
+// kindName writes a kind as a sequence names it (DESIGN.md §7).
+func kindName(gvk kschema.GroupVersionKind) string {
+	if gvk.Group == "" {
+		return gvk.Version + "/" + gvk.Kind
+	}
+	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
 }
 
 // drawable keeps the fields the CRD accepts a drawn value of in the sample. A
@@ -133,7 +145,9 @@ func (g *Generator) sequence(t *rapid.T) run.Sequence {
 // (DESIGN.md §6). A restart is wrapped in them: G5 compares the converged
 // state either side of a restart, and judges nothing if another op changed the
 // run in between. The last op takes one because nothing else judges the state
-// the run ends in. A noSettle elsewhere is left alone.
+// the run ends in. A noSettle elsewhere is left alone. A deleted fixture comes
+// back before the next op that settles, since the target may rightly not be
+// ready without it.
 func checkpointed(ops []run.Op) []run.Op {
 	judged := make([]run.Op, 0, 3*len(ops))
 	settled := false
@@ -157,6 +171,11 @@ func checkpointed(ops []run.Op) []run.Op {
 			emit(run.Op{Type: run.OpSettle})
 		case last && !settled:
 			emit(run.Op{Type: run.OpSettle})
+		}
+	}
+	for i := range judged {
+		if judged[i].Type == run.OpDeleteFixture {
+			judged[i].Until = &run.Until{Op: i + 1 + slices.IndexFunc(judged[i+1:], run.Op.Settles)}
 		}
 	}
 	return judged
@@ -235,6 +254,8 @@ type state struct {
 	// settled says the Runner has waited for the target's reaction since the
 	// last change, so the objects the target manages are there to be deleted.
 	settled bool
+	// gone are the fixtures deleted since the last op that settles.
+	gone []string
 }
 
 // op draws the next op.
@@ -253,6 +274,13 @@ func (g *Generator) op(t *rapid.T, index int, at *state) run.Op {
 		// the run will hold, and a later index would often resolve to nothing
 		// and be skipped (DESIGN.md §7).
 		op.Nth = new(int)
+	case run.OpUpdateFixture:
+		fixture := rapid.SampledFrom(g.updatable).Draw(t, "fixture")
+		op.Kind, op.Name = kindName(fixture.GVK), fixture.Name
+		op.Patch = nest(rapid.SampledFrom(fixture.Mutate).Draw(t, "path").Keys(), fixtureWords.Draw(t, "value"))
+	case run.OpDeleteFixture:
+		fixture := rapid.SampledFrom(g.present(at)).Draw(t, "fixture")
+		op.Kind, op.Name = kindName(fixture.GVK), fixture.Name
 	}
 	if op.Type.OnCR() {
 		op.NoSettle = rapid.Bool().Draw(t, "noSettle")
@@ -268,8 +296,14 @@ func (g *Generator) legal(at *state) []run.OpType {
 	if at.cr != nil && len(g.fields) > 0 {
 		legal = append(legal, run.OpUpdate)
 	}
+	if len(g.updatable) > 0 {
+		legal = append(legal, run.OpUpdateFixture)
+	}
 	if at.cr != nil && at.settled && len(g.managed) > 0 {
 		legal = append(legal, run.OpDeleteManaged)
+	}
+	if len(g.present(at)) > 0 {
+		legal = append(legal, run.OpDeleteFixture)
 	}
 	legal = append(legal, run.OpRecreate)
 	if at.cr != nil {
@@ -277,6 +311,20 @@ func (g *Generator) legal(at *state) []run.OpType {
 	}
 	return legal
 }
+
+// present are the fixtures generation may delete and has not.
+func (g *Generator) present(at *state) []target.MutableFixture {
+	return slices.DeleteFunc(slices.Clone(g.target.Generate.Fixtures), func(fixture target.MutableFixture) bool {
+		return slices.Contains(at.gone, kindName(fixture.GVK)+" "+fixture.Name)
+	})
+}
+
+// fixtureWords are short words whose length is a multiple of four, so that a
+// Secret's data reads each as base64.
+var fixtureWords = rapid.Custom(func(t *rapid.T) any {
+	length := 4 * rapid.IntRange(1, 3).Draw(t, "quads")
+	return rapid.StringOfN(wordRunes, length, length, -1).Draw(t, "word")
+})
 
 func (at *state) advance(op run.Op) {
 	switch op.Type {
@@ -286,12 +334,14 @@ func (at *state) advance(op run.Op) {
 		at.cr = op.Obj.Object
 	case run.OpUpdate:
 		at.cr = run.MergePatch(runtime.DeepCopyJSON(at.cr), op.Patch)
+	case run.OpDeleteFixture:
+		at.gone = append(at.gone, op.Kind+" "+op.Name)
 	}
-	// The only op that changes the managed objects without waiting for the
-	// target's reaction is a CR op that skips its settle.
+	// Only a CR op that skips its settle and a deleteFixture change the run
+	// without waiting for the target's reaction.
 	if op.Settles() {
-		at.settled = true
-	} else if op.Type.OnCR() {
+		at.settled, at.gone = true, nil
+	} else if op.Type.OnCR() || op.Type == run.OpDeleteFixture {
 		at.settled = false
 	}
 }

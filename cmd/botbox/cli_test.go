@@ -929,6 +929,10 @@ func TestAnUnfinishedRunOfTheMinimizedSequenceIsNoPass(t *testing.T) {
 	if said := string(written) + stderr; strings.Contains(said, "passed when it ran again") || !strings.Contains(said, "did not finish when it ran again") {
 		t.Errorf("botbox run printed %q and the report\n%s\nwant them to say the run did not finish.", stderr, written)
 	}
+	if want := fmt.Sprintf("botbox: the minimized sequence did not finish when it ran again, so %s holds that partial run: an interrupt stopped the run",
+		session.dirs[0]); !strings.Contains(stderr, want) {
+		t.Errorf("botbox run printed %q on stderr, want %q.", stderr, want)
+	}
 	encoded, err := os.ReadFile(filepath.Join(session.dirs[0], report.JSONFile))
 	if err != nil {
 		t.Fatal(err)

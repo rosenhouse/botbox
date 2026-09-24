@@ -320,13 +320,14 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 
 // rerun executes the minimized sequence into the run directory, so that the
 // recordings there are of the sequence the run reports, and returns what that
-// run found. A run that reproduced nothing says so: the directory then holds
-// a run that passed.
+// run found. A run that did not finish or reproduced nothing says what the
+// directory then holds.
 func (c *cli) rerun(ctx context.Context, opts options, s session, t *target.Target, shrunk run.Sequence, dir string) (run.Result, error) {
 	result, err := s.execute(ctx, t, shrunk, dir, run.Engine{})
 	switch {
 	case err != nil:
-		c.warn(opts.named(ctx, err))
+		c.warn(fmt.Errorf("the minimized sequence did not finish when it ran again, so %s holds that partial run: %w",
+			dir, opts.named(ctx, err)))
 	case result.Violation == nil:
 		c.warn(fmt.Errorf("the minimized sequence passed when it ran again, so %s holds that run", dir))
 	}

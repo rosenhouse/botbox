@@ -124,23 +124,40 @@ func TestG6CountsOneRequestAtATime(t *testing.T) {
 	}
 }
 
-func TestG6OrdersLoopsThatDifferOnlyByNamespace(t *testing.T) {
+// A run keeps its first violation, so G6 reports the loop that began first.
+func TestG6OrdersLoopsByWhenTheyBegan(t *testing.T) {
 	elsewhere := failedGet("w-0", 404)
 	elsewhere.Namespace = "botbox-run-0"
-	in := loop(errLoop+1, failedGet("w-0", 404)).
-		requests(time.Second, 500*time.Millisecond, errLoop+1, elsewhere).
-		through(8 * time.Second)
+	for _, test := range []struct {
+		name          string
+		first, second proxy.Request
+		later         time.Duration
+		want          []string
+	}{
+		{"one after the other", failedGet("w-1", 404), failedGet("w-0", 404), 200 * time.Millisecond,
+			[]string{namespace + "/w-1", namespace + "/w-0"}},
+		{"together, by request", failedGet("w-1", 404), failedGet("w-0", 404), 0,
+			[]string{namespace + "/w-0", namespace + "/w-1"}},
+		{"together, by namespace", failedGet("w-0", 404), elsewhere, 0,
+			[]string{"botbox-run-0/w-0", namespace + "/w-0"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			in := loop(errLoop+1, test.first).
+				requests(time.Second+test.later, 500*time.Millisecond, errLoop+1, test.second).
+				through(8 * time.Second)
 
-	// Go ranges over a map in a random order, so one evaluation can pass by
-	// chance.
-	for range 100 {
-		var namespaces []string
-		for _, violation := range evaluate(t, invariant.NoErrorLoop, in).Violations {
-			namespaces = append(namespaces, violation.Requests[0].Namespace)
-		}
-		if want := []string{"botbox-run-0", namespace}; !slices.Equal(namespaces, want) {
-			t.Fatalf("G6 reported loops in the namespaces %v, want %v.", namespaces, want)
-		}
+			// Go ranges over a map in a random order, so one evaluation can
+			// pass by chance.
+			for range 100 {
+				var loops []string
+				for _, violation := range evaluate(t, invariant.NoErrorLoop, in).Violations {
+					loops = append(loops, violation.Requests[0].Namespace+"/"+violation.Requests[0].Name)
+				}
+				if !slices.Equal(loops, test.want) {
+					t.Fatalf("G6 reported the loops %v, want %v.", loops, test.want)
+				}
+			}
+		})
 	}
 }
 

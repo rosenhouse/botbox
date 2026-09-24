@@ -31,7 +31,7 @@ func RestartStable(in Input) (Result, error) {
 		reached := in.reached(changes)
 		if len(changes) > 0 && !in.spares(reached, before, after) {
 			out.note("for %s: %s ran between the converged states before and after it, so G5 cannot tell what the restart changed; a settle op on each side of a restart lets G5 judge it",
-				describe(op), describe(changes[0]))
+				describe(op), describeAll(changes))
 			continue
 		}
 		if in.faulted(before.Time, after.Time) {
@@ -41,11 +41,23 @@ func RestartStable(in Input) (Result, error) {
 		}
 		if len(changes) > 0 {
 			out.note("for %s on what %s may have changed between the converged states before and after it",
-				describe(op), describe(changes[0]))
+				describe(op), describeAll(changes))
 		}
 		out.compare(in, op, before, after, reached)
 	}
 	return out, nil
+}
+
+func describeAll(ops []Op) string {
+	described := make([]string, len(ops))
+	for i, op := range ops {
+		described[i] = describe(op)
+	}
+	last := len(described) - 1
+	if last == 0 {
+		return described[0]
+	}
+	return strings.Join(described[:last], ", ") + " and " + described[last]
 }
 
 // changedBetween returns the first op that changed the CR or a managed object

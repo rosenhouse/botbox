@@ -850,12 +850,12 @@ func TestG5LeavesARestartUnjudgedOnlyForAnOpThatChangesTheRun(t *testing.T) {
 	}
 }
 
-func TestG5NamesTheFirstOpThatKeptItFromJudgingARestart(t *testing.T) {
+func TestG5NamesEveryOpThatKeptItFromJudgingARestart(t *testing.T) {
 	in := changedAround(func(r *run) *run {
-		return r.op(invariant.OpUpdate, 11*time.Second).op(invariant.OpDelete, 12*time.Second)
+		return r.op(invariant.OpUpdate, 11*time.Second).op(invariant.OpDelete, 12*time.Second).op(invariant.OpRecreate, 12500*time.Millisecond)
 	})
 
-	noted(t, invariant.RestartStable, in, "op 1 (update) ran")
+	noted(t, invariant.RestartStable, in, "op 1 (update), op 2 (delete) and op 3 (recreate) ran")
 }
 
 func TestG5LeavesARestartUnjudgedWhereAFaultReachedBetweenTheStatesItCompares(t *testing.T) {
@@ -930,6 +930,68 @@ func TestG5JudgesACRNoOpBetweenItsStatesActedOn(t *testing.T) {
 
 	if !strings.Contains(violation.Statement, "Widget w changed") {
 		t.Errorf("The statement is %q, want it to name the Widget w.", violation.Statement)
+	}
+}
+
+func TestG5LeavesOutWhatEachOpBetweenItsStatesReached(t *testing.T) {
+	in := newRun().withSecondWidget().
+		record(time.Second, widget("10", spec(1), status(1, 1)), secondWidget("30", spec(1), status(1, 1)),
+			child("w-0", "11", data("0")), secondChild("w2-0", "31", data("0")), child("spared", "40", ownedByGhost)).
+		checkpoint(5*time.Second, invariant.Converged).
+		op(invariant.OpRestart, 10*time.Second).
+		op(invariant.OpUpdate, 11*time.Second).
+		opOn(invariant.OpUpdate, 11500*time.Millisecond, secondName).
+		record(12*time.Second, widget("12", spec(2), generation(2), status(2, 2)), secondWidget("32", spec(2), generation(2), status(2, 2)),
+			child("w-0", "13", data("1")), secondChild("w2-0", "33", data("1"))).
+		checkpoint(15*time.Second, invariant.Converged).
+		through(20 * time.Second)
+
+	noted(t, invariant.RestartStable, in, "on what op 1 (update) and op 2 (update) may have changed")
+}
+
+// A recreate reaches the CR it deleted and the one it created.
+func TestG5LeavesOutBothCRsARecreateWrote(t *testing.T) {
+	in := newRun().withSecondWidget().
+		record(time.Second, widget("10", spec(1), status(1, 1)), secondWidget("30", spec(1), status(1, 1)),
+			child("w-0", "11", data("0")), secondChild("w2-0", "31", data("0"))).
+		checkpoint(5*time.Second, invariant.Converged).
+		op(invariant.OpRestart, 10*time.Second).
+		op(invariant.OpRecreate, 11*time.Second).
+		remove(11*time.Second, widget("12", spec(1), status(1, 1)), child("w-0", "13", data("0"))).
+		record(12*time.Second, widget("20", spec(1), status(1, 1), uid("uid-w-again")),
+			child("w-0", "21", data("0"), uid("uid-w-0-again"), ownedByRecreated)).
+		checkpoint(15*time.Second, invariant.Converged).
+		through(20 * time.Second)
+
+	noted(t, invariant.RestartStable, in, "on what op 1 (recreate) may have changed")
+}
+
+// Either state may hold what the ops between them left alone.
+func TestG5JudgesWhatEitherStateHoldsThatTheOpsLeftAlone(t *testing.T) {
+	for _, c := range []struct {
+		name          string
+		before, after []*unstructured.Unstructured
+	}{
+		{"before", []*unstructured.Unstructured{child("spared", "40", ownedByGhost)}, nil},
+		{"after", nil, []*unstructured.Unstructured{child("spared", "40", ownedByGhost)}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := newRun().
+				record(time.Second, append([]*unstructured.Unstructured{widget("10", spec(1), status(1, 1))}, c.before...)...).
+				checkpoint(5*time.Second, invariant.Converged).
+				op(invariant.OpRestart, 10*time.Second).
+				op(invariant.OpUpdate, 11*time.Second).
+				remove(11*time.Second, c.before...).
+				record(12*time.Second, append([]*unstructured.Unstructured{widget("11", spec(2), generation(2), status(2, 2))}, c.after...)...).
+				checkpoint(15*time.Second, invariant.Converged).
+				through(20 * time.Second)
+
+			violation := fired(t, invariant.RestartStable, in)
+
+			if !strings.Contains(violation.Statement, "spared") {
+				t.Errorf("The statement is %q, want it to name the object only one state holds.", violation.Statement)
+			}
+		})
 	}
 }
 

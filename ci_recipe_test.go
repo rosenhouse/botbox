@@ -29,6 +29,7 @@ type workflow struct {
 type job struct {
 	RunsOn          string `yaml:"runs-on"`
 	ContinueOnError any    `yaml:"continue-on-error"`
+	TimeoutMinutes  any    `yaml:"timeout-minutes"`
 	Steps           []step `yaml:"steps"`
 }
 
@@ -36,6 +37,7 @@ type step struct {
 	ID              string            `yaml:"id"`
 	If              string            `yaml:"if"`
 	ContinueOnError any               `yaml:"continue-on-error"`
+	TimeoutMinutes  any               `yaml:"timeout-minutes"`
 	Uses            string            `yaml:"uses"`
 	With            map[string]string `yaml:"with"`
 	Env             map[string]string `yaml:"env"`
@@ -193,6 +195,9 @@ func TestTheCIRecipeCachesWhatItInstalls(t *testing.T) {
 	if save.With["path"] != restore.With["path"] {
 		t.Errorf("the cache saves %q and restores %q", save.With["path"], restore.With["path"])
 	}
+	if prefixes, ok := restore.With["restore-keys"]; ok {
+		t.Errorf("the cache also restores keys %q, which carry old control planes into each new cache", prefixes)
+	}
 
 	want := []string{"runner.arch", "runner.os"}
 	for _, m := range regexp.MustCompile(`\$\{?(\w+_VERSION)\b`).FindAllStringSubmatch(commands, -1) {
@@ -313,10 +318,17 @@ func botboxRuns(t *testing.T, steps []step) []step {
 }
 
 func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
-	steps := recipeSteps(t)
+	recipe := recipeJob(t)
+	steps := recipe.Steps
 	upload := stepUsing(t, steps, "actions/upload-artifact")
 	if upload.If != "failure()" {
 		t.Errorf("the evidence uploads if %q, not when botbox fails", upload.If)
+	}
+	if upload.With["if-no-files-found"] == "error" {
+		t.Error("the upload adds an error to a job that failed before botbox wrote anything")
+	}
+	if recipe.TimeoutMinutes != nil || slices.ContainsFunc(steps, func(s step) bool { return s.TimeoutMinutes != nil }) {
+		t.Error("the recipe sets timeout-minutes, which can stop botbox before its --deadline makes it write a report")
 	}
 	uploaded := strings.TrimSuffix(upload.With["path"], "/")
 	for _, s := range botboxRuns(t, steps) {
@@ -473,7 +485,7 @@ func actionRelease(uses string) string {
 
 func TestTheCIRecipeChecksOutTheRepositoryWithAReadOnlyToken(t *testing.T) {
 	recipe := recipeJob(t)
-	if len(recipe.Steps) == 0|| !strings.HasPrefix(recipe.Steps[0].Uses, "actions/checkout@") {
+	if len(recipe.Steps) == 0 || !strings.HasPrefix(recipe.Steps[0].Uses, "actions/checkout@") {
 		t.Error("the job's first step does not check out the repository")
 	}
 	if permissions := readWorkflow(t, ciRecipe).Permissions; !maps.Equal(permissions, map[string]string{"contents": "read"}) {

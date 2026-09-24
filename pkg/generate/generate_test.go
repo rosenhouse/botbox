@@ -109,6 +109,27 @@ func TestADeletedFixtureComesBackBeforeTheNextOpThatSettles(t *testing.T) {
 	})
 }
 
+// G7 notes a deleteManaged that follows a change of botbox's before the run
+// converged, so generation waits for the target's reaction first.
+func TestADeletedFixtureIsBackForTheNextDrawOnceAnOpSettles(t *testing.T) {
+	loaded := loadTarget(t, fixturesTarget)
+	g := newGenerator(t, loaded, Options{})
+	at := state{cr: loaded.Sample.Object, settled: true}
+	token := run.Op{Type: run.OpDeleteFixture, Kind: "v1/Secret", Name: "token"}
+
+	at.advance(token)
+	if legal := g.legal(&at); slices.Contains(legal, run.OpDeleteManaged) {
+		t.Errorf("Right after a deleteFixture, generation may draw %v.", legal)
+	}
+	if present := g.present(&at); len(present) != 1 || present[0].Name != "widget-config" {
+		t.Errorf("With the token deleted, generation may delete %v, want widget-config alone.", present)
+	}
+	at.advance(run.Op{Type: run.OpSettle})
+	if present := g.present(&at); len(present) != 2 {
+		t.Errorf("Once an op settled, generation may delete %v, want both fixtures.", present)
+	}
+}
+
 func TestATargetWithoutGenerateFixturesDrawsNoFixtureOp(t *testing.T) {
 	// The toy declares a fixture, and no generate.fixtures.
 	g := newGenerator(t, loadTarget(t, toyTarget), Options{})

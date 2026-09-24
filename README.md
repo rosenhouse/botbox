@@ -520,7 +520,7 @@ Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-gene
 | G1 | Bounded reconciliation. Under an unchanged spec, one quiet window holds no more requests than `quiet` allows, zero by default. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
 | G3 | Clean deletion. Deleting the CR removes everything it manages and clears its finalizers. |
-| G4 | Convergence. `ready` holds within `T_settle` of every change to the spec or a fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
+| G4 | Convergence. `ready` holds within `T_settle` of every spec change, `updateFixture` or return of a deleted fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
 | G7 | Self-healing. An object `deleteManaged` deletes exists again, by kind and name, once the run settles. |

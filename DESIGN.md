@@ -229,23 +229,23 @@ The Runner executes one sequence:
    manager adds to the namespace (§5.8). Exclude what the namespace holds from the
    managed objects (§6). Apply the target's fixtures. Start the target via the Launcher.
 2. Apply ops in order. Before an op acts, but after its instant is stamped, create again
-   each fixture a `DeleteFixture` deleted until that op (§7). After each op that mutates the
-   CR, a managed object or a fixture, wait up to
-   `T_settle` for convergence unless the op sets `noSettle`, and longer while the target is
-   still owed time to recover from a fault that stopped (§6) or to delete a primary CR. The
-   wait ends once the `Ready` predicate holds, no primary CR is being deleted, and neither
-   the CR nor a managed object has changed for `T_stable`, so a checkpoint lands after the
-   target's reaction, not before it. After a deletion of the primary CR, the wait may run
-   until the deletion's G3 deadline, or `T_settle` past the instant the CR went if it went
-   by then. A `recreate` waits `T_delete` for its old CR to go, and longer while the target
-   is owed time as above. A CR still there where that wait ends is judged there, as an
-   expired settle wait is. A wait in which a CR outlived a G3 deadline that no fault
-   reached into is G3's to judge (§6). Any other wait that expires while no fault excuses
-   it records a G4 violation, which says why from the Observer's history of the wait:
-   `Ready` never held, held and then stopped, or held while the namespace kept changing
-   within `T_stable`; a CR was still being deleted; or no CR was left to be ready. It also
-   says where the target was waiting to restart, restarted within `T_stable`, had not yet
-   shown it runs, or first did within `T_stable`, and then leaves out what changed. Where
+   each fixture a `DeleteFixture` deleted until that op (§7). After each op that mutates
+   the CR or a managed object, or updates a fixture, wait up to `T_settle` for convergence
+   unless the op sets `noSettle`, and longer while the target is still owed time to
+   recover from a fault that stopped (§6) or to delete a primary CR. The wait ends once
+   the `Ready` predicate holds, no primary CR is being deleted, and neither the CR nor a
+   managed object has changed for `T_stable`, so a checkpoint lands after the target's
+   reaction, not before it. After a deletion of the primary CR, the wait may run until the
+   deletion's G3 deadline, or `T_settle` past the instant the CR went if it went by then.
+   A `recreate` waits `T_delete` for its old CR to go, and longer while the target is owed
+   time as above. A CR still there where that wait ends is judged there, as an expired
+   settle wait is. A wait in which a CR outlived a G3 deadline that no fault reached into
+   is G3's to judge (§6). Any other wait that expires while no fault excuses it records a
+   G4 violation, which says why from the Observer's history of the wait: `Ready` never
+   held, held and then stopped, or held while the namespace kept changing within
+   `T_stable`; a CR was still being deleted; or no CR was left to be ready. It also says
+   where the target was waiting to restart, restarted within `T_stable`, had not yet shown
+   it runs, or first did within `T_stable`, and then leaves out what changed. Where
    `Ready` held and nothing changed within `T_stable`, it says that.
    The Runner and the engine raise it with one function, so they agree. A fault excuses it
    while active, which is once the proxy has applied it and until the proxy stops (D36),
@@ -427,7 +427,7 @@ real targets; the toy target sets much shorter ones (§9).
 | **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault or a deletion (§5.5), the target makes no more than `N_quiet` (default 0) API requests in `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io`, whose leases and lease candidates leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
 | **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. A status write whose content is unchanged moves no resourceVersion, so G2 counts status subresource writes from the proxy log, and more than `N_quiet` of them is churn. `N_quiet` never excuses a resourceVersion that moves. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
-| **G4** | Convergence | Within `T_settle` after any change to the spec or a fixture, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). A `Restart` gives the target `T_settle` past its return. A target waiting to restart, or not back since it last started, has not converged. This is ESR as a test. | Observer + target predicate |
+| **G4** | Convergence | Within `T_settle` after any spec change, `UpdateFixture` or restore of a deleted fixture, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). A `Restart` gives the target `T_settle` past its return. A target waiting to restart, or not back since it last started, has not converged. This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
 | **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 10) times within `T_settle` under an unchanged spec and fixtures, with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
 | **G7** | Self-healing | An object a `DeleteManaged` op deleted exists again, by kind and name, when the settle wait after the op ends: on convergence, or at `T_settle` or later after a fault or a deletion (§5.5). Its content may differ. A kind the target lists in `notRecreated` is exempt (§8.1). | Observer |

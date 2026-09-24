@@ -138,8 +138,8 @@ func (o Op) Settles() bool {
 	return o.Type == OpSettle || (!o.NoSettle && slices.Contains(mutatingOps, o.Type))
 }
 
-// mutatingOps change the CR, a managed object or a fixture, so the Runner
-// settles after them.
+// mutatingOps change the CR or a managed object, or update a fixture, so the
+// Runner settles after them.
 var mutatingOps = append(slices.Clone(crOps), OpDeleteManaged, OpUpdateFixture)
 
 // ReadSequence reads and validates a sequence file.

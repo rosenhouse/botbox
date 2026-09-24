@@ -264,6 +264,8 @@ func TestLoadRejects(t *testing.T) {
 		{"sample of another kind", minimalTarget, "apiVersion: v1\nkind: Secret\nmetadata:\n  name: s\n", []string{"widget.yaml", "Secret", "Widget"}},
 		{"sample holding two objects", minimalTarget, sampleWidget + "---\n" + sampleWidget, []string{"widget.yaml", "2 objects"}},
 		{"sample holding no object", minimalTarget, "# just a comment\n", []string{"widget.yaml", "no object"}},
+		{"sample with no name", minimalTarget, "apiVersion: toy.botbox/v1\nkind: Widget\nmetadata:\n  generateName: widget-\n",
+			[]string{"widget.yaml", "no metadata.name"}},
 		{"sample that is not YAML", minimalTarget, "name: \"unterminated\n", []string{"widget.yaml"}},
 		{"missing crds path", minimalTarget + "crds: [nosuch/]\n", "", []string{"crds", "nosuch"}},
 		{"managed group read as a version", minimalTarget + "manages:\n  - apps/Deployment\n", "", []string{"manages", "apps"}},

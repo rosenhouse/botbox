@@ -160,6 +160,9 @@ func load(path string) (*Target, error) {
 	if gvk := loaded.Sample.GroupVersionKind(); gvk != loaded.Primary {
 		return nil, fmt.Errorf("sample %s: holds %s, not the primary %s", samplePath, gvk, loaded.Primary)
 	}
+	if loaded.Sample.GetName() == "" {
+		return nil, fmt.Errorf("sample %s: holds no metadata.name; give it one, since each CR a sequence creates is named after it", samplePath)
+	}
 	for _, fixture := range declared.Fixtures {
 		fixturePath := resolve(dir, fixture)
 		objects, err := loadObjects(fixturePath)

@@ -36,6 +36,7 @@ func TestTheSeededBugsTripTheChecksTheCatalogNames(t *testing.T) {
 		{bug: "B9", catalog: []string{"G3"}, fires: []string{"G3", "G4"}, in: b9()},
 		{bug: "B10", catalog: []string{"G4"}, fires: []string{"G4", "P1"}, in: b10()},
 		{bug: "B13", catalog: []string{"G3"}, fires: []string{"G3"}, in: b13()},
+		{bug: "B14", catalog: []string{"G4"}, fires: []string{"G4"}, in: b14()},
 	} {
 		t.Run(seeded.bug, func(t *testing.T) {
 			results, err := invariant.Evaluate(seeded.in)
@@ -237,6 +238,16 @@ func b13() invariant.Input {
 		through(35 * time.Second)
 }
 
+// b14 names its children after the kind, so the second Widget finds its child
+// owned by the first and never converges.
+func b14() invariant.Input {
+	return converged().withSecondWidget().
+		opOn(invariant.OpCreate, 5*time.Second, secondName).
+		record(5100*time.Millisecond, secondWidget("21", spec(2), finalizers(cleanup))).
+		checkpoint(10100*time.Millisecond, invariant.Expired).
+		through(10100 * time.Millisecond)
+}
+
 // restartedAndScaledDown is b10.json up to its scale-down: three children, a
 // restart at 10s and an update of spec.count to 1 before anything settles.
 func restartedAndScaledDown() *run {
@@ -293,7 +304,7 @@ func TestEveryViolationSaysHowMuchEvidenceItChoseFrom(t *testing.T) {
 	}{
 		{"B1", b1()}, {"B2", b2()}, {"B3", b3()}, {"B4", b4()}, {"B5", b5()},
 		{"B6", b6()}, {"B7", b7()}, {"B8", b8()}, {"B9", b9()}, {"B10", b10()},
-		{"B13", b13()},
+		{"B13", b13()}, {"B14", b14()},
 	} {
 		t.Run(seeded.bug, func(t *testing.T) {
 			results, err := invariant.Evaluate(seeded.in)

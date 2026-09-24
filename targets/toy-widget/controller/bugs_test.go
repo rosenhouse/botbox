@@ -427,6 +427,34 @@ func TestB13NeverCleansUpADeletedWidget(t *testing.T) {
 	}
 }
 
+func TestB14NamesTheChildrenAfterTheKindSoTwoWidgetsFightOverThem(t *testing.T) {
+	for _, testCase := range []struct {
+		name        string
+		bug         Bug
+		want        []string
+		secondFails bool
+	}{
+		{"the correct controller names them after each Widget", 0, []string{"w-0", "w2-0"}, false},
+		{"B14 names them after the kind", B14, []string{"widget-0"}, true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			first, second := newWidget(1), newWidget(1)
+			second.Name, second.UID = "w2", "second-uid"
+			r := fixture(t, testCase.bug, interceptor.Funcs{}, first, second)
+
+			mustReconcile(t, r, first)
+			err := reconcile(t, r, second)
+
+			if failed := err != nil; failed != testCase.secondFails {
+				t.Errorf("Reconciling the second Widget returned %v, want an error: %t.", err, testCase.secondFails)
+			}
+			if names := childNames(t, r, first); !slices.Equal(names, testCase.want) {
+				t.Errorf("The reconciles left the ConfigMaps %v, want %v.", names, testCase.want)
+			}
+		})
+	}
+}
+
 // refuseTheFirstChildCreate is the fault the sequence b11-fault.json injects,
 // as the fake API server: one refused ConfigMap create and no more.
 func refuseTheFirstChildCreate() interceptor.Funcs {

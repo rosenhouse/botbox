@@ -218,6 +218,12 @@ func (r *Reconciler) syncChildren(ctx context.Context, widget *toyv1.Widget) (in
 		count = widget.Status.Ready // B4 (§9.1): the count comes from the status.
 	}
 	desired := desiredChildren(widget, count)
+	if r.Bug == B14 {
+		// B14: the children are named after the kind, so two Widgets share them.
+		for index := range desired {
+			desired[index].Name = fmt.Sprintf("widget-%d", index)
+		}
+	}
 	for index := range desired {
 		if err := r.ensureChild(ctx, widget, index, &desired[index]); err != nil {
 			return 0, err

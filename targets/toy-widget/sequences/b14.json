@@ -1,0 +1,66 @@
+{
+  "seed": 20260920,
+  "target": "toy-widget",
+  "ops": [
+    {
+      "i": 0,
+      "t": "create",
+      "obj": {
+        "apiVersion": "toy.botbox/v1",
+        "kind": "Widget",
+        "metadata": {
+          "name": "widget"
+        },
+        "spec": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "i": 1,
+      "t": "create",
+      "obj": {
+        "apiVersion": "toy.botbox/v1",
+        "kind": "Widget",
+        "metadata": {
+          "name": "widget-2"
+        },
+        "spec": {
+          "count": 1
+        }
+      }
+    },
+    {
+      "i": 2,
+      "t": "deleteManaged",
+      "kind": "v1/ConfigMap",
+      "index": 0
+    },
+    {
+      "i": 3,
+      "t": "delete"
+    },
+    {
+      "i": 4,
+      "t": "restart"
+    },
+    {
+      "i": 5,
+      "t": "settle"
+    },
+    {
+      "i": 6,
+      "t": "update",
+      "cr": "widget-2",
+      "patch": {
+        "spec": {
+          "count": 2
+        }
+      }
+    },
+    {
+      "i": 7,
+      "t": "settle"
+    }
+  ]
+}

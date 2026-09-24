@@ -46,16 +46,23 @@ func (s state) holds(uid types.UID) bool {
 
 // leftBy reports whether an object still there at the deleted CR's deadline
 // is that CR's to answer for. An object belongs to the CRs it names, and one
-// that names none to every CR there when the deleted one went. An object
-// another of its CRs still holds on to at the deadline is not left over.
+// that names none to every CR there when the deleted one went. The last of
+// them to go answers for it: another that is still there at the deadline, or
+// whose own deadline is later, keeps it.
 func (in Input) leftBy(deleted deletion, v observe.Version, then, now state) bool {
 	named := in.namedCRs(v)
 	if len(named) > 0 && !slices.Contains(named, deleted.uid) {
 		return false
 	}
-	return !slices.ContainsFunc(now.crs(in.Target.Primary), func(cr observe.Version) bool {
+	later := map[types.UID]bool{}
+	for _, other := range in.crDeletions() {
+		later[other.uid] = other.deadline.After(deleted.deadline)
+	}
+	crs := slices.Concat(then.crs(in.Target.Primary), now.crs(in.Target.Primary))
+	return !slices.ContainsFunc(crs, func(cr observe.Version) bool {
 		claims := slices.Contains(named, cr.UID) || len(named) == 0 && then.holds(cr.UID)
-		return cr.UID != deleted.uid && claims
+		keeps := now.holds(cr.UID) || later[cr.UID]
+		return cr.UID != deleted.uid && claims && keeps
 	})
 }
 

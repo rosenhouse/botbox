@@ -356,6 +356,12 @@ func ownedByAPod(u *unstructured.Unstructured) {
 	u.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "v1", Kind: "Pod", Name: "p", UID: "uid-p"}})
 }
 
+// ownedByAWidgetElsewhere names an owner of the primary's kind in another
+// group.
+func ownedByAWidgetElsewhere(u *unstructured.Unstructured) {
+	u.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "other.example/v1", Kind: widgetGVK.Kind, Name: "w", UID: "uid-other-w"}})
+}
+
 // ownedByGhost names an owner no snapshot holds, which §6 ignores.
 func ownedByGhost(u *unstructured.Unstructured) {
 	u.SetOwnerReferences([]metav1.OwnerReference{{

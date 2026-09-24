@@ -39,7 +39,8 @@ func CleanDeletion(in Input) (Result, error) {
 // it would have cleaned that object is nobody's to say (D38). Judging it
 // either way would be a guess; a silent pass reads as cleanup that happened.
 func (out *Result) noteWhatBotboxTook(in Input, deleted deletion, deadline time.Time) {
-	had := in.stateAt(deleted.at)
+	states := in.statesAt([]time.Time{deleted.at, deadline})
+	had, since := states[0], states[1]
 	for _, op := range in.Ops {
 		// Only a DeleteManaged op names an object it took (DESIGN.md §5.4).
 		was, hadIt := had.version(op.Deleted)
@@ -52,7 +53,7 @@ func (out *Result) noteWhatBotboxTook(in Input, deleted deletion, deadline time.
 		// An object the run recreated carries the same name and a new UID, so
 		// botbox took the one that came after and not the one this CR left.
 		if took, found := in.versionAt(op.Deleted, op.Time); !found || took.UID != was.UID ||
-			!in.leftBy(deleted, took, had, in.stateAt(op.Time)) {
+			!in.leftBy(deleted, took, had, since) {
 			continue
 		}
 		out.note("for the deletion of %s: %s deleted %s %s inside its %s window, so the target never got the chance to clean it up",

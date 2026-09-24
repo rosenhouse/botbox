@@ -380,7 +380,7 @@ selector refine attribution to a particular CR; they are not required for it.
 emulated on envtest, §5.8). G3 therefore fails on orphans, meaning children with no
 ownerReference to the CR, and on finalizers that never clear. The teardown watches the
 namespace until it is clean or `T_delete` expires (§5.5 step 4). The settle wait after a
-`delete` op and a `recreate`'s wait wait for the CR to go (§5.5 step 2), so G3 judges that
+`delete` op waits for the CR to go, as a `recreate` does (§5.5 step 2), so G3 judges that
 deletion where the wait ends if the CR outlived `T_delete`. A namespace that came clean
 satisfies G3 at that instant, which is how a target that cleans up promptly is judged
 rather than left unjudged: the run stops watching long before `T_delete` is up. An object

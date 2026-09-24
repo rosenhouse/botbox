@@ -509,6 +509,21 @@ func TestAVerdictNamesTheRequestThatFirstFailedMostOften(t *testing.T) {
 	requireStatement(t, violation, "; the target repeated the failing request get configmaps/w-0 2 times")
 }
 
+func TestAVerdictCountsARequestInEachNamespaceApart(t *testing.T) {
+	elsewhere := failedGet("w-0", http.StatusNotFound)
+	elsewhere.Namespace = "botbox-run-0"
+	in := unreadyCreate(0, 1).
+		request(1100*time.Millisecond, failedGet("w-0", http.StatusNotFound)).
+		request(1200*time.Millisecond, elsewhere).
+		request(1300*time.Millisecond, failedGet("w-1", http.StatusNotFound)).
+		request(1400*time.Millisecond, failedGet("w-1", http.StatusNotFound)).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	requireStatement(t, violation, "; the target repeated the failing request get configmaps/w-1 2 times")
+}
+
 func TestAVerdictNamesNoRequestTheTargetDidNotRepeat(t *testing.T) {
 	refused := failedGet("w-0", http.StatusInternalServerError)
 	refused.Fault = "error 500"

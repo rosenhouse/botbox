@@ -1768,5 +1768,7 @@ built from source and run as a black-box binary.
   6). B14 names its children after the kind, which a run of one Widget named `widget`
   cannot tell from correct. Seeds 1 to 30 of cert-manager passed, 11 of them with two
   Certificates or more, and so did seeds 36, 66, 157 and 178, which draw three. Seeds 1
-  to 40 of external-secrets passed, 7 of them with two. Seeds 23 to 27 no longer draw a
-  delete or a `deleteManaged`, and the pinned sequences hold both.
+  to 40 of external-secrets passed, 7 of them with two. One run of seed 22 ended at op 1,
+  before its second CR, when the fake provider's unguarded map crashed external-secrets;
+  it passed on a rerun. cert-manager's seeds 23 to 27 no longer draw a delete or a
+  `deleteManaged`, and its pinned sequences hold both.

@@ -24,7 +24,7 @@ func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 	}
 	stable := in.timeouts().Stable
 	changes := in.versionsIn(at.Add(-stable), at)
-	quiet := in.restarting(at, stable)
+	quiet := in.starting(at, stable)
 	if quiet == "" {
 		quiet = churn(stable, changes)
 	}
@@ -145,10 +145,10 @@ func (w readyWalk) failure() string {
 	return "it evaluated to false"
 }
 
-// restarting says how a restart kept the wait that ended at at from
-// converging, or is empty. A target waiting to restart is not ready, and a
-// restart is a change.
-func (in Input) restarting(at time.Time, stable time.Duration) string {
+// starting says how the target's start kept the wait that ended at at from
+// converging, or is empty. A target waiting to restart, or not yet back, is
+// not ready, and a restart and the target's return are changes.
+func (in Input) starting(at time.Time, stable time.Duration) string {
 	for _, exit := range in.Exits {
 		if !exit.At.After(at) && exit.Restart.After(at) {
 			return "but the target was waiting to restart"
@@ -158,6 +158,16 @@ func (in Input) restarting(at time.Time, stable time.Duration) string {
 		if exit.Restart.After(at.Add(-stable)) && !exit.Restart.After(at) {
 			return fmt.Sprintf("but the target restarted in the last stable (%s)", stable)
 		}
+	}
+	start, named := in.lastRestart(at)
+	if named == "" {
+		named = "it started"
+	}
+	switch back, found := Back(requestsUpTo(in.Requests, at), start); {
+	case !found:
+		return "but the target had requested no resource outside leader election since " + named
+	case back.After(at.Add(-stable)):
+		return fmt.Sprintf("but the target had requested no resource outside leader election since %s until the last stable (%s)", named, stable)
 	}
 	return ""
 }

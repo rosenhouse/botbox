@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/rosenhouse/botbox/pkg/observe"
-	"github.com/rosenhouse/botbox/pkg/proxy"
 )
 
 // SelfHealing is G7: an object a DeleteManaged op deleted exists again, by
@@ -59,29 +58,15 @@ func SelfHealing(in Input) (Result, error) {
 	return out, nil
 }
 
-// stillStarting names the target's last start before the op, a Restart op or
-// the restart after an exit, if the target requested nothing between the two
-// that shows it running, since botbox has no other sign that it is back.
+// stillStarting names the target's last restart before the op if the target
+// was not back by the op.
 func (in Input) stillStarting(op Op) (string, bool) {
-	var start time.Time
-	var named string
-	for _, earlier := range in.Ops {
-		if earlier.Type == OpRestart && earlier.Time.Before(op.Time) {
-			start, named = earlier.Time, describe(earlier)
-		}
-	}
-	for _, exit := range in.Exits {
-		if exit.Restart.Before(op.Time) && exit.Restart.After(start) {
-			start, named = exit.Restart, "the restart after its exit during "+describe(in.opBy(exit.At))
-		}
-	}
+	start, named := in.lastRestart(op.Time)
 	if named == "" {
 		return "", false
 	}
-	running := slices.ContainsFunc(in.Requests, func(r proxy.Request) bool {
-		return r.Start.After(start) && r.Start.Before(op.Time) && showsRunning(r)
-	})
-	return named, !running
+	back, found := Back(in.Requests, start)
+	return named, !found || !back.Before(op.Time)
 }
 
 // stopped reports whether the target exited, or waited to restart, at some
@@ -91,8 +76,3 @@ func (in Input) stopped(from, to time.Time) bool {
 		return !exit.At.After(to) && !exit.Restart.Before(from)
 	})
 }
-
-// showsRunning reports whether a request shows the target past starting up. A
-// process waiting to lead requests only leader election and paths that name no
-// resource, such as discovery.
-func showsRunning(r proxy.Request) bool { return r.Resource != "" && !leaderElection(r) }

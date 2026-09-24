@@ -61,6 +61,7 @@ type botboxProcess struct {
 	cmd            *exec.Cmd
 	exited         <-chan struct{}
 	closed         string
+	out            string
 	stdout, stderr *output
 	lines          chan string
 	// readers are the ends of botbox's output pipes that the test reads.
@@ -106,8 +107,9 @@ func startBotbox(t *testing.T, takes time.Duration, prefix ...string) *botboxPro
 		t.Fatal(err)
 	}
 	lines := make(chan string, 1000)
-	b := &botboxProcess{closed: filepath.Join(t.TempDir(), "closed"), stdout: &output{lines: lines}, stderr: &output{lines: lines}, lines: lines}
-	args := append(prefix, self, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
+	b := &botboxProcess{closed: filepath.Join(t.TempDir(), "closed"), out: t.TempDir(),
+		stdout: &output{lines: lines}, stderr: &output{lines: lines}, lines: lines}
+	args := append(prefix, self, "run", "--target", toyTargetYAML, "--out", b.out, "--runs", "3")
 	b.cmd = exec.Command(args[0], args[1:]...)
 	b.cmd.Env = append(os.Environ(), asBotbox+"=1", closedFile+"="+b.closed, closeTakes+"="+takes.String())
 	b.cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -230,6 +232,11 @@ func TestASignalStopsBotboxAndThenKillsIt(t *testing.T) {
 				if !strings.Contains(stderr, want) {
 					t.Errorf("botbox printed\n%s\nwhich does not say %q.", stderr, want)
 				}
+			}
+			written := readSummary(t, b.out)
+			if written.Outcome != "interrupted" || written.ExitCode != 128+int(test.signal) || written.Runs[0].Outcome != "interrupted" {
+				t.Errorf("The summary says %s, exit %d, and run 1 %s, want run 1 interrupted and exit %d.",
+					written.Outcome, written.ExitCode, written.Runs[0].Outcome, 128+int(test.signal))
 			}
 		})
 	}

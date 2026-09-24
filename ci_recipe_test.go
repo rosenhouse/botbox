@@ -111,7 +111,7 @@ func pinDrift(commands string, vars, pins map[string]string) []string {
 			drift = append(drift, "no command names "+pin.name)
 		}
 		for _, m := range matches {
-			value := m[1]
+			value := strings.Trim(m[1], `"`)
 			if name, isVar := strings.CutPrefix(value, "$"); isVar {
 				value = vars[name]
 			}

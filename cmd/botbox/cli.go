@@ -33,9 +33,10 @@ const (
 )
 
 const (
-	defaultOut      = "botbox-out"
-	defaultDeadline = 4 * time.Minute
-	defaultRuns     = 10
+	defaultOut  = "botbox-out"
+	defaultRuns = 10
+	// minimizing is what a derived deadline gives a shrink pass beyond the runs.
+	minimizing = 4 * time.Minute
 )
 
 const usage = `botbox exercises a controller against the generic invariants of DESIGN.md §6.
@@ -94,17 +95,18 @@ type session interface {
 
 // options are the flags of DESIGN.md §11.
 type options struct {
-	command    string
-	target     string
-	sequences  string
-	out        string
-	kubeconfig string
-	deadline   time.Duration
-	launchArgs []string
-	runs       int
-	runsGiven  bool
-	seed       int64
-	seedGiven  bool
+	command       string
+	target        string
+	sequences     string
+	out           string
+	kubeconfig    string
+	deadline      time.Duration
+	deadlineGiven bool
+	launchArgs    []string
+	runs          int
+	runsGiven     bool
+	seed          int64
+	seedGiven     bool
 }
 
 // main returns what botbox exits with. An invocation a signal interrupted
@@ -151,6 +153,11 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	if err != nil {
 		return c.fail(err)
 	}
+	sequences := make([]run.Sequence, len(runs))
+	for i, planned := range runs {
+		sequences[i] = planned.sequence
+	}
+	c.derive(&opts, exercised, sequences, runs[0].generated())
 
 	s, err := c.startSession(opts, exercised)
 	if err != nil {
@@ -176,8 +183,7 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 		// blamed on a run. An invocation the deadline stopped tested less than
 		// asked, so it does not pass.
 		if i > 0 && ctx.Err() != nil {
-			return c.fail(fmt.Errorf("the --deadline of %s stopped the invocation after %d of %d runs",
-				opts.deadline, i, len(runs)))
+			return c.fail(fmt.Errorf("%s stopped the invocation after %d of %d runs", opts.deadlineName(), i, len(runs)))
 		}
 		number := i + 1
 		fmt.Fprintf(c.stdout, "run %d: seed %d, %s\n", number, planned.sequence.Seed, planned.source())
@@ -489,11 +495,10 @@ func exitCode(result run.Result, err error) int {
 	}
 }
 
-// named blames an interrupt, or the --deadline, for a run its context cut
-// short. §11 makes the deadline exit 2, which a reader has to be able to tell
-// from a broken target. The context botbox built from the flag is what it
-// asks. The teardown's cleanup runs on a budget of its own, which is nobody's
-// flag.
+// named blames an interrupt, or the deadline, for a run its context cut short.
+// §11 makes the deadline exit 2, which a reader has to be able to tell from a
+// broken target. The context botbox built from the deadline is what it asks.
+// The teardown's cleanup runs on a budget of its own.
 func (o options) named(ctx context.Context, err error) error {
 	if _, ok := interruption(ctx); ok && errors.Is(err, context.Canceled) {
 		return errors.New("an interrupt stopped the run")
@@ -501,7 +506,41 @@ func (o options) named(ctx context.Context, err error) error {
 	if !errors.Is(err, context.DeadlineExceeded) || !errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		return err
 	}
-	return fmt.Errorf("the --deadline of %s ended the run: %w", o.deadline, err)
+	return fmt.Errorf("%s ended the run: %w", o.deadlineName(), err)
+}
+
+// deadlineName names the deadline, and says whether botbox derived it.
+func (o options) deadlineName() string {
+	if o.deadlineGiven {
+		return "the --deadline of " + o.deadline.String()
+	}
+	return "the derived deadline of " + o.deadline.String()
+}
+
+// derive gives an invocation that set no deadline what its runs can take at
+// the target's timeouts, and time to minimize a failure where botbox drew the
+// sequences.
+func (c *cli) derive(opts *options, t *target.Target, sequences []run.Sequence, minimizes bool) {
+	if opts.deadlineGiven {
+		return
+	}
+	var runs time.Duration
+	for _, sequence := range sequences {
+		runs += run.Bound(t, sequence)
+	}
+	opts.deadline = runs
+	these := "this run"
+	if len(sequences) > 1 {
+		these = fmt.Sprintf("these %d runs", len(sequences))
+	}
+	if !minimizes {
+		fmt.Fprintf(c.stdout, "the deadline is %s: %s can take that long at the target's timeouts. --deadline sets another.\n",
+			opts.deadline, these)
+		return
+	}
+	opts.deadline += minimizing
+	fmt.Fprintf(c.stdout, "the deadline is %s: %s can take %s at the target's timeouts, and minimizing a failure gets %s. --deadline sets another.\n",
+		opts.deadline, these, runs, minimizing)
 }
 
 // ended names what ended ctx: an interrupt, or else the deadline.
@@ -558,6 +597,7 @@ func parse(args []string) (options, []string, error) {
 	flags.Visit(func(f *flag.Flag) {
 		opts.seedGiven = opts.seedGiven || f.Name == "seed"
 		opts.runsGiven = opts.runsGiven || f.Name == "runs"
+		opts.deadlineGiven = opts.deadlineGiven || f.Name == "deadline"
 	})
 
 	sequences := flags.Args()
@@ -600,7 +640,7 @@ func (o *options) flags() *flag.FlagSet {
 	flags.SetOutput(io.Discard) // The caller prints what Parse returns.
 	flags.StringVar(&o.target, "target", "", "the target.yaml to exercise")
 	flags.StringVar(&o.kubeconfig, "kubeconfig", "", "an existing cluster to run against, instead of envtest")
-	flags.DurationVar(&o.deadline, "deadline", defaultDeadline, "how long the invocation may take")
+	flags.DurationVar(&o.deadline, "deadline", 0, "how long the invocation may take")
 	flags.Var((*stringList)(&o.launchArgs), "launch-arg", "append an argument to the target's launch.args (repeatable)")
 	if o.command == "matrix" {
 		flags.StringVar(&o.out, "out", defaultMatrix, "the Markdown file to write")

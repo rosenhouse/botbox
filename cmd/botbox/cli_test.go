@@ -63,12 +63,16 @@ type fakeSession struct {
 	closed       bool
 	// refused is what vet answers.
 	refused error
+	// deadlines are when each execute's context ends.
+	deadlines []time.Time
 }
 
 func (s *fakeSession) vet(*target.Target) error { return s.refused }
 
-func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
+func (s *fakeSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
 	s.sequences = append(s.sequences, sequence)
+	deadline, _ := ctx.Deadline()
+	s.deadlines = append(s.deadlines, deadline)
 	s.dirs = append(s.dirs, dir)
 	s.args = append(s.args, t.Launch.Args)
 	s.checks = append(s.checks, check)
@@ -753,6 +757,124 @@ func TestADeadlineThatStopsTheInvocationBetweenRunsExitsTwo(t *testing.T) {
 	}
 }
 
+// targetWithoutTimeouts is the toy target declaring no timeouts, so that it
+// takes the defaults.
+func targetWithoutTimeouts(t *testing.T) string {
+	t.Helper()
+	toy, err := filepath.Abs("../../targets/toy-widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := fmt.Sprintf(`name: toy-widget
+crds:
+  - %s/crds/
+primary: toy.botbox/v1/Widget
+sample: %s/widget.yaml
+manages:
+  - v1/ConfigMap
+launch:
+  binary: bin/toy-widget
+`, toy, toy)
+	path := filepath.Join(t.TempDir(), "target.yaml")
+	if err := os.WriteFile(path, []byte(declared), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// Ten runs at the default timeouts outlast a fixed deadline of 4m. Without
+// --deadline, the runs get what they can take, and a sequence botbox drew gets
+// time to be minimized.
+func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
+	targetFile := targetWithoutTimeouts(t)
+	loaded, err := target.Load(targetFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sequence := writeSequence(t, 1)
+	for _, test := range []struct {
+		name      string
+		args      []string
+		minimizes bool
+	}{
+		{"drawn runs", []string{"run", "--runs", "10", "--seed", "1"}, true},
+		{"a named sequence", []string{"run", sequence}, false},
+		{"a replay", []string{"replay", sequence}, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			session := &fakeSession{}
+			args := slices.Concat(test.args[:1], []string{"--target", targetFile, "--out", t.TempDir()}, test.args[1:])
+			before := time.Now()
+
+			code, stdout, stderr := invokeWith(t, session, countingGenerator(nil, run.OpCreate, run.OpSettle), args...)
+
+			after := time.Now()
+			if code != exitOK {
+				t.Fatalf("botbox %v exited %d: %s", args, code, stderr)
+			}
+			var want time.Duration
+			for _, sequence := range session.sequences {
+				want += run.Bound(loaded, sequence)
+			}
+			if test.minimizes {
+				want += minimizing
+			}
+			if deadline := session.deadlines[0]; deadline.Before(before.Add(want)) || deadline.After(after.Add(want)) {
+				t.Errorf("The runs had %v, want %v.", deadline.Sub(before), want)
+			}
+			if !strings.Contains(stdout, "the deadline is "+want.String()) {
+				t.Errorf("botbox %v printed %q, want the deadline of %v.", args, stdout, want)
+			}
+		})
+	}
+}
+
+func TestAGivenDeadlineIsTheInvocations(t *testing.T) {
+	session := &fakeSession{}
+	before := time.Now()
+
+	code, stdout, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "2", "--deadline", "1m")
+
+	after := time.Now()
+	if code != exitOK {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	if deadline := session.deadlines[0]; deadline.Before(before.Add(time.Minute)) || deadline.After(after.Add(time.Minute)) {
+		t.Errorf("The runs had %v, want the 1m given.", deadline.Sub(before))
+	}
+	if strings.Contains(stdout, "the deadline is") {
+		t.Errorf("botbox run printed %q, and the deadline was given.", stdout)
+	}
+}
+
+// No flag set a derived deadline, so what it stopped says botbox derived it.
+func TestADerivedDeadlineSaysSoWhereItStops(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		failure error
+		want    string
+	}{
+		{"a run", fmt.Errorf("op 0 (settle): %w", context.DeadlineExceeded), "run 1: the derived deadline of "},
+		{"the invocation", nil, "the derived deadline of "},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithDeadline(t.Context(), time.Now())
+			defer cancel()
+			session := &fakeSession{failures: []error{test.failure}}
+
+			code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
+				"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3", "--seed", "1")
+
+			if code != exitError {
+				t.Errorf("botbox run exited %d, want %d.", code, exitError)
+			}
+			if !strings.Contains(stderr, test.want) || strings.Contains(stderr, "--deadline") {
+				t.Errorf("botbox run printed %q on stderr, want %q.", stderr, test.want)
+			}
+		})
+	}
+}
+
 func TestAnInterruptBeforeTheFirstRunStartsNone(t *testing.T) {
 	ctx, cancel := context.WithCancelCause(t.Context())
 	cancel(interrupt{syscall.SIGINT})
@@ -1270,7 +1392,7 @@ func TestParseReadsTheFlagsOfSection11(t *testing.T) {
 	if opts.target != "t.yaml" || opts.runs != 3 || opts.seed != 42 || opts.out != "elsewhere" {
 		t.Errorf("parse read %+v.", opts)
 	}
-	if opts.deadline.String() != "1m30s" || opts.kubeconfig != "kubeconfig" {
+	if opts.deadline.String() != "1m30s" || !opts.deadlineGiven || opts.kubeconfig != "kubeconfig" {
 		t.Errorf("parse read the deadline %v and the kubeconfig %q.", opts.deadline, opts.kubeconfig)
 	}
 	if !slices.Equal(opts.launchArgs, []string{"--bug=1"}) {
@@ -1289,15 +1411,15 @@ func TestParseReadsTheSequenceFiles(t *testing.T) {
 	}
 }
 
-func TestParseDefaultsTheDeadlineAndTheOutputDirectory(t *testing.T) {
+func TestParseDefaultsTheOutputDirectoryAndLeavesTheDeadlineToDerive(t *testing.T) {
 	opts, _, err := parse([]string{"replay", "--target", "t.yaml", "a.json"})
 
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)
 	}
-	if opts.deadline != defaultDeadline || opts.out != defaultOut {
-		t.Errorf("parse defaulted to the deadline %v and the directory %q, want %v and %q.",
-			opts.deadline, opts.out, defaultDeadline, defaultOut)
+	if opts.deadlineGiven || opts.out != defaultOut {
+		t.Errorf("parse read a deadline of %v and defaulted to the directory %q, want no deadline and %q.",
+			opts.deadline, opts.out, defaultOut)
 	}
 }
 

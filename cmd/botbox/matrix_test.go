@@ -436,6 +436,34 @@ func TestMatrixNamesTheRunAnInterruptStopped(t *testing.T) {
 	}
 }
 
+// A matrix minimizes nothing, so its runs get what they can take.
+func TestMatrixDerivesItsDeadlineFromItsRuns(t *testing.T) {
+	toy, err := target.Load(toyTargetYAML)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session := &fakeSession{results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, true)}}
+	before := time.Now()
+
+	code, stdout, stderr := invoke(t, session, "matrix",
+		"--target", toyTargetYAML, "--sequences", bugSequences(t, 0, 1), "--out", matrixFile(t))
+
+	after := time.Now()
+	if code != exitOK {
+		t.Fatalf("botbox matrix exited %d: %s", code, stderr)
+	}
+	var want time.Duration
+	for _, sequence := range session.sequences {
+		want += run.Bound(toy, sequence)
+	}
+	if deadline := session.deadlines[0]; deadline.Before(before.Add(want)) || deadline.After(after.Add(want)) {
+		t.Errorf("The runs had %v, want %v.", deadline.Sub(before), want)
+	}
+	if !strings.Contains(stdout, "the deadline is "+want.String()) {
+		t.Errorf("botbox matrix printed %q, want the deadline of %v.", stdout, want)
+	}
+}
+
 func TestMatrixConfigurationErrorsExitTwo(t *testing.T) {
 	for _, test := range []struct {
 		name      string

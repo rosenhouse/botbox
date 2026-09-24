@@ -99,6 +99,11 @@ func TestValidateNamesTheControlPlaneBinaryItCannotRun(t *testing.T) {
 			t.Setenv("PATH", t.TempDir())
 			return []string{"TEST_ASSET_ETCD is my-etcd, and envtest found no my-etcd on PATH"}
 		}},
+		{"TEST_ASSET_ETCD is the root directory", func(t *testing.T) []string {
+			installControlPlane(t, "etcd", "kube-apiserver")
+			t.Setenv("TEST_ASSET_ETCD", "/")
+			return []string{"TEST_ASSET_ETCD is /, and / is not executable"}
+		}},
 		{"the directory holds etcd alone", func(t *testing.T) []string {
 			dir := installControlPlane(t, "etcd")
 			return []string{filepath.Join(dir, "kube-apiserver")}

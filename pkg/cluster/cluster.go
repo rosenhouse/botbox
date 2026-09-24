@@ -78,7 +78,7 @@ func findBinary(name string) error {
 // cannotRun says why envtest cannot run path, or is empty if it can. Like
 // os/exec, it looks a name with no slash up on PATH.
 func cannotRun(name, path string) string {
-	if filepath.Base(path) == path {
+	if !strings.Contains(path, "/") {
 		if _, err := exec.LookPath(path); err != nil {
 			return fmt.Sprintf("envtest found no %s on PATH", path)
 		}

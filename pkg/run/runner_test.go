@@ -558,6 +558,41 @@ func TestRunChangesDeletesAndRestoresAFixture(t *testing.T) {
 	}
 }
 
+func TestAnOpRestoredAFixtureOnlyWhereACreateSucceeded(t *testing.T) {
+	declared := withSecret()
+	other := declared.Fixtures[0].DeepCopy()
+	other.SetName("other")
+	declared.Fixtures = append(declared.Fixtures, other)
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpDeleteFixture, Kind: "v1/Secret", Name: "token", Until: &Until{Op: 3}},
+		Op{Type: OpDeleteFixture, Kind: "v1/Secret", Name: "other", Until: &Until{Op: 3}},
+		Op{Type: OpSettle},
+	)
+	for _, test := range []struct {
+		failing  string
+		restored bool
+	}{
+		{failing: "token", restored: false},
+		{failing: "other", restored: true},
+	} {
+		t.Run("where the restore of "+test.failing+" fails", func(t *testing.T) {
+			h := newFakeHarness()
+			refused := errors.New("the API server refused the create")
+			h.fail["createFixture v1/Secret "+test.failing+" map[token:czNjcjN0]"] = refused
+
+			result, err := runSequence(t.Context(), declared, sequence, Options{Check: &fakeChecker{}}, h)
+
+			if !errors.Is(err, refused) {
+				t.Fatalf("The run returned %v, want the refused create.", err)
+			}
+			if restored := result.Timeline.Ops[3].Restored; restored != test.restored {
+				t.Errorf("Op 3 restored a fixture: %t, want %t.", restored, test.restored)
+			}
+		})
+	}
+}
+
 func TestRunRefusesAnOpOnAFixtureTheTargetDoesNotDeclare(t *testing.T) {
 	sequence := sequenceOf(
 		Op{Type: OpCreate, Obj: widget("widget")},

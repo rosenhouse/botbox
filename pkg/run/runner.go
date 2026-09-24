@@ -513,17 +513,20 @@ func (r *runner) applyToFixture(ctx context.Context, op Op) error {
 }
 
 // restoreFixtures creates again, as botbox last wrote them, the fixtures
-// deleted until this op, and reports whether there were any.
+// deleted until this op, and reports whether it created any.
 func (r *runner) restoreFixtures(ctx context.Context, op int) (bool, error) {
 	var gone []Op
+	restored := false
 	for _, deleted := range r.deleted {
 		if deleted.Until.Op > op {
 			gone = append(gone, deleted)
-		} else if err := r.h.createFixture(ctx, r.fixtures[deleted.fixture()]); err != nil {
-			return true, err
+			continue
 		}
+		if err := r.h.createFixture(ctx, r.fixtures[deleted.fixture()]); err != nil {
+			return restored, err
+		}
+		restored = true
 	}
-	restored := len(gone) < len(r.deleted)
 	r.deleted = gone
 	return restored, nil
 }

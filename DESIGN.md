@@ -422,12 +422,13 @@ took an object inside, G5 for a `Restart` missing a snapshot or with a change of
 or a fault between its snapshots, and G7 for an object a `DeleteManaged` deleted that did
 not come back, where the op followed such a change before the run converged or followed a
 `Restart` the target had not yet answered, or where a fault reached into the op or its
-wait. The Runner carries the last checkpoint's notes out and `botbox` prints them at the
-end of the run, because a check that was skipped otherwise reads like one that passed. G5
-also notes an `equalIgnore` path it could not follow (§8.1), since it then compares a
-field the target meant it to skip. The Runner also notes each ownerReference the collector
-could not resolve (§5.8), since the object that carries it stays, and G3 would report it
-without saying why.
+wait or the target was still owed time to recover from one where the wait ended. The
+Runner carries the last checkpoint's notes out and `botbox` prints them at the end of the
+run, because a check that was skipped otherwise reads like one that passed. G5 also notes
+an `equalIgnore` path it could not follow (§8.1), since it then compares a field the
+target meant it to skip. The Runner also notes each ownerReference the collector could not
+resolve (§5.8), since the object that carries it stays, and G3 would report it without
+saying why.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2, G5 and G7 need none of their own, but they
@@ -466,13 +467,14 @@ kind and name satisfies G7, whatever its UID and content, since a recreated obje
 a new UID. Where none exists, G7 does not judge an op where no primary CR is live, or
 where the CR is being deleted, when the wait ends: nothing asks for the object back. It
 notes an op where botbox changed the CR or a managed object after the last settle wait
-that converged, since the target may then have meant to delete the object itself, and one
-where a fault was active during the op or its wait. It also notes an op that follows a
-`Restart` where the target requested nothing between the two but leader election's leases
-and lease candidates, and paths that name no resource. botbox has no other sign that the
-target is back (§5.1), and a process starting up or waiting to lead requests only those. A
-violation quotes the object's history and the managed objects where the wait ended, which
-show an object recreated under a new name.
+that converged, since the target may then have meant to delete the object itself. It
+notes one where a fault was active during the op or its wait, or where the wait ended
+while the target was still owed time to recover from a fault. It also notes an op that
+follows a `Restart` where the target requested nothing between the two but leader
+election's leases and lease candidates, and paths that name no resource. botbox has no
+other sign that the target is back (§5.1), and a process starting up or waiting to lead
+requests only those. A violation quotes the object's history and the managed objects where
+the wait ended, which show an object recreated under a new name.
 
 ## 7. Sequence format
 
@@ -1377,8 +1379,11 @@ built from source and run as a black-box binary.
   a rename, so neither lists Secret. G7 notes an op that follows a change of botbox's
   before the run converged, because the target may have meant to delete that object
   itself, as the toy does on a scale-down. It notes one where a fault was active during
-  the op or its wait, as every check ignores a fault's window, and it does not judge an op
-  while no CR is live. An object that is back satisfies G7 before any of these, whatever
+  the op or its wait, as every check ignores a fault's window, and one whose wait ended
+  while the target was still owed time to recover from a fault. The Runner stops a fault
+  that runs until an op just before it applies the op, and the toy's informer retried its
+  list 4 s after such a fault stopped, when G7 had already failed it. G7 does not judge an
+  op while no CR is live. An object that is back satisfies G7 before any of these, whatever
   the fault or the change did. A `Restart` gives botbox no sign that the target is back,
   so a settle wait after one could converge while the target was still starting, or
   waiting out the lease its killed predecessor held. G7 then failed the correct toy behind

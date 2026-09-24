@@ -245,27 +245,45 @@ func TestG7IgnoresAnOpWhoseWaitNeverEnded(t *testing.T) {
 }
 
 // A fault that ends while botbox deletes the object can still hide the deletion
-// from the target.
+// from the target, and so can one the target is still recovering from.
 func TestG7NotesAnObjectAFaultMayHaveKeptAway(t *testing.T) {
-	const wantNote = "G7 is not evaluated for op 1 (deleteManaged): a fault was active during it or the wait after it"
+	const wantNote = "G7 is not evaluated for op 1 (deleteManaged): a fault was active during it or the wait after it, " +
+		"or the target was still owed time to recover from one where the wait ended"
 	for _, c := range []struct {
 		name string
 		in   invariant.Input
+		want string
 	}{
 		{"in the wait", childDeleted().
 			fault(10050*time.Millisecond, 11*time.Second).
 			checkpoint(16*time.Second, invariant.Expired).
-			through(16 * time.Second)},
+			through(16 * time.Second), wantNote},
 		{"during the op alone", childDeleted().
 			fault(9*time.Second, 10050*time.Millisecond).
 			checkpoint(12100*time.Millisecond, invariant.Converged).
 			waitBegan(10100 * time.Millisecond).
-			through(12100 * time.Millisecond)},
+			through(12100 * time.Millisecond), wantNote},
+		// The Runner stops a fault that runs until an op just before it
+		// applies the op. The target is owed until 20.98s.
+		{"that stopped as the op began", childDeleted().
+			fault(4*time.Second, 9990*time.Millisecond).
+			checkpoint(12100*time.Millisecond, invariant.Converged).
+			through(12100 * time.Millisecond), wantNote},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			noted(t, invariant.SelfHealing, c.in, wantNote)
+			noted(t, invariant.SelfHealing, c.in, c.want)
 		})
 	}
+}
+
+// A fault from 3s to 5s leaves the target owed until 12s, where the wait ends.
+func TestG7FiresOnceTheTargetHadRecoveredFromAFault(t *testing.T) {
+	in := childDeleted().
+		fault(3*time.Second, 5*time.Second).
+		checkpoint(12*time.Second, invariant.Converged).
+		through(12 * time.Second)
+
+	fired(t, invariant.SelfHealing, in)
 }
 
 // The update scales the toy down to one child before it settles, so the

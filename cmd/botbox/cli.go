@@ -42,8 +42,8 @@ const (
 
 const usage = `botbox exercises a controller against the generic invariants of DESIGN.md §6.
 
-  botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]
-  botbox replay --target <yaml> [--out DIR] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>
+  botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]
+  botbox replay --target <yaml> [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>
   botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...
   botbox version
 `
@@ -100,6 +100,7 @@ type options struct {
 	target        string
 	sequences     string
 	out           string
+	junit         string
 	kubeconfig    string
 	deadline      time.Duration
 	deadlineGiven bool
@@ -174,6 +175,9 @@ func (c *cli) exercise(ctx context.Context, opts options, paths []string) int {
 	}
 	record.finish(ctx, code, time.Now())
 	c.warn(record.write(out.Dir()))
+	if opts.junit != "" {
+		c.warn(record.writeJUnit(opts.junit, out.Dir()))
+	}
 	// A second signal kills botbox at once, and stopping the cluster takes
 	// seconds, so the summary comes first.
 	if s != nil {
@@ -688,6 +692,9 @@ func (o *options) flags() *flag.FlagSet {
 		flags.StringVar(&o.sequences, "sequences", "", "the directory holding one b<id>.json per seeded bug")
 	} else {
 		flags.StringVar(&o.out, "out", defaultOut, "where failing runs are written")
+	}
+	if o.command != "matrix" {
+		flags.StringVar(&o.junit, "junit", "", "a JUnit XML file to write each run's outcome to")
 	}
 	if o.command == "run" {
 		flags.IntVar(&o.runs, "runs", defaultRuns, "how many sequences to draw and run")

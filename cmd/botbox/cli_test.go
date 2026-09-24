@@ -1607,7 +1607,7 @@ func TestTheReplayCommandQuotesEveryOtherByte(t *testing.T) {
 // carries it, or it does not. This test makes its author say which.
 func TestEveryFlagIsReplayedOrSelectsNothing(t *testing.T) {
 	replayed := []string{"target", "kubeconfig", "launch-arg"}
-	inert := []string{"runs", "seed", "out", "deadline", "sequences"}
+	inert := []string{"runs", "seed", "out", "deadline", "sequences", "junit"}
 	for _, command := range []string{"run", "replay", "matrix"} {
 		(&options{command: command}).flags().VisitAll(func(f *flag.Flag) {
 			if !slices.Contains(replayed, f.Name) && !slices.Contains(inert, f.Name) {

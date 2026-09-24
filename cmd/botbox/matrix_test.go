@@ -459,8 +459,9 @@ func TestMatrixDerivesItsDeadlineFromItsRuns(t *testing.T) {
 	if deadline := session.deadlines[0]; deadline.Before(before.Add(want)) || deadline.After(after.Add(want)) {
 		t.Errorf("The runs had %v, want %v.", deadline.Sub(before), want)
 	}
-	if !strings.Contains(stdout, "the deadline is "+want.String()) {
-		t.Errorf("botbox matrix printed %q, want the deadline of %v.", stdout, want)
+	says := fmt.Sprintf("the deadline is %s: these 3 runs can take that long at the target's timeouts. --deadline sets another.\n", want)
+	if !strings.Contains(stdout, says) {
+		t.Errorf("botbox matrix printed %q, want %q.", stdout, says)
 	}
 }
 

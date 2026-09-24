@@ -792,14 +792,17 @@ func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
 		t.Fatal(err)
 	}
 	sequence := writeSequence(t, 1)
+	named := "the deadline is %[1]s: this run can take that long at the target's timeouts. --deadline sets another.\n"
 	for _, test := range []struct {
-		name      string
-		args      []string
-		minimizes bool
+		name       string
+		args       []string
+		minimizing time.Duration
+		says       string
 	}{
-		{"drawn runs", []string{"run", "--runs", "10", "--seed", "1"}, true},
-		{"a named sequence", []string{"run", sequence}, false},
-		{"a replay", []string{"replay", sequence}, false},
+		{"drawn runs", []string{"run", "--runs", "10", "--seed", "1"}, 4 * time.Minute,
+			"the deadline is %[1]s: these 10 runs can take %[2]s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.\n"},
+		{"a named sequence", []string{"run", sequence}, 0, named},
+		{"a replay", []string{"replay", sequence}, 0, named},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			session := &fakeSession{}
@@ -812,18 +815,16 @@ func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
 			if code != exitOK {
 				t.Fatalf("botbox %v exited %d: %s", args, code, stderr)
 			}
-			var want time.Duration
+			var runs time.Duration
 			for _, sequence := range session.sequences {
-				want += run.Bound(loaded, sequence)
+				runs += run.Bound(loaded, sequence)
 			}
-			if test.minimizes {
-				want += minimizing
-			}
+			want := runs + test.minimizing
 			if deadline := session.deadlines[0]; deadline.Before(before.Add(want)) || deadline.After(after.Add(want)) {
 				t.Errorf("The runs had %v, want %v.", deadline.Sub(before), want)
 			}
-			if !strings.Contains(stdout, "the deadline is "+want.String()) {
-				t.Errorf("botbox %v printed %q, want the deadline of %v.", args, stdout, want)
+			if says := fmt.Sprintf(test.says, want, runs); !strings.Contains(stdout, says) {
+				t.Errorf("botbox %v printed %q, want %q.", args, stdout, says)
 			}
 		})
 	}

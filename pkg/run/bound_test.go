@@ -13,8 +13,9 @@ import (
 // the Runner asks of it.
 type waitingHarness struct {
 	*fakeHarness
-	timeouts target.Timeouts
-	waited   time.Duration
+	timeouts   target.Timeouts
+	waited     time.Duration
+	stepsUntil time.Time
 }
 
 // newWaitingHarness counts the start's wait for a kubeconfig cluster's
@@ -44,6 +45,12 @@ func (w *waitingHarness) awaitCRGone(ctx context.Context, name string) error {
 func (w *waitingHarness) awaitClean(ctx context.Context, within time.Duration) (bool, error) {
 	w.waited += within
 	return w.fakeHarness.awaitClean(ctx, within)
+}
+
+// deleteCR records until when the teardown's steps may run.
+func (w *waitingHarness) deleteCR(ctx context.Context, name string) error {
+	w.stepsUntil, _ = ctx.Deadline()
+	return w.fakeHarness.deleteCR(ctx, name)
 }
 
 // restart waits a grace period for the killed target to be reaped.
@@ -122,6 +129,22 @@ func TestBoundCoversTheBackoffOfAnExitAFaultExcused(t *testing.T) {
 	}
 	if bound := Bound(defaults, sequence); bound < h.waited {
 		t.Errorf("Bound is %v, and the Runner's waits can take %v.", bound, h.waited)
+	}
+}
+
+// The teardown's steps may run until T_stable, T_delete and 30s past where its
+// quiet window opens, which is what Bound gives them.
+func TestTheTeardownsStepsRunOnABudget(t *testing.T) {
+	h := newWaitingHarness(testTimeouts)
+
+	result, err := runSequence(t.Context(), toyTarget, sequenceOf(createOp), Options{Check: &fakeChecker{}}, h)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	budget := testTimeouts.Stable + testTimeouts.Delete + 30*time.Second
+	if steps := h.stepsUntil.Sub(result.Timeline.Quiet.Start); steps > budget || steps < budget-time.Second {
+		t.Errorf("The teardown's steps had %v, want %v.", steps, budget)
 	}
 }
 

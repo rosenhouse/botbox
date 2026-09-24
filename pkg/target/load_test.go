@@ -553,14 +553,14 @@ func TestLoadRefusesAFixtureThatNamesANamespace(t *testing.T) {
 }
 
 func TestLoadLaunchEnv(t *testing.T) {
-	path := writeTarget(t, minimalTargetWithEnv+"    WATCH_NAMESPACE: $NAMESPACE\n    EMPTY: ''\n    UNSET:\n    UMASK: '0022'\n    PORT: 8080\n",
+	path := writeTarget(t, minimalTargetWithEnv+"    WATCH_NAMESPACE: $NAMESPACE\n    EMPTY: ''\n    NULL_IS_EMPTY:\n    UMASK: '0022'\n    PORT: 8080\n",
 		map[string]string{"widget.yaml": sampleWidget})
 
 	loaded, err := target.Load(path)
 	if err != nil {
 		t.Fatalf("Load rejected launch.env: %v", err)
 	}
-	want := map[string]string{"WATCH_NAMESPACE": "$NAMESPACE", "EMPTY": "", "UNSET": "", "UMASK": "0022", "PORT": "8080"}
+	want := map[string]string{"WATCH_NAMESPACE": "$NAMESPACE", "EMPTY": "", "NULL_IS_EMPTY": "", "UMASK": "0022", "PORT": "8080"}
 	if !reflect.DeepEqual(loaded.Launch.Env, want) {
 		t.Errorf("Load read launch.env %v, want %v.", loaded.Launch.Env, want)
 	}

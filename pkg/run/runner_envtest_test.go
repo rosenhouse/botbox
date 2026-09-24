@@ -76,6 +76,27 @@ const createThenDeleteManaged = `{
   ]
 }`
 
+const createThenRestart = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "restart"},
+    {"i": 2, "t": "settle"}
+  ]
+}`
+
+const restartThenDeleteManaged = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "restart"},
+    {"i": 2, "t": "settle"},
+    {"i": 3, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
+  ]
+}`
+
 // checkpointState is what a check saw when it ran.
 type checkpointState struct {
 	op          int
@@ -476,6 +497,51 @@ func TestRunner(t *testing.T) {
 		}
 	})
 
+	// Only its requests show botbox that a restarted target is back.
+	t.Run("passes a target that takes a while to come back from a restart", func(t *testing.T) {
+		const delay = 2200 * time.Millisecond
+		toy := loadTarget(t, restartsAfter(t, binary, fmt.Sprintf("sleep %v", delay.Seconds())))
+		toy.Timeouts = target.Timeouts{Settle: 8 * time.Second, Stable: time.Second, Delete: 10 * time.Second}
+
+		result, err := run.Run(ctx, toy, readSequence(t, restartThenDeleteManaged), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy runs without a bug.", result.Violation)
+		}
+		if len(result.Notes) > 0 {
+			t.Errorf("The run noted %q, want every check to judge.", result.Notes)
+		}
+		if wait := result.Timeline.Ops[2].Settled; wait == nil || !wait.Converged || wait.Window.End.Sub(wait.Window.Start) < delay {
+			t.Errorf("The settle wait after the restart was %+v, want one that converged once the toy was back, after %v.", wait, delay)
+		}
+	})
+
+	t.Run("fails G4 on a target that never comes back from a restart", func(t *testing.T) {
+		toy := loadTarget(t, restartsAfter(t, binary, "exec sleep 600"))
+		toy.Timeouts = target.Timeouts{Settle: 3 * time.Second, Stable: time.Second, Delete: 2 * time.Second}
+
+		result, err := run.Run(ctx, toy, readSequence(t, createThenRestart), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation == nil || result.Violation.ID != "G4" {
+			t.Fatalf("The run reported %v, want G4.", result.Violation)
+		}
+		const want = "the settle wait after op 2 (settle) expired with no fault active"
+		const why = "but the target had requested no resource outside leader election since op 1 (restart)"
+		if statement := result.Violation.Statement; !strings.HasPrefix(statement, want) || !strings.Contains(statement, why) {
+			t.Errorf("G4 says %q, want it to begin %q and say %q.", statement, want, why)
+		}
+	})
+
 	// A target that dies mid-run takes the run with it, and no wait outlives
 	// it (DESIGN.md §5.5).
 	t.Run("ends the settle wait where the target stopped", func(t *testing.T) {
@@ -517,6 +583,19 @@ func diesAfter(t *testing.T, d time.Duration, says string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "dies-after")
 	script := fmt.Sprintf("#!/bin/sh\nsleep %v\necho %q >&2\nexit 1\n", d.Seconds(), says)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// restartsAfter is the toy behind a script that runs then before every start
+// but the first.
+func restartsAfter(t *testing.T, toy, then string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path, started := filepath.Join(dir, "restarts-after"), filepath.Join(dir, "started")
+	script := fmt.Sprintf("#!/bin/sh\nif [ -e %q ]; then %s; fi\n: > %q\nexec %q \"$@\"\n", started, then, started, toy)
 	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

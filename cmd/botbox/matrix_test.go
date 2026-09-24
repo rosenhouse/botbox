@@ -247,22 +247,22 @@ func TestMatrixFailsOnARowThatBreaksTheAcceptance(t *testing.T) {
 		{
 			name:    "a bug nothing caught",
 			results: []run.Result{recorded(t, true), recorded(t, true), recorded(t, true)},
-			want:    []string{"B1: b1.json under --bug=1 fired nothing"},
+			want:    []string{"B1: b1.json under --bug=1 fired nothing; reproduce it with\n  botbox replay"},
 		},
 		{
 			name:    "a control something caught",
 			results: []run.Result{recorded(t, false), recorded(t, false), recorded(t, true)},
-			want:    []string{"B0: b0.json fired G4, G6"},
+			want:    []string{"B0: b0.json fired G4, G6; reproduce it with\n  botbox replay"},
 		},
 		{
 			name:    "a sequence something caught against the toy with no bug",
 			results: []run.Result{recorded(t, true), recorded(t, false), recorded(t, false)},
-			want:    []string{"B1: b1.json without --bug=1 fired G4, G6"},
+			want:    []string{"B1: b1.json without --bug=1 fired G4, G6; reproduce it with\n  botbox replay"},
 		},
 		{
 			name:    "both runs of one sequence",
 			results: []run.Result{recorded(t, true), recorded(t, true), recorded(t, false)},
-			want:    []string{"B1: b1.json under --bug=1 fired nothing", "B1: b1.json without --bug=1 fired G4, G6"},
+			want:    []string{"B1: b1.json under --bug=1 fired nothing; reproduce it with\n  botbox replay", "B1: b1.json without --bug=1 fired G4, G6; reproduce it with\n  botbox replay"},
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -441,8 +441,8 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 			if _, err := os.Stat(out); !errors.Is(err, fs.ErrNotExist) {
 				t.Errorf("botbox matrix wrote %s, want no matrix of a run that errored.", out)
 			}
-			erred, finished := session.dirs[len(session.dirs)-1], session.dirs[:len(session.dirs)-1]
-			if want := "botbox: " + test.want + "\n  the run's files are in " + erred + "\n  run it again with\n"; !strings.Contains(stderr, want) {
+			kept, finished := session.dirs[len(session.dirs)-1], session.dirs[:len(session.dirs)-1]
+			if want := "botbox: " + test.want + "\n  the run's files are in " + kept + "\n  run it again with\n"; !strings.Contains(stderr, want) {
 				t.Errorf("botbox matrix reported\n%s\nwant\n%s", stderr, want)
 			}
 			commands := replayed(t, stderr)
@@ -450,14 +450,14 @@ func TestMatrixExitsTwoWhereARunErrors(t *testing.T) {
 				!slices.Equal(commands[0].sequences, []string{filepath.Join(sequences, test.replay)}) {
 				t.Errorf("botbox matrix printed the replay commands %+v, want one of %s with --x=1 and %v.", commands, test.replay, test.bugArgs)
 			}
-			if !strings.HasPrefix(erred, tmp+string(filepath.Separator)) {
-				t.Errorf("botbox matrix kept %s, want it under %s.", erred, tmp)
+			if !strings.HasPrefix(kept, tmp+string(filepath.Separator)) {
+				t.Errorf("botbox matrix kept %s, want it under %s.", kept, tmp)
 			}
-			if _, err := os.Stat(filepath.Join(erred, "target.log")); err != nil {
+			if _, err := os.Stat(filepath.Join(kept, "target.log")); err != nil {
 				t.Errorf("botbox matrix removed the target.log of the run that erred: %v", err)
 			}
-			if kept, err := os.Stat(filepath.Dir(erred)); err != nil || kept.Mode().Perm()&0o077 != 0 {
-				t.Errorf("botbox matrix kept %s where other users can read it (%v).", erred, err)
+			if parent, err := os.Stat(filepath.Dir(kept)); err != nil || parent.Mode().Perm()&0o077 != 0 {
+				t.Errorf("botbox matrix kept %s where other users can read it (%v).", kept, err)
 			}
 			for _, dir := range finished {
 				if _, err := os.Stat(dir); !errors.Is(err, fs.ErrNotExist) {

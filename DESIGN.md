@@ -94,12 +94,12 @@ In envtest mode the test cluster also includes botbox's garbage-collector emulat
 
 ```go
 type Launcher interface {
-    Start(ctx context.Context, kubeconfig string) error   // kubeconfig points at the proxy
-    Stop(ctx context.Context) error                       // graceful: SIGTERM, then SIGKILL after a grace period
-    Restart(ctx context.Context) error                    // crash: SIGKILL, then Start
+    Start(ctx context.Context, kubeconfig string) error                        // kubeconfig points at the proxy
+    Stop(ctx context.Context) error                                            // graceful: SIGTERM, then SIGKILL after a grace period
+    Restart(ctx context.Context) error                                         // crash: SIGKILL, then Start
     Supervise(ctx context.Context, onExit func(exit error, restart time.Time)) // until ctx ends, restart the target whenever it exits
-    Status() Status                                       // is the target still running, and why it stopped if not
-    Exited() <-chan struct{}                              // closed once the target has stopped and will not start again
+    Status() Status                                                            // is the target still running, and why it stopped if not
+    Exited() <-chan struct{}                                                   // closed once the target has stopped and will not start again
 }
 ```
 
@@ -260,27 +260,26 @@ The Runner executes one sequence:
 4. Tear down. Clear every active fault. If the target is still owed time to recover from
    a fault, which is so for a fault the teardown just cleared, wait for convergence as
    step 2 does and checkpoint where the wait ends. This recovery wait is judged as an op's
-   wait is. A run that ended at a
-   violation or a harness error gets none. Then wait `T_stable`, which is the last quiet
-   window (§6). Delete the primary CR if it still exists and wait for the G3 window. A
-   target that stopped for good, before supervision or because a restart failed, cleaned
-   nothing up, so the run ends as that harness error rather than at a verdict on the
-   deletion. G3 judges a target that is waiting to restart, and the notes carry its exits.
-   A run that ended at a harness error judges no deletion either, because its ops did not
-   all run. Then
-   force-remove any finalizer still present in the run namespace; the report notes each one
-   (D37). G3 judged the deletion window, which closed before this. Delete every remaining
-   object
-   in the namespace that botbox or the target created. Stop the target if it was started
-   for this run. Delete the namespace. Namespace names are never reused, so a namespace
-   that never finishes terminating (envtest, §5.8) is harmless.
+   wait is. A run that ended at a violation or a harness error gets none. Then wait
+   `T_stable`, which is the last quiet window (§6). Delete the primary CR if it still
+   exists and wait for the G3 window. A target that stopped for good, before supervision
+   or because a restart failed, cleaned nothing up, so the run ends as that harness error
+   rather than at a verdict on the deletion. G3 judges a target that is waiting to
+   restart, and the notes carry its exits. A run that ended at a harness error judges no
+   deletion either, because its ops did not all run. Then force-remove any finalizer still
+   present in the run namespace; the report notes each one (D37). G3 judged the deletion
+   window, which closed before this. Delete every remaining object in the namespace that
+   botbox or the target created. Stop the target if it was started for this run. Delete
+   the namespace. Namespace names are never reused, so a namespace that never finishes
+   terminating (envtest, §5.8) is harmless.
 
 **An abandoned run.** The deadline and an interrupt end the run's context (§11), and that
 ends every wait of the run, the teardown's included. The run is then abandoned where it
 is. Its teardown waits for nothing more and judges nothing, and a violation found before
-stands. It still deletes the CR, forces off the finalizers and empties the namespace. It
-stops the target without a grace period and deletes the namespace on a budget of its own.
-Supervision ends with the context, so the target does not restart.
+stands. It still deletes the CR, forces off the finalizers without noting them, and
+empties the namespace. It stops the target without a grace period and deletes the
+namespace on a budget of its own. Supervision ends with the context, so the target does
+not restart.
 
 Cleanup between runs never restarts the API server, because rapid's shrinker re-invokes
 the test function many times.
@@ -974,10 +973,12 @@ the proxy; the `Image` launcher. Separate design addendum.
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
   harness error, or a deadline that stopped the invocation before its last run.
   SIGINT, SIGTERM and SIGHUP interrupt the invocation. No further run starts, and the run
-  under way is abandoned (§5.5). botbox names its directory, stops what it started, and
-  then dies of the signal, so a shell reports 128 plus the signal's number. A second
-  signal kills botbox at once. A signal botbox was started ignoring, as under
-  `nohup`, stays ignored.
+  under way is abandoned (§5.5). `botbox run` and `botbox replay` name its directory, and
+  `botbox matrix` names its row. A run that failed before the interrupt reports its own
+  error. botbox ignores SIGPIPE from then on, stops what it started, and then dies of the
+  signal, so a shell reports 128 plus the signal's number. A second signal kills botbox at
+  once. A SIGHUP or SIGINT that botbox was started ignoring, as under `nohup`, stays
+  ignored.
 - **Output.** `--out` defaults to `botbox-out/`. Each invocation writes
   `<out>/<timestamp>-<seed>/`, taking the next free name where a second invocation of one
   seed opens a directory in the same second. Each failing run writes `run-<n>/` under it
@@ -1559,17 +1560,19 @@ built from source and run as a black-box binary.
   removes, so a correctly owned Job failed G3 too. botbox therefore also turns off the API
   server's garbage collector, which adds those finalizers.
 - **D@53 An interrupt abandons the run under way, and botbox dies of the signal once it
-  has stopped what it started.** botbox handled no signal. After `kill -TERM` or a Ctrl-C,
-  etcd, kube-apiserver and the target outlived it, holding about 300 MB. envtest's
-  directories stayed in `TMPDIR`, and a kubeconfig cluster kept the run namespace. envtest
-  starts etcd and kube-apiserver in process groups of their own, so a terminal's Ctrl-C
-  never reaches them. SIGINT, SIGTERM and SIGHUP now end the invocation's context. GitHub
-  Actions sends SIGTERM 7.5 s after the SIGINT that cancels a job, and the teardown's
-  waits alone take `T_stable + T_delete`, so an abandoned run waits for nothing. A
-  context whose deadline has passed cannot report a later interrupt, so the deadline ends
-  the teardown's waits too. A run it cuts there exits 2, as §11 says of a run that
-  overruns it. It used to be judged past the deadline. A Ctrl-C also reaches the target,
-  so supervision ends with the context. botbox dies of the signal rather than exit 2, so
-  that a shell loop, make and `timeout` see an interrupt. `signal.Notify` would undo
-  `nohup`, so botbox leaves alone a signal it was started ignoring. A SIGKILLed botbox
-  still leaves the control plane and the target running.
+  has stopped what it started.** Only botbox takes back what it started: etcd,
+  kube-apiserver, the target, the run namespace and envtest's directories in `TMPDIR`.
+  envtest starts etcd and kube-apiserver in process groups of their own, so a terminal's
+  Ctrl-C never reaches them. SIGINT, SIGTERM and SIGHUP end the invocation's context.
+  GitHub Actions cancels a step by sending its shell SIGINT and, 7.5 s later, SIGTERM.
+  The shell passes neither on, so the step must `exec` botbox. The teardown's waits alone
+  take `T_stable + T_delete`, so an abandoned run waits for nothing. A context whose
+  deadline has passed cannot report a later interrupt, so the deadline ends the
+  teardown's waits too, and a run it cuts there exits 2 (§11). A Ctrl-C also reaches the
+  target, so supervision ends with the context. botbox blames the interrupt only for a
+  wait it ended and a target that stopped, so a run that failed on its own says why.
+  botbox dies of the signal rather than exit 2, so that a shell loop, make and `timeout`
+  see an interrupt. A Ctrl-C also kills a `tee` that reads botbox's output, so botbox
+  ignores SIGPIPE once interrupted. `signal.Notify` would undo `nohup`, so botbox leaves
+  alone a SIGHUP or SIGINT it was started ignoring. Go keeps no other inherited SIG_IGN.
+  A SIGKILLed botbox still leaves the control plane and the target running.

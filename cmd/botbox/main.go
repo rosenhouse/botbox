@@ -19,8 +19,8 @@ func main() {
 
 // interruptible runs the invocation until SIGINT, SIGTERM or SIGHUP interrupts
 // it. botbox then stops what it started and dies of that signal, as a shell
-// expects. A second signal kills it at once. A signal botbox started out
-// ignoring, as under nohup, stays ignored.
+// expects. A second signal kills it at once. A SIGHUP or SIGINT that botbox
+// started out ignoring, as under nohup, stays ignored.
 func (c *cli) interruptible(args []string) int {
 	ctx, cancel := context.WithCancelCause(context.Background())
 	defer cancel(nil)

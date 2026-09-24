@@ -432,7 +432,7 @@ Exit 2 means botbox could not test your controller, and the message says what to
     index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
     echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 --index $index -p path)" >>"$GITHUB_ENV"
 - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
-- run: botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m
+- run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m
 ```
 
 `$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not. Give
@@ -441,11 +441,12 @@ before the last run, exits 2 rather than reporting a find. botbox stops within s
 deadline. Cache the control plane and the target as
 [.github/workflows/ci.yml](.github/workflows/ci.yml) does. The job needs no cluster and no registry.
 
-GitHub Actions cancels a job with SIGINT, and sends SIGTERM 7.5 s later. SIGINT, SIGTERM,
-SIGHUP and a terminal's Ctrl-C all stop botbox cleanly. It abandons the run under way, stops your controller
-and the control plane, deletes the run namespace, and names the unfinished run's directory. Then
-it dies of the signal. That takes a second or two. A second signal exits at once and leaves those
-processes running, as SIGKILL does.
+SIGINT, SIGTERM, SIGHUP and a terminal's Ctrl-C all stop botbox cleanly. It abandons the run
+under way, stops your controller and the control plane, and deletes the run namespace.
+`botbox run` and `botbox replay` name the unfinished run's directory. Then botbox dies of the
+signal. That takes a few seconds. A second signal kills botbox at once and leaves those processes
+running, as SIGKILL does. GitHub Actions cancels a job by sending the step's shell SIGINT and,
+7.5 s later, SIGTERM. The shell passes neither on, so the step above runs botbox with `exec`.
 
 Pin botbox to a commit, because `@latest` tracks main. Fix the seed on pull requests, and draw
 fresh seeds on a schedule, as [nightly.yml](.github/workflows/nightly.yml) does. A seed names a

@@ -35,8 +35,8 @@ type liveRun struct {
 	target    *target.Target
 	client    dynamic.Interface
 	resources map[schema.GroupVersionKind]schema.GroupVersionResource
-	// emptied are the kinds the teardown deletes: the target's and its
-	// fixtures'.
+	// emptied are the kinds the teardown forces finalizers off and deletes:
+	// the target's and its fixtures'.
 	emptied []schema.GroupVersionKind
 }
 
@@ -194,7 +194,7 @@ func (l *liveRun) awaitClean(ctx context.Context, within time.Duration) (bool, e
 func (l *liveRun) forceFinalizers(ctx context.Context) ([]string, error) {
 	var forced []string
 	var failures []error
-	for _, gvk := range l.target.WatchedKinds() {
+	for _, gvk := range l.emptied {
 		list, err := l.of(gvk).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			failures = append(failures, fmt.Errorf("listing the %s left behind: %w", kindName(gvk), err))

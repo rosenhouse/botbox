@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -356,6 +357,37 @@ func TestRunner(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("forces a fixture's finalizer off and notes it", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		held := fixtureSecret()
+		held.SetFinalizers([]string{"example.com/hold"})
+		toy.Fixtures = append(toy.Fixtures, held)
+
+		result, err := run.Run(ctx, toy, readSequence(t, oneCreate), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: &recordingChecker{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if want := []string{"v1/Secret " + fixtureName}; !slices.Equal(result.Timeline.Forced, want) {
+			t.Errorf("The teardown forced the finalizers off %v, want %v.", result.Timeline.Forced, want)
+		}
+		if want := "the teardown force-removed the finalizers of v1/Secret " + fixtureName; !slices.ContainsFunc(result.Notes, func(note string) bool {
+			return strings.HasPrefix(note, want)
+		}) {
+			t.Errorf("The run carried the notes %q, want one saying %q.", result.Notes, want)
+		}
+		client, err := dynamic.NewForConfig(testCluster.Config())
+		if err != nil {
+			t.Fatalf("Building a client failed: %v", err)
+		}
+		secrets := client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "secrets"}).Namespace(result.Timeline.Namespace)
+		if _, err := secrets.Get(ctx, fixtureName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Errorf("Reading the fixture after the run returned %v, want it gone.", err)
+		}
+	})
 
 	t.Run("notes an owner the collector cannot resolve", func(t *testing.T) {
 		toy := loadTarget(t, binary)

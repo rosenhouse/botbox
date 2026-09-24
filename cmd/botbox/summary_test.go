@@ -99,7 +99,7 @@ func sampleSummary(t *testing.T) *summary {
 	}, []string{"the proxy applied the fault of op 1 to no request", `P1 "status.ready <= 3 && has(spec)" is not evaluated`},
 		filepath.Join("botbox-out", "20260924T010203Z-7", "run-2"))
 
-	s.finish(context.Background(), exitViolation, start.Add(58*time.Second))
+	s.finish(context.Background(), exitViolation, start.Add(58*time.Second+123456*time.Nanosecond))
 	return s
 }
 

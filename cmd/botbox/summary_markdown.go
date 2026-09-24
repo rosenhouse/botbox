@@ -63,7 +63,7 @@ func (r runSummary) source() string {
 	if r.File == "" {
 		return "drawn"
 	}
-	return "`" + cell(r.File) + "`"
+	return "`" + strings.ReplaceAll(r.File, "|", `\|`) + "`"
 }
 
 // verdict is the check a run failed, or else its outcome.
@@ -119,8 +119,4 @@ func (r runSummary) details(md *strings.Builder) {
 			fmt.Fprintf(md, "- %s\n", note)
 		}
 	}
-}
-
-func cell(s string) string {
-	return strings.NewReplacer("|", `\|`, "\n", " ").Replace(s)
 }

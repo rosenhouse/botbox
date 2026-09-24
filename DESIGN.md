@@ -94,12 +94,12 @@ In envtest mode the test cluster also includes botbox's garbage-collector emulat
 
 ```go
 type Launcher interface {
-    Start(ctx context.Context, kubeconfig string) error // kubeconfig points at the proxy
-    Stop(ctx context.Context) error                     // graceful: SIGTERM, then SIGKILL after a grace period
-    Restart(ctx context.Context) error                  // crash: SIGKILL, then Start
+    Start(ctx context.Context, kubeconfig string) error   // kubeconfig points at the proxy
+    Stop(ctx context.Context) error                       // graceful: SIGTERM, then SIGKILL after a grace period
+    Restart(ctx context.Context) error                    // crash: SIGKILL, then Start
     Supervise(onExit func(exit error, restart time.Time)) // from now on, restart the target whenever it exits
-    Status() Status                    // is the target still running, and why it stopped if not
-    Exited() <-chan struct{}           // closed once the target has stopped and will not start again
+    Status() Status                                       // is the target still running, and why it stopped if not
+    Exited() <-chan struct{}                              // closed once the target has stopped and will not start again
 }
 ```
 
@@ -228,31 +228,31 @@ The Runner executes one sequence:
    Observer's history of the wait: `Ready` never held, held and then stopped, or held while
    the namespace kept changing within `T_stable`; or no CR was left to be ready. Where
    `Ready` held while the target waited to restart, or restarted within `T_stable`, it says
-   that instead. Where `Ready` held and nothing changed within `T_stable`, it says that. The Runner and the
-   engine raise it with one function, so they agree. A fault excuses it while active, which
-   is once the proxy has applied it and until the proxy stops (D36), and while the target
-   is still owed time to recover from it (§6). Until a settle wait has converged, normally
-   op 0's, a wait also ends where the target's process exits, and the Runner checks the
-   target is running before it applies each op. A target that stopped then ends the run as
-   a harness error naming the op it was at (§11): a bad flag or a taken port reads the same
-   way, and the ops behind it would run against nothing. The error quotes the line in
-   `target.log` that says why: the line the last Go panic opens with, or else the last line
-   above any stack trace, since a logger's trace ends in a frame. The log holds every
-   process a `restart` started, and the last one is the one that stopped. Where botbox had
-   created the CR and the target had requested a resource, the error says the CR may have
-   crashed the target and names the run's `sequence.json`, unless the target wrote that its
-   port was taken. Once a wait has converged, the target has shown it runs, and the
-   Launcher supervises it (§5.1). The run notes each exit and the line the target wrote as
-   it stopped. A wait does not converge while the target waits to restart, and a restart
-   counts as a change, so a restarted target runs for `T_stable` before a wait converges. A
-   target that exits again within `T_stable` of each restart therefore never converges,
-   even where it wrote its converged state first, and its wait expires as a G4 that counts
-   the exits since the target last converged and quotes the last. A target that runs
-   longer between exits can converge in between, until a backoff outlasts a wait. A target
-   that converges after an exit passes. An exit a fault excuses owes the target `T_settle`
-   past its restart (§6). Any other restart gives it no more time, and its startup requests
-   count toward G1 where they land in a quiet window (§6). A restart that fails ends the
-   run as the harness error above.
+   that instead. Where `Ready` held and nothing changed within `T_stable`, it says that.
+   The Runner and the engine raise it with one function, so they agree. A fault excuses it
+   while active, which is once the proxy has applied it and until the proxy stops (D36),
+   and while the target is still owed time to recover from it (§6). Until a settle wait has
+   converged, normally op 0's, a wait also ends where the target's process exits, and the
+   Runner checks the target is running before it applies each op. A target that stopped
+   then ends the run as a harness error naming the op it was at (§11): a bad flag or a
+   taken port reads the same way, and the ops behind it would run against nothing. The
+   error quotes the line in `target.log` that says why: the line the last Go panic opens
+   with, or else the last line above any stack trace, since a logger's trace ends in a
+   frame. The log holds every process a `restart` started, and the last one is the one that
+   stopped. Where botbox had created the CR and the target had requested a resource, the
+   error says the CR may have crashed the target and names the run's `sequence.json`,
+   unless the target wrote that its port was taken. Once a wait has converged, the target
+   has shown it runs, and the Launcher supervises it (§5.1). The run notes each exit and
+   the line the target wrote as it stopped. A wait does not converge while the target waits
+   to restart, and a restart counts as a change, so a restarted target runs for `T_stable`
+   before a wait converges. A target that exits again within `T_stable` of each restart
+   therefore never converges, even where it wrote its converged state first, and its wait
+   expires as a G4 that counts the exits since the target last converged and quotes the
+   last. A target that runs longer between exits can converge in between, until a backoff
+   outlasts a wait. A target that converges after an exit passes. An exit a fault excuses
+   owes the target `T_settle` past its restart (§6). Any other restart gives it no more
+   time, and its startup requests count toward G1 where they land in a quiet window (§6). A
+   restart that fails ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.

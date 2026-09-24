@@ -122,7 +122,10 @@ func (r runSummary) junit(class, dir string) junitCase {
 	switch r.Outcome {
 	case outcomeViolation:
 		c.Failure = &junitProblem{Type: r.Violation.ID, Message: r.Violation.Statement,
-			Body: fmt.Sprintf("%s\n%s holds the report and the evidence.", r.Violation.Evidence, files)}
+			Body: files + " holds the report and the evidence."}
+		if r.Violation.Evidence != "" {
+			c.Failure.Body = r.Violation.Evidence + "\n" + c.Failure.Body
+		}
 	case outcomeError, outcomeInterrupted:
 		c.Error = &junitProblem{Type: string(r.Outcome), Message: r.Error}
 		if r.Dir != "" {

@@ -300,6 +300,21 @@ func TestAJUnitFileThatCannotBeWrittenOnlyWarns(t *testing.T) {
 	}
 }
 
+func TestAJUnitFailureWithNoEvidenceNamesTheDirectory(t *testing.T) {
+	s := sampleSummary(t)
+	s.Runs[1].Violation.Evidence = ""
+	junit := filepath.Join(t.TempDir(), "junit.xml")
+
+	if err := s.writeJUnit(junit, "botbox-out"); err != nil {
+		t.Fatal(err)
+	}
+
+	suite, _ := readJUnit(t, junit)
+	if f := suite.Cases[1].Failure; f == nil || f.Body != "botbox-out/run-2 holds the report and the evidence." {
+		t.Errorf("Run 2 failed with %+v, want its directory named and nothing else.", f)
+	}
+}
+
 func TestJUnitKeepsItsForm(t *testing.T) {
 	encoded, err := sampleSummary(t).junit(filepath.Join("botbox-out", "20260924T010203Z-7"))
 	if err != nil {

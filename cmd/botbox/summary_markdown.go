@@ -40,7 +40,11 @@ func (s *summary) provenance() string {
 			ran++
 		}
 	}
-	said := fmt.Sprintf("botbox %s ran %d of %d runs from seed %d on %s", s.Botbox, ran, len(s.Runs), s.Seed, s.Cluster)
+	cluster := s.Cluster
+	if cluster == "kubeconfig" {
+		cluster = "the --kubeconfig cluster"
+	}
+	said := fmt.Sprintf("botbox %s ran %d of %d runs from seed %d on %s", s.Botbox, ran, len(s.Runs), s.Seed, cluster)
 	if len(s.LaunchArgs) > 0 {
 		args := make([]string, len(s.LaunchArgs))
 		for i, arg := range s.LaunchArgs {

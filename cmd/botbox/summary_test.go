@@ -414,6 +414,25 @@ func TestTheSummaryNamesTheSequenceFilesItRan(t *testing.T) {
 	if len(written.Runs) != 1 || written.Runs[0].File != path || written.Runs[0].Seed != 8675309 {
 		t.Errorf("The summary lists %+v, want the one run of %s.", written.Runs, path)
 	}
+	if md, _ := os.ReadFile(filepath.Join(summaryDir(t, out), "summary.md")); !strings.Contains(string(md), " on the --kubeconfig cluster.") {
+		t.Errorf("summary.md is\n%s\nwant it to say botbox ran on the --kubeconfig cluster.", md)
+	}
+}
+
+// The summary's seed is the one its directory is named for.
+func TestTheSummaryGivesTheSeedTheCallerGave(t *testing.T) {
+	out := t.TempDir()
+
+	code, _, stderr := invoke(t, &fakeSession{}, "run", "--target", toyTargetYAML, "--out", out, "--seed", "5", writeSequence(t, 8675309))
+
+	if code != exitOK {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	written := readSummary(t, out)
+	if !strings.HasSuffix(summaryDir(t, out), "-5") || written.Seed != 5 || written.Runs[0].Seed != 8675309 {
+		t.Errorf("%s holds a summary of seed %d, with run 1 of seed %d, want seed 5 and 8675309.",
+			summaryDir(t, out), written.Seed, written.Runs[0].Seed)
+	}
 }
 
 // A failing run's summary says what its report says, which may be of the

@@ -599,15 +599,15 @@ func (r *runner) targetStopped(status launch.Status) error {
 	case strings.Contains(said, "address already in use"):
 		err = fmt.Errorf("%w; another process holds that port, perhaps a concurrent run of this target, so give the target a free one in launch.args", err)
 	// A supervised target stops only where a restart failed, and a target that
-	// read no resource never saw the CR.
-	case r.cr != "" && r.converged.IsZero() && slices.ContainsFunc(r.h.requests(), readsAResource):
+	// requested no resource never saw the CR.
+	case r.cr != "" && r.converged.IsZero() && slices.ContainsFunc(r.h.requests(), namesAResource):
 		err = fmt.Errorf("%w; botbox had created the CR, so the CR may have crashed the target, and %s replays the run",
 			err, filepath.Join(r.dir, sequenceFile))
 	}
 	return err
 }
 
-func readsAResource(request proxy.Request) bool { return request.Resource != "" }
+func namesAResource(request proxy.Request) bool { return request.Resource != "" }
 
 // panicked opens the report a Go runtime writes on the way out.
 var panicked = []string{"panic: ", "fatal error: "}

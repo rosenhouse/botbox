@@ -246,8 +246,8 @@ func (b *Binary) reap(exited *process) {
 }
 
 // restartLater tells the supervisor why the target stopped and when it starts
-// again, then starts it once the backoff has passed. The caller holds b.mu, so that Stop and
-// Restart wait until the exit is heard.
+// again, then starts it once the backoff has passed. The caller holds b.mu, so
+// that Stop and Restart wait until the exit is heard.
 func (b *Binary) restartLater(exited *process) {
 	delay := b.backoff(b.restarts)
 	b.restarts++

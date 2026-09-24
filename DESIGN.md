@@ -966,17 +966,17 @@ the proxy; the `Image` launcher. Separate design addendum.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. The deadline abandons the run under way (§5.5), and the
   shrinker stops there and reports the smallest failing sequence it found. Without
-  `--deadline`, botbox derives the deadline and prints it: the longest the Runner's waits
-  can make each run take at the target's timeouts, plus 4m to minimize a failure where
+  `--deadline`, botbox derives the deadline and prints it: what each run's waits (§5.5)
+  can take at their longest, one run after another, plus 4m to minimize a failure where
   botbox drew the sequences. `botbox matrix` minimizes nothing and gets no 4m. A run's
-  start gets 30 s (§5.8). Each op that settles gets `T_settle`, a `recreate` and a
-  `delete` that settles get `T_delete` more for the CR to go, and a `restart` gets the
-  launcher's 5 s grace period. The teardown gets `T_stable`, `T_delete` and 30 s for its
-  steps, two grace periods to stop the target, and 30 s to delete the namespace. After a
-  fault, G4 gives a target as long as the faults lasted plus `T_settle`, and `T_settle`
-  past the restart of an exit a fault excused, whose backoff can reach 5 min (§6). So each
-  fault op doubles what the run gets before its teardown and adds `2·T_settle` and 5 min.
-  A target that keeps exiting while a fault is active can still outlast the derived
+  start gets the 30 s a kubeconfig cluster's namespace defaults may take (§5.8), a
+  `restart` gets 5 s for the reap, and a `delete` that settles gets `T_delete` beside
+  `T_settle`. The teardown gets 30 s for its steps beyond its waits, two 5 s grace periods
+  to stop the target, and 30 s to delete the namespace. After a fault, a target that exits
+  restarts after a backoff of up to 5 min (§5.1) and is owed `T_settle` past the restart,
+  and the faults are owed as long as they lasted plus `T_settle` (§6). So each fault op
+  allows an exit, doubles what the run gets before its teardown, and allows another exit.
+  A target that exits more than once while a fault is active can outlast the derived
   deadline. `--launch-arg` appends to `launch.args`
   (repeatable; a later flag wins), which is how the bug matrix selects `--bug=N`.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
@@ -1589,11 +1589,11 @@ built from source and run as a black-box binary.
   alone a SIGHUP or SIGINT it was started ignoring. Go keeps no other inherited SIG_IGN.
   A SIGKILLed botbox still leaves the control plane and the target running.
 - **D@51 Without `--deadline`, botbox derives the deadline from the target's timeouts.** A
-  fixed default of 4m stopped ten runs of a correct controller at §6's timeouts after six.
-  Every run waits at least `2·T_stable` in quiet windows, and those runs took 32 to 42 s.
-  A larger fixed default breaks again when `--runs` grows or the timeouts widen, and fewer
-  default runs leave no room either. The derived deadline sums the longest each planned
-  run's waits can take, so it cuts no run the Runner would end on its own, unless a request
-  hangs or a target keeps exiting under an active fault. At §6's timeouts it runs to tens
-  of minutes, so botbox prints it. The old 4m is what minimizing gets beyond the runs. An
-  explicit `--deadline` is used as given.
+  fixed 4m stopped ten runs of a correct controller at §6's timeouts after six, since each
+  run waits at least `2·T_stable` in quiet windows. A larger fixed default fails again when
+  `--runs` grows or the timeouts widen. The derived deadline cuts no run the Runner would
+  end on its own, unless a request hangs or a target keeps exiting under an active fault.
+  Faults can stop one after another, each extending the wait the one before extended, so
+  each fault op doubles the bound. At §6's timeouts the deadline runs to tens of minutes,
+  so botbox prints it. The old 4m is what minimizing gets beyond the runs. An explicit
+  `--deadline` is used as given.

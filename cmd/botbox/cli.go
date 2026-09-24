@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"math"
 	"math/rand/v2"
 	"os"
 	"path/filepath"
@@ -524,10 +525,7 @@ func (c *cli) derive(opts *options, t *target.Target, sequences []run.Sequence, 
 	if opts.deadlineGiven {
 		return
 	}
-	var runs time.Duration
-	for _, sequence := range sequences {
-		runs += run.Bound(t, sequence)
-	}
+	runs := run.Bound(t, sequences...)
 	opts.deadline = runs
 	these := "this run"
 	if len(sequences) > 1 {
@@ -538,7 +536,7 @@ func (c *cli) derive(opts *options, t *target.Target, sequences []run.Sequence, 
 			opts.deadline, these)
 		return
 	}
-	opts.deadline += minimizing
+	opts.deadline = min(runs, math.MaxInt64-minimizing) + minimizing
 	fmt.Fprintf(c.stdout, "the deadline is %s: %s can take %s at the target's timeouts, and minimizing a failure gets %s. --deadline sets another.\n",
 		opts.deadline, these, runs, minimizing)
 }

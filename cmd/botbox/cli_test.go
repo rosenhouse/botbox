@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -827,6 +828,23 @@ func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
 				t.Errorf("botbox %v printed %q, want %q.", args, stdout, says)
 			}
 		})
+	}
+}
+
+// Runs whose waits no duration can count get the longest deadline, not one
+// that has already passed.
+func TestADeadlineTooLongToCountIsTheLongest(t *testing.T) {
+	faults := slices.Repeat([]run.OpType{run.OpFault}, 64)
+	generate := countingGenerator(nil, slices.Concat([]run.OpType{run.OpCreate}, faults, []run.OpType{run.OpSettle})...)
+	session := &fakeSession{}
+
+	code, stdout, stderr := invokeWith(t, session, generate, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "2")
+
+	if code != exitOK || len(session.sequences) != 2 {
+		t.Fatalf("botbox run exited %d after %d runs: %s", code, len(session.sequences), stderr)
+	}
+	if longest := time.Duration(math.MaxInt64).String(); !strings.Contains(stdout, "the deadline is "+longest) {
+		t.Errorf("botbox run printed %q, want the deadline of %s.", stdout, longest)
 	}
 }
 

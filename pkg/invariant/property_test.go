@@ -2,6 +2,7 @@ package invariant_test
 
 import (
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -321,6 +322,28 @@ func TestAPropertyHoldsForEveryCR(t *testing.T) {
 
 	if want := timelineOf(widgetGVK, secondName); violation.VersionsOf != want {
 		t.Errorf("The timeline is of %q, want %q, the CR the property failed on.", violation.VersionsOf, want)
+	}
+	if want := "the property did not hold on the CR w2: "; !strings.HasPrefix(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to begin %q.", violation.Statement, want)
+	}
+}
+
+// A CR's property reads the objects that name it and those that name no CR.
+func TestAPropertyReadsTheObjectsOfItsCR(t *testing.T) {
+	in := newRun().withSecondWidget().
+		op(invariant.OpCreate, 0).
+		record(100*time.Millisecond, widget("10", spec(2), status(2, 1)), secondWidget("20", spec(2), status(2, 1))).
+		record(200*time.Millisecond, child("w-0", "11"), secondChild("w2-0", "21"), secondChild("w2-1", "22")).
+		checkpoint(2*time.Second, invariant.Converged).
+		through(2 * time.Second)
+
+	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
+
+	if want := timelineOf(widgetGVK, widgetName); violation.VersionsOf != want {
+		t.Errorf("The timeline is of %q, want %q, whose one child the property counted.", violation.VersionsOf, want)
+	}
+	if got := state(violation); !slices.Equal(got, []string{"w-0"}) {
+		t.Errorf("The violation quotes %v, want w's own child.", got)
 	}
 }
 

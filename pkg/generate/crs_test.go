@@ -145,14 +145,15 @@ func TestNoTwoCRsShareADistinctValue(t *testing.T) {
 			loaded := loadTarget(t, testCase.path)
 			g := newGenerator(t, loaded, Options{})
 			several := 0
-			rapid.Check(t, func(rt *rapid.T) {
-				follow(g.sequence(rt), loaded.Sample.GetName(), func(op run.Op, _ string, crs map[string]*written) {
+			// Seed 713 once gave two ExternalSecrets one target.
+			for seed := int64(1); seed <= 3000; seed++ {
+				follow(sequenceAt(t, g, seed), loaded.Sample.GetName(), func(op run.Op, _ string, crs map[string]*written) {
 					held := map[string]string{}
 					for name, cr := range crs {
 						value, found, _ := unstructured.NestedString(cr.object, testCase.distinct...)
 						if other, taken := held[value]; found && taken {
-							rt.Fatalf("After op %d, the CRs %s and %s both hold %q at %s.",
-								op.Index, other, name, value, strings.Join(testCase.distinct, "."))
+							t.Fatalf("After op %d of seed %d, the CRs %s and %s both hold %q at %s.",
+								op.Index, seed, other, name, value, strings.Join(testCase.distinct, "."))
 						}
 						held[value] = name
 					}
@@ -160,7 +161,7 @@ func TestNoTwoCRsShareADistinctValue(t *testing.T) {
 						several++
 					}
 				})
-			})
+			}
 			if several == 0 {
 				t.Error("No sequence created a second CR.")
 			}
@@ -221,6 +222,25 @@ func TestAnUpdateThatRepeatsAnotherCRsDistinctValueIsDrawnAgain(t *testing.T) {
 
 	if patch != nil {
 		t.Errorf("An update of the second gadget patched %v, which gives it the first's spec.left.", patch)
+	}
+}
+
+// Each CR's own value is the one it falls back on, so no other CR takes it.
+func TestADrawNeverTakesTheValueAnotherCRFallsBackOn(t *testing.T) {
+	loaded := loadTarget(t, rulesTarget)
+	loaded.Generate.Distinct = []string{"spec.left"}
+	g := newGenerator(t, loaded, Options{})
+	g.fields = []field{fixedField("spec.left", "one-3")}
+	var alone state
+	rapid.Check(t, func(rt *rapid.T) {
+		cr := g.cr(rt, 0, &alone)
+		if left, _, _ := unstructured.NestedString(cr.Object, "spec", "left"); left != "one" {
+			rt.Fatalf("The first gadget holds the spec.left %q, which the third falls back on.", left)
+		}
+	})
+	at := &state{crs: []drawnCR{{object: g.base(0).Object, live: true}}}
+	if patch := rapid.Custom(func(t *rapid.T) map[string]any { return g.patch(t, 0, at) }).Example(0); patch != nil {
+		t.Errorf("An update of the first gadget patched %v, which the third falls back on.", patch)
 	}
 }
 

@@ -303,8 +303,8 @@ func TestG3FiresOnTheLeftoversOfTheCRThatWent(t *testing.T) {
 
 	violation := fired(t, invariant.CleanDeletion, in)
 
-	if !strings.Contains(violation.Statement, "w-0") {
-		t.Errorf("The statement is %q, want it to name the deleted Widget's child.", violation.Statement)
+	if want := "the v1/ConfigMap w-0 was still there 10s after the CR w was deleted"; !strings.HasPrefix(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to begin %q.", violation.Statement, want)
 	}
 }
 

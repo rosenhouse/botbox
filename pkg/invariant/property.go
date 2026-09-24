@@ -23,7 +23,11 @@ func Property(declared target.Property) Check {
 				crs = []observe.Version{{}} // The predicate reads no CR.
 			}
 			for _, cr := range crs {
-				holds, err := declared.Eval(cr.Object, objects(managed))
+				theirs := managed
+				if cr.Object != nil {
+					theirs = in.objectsOf(cr.UID, managed)
+				}
+				holds, err := declared.Eval(cr.Object, objects(theirs))
 				if err != nil {
 					return Result{}, fmt.Errorf("evaluating property %s: %w", declared.ID, err)
 				}
@@ -33,8 +37,9 @@ func Property(declared target.Property) Check {
 				violation := Violation{
 					Statement: fmt.Sprintf("the property did not hold: %s", declared.Description),
 					At:        s.at,
-				}.quotingManaged(Sample(managed))
+				}.quotingManaged(Sample(theirs))
 				if cr.Object != nil {
+					violation.Statement = fmt.Sprintf("the property did not hold on the CR %s: %s", cr.Name, declared.Description)
 					violation = violation.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), s.at)))
 				}
 				out.violate(violation)

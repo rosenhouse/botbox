@@ -257,19 +257,33 @@ func (o Op) validateFields() error {
 // namingOps act on a CR an earlier op created, which cr names.
 var namingOps = []OpType{OpUpdate, OpDelete, OpRecreate}
 
-// checkCRs reports an op that acts on a CR no op before it creates. An op
+// checkCRs reports an op that acts on a CR no op before it creates, a
+// recreate that creates another CR, and a create of a CR still there. An op
 // that names no CR acts on the sample's.
 func (s Sequence) checkCRs(sample string) error {
 	created := map[string]bool{}
+	// live holds the op that created each CR no op has deleted since.
+	live := map[string]int{}
 	for _, op := range s.Ops {
-		if name := op.crOr(sample); slices.Contains(namingOps, op.Type) && !created[name] {
-			if op.CR == "" {
-				return fmt.Errorf("op %d (%s) names no cr, so it acts on the sample's %s, which no op before it creates", op.Index, op.Type, name)
-			}
-			return fmt.Errorf("op %d (%s) acts on the CR %s, which no op before it creates", op.Index, op.Type, name)
+		name := op.crOr(sample)
+		if op.Type == OpCreate {
+			name = op.Obj.GetName()
 		}
-		if op.Obj != nil {
-			created[op.Obj.GetName()] = true
+		switch creator, there := live[name]; {
+		case slices.Contains(namingOps, op.Type) && !created[name] && op.CR == "":
+			return fmt.Errorf("op %d (%s) names no cr, so it acts on the sample's %s, which no op before it creates", op.Index, op.Type, name)
+		case slices.Contains(namingOps, op.Type) && !created[name]:
+			return fmt.Errorf("op %d (%s) acts on the CR %s, which no op before it creates", op.Index, op.Type, name)
+		case op.Type == OpRecreate && op.Obj.GetName() != name:
+			return fmt.Errorf("op %d (recreate) acts on the CR %s and creates %s; a recreate creates the CR it deletes", op.Index, name, op.Obj.GetName())
+		case op.Type == OpCreate && there:
+			return fmt.Errorf("op %d (create) creates the CR %s, which op %d created and no op since deleted", op.Index, name, creator)
+		}
+		switch op.Type {
+		case OpCreate, OpRecreate:
+			created[name], live[name] = true, op.Index
+		case OpDelete:
+			delete(live, name)
 		}
 	}
 	return nil

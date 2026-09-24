@@ -20,6 +20,14 @@ func (in Input) namedCRs(v observe.Version) []types.UID {
 	return named
 }
 
+// objectsOf are the objects that name the CR, and those that name no CR.
+func (in Input) objectsOf(cr types.UID, objects []observe.Version) []observe.Version {
+	return slices.DeleteFunc(slices.Clone(objects), func(v observe.Version) bool {
+		named := in.namedCRs(v)
+		return len(named) > 0 && !slices.Contains(named, cr)
+	})
+}
+
 // crs are the primary CRs a state holds.
 func (s state) crs(gvk schema.GroupVersionKind) []observe.Version {
 	var crs []observe.Version

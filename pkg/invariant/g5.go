@@ -14,7 +14,8 @@ import (
 // (DESIGN.md §6). It compares the last converged snapshot before each Restart
 // with the first converged one after it, keyed by kind and name. A Restart
 // missing either snapshot, or with a fault between them, is not evaluated, and
-// the result says so. Nor is what a change of botbox's between them reached.
+// the result says so. G5 leaves out what a change of botbox's between them may
+// have changed, and says so too.
 func RestartStable(in Input) (Result, error) {
 	out := Result{ID: "G5"}
 	for _, op := range in.Ops {
@@ -39,7 +40,7 @@ func RestartStable(in Input) (Result, error) {
 			continue
 		}
 		if len(changes) > 0 {
-			out.note("for %s on the objects %s may have changed: it ran between the converged states before and after it",
+			out.note("for %s on what %s may have changed between the converged states before and after it",
 				describe(op), describe(changes[0]))
 		}
 		out.compare(in, op, before, after, reached)

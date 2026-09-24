@@ -216,7 +216,7 @@ func (g *Generator) cr(t *rapid.T, n int, at *state) *unstructured.Unstructured 
 		} else if err := unstructured.SetNestedField(changed.Object, value, mutable.path...); err != nil {
 			t.Fatalf("The sample does not take a %s: %v.", mutable.dotted, err)
 		}
-		if g.rules.refusal(changed.Object, nil) == nil && !at.collides(g.distinct, n, changed.Object) {
+		if g.rules.refusal(changed.Object, nil) == nil && !g.collides(at, n, changed.Object) {
 			cr = changed
 		}
 	}
@@ -262,7 +262,7 @@ func (g *Generator) patch(t *rapid.T, n int, at *state) map[string]any {
 		// (RFC 7386).
 		patch := nest(mutable.path, value)
 		patched := run.MergePatch(runtime.DeepCopyJSON(cr), patch)
-		if g.rules.refusal(patched, cr) == nil && !at.collides(g.distinct, n, patched) {
+		if g.rules.refusal(patched, cr) == nil && !g.collides(at, n, patched) {
 			return patch
 		}
 	}
@@ -305,14 +305,25 @@ func (at *state) live() []int {
 	return live
 }
 
-// collides reports whether the n-th CR, written as cr, would hold another
-// CR's value at a distinct path.
-func (at *state) collides(distinct [][]string, n int, cr map[string]any) bool {
-	for _, path := range distinct {
+// collides reports whether the n-th CR, written as cr, would hold at a
+// distinct path another CR's value, or the value another CR's base holds,
+// which that CR falls back on.
+func (g *Generator) collides(at *state, n int, cr map[string]any) bool {
+	var others []map[string]any
+	for other := range g.maxCRs {
+		if other == n {
+			continue
+		}
+		others = append(others, g.base(other).Object)
+		if other < len(at.crs) {
+			others = append(others, at.crs[other].object)
+		}
+	}
+	for _, path := range g.distinct {
 		value, _, _ := unstructured.NestedFieldNoCopy(cr, path...)
-		for other, drawn := range at.crs {
-			theirs, _, _ := unstructured.NestedFieldNoCopy(drawn.object, path...)
-			if other != n && reflect.DeepEqual(value, theirs) {
+		for _, theirs := range others {
+			held, _, _ := unstructured.NestedFieldNoCopy(theirs, path...)
+			if reflect.DeepEqual(value, held) {
 				return true
 			}
 		}

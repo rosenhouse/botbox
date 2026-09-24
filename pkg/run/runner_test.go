@@ -491,8 +491,8 @@ func TestRunNamesTheCREachCROpWrote(t *testing.T) {
 		Op{Type: OpUpdate, CR: "a", Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
 		Op{Type: OpSettle},
 		Op{Type: OpRestart},
-		Op{Type: OpRecreate, CR: "a", Obj: widget("b")},
-		Op{Type: OpDelete, CR: "b"},
+		Op{Type: OpRecreate, CR: "a", Obj: widget("a")},
+		Op{Type: OpDelete, CR: "a"},
 	)
 
 	result, err := runFake(t, newFakeHarness(), nil, sequence)
@@ -504,7 +504,7 @@ func TestRunNamesTheCREachCROpWrote(t *testing.T) {
 	for _, op := range result.Timeline.Ops {
 		got = append(got, op.CR)
 	}
-	if want := []string{"a", "a", "", "", "b", "b"}; !slices.Equal(got, want) {
+	if want := []string{"a", "a", "", "", "a", "a"}; !slices.Equal(got, want) {
 		t.Errorf("The ops name the CRs %q, want %q.", got, want)
 	}
 }
@@ -1795,6 +1795,25 @@ func TestRunValidatesTheSequenceAgainstTheTarget(t *testing.T) {
 			want:  "op 1 (delete) names no cr, so it acts on the sample's widget, which no op before it creates",
 		},
 		{
+			name: "a recreate that creates another CR",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpRecreate, Obj: widget("widget-2")},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (recreate) acts on the CR widget and creates widget-2",
+		},
+		{
+			name: "a create of a CR an earlier op created",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
+				Op{Type: OpCreate, Obj: widget("widget")},
+			),
+			check: &fakeChecker{},
+			want:  "op 2 (create) creates the CR widget, which op 0 created",
+		},
+		{
 			name: "a recreate of a CR only a later op creates",
 			sequence: sequenceOf(
 				Op{Type: OpCreate, Obj: widget("widget")},
@@ -1820,8 +1839,9 @@ func TestRunAcceptsOpsOnTheCRsEarlierOpsCreate(t *testing.T) {
 		Op{Type: OpCreate, Obj: widget("widget")},
 		Op{Type: OpCreate, Obj: widget("widget-2")},
 		Op{Type: OpUpdate, CR: "widget-2", Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
-		Op{Type: OpRecreate, CR: "widget-2", Obj: widget("widget-3")},
-		Op{Type: OpDelete, CR: "widget-3"},
+		Op{Type: OpRecreate, CR: "widget-2", Obj: widget("widget-2")},
+		Op{Type: OpDelete, CR: "widget-2"},
+		Op{Type: OpCreate, Obj: widget("widget-2")},
 		Op{Type: OpDelete},
 	)
 

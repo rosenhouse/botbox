@@ -149,14 +149,14 @@ func TestValidateNamesTheControlPlaneBinaryItCannotRun(t *testing.T) {
 
 // envtest, like os/exec, looks a path with no slash up on PATH.
 func TestValidateLooksABareNameUpOnPATH(t *testing.T) {
-	for name, set := range map[string][2]string{
-		"KUBEBUILDER_ASSETS is empty": {"KUBEBUILDER_ASSETS", ""},
-		"TEST_ASSET_ETCD is a name":   {"TEST_ASSET_ETCD", "my-etcd"},
+	for name, set := range map[string]struct{ variable, value, etcd string }{
+		"KUBEBUILDER_ASSETS is empty": {"KUBEBUILDER_ASSETS", "", "etcd"},
+		"TEST_ASSET_ETCD is a name":   {"TEST_ASSET_ETCD", "my-etcd", "my-etcd"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			installControlPlane(t, "kube-apiserver")
-			t.Setenv("PATH", executables(t, "my-etcd", "etcd", "kube-apiserver"))
-			t.Setenv(set[0], set[1])
+			t.Setenv("PATH", executables(t, set.etcd, "kube-apiserver"))
+			t.Setenv(set.variable, set.value)
 
 			if err := (cluster.Options{}).Validate(); err != nil {
 				t.Errorf("Validate refused a control plane on PATH: %v", err)

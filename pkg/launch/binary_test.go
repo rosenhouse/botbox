@@ -644,7 +644,7 @@ func TestASupervisedTargetThatExitsStartsAgain(t *testing.T) {
 	binary, log, heard := newSupervised(t, launch.MaxBackoff, script, quit)
 	mustStart(t, binary)
 	waitForLog(t, log, "started")
-	binary.Supervise(heard.record)
+	binary.Supervise(t.Context(), heard.record)
 	exited := binary.Exited()
 	beforeExit := time.Now()
 
@@ -668,7 +668,7 @@ func TestASupervisedTargetWaitsBeforeItsSecondRestart(t *testing.T) {
 	mustStart(t, binary)
 	waitForLog(t, log, "started")
 	supervised := time.Now()
-	binary.Supervise(heard.record)
+	binary.Supervise(t.Context(), heard.record)
 
 	waitForLogCount(t, log, "started", 2)
 	deadline := time.Now().Add(10 * time.Second)
@@ -701,7 +701,7 @@ func TestAStopOrRestartIsNoExit(t *testing.T) {
 	binary, log, heard := newSupervised(t, launch.MaxBackoff, "echo started; "+forever)
 	mustStart(t, binary)
 	waitForLog(t, log, "started")
-	binary.Supervise(heard.record)
+	binary.Supervise(t.Context(), heard.record)
 
 	if err := binary.Restart(t.Context()); err != nil {
 		t.Fatalf("Restart failed: %v", err)
@@ -726,7 +726,7 @@ func TestAStopOrRestartIsNoExit(t *testing.T) {
 func TestStopCancelsARestartThatIsWaiting(t *testing.T) {
 	binary, log, heard := newSupervised(t, time.Second, "echo started; exit 3")
 	mustStart(t, binary)
-	binary.Supervise(heard.record)
+	binary.Supervise(t.Context(), heard.record)
 	for deadline := time.Now().Add(10 * time.Second); len(heard.all()) < 2; time.Sleep(time.Millisecond) {
 		if time.Now().After(deadline) {
 			t.Fatal("The target never exited a second time.")
@@ -750,7 +750,7 @@ func TestStopReturnsOnceTheExitIsHeard(t *testing.T) {
 	binary, log, heard := newSupervised(t, launch.MaxBackoff, script, quit)
 	mustStart(t, binary)
 	waitForLog(t, log, "started")
-	binary.Supervise(func(exit error, restart time.Time) {
+	binary.Supervise(t.Context(), func(exit error, restart time.Time) {
 		time.Sleep(300 * time.Millisecond)
 		heard.record(exit, restart)
 	})
@@ -776,6 +776,50 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+// An interrupt ends supervision, so a target that exits after it stays down.
+func TestSupervisionEndsWithItsContext(t *testing.T) {
+	quit, script := quitFile(t)
+	binary, log, heard := newSupervised(t, launch.MaxBackoff, script, quit)
+	mustStart(t, binary)
+	waitForLog(t, log, "started")
+	ctx, cancel := context.WithCancel(t.Context())
+	binary.Supervise(ctx, heard.record)
+
+	cancel()
+	touch(t, quit)
+
+	requireClosed(t, binary.Exited(), "after the target exited unsupervised")
+	if got := strings.Count(log.String(), "started"); got != 1 {
+		t.Errorf("The target started %d times, want once.", got)
+	}
+	if seen := heard.all(); len(seen) != 0 {
+		t.Errorf("The supervisor reported the exits %v, and supervision had ended.", seen)
+	}
+	var exit *exec.ExitError
+	if status := binary.Status(); status.Running || !errors.As(status.Exit, &exit) || exit.ExitCode() != 3 {
+		t.Errorf("Status reported %+v, want a target that stopped with exit status 3.", status)
+	}
+}
+
+func TestARestartThatIsWaitingEndsWithSupervision(t *testing.T) {
+	binary, log, heard := newSupervised(t, 200*time.Millisecond, "echo started; exit 3")
+	mustStart(t, binary)
+	ctx, cancel := context.WithCancel(t.Context())
+	binary.Supervise(ctx, heard.record)
+	for deadline := time.Now().Add(10 * time.Second); len(heard.all()) < 2; time.Sleep(time.Millisecond) {
+		if time.Now().After(deadline) {
+			t.Fatal("The target never exited a second time.")
+		}
+	}
+
+	cancel()
+
+	requireClosed(t, binary.Exited(), "once the restart that was waiting came due")
+	if got := strings.Count(log.String(), "started"); got != 2 {
+		t.Errorf("The target started %d times, want 2: supervision ended before the second restart.", got)
+	}
+}
+
 // A target that cannot start again is gone for good, and says why.
 func TestASupervisedTargetThatCannotStartAgainStops(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "deletes-itself")
@@ -787,7 +831,7 @@ func TestASupervisedTargetThatCannotStartAgainStops(t *testing.T) {
 	t.Cleanup(func() { _ = binary.Stop(context.Background()) })
 	heard := &exits{}
 	mustStart(t, binary)
-	binary.Supervise(heard.record)
+	binary.Supervise(t.Context(), heard.record)
 
 	requireClosed(t, binary.Exited(), "after the restart failed")
 	status := binary.Status()

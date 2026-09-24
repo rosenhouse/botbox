@@ -97,7 +97,7 @@ type Launcher interface {
     Start(ctx context.Context, kubeconfig string) error   // kubeconfig points at the proxy
     Stop(ctx context.Context) error                       // graceful: SIGTERM, then SIGKILL after a grace period
     Restart(ctx context.Context) error                    // crash: SIGKILL, then Start
-    Supervise(onExit func(exit error, restart time.Time)) // from now on, restart the target whenever it exits
+    Supervise(ctx context.Context, onExit func(exit error, restart time.Time)) // until ctx ends, restart the target whenever it exits
     Status() Status                                       // is the target still running, and why it stopped if not
     Exited() <-chan struct{}                              // closed once the target has stopped and will not start again
 }
@@ -116,6 +116,7 @@ Implementations:
   whenever it exits on its own, as a kubelet restarts a container: at once the first time,
   then after 10 s, doubling up to 5 min. It tells the Runner why the target stopped and
   when it starts again. `Stop` and `Restart` are not exits, and `Stop` ends supervision.
+  The end of the context `Supervise` was given ends it too.
   `Status` says whether a supervised target is waiting to restart, and when the process
   now running started.
   botbox does not probe the target for health; the settle wait after the first op absorbs
@@ -259,7 +260,7 @@ The Runner executes one sequence:
 4. Tear down. Clear every active fault. If the target is still owed time to recover from
    a fault, which is so for a fault the teardown just cleared, wait for convergence as
    step 2 does and checkpoint where the wait ends. This recovery wait is judged as an op's
-   wait is, so the caller's deadline can end it and no later step. A run that ended at a
+   wait is. A run that ended at a
    violation or a harness error gets none. Then wait `T_stable`, which is the last quiet
    window (§6). Delete the primary CR if it still exists and wait for the G3 window. A
    target that stopped for good, before supervision or because a restart failed, cleaned
@@ -273,6 +274,13 @@ The Runner executes one sequence:
    in the namespace that botbox or the target created. Stop the target if it was started
    for this run. Delete the namespace. Namespace names are never reused, so a namespace
    that never finishes terminating (envtest, §5.8) is harmless.
+
+**An abandoned run.** The deadline and an interrupt end the run's context (§11), and that
+ends every wait of the run, the teardown's included. The run is then abandoned where it
+is. Its teardown waits for nothing more and judges nothing, and a violation found before
+stands. It still deletes the CR, forces off the finalizers and empties the namespace. It
+stops the target without a grace period and deletes the namespace on a budget of its own.
+Supervision ends with the context, so the target does not restart.
 
 Cleanup between runs never restarts the API server, because rapid's shrinker re-invokes
 the test function many times.

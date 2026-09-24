@@ -425,7 +425,7 @@ func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	live.supervise()
+	live.supervise(t.Context())
 
 	for deadline := time.Now().Add(10 * time.Second); len(live.exits()) < 2 && time.Now().Before(deadline); {
 		time.Sleep(5 * time.Millisecond)
@@ -448,5 +448,30 @@ func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
 		if down := exit.Restart.Sub(exit.At); down > want.backoff || down < want.backoff-time.Second {
 			t.Errorf("Exit %d restarts %v after it, want %v.", i+1, down, want.backoff)
 		}
+	}
+}
+
+// The launcher supervises the target under the run's context, so a target that
+// exits after an interrupt is not restarted.
+func TestTheHarnessSupervisesUnderTheContextItIsGiven(t *testing.T) {
+	dir := t.TempDir()
+	binary := launch.NewBinary(launch.Options{Path: "/bin/sh", Args: []string{"-c", "exit 3"}})
+	t.Cleanup(func() { _ = binary.Stop(context.Background()) })
+	live := &liveRun{h: &Harness{dir: dir, Launcher: binary}}
+	if err := binary.Start(t.Context(), "kubeconfig"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	live.supervise(ctx)
+
+	select {
+	case <-binary.Exited():
+	case <-time.After(10 * time.Second):
+		t.Fatal("The target was still supervised after its context ended.")
+	}
+	if exits := live.exits(); len(exits) != 0 {
+		t.Errorf("The harness recorded the exits %+v, and supervision had ended.", exits)
 	}
 }

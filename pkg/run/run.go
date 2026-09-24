@@ -170,7 +170,10 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 	if err := h.createNamespace(ctx, core); err != nil {
 		return err
 	}
+	// The namespace goes even when an interrupt has ended ctx.
 	h.down.push("deleting the run namespace", func(ctx context.Context) error {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownMargin)
+		defer cancel()
 		return deleteNamespace(ctx, core, h.Namespace)
 	})
 

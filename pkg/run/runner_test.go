@@ -98,6 +98,13 @@ type fakeHarness struct {
 	// cancel ends the run's context at the call cancelsAfter names.
 	cancel       context.CancelFunc
 	cancelsAfter string
+	// supervising is the context the run supervised the target under, and
+	// stoppedAtOnce is whether the teardown stopped the target under a
+	// context that had ended, which kills it at once. cancelled names the
+	// writes made under such a context, which the API server never gets.
+	supervising   context.Context
+	stoppedAtOnce bool
+	cancelled     []string
 }
 
 func newFakeHarness() *fakeHarness {
@@ -166,15 +173,28 @@ func (f *fakeHarness) exit() {
 	f.targetGone = true
 }
 
-func (f *fakeHarness) supervise() {
-	f.supervised = true
+func (f *fakeHarness) supervise(ctx context.Context) {
+	f.supervised, f.supervising = true, ctx
 	_ = f.record("supervise")
 }
 
 func (f *fakeHarness) exits() []Exit { return slices.Clone(f.exited) }
 
-func (f *fakeHarness) sleep(_ context.Context, d time.Duration) error {
-	return f.record("sleep " + d.String())
+// write records a write to the API server.
+func (f *fakeHarness) write(ctx context.Context, call string) error {
+	if ctx.Err() != nil {
+		f.cancelled = append(f.cancelled, call)
+	}
+	return f.record(call)
+}
+
+// sleep ends with the context, as the live harness's does, and a sleep under a
+// context that has ended waits for nothing.
+func (f *fakeHarness) sleep(ctx context.Context, d time.Duration) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return errors.Join(f.record("sleep "+d.String()), ctx.Err())
 }
 
 func (f *fakeHarness) restart(context.Context) error { return f.record("restart") }
@@ -265,10 +285,10 @@ func (f *fakeHarness) targetStatus() launch.Status {
 	return launch.Status{Running: true}
 }
 
-func (f *fakeHarness) deleteCR(_ context.Context, name string) error {
+func (f *fakeHarness) deleteCR(ctx context.Context, name string) error {
 	f.deletedCRAt = time.Now()
 	time.Sleep(f.deleteCRDelay)
-	return f.record("deleteCR " + name)
+	return f.write(ctx, "deleteCR "+name)
 }
 
 func (f *fakeHarness) awaitCRGone(_ context.Context, name string) error {
@@ -286,17 +306,25 @@ func (f *fakeHarness) deleteManaged(_ context.Context, gvk schema.GroupVersionKi
 
 func (f *fakeHarness) managedCount() int { return f.count }
 
-func (f *fakeHarness) awaitClean(_ context.Context, within time.Duration) (bool, error) {
-	return f.clean, f.record("awaitClean " + within.String())
+// awaitClean reads the namespace before it waits, as the live harness's does.
+func (f *fakeHarness) awaitClean(ctx context.Context, within time.Duration) (bool, error) {
+	err := f.record("awaitClean " + within.String())
+	if f.clean || err != nil {
+		return f.clean, err
+	}
+	return false, ctx.Err()
 }
 
-func (f *fakeHarness) forceFinalizers(context.Context) ([]string, error) {
-	return f.forced, f.record("forceFinalizers")
+func (f *fakeHarness) forceFinalizers(ctx context.Context) ([]string, error) {
+	return f.forced, f.write(ctx, "forceFinalizers")
 }
 
-func (f *fakeHarness) empty(context.Context) error { return f.record("empty") }
-func (f *fakeHarness) objects() *observe.Store     { return f.store }
-func (f *fakeHarness) stop(context.Context) error  { return f.record("stop") }
+func (f *fakeHarness) empty(ctx context.Context) error { return f.write(ctx, "empty") }
+func (f *fakeHarness) objects() *observe.Store         { return f.store }
+func (f *fakeHarness) stop(ctx context.Context) error {
+	f.stoppedAtOnce = ctx.Err() != nil
+	return f.record("stop")
+}
 
 func (f *fakeHarness) unresolvedOwners() []cluster.Unresolved {
 	if !slices.Contains(f.calls, "stop") {
@@ -1148,29 +1176,92 @@ func TestRunRecordsG4WhenTheRecoveryExpires(t *testing.T) {
 	}
 }
 
-// The recovery is judged, as an op's wait is, so the caller's deadline ends
-// it. The teardown that follows does not answer to that deadline.
-func TestTheRecoveryEndsWithTheCallersContext(t *testing.T) {
+// An interrupt or the deadline ends the run's context, and the run is
+// abandoned wherever it is. Its teardown waits for nothing more and judges
+// nothing, and it still takes back what the run made.
+func TestAnAbandonedRunWaitsForNothing(t *testing.T) {
+	quiet := "sleep " + testTimeouts.Stable.String()
+	deletion := "awaitClean " + (testTimeouts.Delete + deletionMargin).String()
+	cleanup := []string{"deleteCR widget", "forceFinalizers", "empty", "stop"}
+	for _, test := range []struct {
+		name  string
+		at    string
+		fault bool
+		want  []string
+	}{
+		{name: "in an op's settle wait", at: "settle", want: slices.Concat([]string{"clearFaults"}, cleanup)},
+		{name: "in the recovery", at: "clearFaults", fault: true, want: slices.Concat([]string{"clearFaults", "settle"}, cleanup)},
+		{name: "in the quiet window", at: quiet, want: slices.Concat([]string{"clearFaults", quiet}, cleanup)},
+		{name: "in the deletion window", at: deletion,
+			want: []string{"clearFaults", quiet, "deleteCR widget", deletion, "forceFinalizers", "empty", "stop"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newFakeHarness()
+			h.clean, h.forced = false, []string{"toy.botbox/v1/Widget widget"}
+			ctx, cancel := context.WithCancel(t.Context())
+			h.cancel, h.cancelsAfter = cancel, test.at
+			ops := []Op{{Type: OpCreate, Obj: widget("widget")}}
+			if test.fault {
+				h.faulting = true
+				ops = append(ops, Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}}, Op{Type: OpSettle})
+			}
+
+			result, err := runSequence(ctx, toyTarget, sequenceOf(ops...), Options{Check: &fakeChecker{}}, h)
+
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("The run returned %v, want the caller's context ended.", err)
+			}
+			if got := h.teardownCalls(); !slices.Equal(got, test.want) {
+				t.Errorf("The teardown did\n\t%v\nwant\n\t%v", got, test.want)
+			}
+			if !h.stoppedAtOnce {
+				t.Error("The teardown gave the target its grace period, want it killed at once.")
+			}
+			if len(h.cancelled) > 0 {
+				t.Errorf("The teardown made the writes %v under the context that had ended.", h.cancelled)
+			}
+			if got := checkpointsAt(result.Timeline); slices.Contains(got, Teardown) {
+				t.Errorf("The run checkpointed at %v, want no deletion judged.", got)
+			}
+			// The namespace had no time to empty on its own.
+			if notes := strings.Join(result.Notes, "\n"); strings.Contains(notes, "force-removed") {
+				t.Errorf("The run notes %q, and nothing waited for the finalizers.", notes)
+			}
+		})
+	}
+}
+
+// A violation found before the context ended stands, however far the teardown
+// got.
+func TestAViolationStandsWhenItsTeardownIsAbandoned(t *testing.T) {
 	h := newFakeHarness()
-	h.faulting = true
 	ctx, cancel := context.WithCancel(t.Context())
-	h.cancel, h.cancelsAfter = cancel, "clearFaults"
-	sequence := sequenceOf(
-		Op{Type: OpCreate, Obj: widget("widget")},
-		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}},
-		Op{Type: OpSettle},
-	)
+	h.cancel, h.cancelsAfter = cancel, "sleep "+testTimeouts.Stable.String()
+	check := &fakeChecker{violations: [][]Violation{{{ID: "G2"}}}}
 
-	result, err := runSequence(ctx, toyTarget, sequence, Options{Check: &fakeChecker{}}, h)
+	result, err := runSequence(ctx, toyTarget, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}), Options{Check: check}, h)
 
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("The run returned %v, want the caller's context ended.", err)
+	if err != nil {
+		t.Errorf("The run returned %v, want the violation alone.", err)
 	}
-	if !slices.Contains(h.calls, "stop") {
-		t.Errorf("The run did %v, want it torn down anyway.", h.calls)
+	if result.Violation == nil || result.Violation.ID != "G2" {
+		t.Errorf("The run reported %v, want the G2 it found before the teardown.", result.Violation)
 	}
-	if got := checkpointsAt(result.Timeline); slices.Contains(got, Teardown) {
-		t.Errorf("The run checkpointed at %v, want no deletion judged after the recovery failed.", got)
+}
+
+// An interrupt ends supervision too, so the target is not restarted after it.
+func TestTheRunSupervisesTheTargetUnderItsContext(t *testing.T) {
+	h := newFakeHarness()
+	ctx, cancel := context.WithCancel(t.Context())
+
+	_, err := runSequence(ctx, toyTarget, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}), Options{Check: &fakeChecker{}}, h)
+	cancel()
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if h.supervising == nil || h.supervising.Err() == nil {
+		t.Error("The run supervised the target under a context its own did not end.")
 	}
 }
 

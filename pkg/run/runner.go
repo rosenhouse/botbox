@@ -152,8 +152,8 @@ type Timeline struct {
 	// no End is a fault the proxy still applies.
 	Faults []Window
 	// Forced names every object the teardown force-removed a finalizer from.
-	// The run notes each one: G3 judged the deletion window, which closed
-	// before any of this (DESIGN.md §5.5, D37).
+	// A run that was not abandoned notes each one: G3 judged the deletion
+	// window, which closed before any of this (DESIGN.md §5.5, D37).
 	Forced []string
 	// Exits are the times the target stopped on its own after the first
 	// settle wait converged.
@@ -299,9 +299,9 @@ type harness interface {
 	// targetStatus reports whether the target is still running, and why it
 	// stopped if it is not.
 	targetStatus() launch.Status
-	// supervise restarts the target from now on whenever it exits, and
+	// supervise restarts the target whenever it exits until ctx ends, and
 	// records each exit in exits.
-	supervise()
+	supervise(ctx context.Context)
 	exits() []Exit
 	stop(ctx context.Context) error
 	// unresolvedOwners names each owner the collector could not resolve. It
@@ -539,7 +539,7 @@ func (r *runner) wait(ctx context.Context) (Wait, error) {
 	wait.Window.End, wait.Converged = r.now(), converged
 	if converged {
 		if r.converged.IsZero() {
-			r.h.supervise()
+			r.h.supervise(ctx)
 		}
 		r.converged = wait.Window.End
 	}
@@ -794,8 +794,8 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 }
 
 // teardown is step 4 of DESIGN.md §5.5. Every step runs even if one fails.
-// The caller's deadline can end the recovery, which is judged as an op's wait
-// is, but no step after it.
+// Its waits end with the caller's context, which abandons the run: the
+// teardown then judges nothing and kills the target at once.
 func (r *runner) teardown(ctx context.Context) error {
 	r.teardownStart = r.now()
 	r.clearFaults()
@@ -806,10 +806,10 @@ func (r *runner) teardown(ctx context.Context) error {
 	}
 	failures := []error{r.awaitRecovery(ctx)}
 
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.teardownBudget())
+	down, cancel := context.WithTimeout(context.WithoutCancel(ctx), r.teardownBudget())
 	defer cancel()
 	r.timeline.Quiet.Start = r.now()
-	failures = append(failures, r.h.sleep(ctx, r.target.Timeouts.Stable))
+	cut := r.h.sleep(ctx, r.target.Timeouts.Stable)
 
 	// Stamped before the delete, not after it: from here on botbox is the one
 	// changing the namespace, and no invariant window reaches past this instant
@@ -818,28 +818,35 @@ func (r *runner) teardown(ctx context.Context) error {
 	r.timeline.Quiet.End = r.now()
 	r.timeline.Deletion.Start = r.timeline.Quiet.End
 	if r.cr != "" {
-		failures = append(failures, r.h.deleteCR(ctx, r.cr))
+		failures = append(failures, r.h.deleteCR(down, r.cr))
 	}
-	clean, err := r.h.awaitClean(ctx, r.target.Timeouts.Delete+deletionMargin)
+	clean := false
+	if cut == nil {
+		clean, cut = r.h.awaitClean(ctx, r.target.Timeouts.Delete+deletionMargin)
+	}
 	r.timeline.Deletion.End = r.now()
 	if clean {
 		r.timeline.Cleaned = r.timeline.Deletion.End
 	}
-	failures = append(failures, err)
-	if r.violation == nil && !r.failed {
+	switch {
+	case r.violation != nil || r.failed:
+	case cut != nil:
+		failures = append(failures, fmt.Errorf("the teardown: %w", cut))
+	default:
 		failures = append(failures, r.teardownCheckpoint(clean))
 	}
 
-	forced, err := r.h.forceFinalizers(ctx)
+	forced, err := r.h.forceFinalizers(down)
 	r.timeline.Forced = forced
-	if len(forced) > 0 {
+	if len(forced) > 0 && cut == nil {
 		// G3's window closed before this, so nothing forced here was ever
 		// credited to the target. What a reader would otherwise miss is that
-		// the namespace did not empty on its own (D37).
+		// the namespace did not empty on its own (D37). An abandoned run gave
+		// it no time to.
 		r.skipped = append(r.skipped, fmt.Sprintf("the teardown force-removed the finalizers of %s, so the run namespace did not empty on its own",
 			strings.Join(forced, ", ")))
 	}
-	failures = append(failures, err, r.h.empty(ctx), r.h.stop(ctx))
+	failures = append(failures, err, r.h.empty(down), r.h.stop(ctx))
 	for _, owner := range r.h.unresolvedOwners() {
 		r.skipped = append(r.skipped, unresolvedNote(owner))
 	}

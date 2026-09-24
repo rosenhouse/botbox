@@ -13,8 +13,8 @@ import (
 const stopBudget = 2*launch.DefaultGracePeriod + teardownMargin
 
 // Bound is the longest the Runner's waits can make the runs of the sequences
-// take, one after another. A target that exits more than once while a fault is
-// active can outlast it.
+// take, one after another. A target that exits more than once per fault op
+// while faults are active can outlast it.
 func Bound(t *target.Target, sequences ...Sequence) time.Duration {
 	var total time.Duration
 	for _, s := range sequences {
@@ -25,26 +25,33 @@ func Bound(t *target.Target, sequences ...Sequence) time.Duration {
 
 func bound(timeouts target.Timeouts, s Sequence) time.Duration {
 	bound := defaultNamespaceDefaultsWithin
-	faults := 0
+	faults, stops, stopTogether := 0, 0, 0
 	for _, op := range s.Ops {
-		switch {
-		case op.Type == OpRecreate, op.Type == OpDelete && op.Settles():
+		switch op.Type {
+		case OpDelete, OpRecreate:
 			bound = sum(bound, timeouts.Delete)
-		case op.Type == OpRestart:
+		case OpRestart:
 			bound = sum(bound, launch.DefaultGracePeriod)
-		case op.Type == OpFault:
+		case OpFault:
 			faults++
+			if op.Fault.Until == (Trigger{}) {
+				stopTogether = 1
+			} else {
+				stops++
+			}
 		}
 		if op.Settles() {
 			bound = sum(bound, timeouts.Settle)
 		}
 	}
-	// An exit a fault excused is owed T_settle past a restart that can take
-	// MaxBackoff. Faults that stopped are owed as long as they lasted and
-	// T_settle.
+	// A target that exits while a fault excuses it is owed T_settle past a
+	// restart that can take MaxBackoff. Faults that stopped are owed as long
+	// as they lasted and T_settle. Faults with no trigger stop together.
 	exit := sum(launch.MaxBackoff, timeouts.Settle)
 	for range faults {
 		bound = sum(bound, exit)
+	}
+	for range stops + stopTogether {
 		bound = sum(bound, bound, timeouts.Settle, exit)
 	}
 	return sum(bound, teardownBudget(timeouts), stopBudget)

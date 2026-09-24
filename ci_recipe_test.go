@@ -17,8 +17,9 @@ import (
 
 const ciRecipe = "examples/ci/github-actions.yml"
 
-// workflow holds what these tests read of a GitHub Actions workflow. YAML 1.2
-// keeps the key on a string, as Actions does.
+// workflow holds what these tests read of a GitHub Actions workflow. yaml.v3
+// reads the on key as a string, as Actions does. A YAML 1.1 parser reads it as
+// true.
 type workflow struct {
 	On          map[string]any    `yaml:"on"`
 	Env         map[string]string `yaml:"env"`

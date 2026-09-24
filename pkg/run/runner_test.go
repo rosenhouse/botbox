@@ -1010,8 +1010,11 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 				Op{Type: OpRecreate, Obj: widget("widget")},
 			)
 
+			began := time.Now()
+
 			result, err := runFake(t, h, check, sequence)
 
+			ended := time.Now()
 			if test.wantErr == "" && err != nil {
 				t.Fatalf("The run failed: %v", err)
 			}
@@ -1022,7 +1025,10 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 				t.Errorf("The run reported %v, want %s.", got, test.want)
 			}
 			if got, want := checkpointsAt(result.Timeline), []int{1, 2}; !slices.Equal(got, want) {
-				t.Errorf("The run checkpointed at %v, want %v.", got, want)
+				t.Fatalf("The run checkpointed at %v, want %v.", got, want)
+			}
+			if stayed := result.Timeline.Checkpoints[1]; stayed.Began.Before(began) || stayed.At.Before(stayed.Began) || stayed.At.After(ended) {
+				t.Errorf("The recreate's checkpoint spans %v to %v, want the wait for its CR.", stayed.Began, stayed.At)
 			}
 			if ops := check.inputs[len(check.inputs)-1].Timeline.Ops; len(ops) != 3 || ops[2].CR != "widget" {
 				t.Errorf("The checks at the recreate's checkpoint read the ops %+v, want the recreate of widget last.", ops)

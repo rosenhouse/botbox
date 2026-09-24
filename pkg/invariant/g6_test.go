@@ -1,6 +1,7 @@
 package invariant_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -104,6 +105,26 @@ func TestG6CountsOneRequestAtATime(t *testing.T) {
 
 			silent(t, invariant.NoErrorLoop, in)
 		})
+	}
+}
+
+func TestG6OrdersLoopsThatDifferOnlyByNamespace(t *testing.T) {
+	elsewhere := failedGet("w-0", 404)
+	elsewhere.Namespace = "botbox-run-0"
+	in := loop(errLoop+1, failedGet("w-0", 404)).
+		requests(time.Second, 500*time.Millisecond, errLoop+1, elsewhere).
+		through(8 * time.Second)
+
+	// Go ranges over a map in a random order, so one evaluation can pass by
+	// chance.
+	for range 100 {
+		var namespaces []string
+		for _, violation := range evaluate(t, invariant.NoErrorLoop, in).Violations {
+			namespaces = append(namespaces, violation.Requests[0].Namespace)
+		}
+		if want := []string{"botbox-run-0", namespace}; !slices.Equal(namespaces, want) {
+			t.Fatalf("G6 reported loops in the namespaces %v, want %v.", namespaces, want)
+		}
 	}
 }
 

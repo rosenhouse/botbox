@@ -74,6 +74,7 @@ func (in Input) repeatedFailures() []failure {
 		return cmp.Or(
 			a.requests[0].Start.Compare(b.requests[0].Start),
 			strings.Compare(a.key.String(), b.key.String()),
+			strings.Compare(a.key.namespace, b.key.namespace),
 		)
 	})
 	return failures

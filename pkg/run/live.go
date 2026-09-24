@@ -205,10 +205,9 @@ func (l *liveRun) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind
 }
 
 func (l *liveRun) createFixture(ctx context.Context, fixture *unstructured.Unstructured) error {
-	restored := fixture.DeepCopy()
-	restored.SetNamespace(l.h.Namespace)
-	if _, err := l.of(restored.GroupVersionKind()).Create(ctx, restored, metav1.CreateOptions{}); err != nil {
-		return fmt.Errorf("restoring the fixture %s %s: %w", kindName(restored.GroupVersionKind()), restored.GetName(), err)
+	gvk := fixture.GroupVersionKind()
+	if _, err := l.of(gvk).Create(ctx, fixture, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("restoring the fixture %s %s: %w", kindName(gvk), fixture.GetName(), err)
 	}
 	return nil
 }

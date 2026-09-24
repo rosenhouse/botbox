@@ -111,6 +111,39 @@ func TestSummaryJSONKeepsItsSchema(t *testing.T) {
 	checkGolden(t, "testdata/summary.golden.json", encoded)
 }
 
+func TestSummaryMarkdown(t *testing.T) {
+	for _, test := range []struct {
+		golden string
+		ending func(t *testing.T, s *summary)
+	}{
+		{"violation", func(*testing.T, *summary) {}},
+		{"deadline", func(t *testing.T, s *summary) {
+			s.Runs[1] = newSummary(options{}, &target.Target{}, []planned{{sequence: widgetSequence(8)}}, s.Start).Runs[0]
+			s.Runs[1].Run, s.Runs[1].File = 2, "sequences/a|b.json"
+			s.Error = "the --deadline of 5m0s stopped the invocation after 1 of 3 runs"
+			s.finish(t.Context(), exitError, s.Finish)
+		}},
+		{"interrupted", func(t *testing.T, s *summary) {
+			s.Runs[1].Violation, s.Runs[1].Notes = nil, nil
+			dir := filepath.Join(t.TempDir(), "run-2")
+			if err := os.Mkdir(dir, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			s.Runs[1].stopped(errRunInterrupted, dir)
+			ctx, cancel := context.WithCancelCause(t.Context())
+			cancel(interrupt{syscall.SIGINT})
+			s.finish(ctx, exitError, s.Finish)
+		}},
+	} {
+		t.Run(test.golden, func(t *testing.T) {
+			s := sampleSummary(t)
+			test.ending(t, s)
+
+			checkGolden(t, "testdata/summary."+test.golden+".golden.md", s.markdown())
+		})
+	}
+}
+
 // writtenSummary is summary.json as a consumer reads it.
 type writtenSummary struct {
 	Schema          int
@@ -245,6 +278,9 @@ func TestAPassingInvocationWritesItsSummary(t *testing.T) {
 		if got, want := sequenceOf(t, ran), marshalled(t, session.sequences[i]); got != want {
 			t.Errorf("The summary holds run %d's sequence as\n%s\nwant what it executed:\n%s", i+1, got, want)
 		}
+	}
+	if _, err := os.Stat(filepath.Join(summaryDir(t, out), "summary.md")); err != nil {
+		t.Errorf("The invocation wrote no summary.md: %v", err)
 	}
 	if want := "every run passed.\n"; !strings.HasSuffix(stdout, want) {
 		t.Errorf("botbox run printed %q, want it to end with %q.", stdout, want)
@@ -437,6 +473,15 @@ func TestEveryExitPathWritesTheSummary(t *testing.T) {
 			}
 			for _, ran := range written.Runs {
 				checkRunSummary(t, summaryDir(t, out), ran, g3, test.ran)
+			}
+			md, err := os.ReadFile(filepath.Join(summaryDir(t, out), "summary.md"))
+			if err != nil {
+				t.Fatalf("The invocation wrote no summary.md: %v", err)
+			}
+			for _, want := range []string{": " + test.outcome + "\n", test.err, test.ran} {
+				if !strings.Contains(string(md), want) {
+					t.Errorf("summary.md is\n%s\nwant it to say %q.", md, want)
+				}
 			}
 		})
 	}

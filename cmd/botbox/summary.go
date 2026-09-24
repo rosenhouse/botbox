@@ -191,7 +191,8 @@ func (s *summary) write(dir string) error {
 	if err != nil {
 		return err
 	}
-	return run.WriteAtomic(filepath.Join(dir, summaryJSONFile), encoded)
+	return errors.Join(run.WriteAtomic(filepath.Join(dir, summaryJSONFile), encoded),
+		run.WriteAtomic(filepath.Join(dir, summaryMarkdownFile), s.markdown()))
 }
 
 func (s *summary) marshal() ([]byte, error) {

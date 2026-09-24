@@ -197,7 +197,7 @@ func (r *run) request(when time.Duration, req proxy.Request) *run {
 	return r
 }
 
-// running is a request that shows the target runs.
+// running records a request that shows the target runs.
 func (r *run) running(when time.Duration) *run { return r.request(when, watch()) }
 
 // requests repeats one request at a fixed interval.

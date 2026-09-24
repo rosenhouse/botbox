@@ -444,7 +444,7 @@ func harnessOver(status launch.Status, p *proxy.Proxy) *Harness {
 	}
 }
 
-// listConfigMaps is a request that shows the target runs.
+// listConfigMaps is the path of a request that shows the target runs.
 const listConfigMaps = "/api/v1/namespaces/botbox-run-1/configmaps"
 
 // proxyThatSaw is a proxy that has recorded a request to each path.

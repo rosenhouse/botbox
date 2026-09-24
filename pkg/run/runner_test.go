@@ -1402,8 +1402,8 @@ func TestRunResolvesDeleteManagedAtExecutionTime(t *testing.T) {
 	if got := h.opCalls(); !slices.Contains(got, "deleteManaged v1/ConfigMap widget-2") {
 		t.Errorf("The run did %v, want the third managed ConfigMap deleted.", got)
 	}
-	if got := result.Timeline.Ops[0].Resolved; got != "widget-2" {
-		t.Errorf("The op recorded %q as the object it chose, want widget-2.", got)
+	if got := result.Timeline.Ops[0].Deleted; got != "widget-2" {
+		t.Errorf("The op recorded %q as the object it deleted, want widget-2.", got)
 	}
 }
 
@@ -1441,12 +1441,26 @@ func TestRunNotesADeleteManagedWhoseObjectWasGone(t *testing.T) {
 	if err != nil {
 		t.Fatalf("The run failed: %v", err)
 	}
-	if got := result.Timeline.Ops[0].Resolved; got != "" {
+	if got := result.Timeline.Ops[0].Deleted; got != "" {
 		t.Errorf("The op recorded %q as the object it deleted, and it deleted nothing.", got)
 	}
 	want := "op 0 (deleteManaged) deleted nothing: index 1 resolved to the v1/ConfigMap widget-1, which was gone before botbox could delete it"
 	if !slices.Equal(result.Notes, []string{want}) {
 		t.Errorf("The run reported the notes %q, want %q.", result.Notes, want)
+	}
+}
+
+func TestRunRecordsNoObjectForADeleteManagedThatFailed(t *testing.T) {
+	h := newFakeHarness()
+	h.fail["deleteManaged v1/ConfigMap widget-0"] = apierrors.NewInternalError(errors.New("etcd is down"))
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)}))
+
+	if err == nil {
+		t.Fatalf("The run succeeded, want the failed delete's error.")
+	}
+	if got := result.Timeline.Ops[0].Deleted; got != "" {
+		t.Errorf("The op recorded %q as the object it deleted, and the delete failed.", got)
 	}
 }
 

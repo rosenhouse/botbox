@@ -187,9 +187,8 @@ type AppliedOp struct {
 	At time.Time
 	// CR is the primary CR a CR op wrote.
 	CR string
-	// Resolved is the object a deleteManaged op resolved to, or empty where
-	// the op found nothing to delete (DESIGN.md §7).
-	Resolved string
+	// Deleted is the object a deleteManaged op deleted (DESIGN.md §7).
+	Deleted string
 	// Settled is the settle wait that followed the op, or nil if none did.
 	Settled *Wait
 }
@@ -467,7 +466,7 @@ func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
 		return applied, nil
 	case OpDeleteManaged:
 		name, err := r.applyDeleteManaged(ctx, op)
-		applied.Resolved = name
+		applied.Deleted = name
 		return applied, err
 	case OpSettle:
 		return applied, nil
@@ -558,13 +557,15 @@ func (r *runner) applyDeleteManaged(ctx context.Context, op Op) (string, error) 
 		return "", nil
 	}
 	name := names[*op.Nth]
-	deleted, err := r.h.deleteManaged(ctx, gvk, name)
-	if err == nil && !deleted {
+	switch deleted, err := r.h.deleteManaged(ctx, gvk, name); {
+	case err != nil:
+		return "", err
+	case !deleted:
 		r.skipped = append(r.skipped, fmt.Sprintf("op %d (deleteManaged) deleted nothing: index %d resolved to the %s %s, which was gone before botbox could delete it",
 			op.Index, *op.Nth, op.Kind, name))
 		return "", nil
 	}
-	return name, err
+	return name, nil
 }
 
 // settle waits for the target's reaction and checkpoints where the wait ends

@@ -591,9 +591,9 @@ func requireOpsTookEffect(t *testing.T, check *recordingChecker, result run.Resu
 		t.Errorf("The target watched widgets %d times before the restart and %d after, want the restart to open another.",
 			before.widgetWatch, restarted.widgetWatch)
 	}
-	if want := "widget-0"; result.Timeline.Ops[4].Resolved != want {
-		t.Errorf("The deleteManaged op took %q, want the first ConfigMap by creationTimestamp then name, %q.",
-			result.Timeline.Ops[4].Resolved, want)
+	if want := "widget-0"; result.Timeline.Ops[4].Deleted != want {
+		t.Errorf("The deleteManaged op deleted %q, want the first ConfigMap by creationTimestamp then name, %q.",
+			result.Timeline.Ops[4].Deleted, want)
 	}
 	if len(restarted.managed) != 5 {
 		t.Errorf("After the deleted child the run held the ConfigMaps %v, want the target to have made it again.",

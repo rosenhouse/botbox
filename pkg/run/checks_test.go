@@ -243,7 +243,7 @@ func deletedRun(clean bool) Input {
 func TestTheChecksDoNotCreditACleanupBotboxPerformed(t *testing.T) {
 	in := deletedRun(true)
 	in.Timeline.Ops = append(in.Timeline.Ops, AppliedOp{
-		Op: Op{Index: 1, Type: OpDeleteManaged, Kind: "v1/ConfigMap"}, At: at(11), Resolved: "widget-0",
+		Op: Op{Index: 1, Type: OpDeleteManaged, Kind: "v1/ConfigMap"}, At: at(11), Deleted: "widget-0",
 	})
 
 	g3 := resultOf(t, in, "G3")

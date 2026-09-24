@@ -232,6 +232,42 @@ func TestTheCIRecipeExportsTheControlPlaneOrFails(t *testing.T) {
 	}
 }
 
+func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
+	steps := recipeSteps(t)
+	upload := stepUsing(t, steps, "actions/upload-artifact")
+	if upload.If != "failure()" {
+		t.Errorf("the evidence uploads if %q, not when botbox fails", upload.If)
+	}
+	uploaded := strings.TrimSuffix(upload.With["path"], "/")
+	runs := 0
+	for _, s := range steps {
+		if !strings.Contains(s.Run, "botbox run") {
+			continue
+		}
+		runs++
+		if out := regexp.MustCompile(`--out (\S+)`).FindStringSubmatch(s.Run); out == nil || out[1] != uploaded {
+			t.Errorf("%q writes elsewhere than %s, which the job uploads", s.Run, uploaded)
+		}
+	}
+	if runs == 0 {
+		t.Fatal("no step runs botbox")
+	}
+
+	hint := downloadHint.FindStringSubmatch(readFile(t, ciRecipe))
+	if hint == nil {
+		t.Fatal("the recipe does not say how to download the evidence")
+	}
+	if hint[1] != upload.With["name"] {
+		t.Errorf("%q names an artifact other than %s", hint[0], upload.With["name"])
+	}
+	if hint[2] != uploaded {
+		t.Errorf("%q puts the evidence elsewhere than %s, where the replay command in report.md reads it", hint[0], uploaded)
+	}
+}
+
+// downloadHint matches a gh command that downloads one artifact into a directory.
+var downloadHint = regexp.MustCompile(`gh run download \S+ --name (\S+) --dir (\S+)`)
+
 func runText(steps []step) string {
 	var commands []string
 	for _, s := range steps {

@@ -44,4 +44,11 @@ jobs:
             bin/envtest
           key: ${{ steps.tools.outputs.cache-primary-key }}
       - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
-      - run: botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m
+      - run: botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-out
+      # gh run download <run-id> --name botbox-out --dir botbox-out restores
+      # the paths that the replay command in report.md names.
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: botbox-out
+          path: botbox-out/

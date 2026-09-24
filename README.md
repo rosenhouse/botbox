@@ -422,10 +422,10 @@ A settle wait expired. What follows `expired with no fault active` says why:
   controller converged and kept writing. The Object versions table lists the writes. A
   status field rewritten on every reconcile, such as a timestamp, does this.
 - `ready held until …` means `ready` held and then stopped holding.
-- `ready held from … on, but the target was waiting to restart`, or `but the target
+- A line that goes on `but the target was waiting to restart`, or `but the target
   restarted in the last stable`, means your controller exited. The line counts the exits
   since it last converged and quotes the last.
-- `ready held from … on, but the target had requested no resource outside leader election
+- A line that goes on `but the target had requested no resource outside leader election
   since …` means your controller had not come back from a restart, or had not started, when
   the wait gave up. `until the last stable` means it came back too late to run for
   `stable` before then. A controller slow to start needs a wider `settle`.

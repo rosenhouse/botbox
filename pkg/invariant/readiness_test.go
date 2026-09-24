@@ -195,6 +195,11 @@ func TestAnExpiredWaitSaysTheTargetHadNotShownItRuns(t *testing.T) {
 				"the target exited 1 time since it last converged, last with the exit at 4s"},
 		{"since it first started", readyCR().op(invariant.OpSettle, 3*time.Second),
 			"in 5s, ready held from 0s on, but the target had requested no resource outside leader election since it started"},
+		{"where ready never held", readyCR().running(1100*time.Millisecond).op(invariant.OpRestart, 3*time.Second).
+			op(invariant.OpUpdate, 3*time.Second).record(3100*time.Millisecond, widget("11", spec(2), generation(2), status(1, 1))),
+			"in 5s, ready never held: it evaluated to false, but the target had requested no resource outside leader election since op 0 (restart)"},
+		{"where ready stopped holding", restarted().record(4*time.Second, widget("11", spec(1), status(0, 1))),
+			"in 5s, ready held until 1s: it evaluated to false, but the target had requested no resource outside leader election since op 0 (restart)"},
 		{"until the last stable", restarted().running(6500 * time.Millisecond), sinceTheRestart + " until the last stable (2s)"},
 		{"until the last stable began", restarted().running(6 * time.Second), "in 5s, ready held from 0s on, and nothing changed in the last stable (2s)"},
 		// A recreate's wait lasts T_delete, which can be shorter than stable.

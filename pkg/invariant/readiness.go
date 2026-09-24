@@ -1,6 +1,7 @@
 package invariant
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"slices"
@@ -24,14 +25,11 @@ func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 	}
 	stable := in.timeouts().Stable
 	changes := in.versionsIn(at.Add(-stable), at)
-	quiet := in.starting(at, stable)
-	if quiet == "" {
-		quiet = churn(stable, changes)
-	}
 	violation := Violation{
 		ID: "G4",
 		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active: in %s, %s%s%s",
-			in.describeOp(checkpoint.Op), at.Sub(began).Round(time.Millisecond), walk.why(began, quiet),
+			in.describeOp(checkpoint.Op), at.Sub(began).Round(time.Millisecond),
+			walk.why(began, in.starting(at, stable), churn(stable, changes)),
 			in.repeated(began, at), in.exited(at)),
 		At: at,
 	}.quotingRequests(Recent(requestsUpTo(in.Requests, at))).
@@ -121,14 +119,23 @@ func (w *readyWalk) step(in Input, at time.Time, crs []observe.Version, written 
 	return nil
 }
 
-// why says what kept the wait from converging. quiet says why a wait on a
-// ready CR did not converge.
-func (w readyWalk) why(began time.Time, quiet string) string {
+// why says what kept the wait from converging: Ready, the target's start, or
+// else what changed while Ready held.
+func (w readyWalk) why(began time.Time, starting, churn string) string {
 	switch {
 	case w.crs == 0:
-		return "no CR was left to be ready, " + quiet
+		return "no CR was left to be ready, " + cmp.Or(starting, churn)
 	case w.held:
-		return fmt.Sprintf("ready held from %s on, %s", w.turned.Sub(began).Round(time.Millisecond), quiet)
+		return fmt.Sprintf("ready held from %s on, %s", w.turned.Sub(began).Round(time.Millisecond), cmp.Or(starting, churn))
+	case starting != "":
+		return w.unready(began) + ", " + starting
+	}
+	return w.unready(began)
+}
+
+// unready says how Ready failed at the end of a wait.
+func (w readyWalk) unready(began time.Time) string {
+	switch {
 	case w.cr.DeletionTimestamp != nil:
 		return fmt.Sprintf("the CR %s was still being deleted, held by the finalizers %s", w.cr.Name, strings.Join(w.cr.Finalizers, ", "))
 	case w.ever:

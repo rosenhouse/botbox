@@ -234,10 +234,10 @@ The Runner executes one sequence:
    reached into is G3's to judge (§6). Any other wait that expires while no fault excuses
    it records a G4 violation, which says why from the Observer's history of the wait:
    `Ready` never held, held and then stopped, or held while the namespace kept changing
-   within `T_stable`; a CR was still being deleted; or no CR was left to be ready. Where
-   `Ready` held while the target waited to restart, or restarted within `T_stable`, it says
-   that instead, and likewise where the target had not yet shown it runs, or first did
-   within `T_stable`. Where `Ready` held and nothing changed within `T_stable`, it says that.
+   within `T_stable`; a CR was still being deleted; or no CR was left to be ready. It also
+   says where the target was waiting to restart, restarted within `T_stable`, had not yet
+   shown it runs, or first did within `T_stable`, and then leaves out what changed. Where
+   `Ready` held and nothing changed within `T_stable`, it says that.
    The Runner and the engine raise it with one function, so they agree. A fault excuses it
    while active, which is once the proxy has applied it and until the proxy stops (D36),
    and while the target is still owed time to recover from it (§6). A `recreate` whose old

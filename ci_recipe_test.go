@@ -25,6 +25,7 @@ type workflow struct {
 	On          any               `yaml:"on"`
 	Env         map[string]string `yaml:"env"`
 	Permissions any               `yaml:"permissions"`
+	Defaults    any               `yaml:"defaults"`
 	Jobs        map[string]job    `yaml:"jobs"`
 }
 
@@ -32,6 +33,7 @@ type job struct {
 	If              string            `yaml:"if"`
 	RunsOn          any               `yaml:"runs-on"`
 	Env             map[string]string `yaml:"env"`
+	Defaults        any               `yaml:"defaults"`
 	ContinueOnError any               `yaml:"continue-on-error"`
 	TimeoutMinutes  any               `yaml:"timeout-minutes"`
 	Steps           []step            `yaml:"steps"`
@@ -45,6 +47,8 @@ type step struct {
 	Uses            string            `yaml:"uses"`
 	With            map[string]string `yaml:"with"`
 	Env             map[string]string `yaml:"env"`
+	Shell           string            `yaml:"shell"`
+	WorkingDir      string            `yaml:"working-directory"`
 	Run             string            `yaml:"run"`
 }
 
@@ -407,6 +411,21 @@ func TestTheCIRecipeFailsWhenBotboxFinds(t *testing.T) {
 	for _, s := range botboxRuns(t, recipe.Steps) {
 		if _, output, err := runStep(t, s, "botbox", "exit 1"); err == nil {
 			t.Errorf("%q passes when botbox fails\n%s", s.Run, output)
+		}
+	}
+}
+
+func TestTheCIRecipeRunsEachStepInBashFromTheWorkspaceRoot(t *testing.T) {
+	recipe := recipeJob(t)
+	if readWorkflow(t, ciRecipe).Defaults != nil || recipe.Defaults != nil {
+		t.Error("the recipe sets defaults, which can change the shell or the directory of every step")
+	}
+	for i, s := range recipe.Steps {
+		if s.Shell != "" {
+			t.Errorf("step %d runs under shell %q, and these tests run it as bash -e, as Actions runs a step with no shell key", i, s.Shell)
+		}
+		if s.WorkingDir != "" {
+			t.Errorf("step %d runs in %s, and the upload and the replay command in report.md read paths from the workspace root", i, s.WorkingDir)
 		}
 	}
 }

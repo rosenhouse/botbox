@@ -56,6 +56,23 @@ type GenerateSpec struct {
 	Mutate []string
 	// Overlay tightens the CRD schema at a dotted path.
 	Overlay map[string]map[string]any
+	// MaxCRs bounds the CRs a sequence creates. Zero takes the generator's
+	// default.
+	MaxCRs int
+	// Distinct lists dotted paths at which no two CRs of a sequence hold one
+	// value.
+	Distinct []string
+	// Fixtures are the fixtures generation may delete, in the order the
+	// target lists them.
+	Fixtures []MutableFixture
+}
+
+// MutableFixture is a fixture generation may delete, and the strings in it
+// generation may set.
+type MutableFixture struct {
+	GVK    schema.GroupVersionKind
+	Name   string
+	Mutate []Path
 }
 
 // LaunchSpec says how to run the target (DESIGN.md §5.1).

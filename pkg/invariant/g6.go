@@ -13,7 +13,7 @@ import (
 
 // NoErrorLoop is G6: the target does not make the same failing request, same
 // verb, resource, namespace and name, more than N_errloop times within
-// T_settle under a stable spec with no faults (DESIGN.md §6).
+// T_settle under an unchanged spec and fixtures, with no faults (DESIGN.md §6).
 func NoErrorLoop(in Input) (Result, error) {
 	threshold := in.errLoop()
 	out := Result{ID: "G6"}
@@ -32,7 +32,7 @@ func NoErrorLoop(in Input) (Result, error) {
 }
 
 // failure is the failing requests of one verb, resource, namespace and name in
-// one stretch of unchanged spec.
+// one stretch of unchanged spec and fixtures.
 type failure struct {
 	key      requestKey
 	requests []proxy.Request
@@ -49,7 +49,7 @@ func (k requestKey) String() string {
 }
 
 // repeatedFailures groups the failing requests by what the target asked for,
-// within each stretch of unchanged spec, in a stable order.
+// within each stretch of unchanged spec and fixtures, in a stable order.
 func (in Input) repeatedFailures() []failure {
 	grouped := map[time.Time]map[requestKey][]proxy.Request{}
 	for _, r := range in.Requests {
@@ -98,12 +98,12 @@ func conflicted(r proxy.Request) bool {
 	return r.Status == http.StatusConflict && (r.Verb == "update" || r.Verb == "patch")
 }
 
-// specSetAt is when the run last gave the target a new spec, which opens the
-// stretch G6 counts within. Teardown closes the last one.
+// specSetAt is when the run last gave the target a new spec or fixture, which
+// opens the stretch G6 counts within. Teardown closes the last one.
 func (in Input) specSetAt(t time.Time) time.Time {
 	var since time.Time
 	for _, op := range in.Ops {
-		if op.Type.touchesCR() && !op.Time.After(t) {
+		if (op.Type.touchesCR() || op.Type.onFixture() || op.Restored) && !op.Time.After(t) {
 			since = op.Time
 		}
 	}

@@ -14,10 +14,13 @@ import (
 	"testing"
 	"time"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
@@ -375,7 +378,7 @@ func TestTheHarnessReadsAReadyThatYieldsNoBoolAsAnError(t *testing.T) {
 	yieldsAnInt := &target.Target{Primary: widgetKind, Ready: func(*unstructured.Unstructured) (bool, error) {
 		return false, &target.EvalError{Predicate: "ready", Expr: "status.ready", Err: fmt.Errorf("%w: it yielded int64", target.ErrNotBool)}
 	}}
-	h := &Harness{target: yieldsAnInt, Observer: &observe.Observer{Store: store}, Launcher: launcherReporting{status: launch.Status{Running: true}}}
+	h := &Harness{target: yieldsAnInt, Observer: &observe.Observer{Store: store}, Launcher: launcherReporting{status: launch.Status{Running: true}}, Proxy: proxyThatSaw(t)}
 
 	_, _, err := h.state(time.Now())
 
@@ -435,18 +438,44 @@ type launcherReporting struct {
 
 func (l launcherReporting) Status() launch.Status { return l.status }
 
-// harnessOver reads a quiet, empty run namespace and the target as status says.
-func harnessOver(status launch.Status) *Harness {
+// harnessOver reads a quiet, empty run namespace, the target as status says,
+// and the requests the proxy recorded.
+func harnessOver(status launch.Status, p *proxy.Proxy) *Harness {
 	return &Harness{
 		target:   &target.Target{Primary: widgetKind},
 		Observer: &observe.Observer{Store: observe.NewStore(observe.Options{Namespace: "botbox-run-1"})},
 		Launcher: launcherReporting{status: status},
+		Proxy:    p,
 	}
 }
 
-// A target waiting out a restart backoff is down, whatever state it left.
-func TestATargetWaitingToRestartIsNotReady(t *testing.T) {
+// listConfigMaps is the path of a request that shows the target runs.
+const listConfigMaps = "/api/v1/namespaces/botbox-run-1/configmaps"
+
+// proxyThatSaw is a proxy that has recorded a request to each path.
+func proxyThatSaw(t *testing.T, paths ...string) *proxy.Proxy {
+	t.Helper()
+	p, err := proxy.Start(unreachable(), proxy.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { p.Stop() })
+	for _, path := range paths {
+		resp, err := http.Get(p.URL() + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+	return p
+}
+
+// A target waiting out a restart backoff is down, whatever state it left, and
+// so is one that has not shown it runs since it started.
+func TestATargetIsReadyOnlyOnceItShowsItRuns(t *testing.T) {
 	since := time.Now()
+	listed := proxyThatSaw(t, listConfigMaps)
+	startedLater := time.Now()
 	for _, test := range []struct {
 		name   string
 		status launch.Status
@@ -454,9 +483,10 @@ func TestATargetWaitingToRestartIsNotReady(t *testing.T) {
 	}{
 		{"running", launch.Status{Running: true, Started: since.Add(-time.Minute)}, true},
 		{"waiting to restart", launch.Status{Running: true, Restarting: true, Started: since.Add(-time.Minute)}, false},
+		{"started after its last request", launch.Status{Running: true, Started: startedLater}, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			ready, _, err := harnessOver(test.status).state(since)
+			ready, _, err := harnessOver(test.status, listed).state(since)
 
 			if err != nil || ready != test.ready {
 				t.Errorf("A target %s reads as ready: %t (%v), want %t.", test.name, ready, err, test.ready)
@@ -471,10 +501,24 @@ func TestARestartCountsAsAChange(t *testing.T) {
 	since := time.Now().Add(-time.Minute)
 	restarted := since.Add(time.Second)
 
-	_, changed, err := harnessOver(launch.Status{Running: true, Started: restarted}).state(since)
+	_, changed, err := harnessOver(launch.Status{Running: true, Started: restarted}, proxyThatSaw(t)).state(since)
 
 	if err != nil || !changed.Equal(restarted) {
 		t.Errorf("The run last changed at %v (%v), want the restart at %v.", changed, err, restarted)
+	}
+}
+
+// A target slow to come back does its startup's work after its first request,
+// so a wait converges only once it has run for T_stable.
+func TestTheTargetsFirstRequestCountsAsAChange(t *testing.T) {
+	since := time.Now().Add(-time.Minute)
+	p := proxyThatSaw(t, listConfigMaps, listConfigMaps)
+	first := p.Log()[0].Start
+
+	_, changed, err := harnessOver(launch.Status{Running: true, Started: since.Add(time.Second)}, p).state(since)
+
+	if err != nil || !changed.Equal(first) {
+		t.Errorf("The run last changed at %v (%v), want the target's first request at %v.", changed, err, first)
 	}
 }
 
@@ -524,6 +568,49 @@ func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
 		if down := exit.Restart.Sub(exit.At); down > want.backoff || down < want.backoff-time.Second {
 			t.Errorf("Exit %d restarts %v after it, want %v.", i+1, down, want.backoff)
 		}
+	}
+}
+
+// The API server takes no strategic merge patch of a custom resource, and one
+// would merge lists that the sequence's merge patch replaces.
+func TestAFixtureTakesAJSONMergePatch(t *testing.T) {
+	fixture := widget("fixture")
+	fixture.SetNamespace("botbox-run-1")
+	client := widgetsClient(fixture)
+
+	err := liveOver(client).patchFixture(t.Context(), widgetKind, "fixture", map[string]any{"spec": map[string]any{"count": 2}})
+
+	if err != nil {
+		t.Fatalf("The patch failed: %v", err)
+	}
+	patches := slices.DeleteFunc(client.Actions(), func(action clienttesting.Action) bool { return action.GetVerb() != "patch" })
+	if len(patches) != 1 || patches[0].(clienttesting.PatchAction).GetPatchType() != types.MergePatchType {
+		t.Errorf("patchFixture sent %v, want one %s.", patches, types.MergePatchType)
+	}
+}
+
+func TestAFixtureIsGoneOnceNoObjectUnderDeletionHoldsItsName(t *testing.T) {
+	deleting := &unstructured.Unstructured{}
+	deleting.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
+	refused := errors.New("the API server refused the read")
+	for _, test := range []struct {
+		name    string
+		fixture *unstructured.Unstructured
+		err     error
+		gone    bool
+	}{
+		{"not found", nil, apierrors.NewNotFound(configMapResource.GroupResource(), "fixture"), true},
+		{"still being deleted", deleting, nil, false},
+		{"another object under its name", &unstructured.Unstructured{}, nil, true},
+		{"a failed read", nil, refused, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			gone, err := fixtureGone(test.fixture, test.err)
+
+			if gone != test.gone || (test.err == refused) != errors.Is(err, refused) {
+				t.Errorf("fixtureGone returned (%t, %v), want gone: %t.", gone, err, test.gone)
+			}
+		})
 	}
 }
 

@@ -190,6 +190,27 @@ func TestG6IgnoresFailuresAnOpSplits(t *testing.T) {
 	silent(t, invariant.NoErrorLoop, in)
 }
 
+func TestG6IgnoresFailuresAFixtureOpSplits(t *testing.T) {
+	for _, change := range []struct {
+		name  string
+		apply func(*run) *run
+	}{
+		{"an update", func(r *run) *run { return r.op(invariant.OpUpdateFixture, 2*time.Second) }},
+		{"a delete", func(r *run) *run { return r.op(invariant.OpDeleteFixture, 2*time.Second) }},
+		{"a restore", func(r *run) *run { return r.restoring(invariant.OpSettle, 2*time.Second) }},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			in := change.apply(newRun().
+				op(invariant.OpCreate, 0).
+				requests(time.Second, 200*time.Millisecond, errLoop, failedGet("w-0", 404))).
+				requests(2200*time.Millisecond, 200*time.Millisecond, errLoop, failedGet("w-0", 404)).
+				through(12 * time.Second)
+
+			silent(t, invariant.NoErrorLoop, in)
+		})
+	}
+}
+
 func TestG6TakesTheThresholdSection6DefaultsWhenTheTargetDeclaresNone(t *testing.T) {
 	in := loop(10, failedGet("w-0", 404)).through(40 * time.Second)
 	in.Target.Thresholds = target.Thresholds{}

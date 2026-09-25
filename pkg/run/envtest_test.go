@@ -61,9 +61,8 @@ func TestHarness(t *testing.T) {
 	// The M2 acceptance criterion of DESIGN.md §10.
 	t.Run("runs the toy target and records what it did", func(t *testing.T) {
 		toy := loadTarget(t, binary)
-		// The toy declares no fixture, so the test adds one. The harness
-		// creates it and marks it botbox's, which keeps it out of the managed
-		// objects (DESIGN.md §6).
+		// The harness creates a fixture and marks it botbox's, which keeps it
+		// out of the managed objects (DESIGN.md §6).
 		toy.Fixtures = append(toy.Fixtures, fixtureConfigMap())
 		dir := t.TempDir()
 		h := startHarness(t, ctx, toy, testCluster.Config(), dir)
@@ -108,7 +107,7 @@ func TestHarness(t *testing.T) {
 		}
 
 		deleteWidget(t, ctx, h, widget)
-		requireNamespaceEmptied(t, ctx, h, widget)
+		requireNamespaceEmptied(t, ctx, h, toy, widget)
 	})
 
 	t.Run("hands the target the run namespace", func(t *testing.T) {
@@ -467,19 +466,21 @@ func convergedState(t *testing.T, h *run.Harness, toy *target.Target) map[string
 
 // requireNamespaceEmptied asserts the two cleanup paths of DESIGN.md §9: the
 // finalizer takes the children the Widget controls, and the collector takes
-// what only carries an ownerReference.
-func requireNamespaceEmptied(t *testing.T, ctx context.Context, h *run.Harness, widget *unstructured.Unstructured) {
+// what only carries an ownerReference. The fixtures stay.
+func requireNamespaceEmptied(t *testing.T, ctx context.Context, h *run.Harness, toy *target.Target, widget *unstructured.Unstructured) {
 	t.Helper()
 	eventually(t, func() error {
 		remaining, err := configMaps(t, h).List(ctx, metav1.ListOptions{})
 		if err != nil {
 			return err
 		}
-		if len(remaining.Items) > 0 {
-			var names []string
-			for _, configMap := range remaining.Items {
+		var names []string
+		for _, configMap := range remaining.Items {
+			if !slices.ContainsFunc(toy.Fixtures, func(fixture *unstructured.Unstructured) bool { return fixture.GetName() == configMap.Name }) {
 				names = append(names, configMap.Name)
 			}
+		}
+		if len(names) > 0 {
 			return fmt.Errorf("the namespace still holds the ConfigMaps %v", names)
 		}
 		if _, err := widgets(t, h).Get(ctx, widget.GetName(), metav1.GetOptions{}); !apierrors.IsNotFound(err) {

@@ -119,6 +119,7 @@ func slowToy(t *testing.T, dir, binary string) string {
 	slow := strings.NewReplacer(
 		"  - crds/", "  - "+filepath.Join(toyDir, "crds"),
 		"sample: widget.yaml", "sample: "+filepath.Join(toyDir, "widget.yaml"),
+		"  - config.yaml", "  - "+filepath.Join(toyDir, "config.yaml"),
 		"binary: bin/toy-widget", "binary: "+binary,
 		"settle: 5s", "settle: 60s",
 		"stable: 2s", "stable: 30s",

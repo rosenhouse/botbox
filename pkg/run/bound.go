@@ -35,10 +35,16 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 	faults, stops, untriggered := 0, 0, false
 	for _, op := range s.Ops {
 		switch op.Type {
-		case OpDelete, OpRecreate:
+		case OpDelete, OpDeleteFixture:
 			waits += deletion
+		case OpRecreate:
+			// Its wait for the CR to go lasts while the run is owed time,
+			// which can run T_settle past what the ops before it were given.
+			waits += max(deletion, settle)
 		case OpRestart:
-			waits += float64(launch.RestartWithin)
+			// The target is owed T_settle past its return, which can come
+			// T_settle after the restart.
+			waits += float64(launch.RestartWithin) + settle
 		case OpFault:
 			faults++
 			if op.Fault.Until == (Trigger{}) {
@@ -55,10 +61,10 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 	if untriggered {
 		stops++
 	}
-	// Each fault allows an exit, owed T_settle past a restart that can take
-	// MaxBackoff. Faults that stop are owed as long as they lasted and
-	// T_settle, and allow another exit.
-	exit := float64(launch.MaxBackoff) + settle
+	// Each fault allows an exit, owed T_settle past a return that can come
+	// T_settle after a restart that can take MaxBackoff. Faults that stop are
+	// owed as long as they lasted and T_settle, and allow another exit.
+	exit := float64(launch.MaxBackoff) + 2*settle
 	waits += float64(faults) * exit
 	for range stops {
 		waits = 2*waits + settle + exit

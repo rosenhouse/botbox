@@ -13,8 +13,9 @@ import (
 // RestartStable is G5: restarting the target does not change converged state
 // (DESIGN.md §6). It compares the last converged snapshot before each Restart
 // with the first converged one after it, keyed by kind and name. A Restart
-// missing either snapshot, or with a change of botbox's or a fault between
-// them, is not evaluated, and the result says so.
+// missing either snapshot, or with a fault between them, is not evaluated, and
+// the result says so. G5 leaves out what a change of botbox's between them may
+// have changed, and says so too.
 func RestartStable(in Input) (Result, error) {
 	out := Result{ID: "G5"}
 	for _, op := range in.Ops {
@@ -26,9 +27,11 @@ func RestartStable(in Input) (Result, error) {
 			out.note("for %s: it has no converged snapshot %s it", describe(op), missing)
 			continue
 		}
-		if changed, found := in.changedBetween(before.Time, after.Time); found {
+		changes := in.changesBetween(before.Time, after.Time)
+		reached := in.reached(changes)
+		if len(changes) > 0 && !in.spares(reached, before, after) {
 			out.note("for %s: %s ran between the converged states before and after it, so G5 cannot tell what the restart changed; a settle op on each side of a restart lets G5 judge it",
-				describe(op), describe(changed))
+				describe(op), describeAll(changes))
 			continue
 		}
 		if in.faulted(before.Time, after.Time) {
@@ -36,20 +39,57 @@ func RestartStable(in Input) (Result, error) {
 				describe(op))
 			continue
 		}
-		out.compare(in, op, before, after)
+		if len(changes) > 0 {
+			out.note("for %s on what %s may have changed between the converged states before and after it",
+				describe(op), describeAll(changes))
+		}
+		out.compare(in, op, before, after, reached)
 	}
 	return out, nil
 }
 
-// changedBetween returns the first op that changed the CR or a managed object
-// in [from, to).
+func describeAll(ops []Op) string {
+	described := make([]string, len(ops))
+	for i, op := range ops {
+		described[i] = describe(op)
+	}
+	last := len(described) - 1
+	if last == 0 {
+		return described[0]
+	}
+	return strings.Join(described[:last], ", ") + " and " + described[last]
+}
+
+// changedBetween returns the first op that changed a CR, a managed object or a
+// fixture in [from, to).
 func (in Input) changedBetween(from, to time.Time) (Op, bool) {
-	for _, op := range in.Ops {
-		if op.changesRun() && !op.Time.Before(from) && op.Time.Before(to) {
-			return op, true
-		}
+	if changes := in.changesBetween(from, to); len(changes) > 0 {
+		return changes[0], true
 	}
 	return Op{}, false
+}
+
+// changesBetween are the ops that changed a CR, a managed object or a fixture
+// in [from, to).
+func (in Input) changesBetween(from, to time.Time) []Op {
+	var changes []Op
+	for _, op := range in.Ops {
+		if op.changesRun() && !op.Time.Before(from) && op.Time.Before(to) {
+			changes = append(changes, op)
+		}
+	}
+	return changes
+}
+
+// spares reports whether either converged state holds an object the reach
+// left alone.
+func (in Input) spares(reached reach, before, after Checkpoint) bool {
+	for _, s := range in.statesAt([]time.Time{before.Time, after.Time}) {
+		if slices.ContainsFunc(s.live, func(v observe.Version) bool { return !reached.touches(in, v) }) {
+			return true
+		}
+	}
+	return false
 }
 
 // convergedAround returns the checkpoints of the settle waits that converged
@@ -83,14 +123,16 @@ type changedObject struct {
 }
 
 // compare reports every object that the Restart added, dropped or changed, in
-// one violation.
-func (out *Result) compare(in Input, op Op, before, after Checkpoint) {
+// one violation. It leaves out what botbox's changes reached.
+func (out *Result) compare(in Input, op Op, before, after Checkpoint, reached reach) {
 	states := in.statesAt([]time.Time{before.Time, after.Time})
 	differ := in.differ(states[0], states[1], out)
 	indexed := func(s state) map[objectKey]observe.Version {
 		objects := map[objectKey]observe.Version{}
 		for _, v := range s.live {
-			objects[objectKey{kind: kindName(v.GVK), name: v.Name}] = v
+			if !reached.touches(in, v) {
+				objects[objectKey{kind: kindName(v.GVK), name: v.Name}] = v
+			}
 		}
 		return objects
 	}

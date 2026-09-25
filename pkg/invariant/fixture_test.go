@@ -109,11 +109,23 @@ func (r *run) fixture(obj *unstructured.Unstructured) *run {
 
 // op is an op of the type given, which writes the CR w if it is a CR op.
 func (r *run) op(opType invariant.OpType, when time.Duration) *run {
+	return r.opOn(opType, when, widgetName)
+}
+
+// opOn is an op of the type given, which writes the CR named if it is a CR op.
+func (r *run) opOn(opType invariant.OpType, when time.Duration, cr string) *run {
 	op := invariant.Op{Index: len(r.in.Ops), Type: opType, Time: at(when)}
 	if slices.Contains([]invariant.OpType{invariant.OpCreate, invariant.OpUpdate, invariant.OpDelete, invariant.OpRecreate}, opType) {
-		op.CR = observe.Key{GVK: widgetGVK, Namespace: namespace, Name: widgetName}
+		op.CR = observe.Key{GVK: widgetGVK, Namespace: namespace, Name: cr}
 	}
 	r.in.Ops = append(r.in.Ops, op)
+	return r
+}
+
+// withSecondWidget has botbox create the Widget w2 too, so that it is never
+// managed either.
+func (r *run) withSecondWidget() *run {
+	r.store.Exclude(widgetGVK, secondName)
 	return r
 }
 
@@ -130,6 +142,14 @@ func (r *run) deletedManagedOf(when time.Duration, gvk schema.GroupVersionKind, 
 		Time:    at(when),
 		Deleted: observe.Key{GVK: gvk, Namespace: namespace, Name: name},
 	})
+	return r
+}
+
+// restoring is an op of the type given, before which botbox restored a fixture
+// it had deleted.
+func (r *run) restoring(opType invariant.OpType, when time.Duration) *run {
+	r.op(opType, when)
+	r.in.Ops[len(r.in.Ops)-1].Restored = true
 	return r
 }
 
@@ -197,6 +217,9 @@ func (r *run) request(when time.Duration, req proxy.Request) *run {
 	return r
 }
 
+// running records a request that shows the target runs.
+func (r *run) running(when time.Duration) *run { return r.request(when, watch()) }
+
 // requests repeats one request at a fixed interval.
 func (r *run) requests(first, every time.Duration, count int, req proxy.Request) *run {
 	for i := range count {
@@ -236,6 +259,39 @@ func widget(resourceVersion string, opts ...option) *unstructured.Unstructured {
 // otherwise.
 func child(name, resourceVersion string, opts ...option) *unstructured.Unstructured {
 	return object(configMapGVK, name, resourceVersion, append([]option{ownedByWidget}, opts...)...)
+}
+
+// The second Widget of a run that creates two.
+const (
+	secondName = "w2"
+	secondUID  = "uid-w2"
+)
+
+func secondWidget(resourceVersion string, opts ...option) *unstructured.Unstructured {
+	defaults := []option{uid(secondUID), generation(1)}
+	return object(widgetGVK, secondName, resourceVersion, append(defaults, opts...)...)
+}
+
+// secondChild is a ConfigMap of the second Widget.
+func secondChild(name, resourceVersion string, opts ...option) *unstructured.Unstructured {
+	return object(configMapGVK, name, resourceVersion, append([]option{ownedBySecond}, opts...)...)
+}
+
+func ownedBySecond(u *unstructured.Unstructured) {
+	u.SetOwnerReferences([]metav1.OwnerReference{{
+		APIVersion: widgetGVK.GroupVersion().String(),
+		Kind:       widgetGVK.Kind,
+		Name:       secondName,
+		UID:        secondUID,
+	}})
+}
+
+// ownedByBoth names both Widgets as owners.
+func ownedByBoth(u *unstructured.Unstructured) {
+	ownedByWidget(u)
+	first := u.GetOwnerReferences()
+	ownedBySecond(u)
+	u.SetOwnerReferences(append(first, u.GetOwnerReferences()...))
 }
 
 // secret is a Secret of the Widget, a second managed kind.
@@ -296,7 +352,26 @@ func ownedByWidget(u *unstructured.Unstructured) {
 	}})
 }
 
+// ownedByRecreated names the Widget w that a recreate made, under a new UID.
+func ownedByRecreated(u *unstructured.Unstructured) {
+	ownedByWidget(u)
+	refs := u.GetOwnerReferences()
+	refs[0].UID = "uid-w-again"
+	u.SetOwnerReferences(refs)
+}
+
 func orphaned(u *unstructured.Unstructured) { u.SetOwnerReferences(nil) }
+
+// ownedByAPod names an owner of a kind the target does not declare.
+func ownedByAPod(u *unstructured.Unstructured) {
+	u.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "v1", Kind: "Pod", Name: "p", UID: "uid-p"}})
+}
+
+// ownedByAWidgetElsewhere names an owner of the primary's kind in another
+// group.
+func ownedByAWidgetElsewhere(u *unstructured.Unstructured) {
+	u.SetOwnerReferences([]metav1.OwnerReference{{APIVersion: "other.example/v1", Kind: widgetGVK.Kind, Name: "w", UID: "uid-other-w"}})
+}
 
 // ownedByGhost names an owner no snapshot holds, which §6 ignores.
 func ownedByGhost(u *unstructured.Unstructured) {

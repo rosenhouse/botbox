@@ -108,6 +108,8 @@ type fakeHarness struct {
 	// cancel ends the run's context at the call cancelsAfter names.
 	cancel       context.CancelFunc
 	cancelsAfter string
+	// restoredAt is when botbox last created a fixture.
+	restoredAt time.Time
 	// supervising is the context the run supervised the target under, and
 	// stoppedAtOnce is whether the teardown stopped the target under a
 	// context that had ended, which kills it at once. cancelled names the
@@ -298,8 +300,8 @@ func (f *fakeHarness) faultWindow(id proxy.FaultID) proxy.FaultWindow {
 	return window
 }
 
-func (f *fakeHarness) createCR(_ context.Context, obj *unstructured.Unstructured) (string, error) {
-	return obj.GetName(), f.record("createCR " + obj.GetName())
+func (f *fakeHarness) createCR(_ context.Context, obj *unstructured.Unstructured) error {
+	return f.record("createCR " + obj.GetName())
 }
 
 func (f *fakeHarness) patchCR(_ context.Context, name string, patch map[string]any) error {
@@ -336,6 +338,19 @@ func (f *fakeHarness) managedObjects(gvk schema.GroupVersionKind) []string {
 func (f *fakeHarness) deleteManaged(_ context.Context, gvk schema.GroupVersionKind, name string) (bool, error) {
 	err := f.record("deleteManaged " + kindName(gvk) + " " + name)
 	return err == nil && !slices.Contains(f.gone, name), err
+}
+
+func (f *fakeHarness) patchFixture(_ context.Context, gvk schema.GroupVersionKind, name string, patch map[string]any) error {
+	return f.record(fmt.Sprintf("patchFixture %s %s %v", kindName(gvk), name, patch))
+}
+
+func (f *fakeHarness) deleteFixture(_ context.Context, gvk schema.GroupVersionKind, name string) error {
+	return f.record("deleteFixture " + kindName(gvk) + " " + name)
+}
+
+func (f *fakeHarness) createFixture(_ context.Context, fixture *unstructured.Unstructured) error {
+	f.restoredAt = time.Now()
+	return f.record(fmt.Sprintf("createFixture %s %s %v", kindName(fixture.GroupVersionKind()), fixture.GetName(), fixture.Object["data"]))
 }
 
 func (f *fakeHarness) managedCount() int { return f.count }
@@ -453,6 +468,7 @@ func (c *fakeChecker) Check(in Input) (Findings, error) {
 var toyTarget = &target.Target{
 	Name:      "toy-widget",
 	Primary:   widgetKind,
+	Sample:    widget("widget"),
 	Manages:   []schema.GroupVersionKind{configMapKind},
 	Timeouts:  testTimeouts,
 	Ready:     readyCountsChildren,
@@ -469,6 +485,13 @@ func widget(name string) *unstructured.Unstructured {
 	object := &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{"count": float64(3)}}}
 	object.SetGroupVersionKind(widgetKind)
 	object.SetName(name)
+	return object
+}
+
+// generated is a Widget the API server would name from the prefix.
+func generated(prefix string) *unstructured.Unstructured {
+	object := widget("")
+	object.SetGenerateName(prefix)
 	return object
 }
 
@@ -528,14 +551,122 @@ func TestRunAppliesTheOpsInOrder(t *testing.T) {
 	}
 }
 
+// withSecret is the toy with a Secret fixture.
+func withSecret() *target.Target {
+	withFixture := *toyTarget
+	secret := &unstructured.Unstructured{Object: map[string]any{"data": map[string]any{"token": "czNjcjN0"}}}
+	secret.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Secret"})
+	secret.SetName("token")
+	withFixture.Fixtures = []*unstructured.Unstructured{secret}
+	return &withFixture
+}
+
+func TestRunChangesDeletesAndRestoresAFixture(t *testing.T) {
+	h := newFakeHarness()
+	declared := withSecret()
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpUpdateFixture, Kind: "v1/Secret", Name: "token", Patch: map[string]any{"data": map[string]any{"token": "abcd"}}},
+		Op{Type: OpDeleteFixture, Kind: "v1/Secret", Name: "token", Until: &Until{Op: 4}},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}, NoSettle: true},
+		Op{Type: OpRestart},
+		Op{Type: OpSettle},
+	)
+
+	result, err := runSequence(t.Context(), declared, sequence, Options{Check: &fakeChecker{}}, h)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	want := []string{
+		"createCR widget", "settle", "supervise",
+		"patchFixture v1/Secret token map[data:map[token:abcd]]", "settle",
+		"deleteFixture v1/Secret token",
+		"patchCR widget map[spec:map[count:5]]",
+		"createFixture v1/Secret token map[token:abcd]", "restart",
+		"settle",
+	}
+	if got := h.opCalls(); !slices.Equal(got, want) {
+		t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
+	}
+	var restored []int
+	for _, applied := range result.Timeline.Ops {
+		if applied.Restored {
+			restored = append(restored, applied.Op.Index)
+		}
+		if applied.Deleted != "" {
+			t.Errorf("Op %d names %s as deleted, and G7 asks back only a managed object.", applied.Op.Index, applied.Deleted)
+		}
+	}
+	if !slices.Equal(restored, []int{4}) {
+		t.Errorf("The ops %v restored a fixture, want op 4.", restored)
+	}
+	// Anything the target did in reply came after op 4 began.
+	if h.restoredAt.Before(result.Timeline.Ops[4].At) {
+		t.Errorf("botbox restored the fixture at %v, before op 4 began at %v.", h.restoredAt, result.Timeline.Ops[4].At)
+	}
+	if token := declared.Fixtures[0].Object["data"].(map[string]any)["token"]; token != "czNjcjN0" {
+		t.Errorf("The target's fixture holds the token %v, want the one it declares: the next run starts from it.", token)
+	}
+}
+
+func TestAnOpRestoredAFixtureOnlyWhereACreateSucceeded(t *testing.T) {
+	declared := withSecret()
+	other := declared.Fixtures[0].DeepCopy()
+	other.SetName("other")
+	declared.Fixtures = append(declared.Fixtures, other)
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpDeleteFixture, Kind: "v1/Secret", Name: "token", Until: &Until{Op: 3}},
+		Op{Type: OpDeleteFixture, Kind: "v1/Secret", Name: "other", Until: &Until{Op: 3}},
+		Op{Type: OpSettle},
+	)
+	for _, test := range []struct {
+		failing  string
+		restored bool
+	}{
+		{failing: "token", restored: false},
+		{failing: "other", restored: true},
+	} {
+		t.Run("where the restore of "+test.failing+" fails", func(t *testing.T) {
+			h := newFakeHarness()
+			refused := errors.New("the API server refused the create")
+			h.fail["createFixture v1/Secret "+test.failing+" map[token:czNjcjN0]"] = refused
+
+			result, err := runSequence(t.Context(), declared, sequence, Options{Check: &fakeChecker{}}, h)
+
+			if !errors.Is(err, refused) {
+				t.Fatalf("The run returned %v, want the refused create.", err)
+			}
+			if restored := result.Timeline.Ops[3].Restored; restored != test.restored {
+				t.Errorf("Op 3 restored a fixture: %t, want %t.", restored, test.restored)
+			}
+		})
+	}
+}
+
+func TestRunRefusesAnOpOnAFixtureTheTargetDoesNotDeclare(t *testing.T) {
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpDeleteFixture, Kind: "v1/Secret", Name: "other", Until: &Until{Op: 2}},
+		Op{Type: OpSettle},
+	)
+
+	_, err := runSequence(t.Context(), withSecret(), sequence, Options{Check: &fakeChecker{}}, newFakeHarness())
+
+	if want := "op 1 (deleteFixture): the target declares no fixture v1/Secret other"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("The run returned %v, want an error saying %q.", err, want)
+	}
+}
+
 func TestRunNamesTheCREachCROpWrote(t *testing.T) {
 	sequence := sequenceOf(
 		Op{Type: OpCreate, Obj: widget("a")},
-		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+		Op{Type: OpUpdate, CR: "a", Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
 		Op{Type: OpSettle},
 		Op{Type: OpRestart},
-		Op{Type: OpRecreate, Obj: widget("b")},
-		Op{Type: OpDelete},
+		Op{Type: OpRecreate, CR: "a", Obj: widget("a")},
+		Op{Type: OpDelete, CR: "a"},
 	)
 
 	result, err := runFake(t, newFakeHarness(), nil, sequence)
@@ -547,8 +678,67 @@ func TestRunNamesTheCREachCROpWrote(t *testing.T) {
 	for _, op := range result.Timeline.Ops {
 		got = append(got, op.CR)
 	}
-	if want := []string{"a", "a", "", "", "b", "b"}; !slices.Equal(got, want) {
+	if want := []string{"a", "a", "", "", "a", "a"}; !slices.Equal(got, want) {
 		t.Errorf("The ops name the CRs %q, want %q.", got, want)
+	}
+}
+
+func TestRunActsOnTheCREachOpNames(t *testing.T) {
+	h := newFakeHarness()
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpCreate, Obj: widget("widget-2")},
+		Op{Type: OpUpdate, CR: "widget-2", Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+		Op{Type: OpRecreate, CR: "widget-2", Obj: widget("widget-2")},
+		Op{Type: OpDelete, CR: "widget-2"},
+		Op{Type: OpDelete},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	want := []string{
+		"createCR widget", "settle", "supervise",
+		"createCR widget-2", "settle",
+		"patchCR widget-2 map[spec:map[count:5]]", "settle",
+		"deleteCR widget-2", "awaitCRGone widget-2", "createCR widget-2", "settle",
+		"deleteCR widget-2", "settle",
+		"deleteCR widget", "settle",
+	}
+	if got := h.opCalls(); !slices.Equal(got, want) {
+		t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
+	}
+	var crs []string
+	for _, op := range result.Timeline.Ops {
+		crs = append(crs, op.CR)
+	}
+	if want := []string{"widget", "widget-2", "widget-2", "widget-2", "widget-2", "widget"}; !slices.Equal(crs, want) {
+		t.Errorf("The ops name the CRs %q, want %q.", crs, want)
+	}
+}
+
+func TestTheTeardownDeletesEveryCRTheRunCreated(t *testing.T) {
+	h := newFakeHarness()
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpCreate, Obj: widget("widget-2")},
+		Op{Type: OpRecreate, Obj: widget("widget")},
+	)
+
+	if _, err := runFake(t, h, nil, sequence); err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+
+	var deleted []string
+	for _, call := range h.teardownCalls() {
+		if strings.HasPrefix(call, "deleteCR ") {
+			deleted = append(deleted, call)
+		}
+	}
+	if want := []string{"deleteCR widget", "deleteCR widget-2"}; !slices.Equal(deleted, want) {
+		t.Errorf("The teardown did %v, want each CR the run created deleted once: %v.", deleted, want)
 	}
 }
 
@@ -1409,11 +1599,11 @@ func TestRunRecordsG4WhenTheRecoveryExpires(t *testing.T) {
 
 // An interrupt or the deadline ends the run's context, and the run is
 // abandoned wherever it is. Its teardown waits for nothing more and judges
-// nothing, and it still takes back what the run made.
+// nothing, and it still takes back what the run made, every CR included.
 func TestAnAbandonedRunWaitsForNothing(t *testing.T) {
 	quiet := "sleep " + testTimeouts.Stable.String()
 	deletion := "awaitClean " + (testTimeouts.Delete + deletionMargin).String()
-	cleanup := []string{"deleteCR widget", "empty", "forceFinalizers", "stop"}
+	cleanup := []string{"deleteCR widget", "deleteCR widget-2", "empty", "forceFinalizers", "stop"}
 	for _, test := range []struct {
 		name  string
 		at    string
@@ -1424,14 +1614,14 @@ func TestAnAbandonedRunWaitsForNothing(t *testing.T) {
 		{name: "in the recovery", at: "clearFaults", fault: true, want: slices.Concat([]string{"clearFaults", "settle"}, cleanup)},
 		{name: "in the quiet window", at: quiet, want: slices.Concat([]string{"clearFaults", quiet}, cleanup)},
 		{name: "in the deletion window", at: deletion,
-			want: []string{"clearFaults", quiet, "deleteCR widget", deletion, "empty", "forceFinalizers", "stop"}},
+			want: []string{"clearFaults", quiet, "deleteCR widget", "deleteCR widget-2", deletion, "empty", "forceFinalizers", "stop"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newFakeHarness()
 			h.clean, h.forced = false, []string{"toy.botbox/v1/Widget widget"}
 			ctx, cancel := context.WithCancel(t.Context())
 			h.cancel, h.cancelsAfter = cancel, test.at
-			ops := []Op{{Type: OpCreate, Obj: widget("widget")}}
+			ops := []Op{{Type: OpCreate, Obj: widget("widget"), NoSettle: true}, {Type: OpCreate, Obj: widget("widget-2")}}
 			if test.fault {
 				h.faulting = true
 				ops = append(ops, Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}}, Op{Type: OpSettle})
@@ -1751,18 +1941,20 @@ func TestRunGivesEachCheckTheRunSoFar(t *testing.T) {
 }
 
 func TestRunNeedsACRBeforeAnOpThatActsOnOne(t *testing.T) {
-	for _, opType := range []OpType{OpUpdate, OpDelete} {
+	for _, opType := range []OpType{OpUpdate, OpDelete, OpRecreate} {
 		t.Run(string(opType), func(t *testing.T) {
-			h := newFakeHarness()
 			op := Op{Type: opType, Index: 0}
-			if opType == OpUpdate {
+			switch opType {
+			case OpUpdate:
 				op.Patch = map[string]any{"spec": map[string]any{}}
+			case OpRecreate:
+				op.Obj = widget("widget")
 			}
 
-			_, err := runFake(t, h, nil, Sequence{Seed: 1, Target: toyTarget.Name, Ops: []Op{op}})
+			err := validateRun(toyTarget, Sequence{Seed: 1, Target: toyTarget.Name, Ops: []Op{op}}, Options{Dir: "out", Check: &fakeChecker{}})
 
-			if err == nil || !strings.Contains(err.Error(), "no CR") {
-				t.Errorf("The run returned %v, want an error: the sequence creates no CR.", err)
+			if err == nil || !strings.Contains(err.Error(), "which no op before it creates") {
+				t.Errorf("validateRun returned %v, want an error: the sequence creates no CR.", err)
 			}
 		})
 	}
@@ -1874,6 +2066,100 @@ func TestRunValidatesTheSequenceAgainstTheTarget(t *testing.T) {
 			sequence: Sequence{Target: toyTarget.Name},
 			want:     "check",
 		},
+		{
+			name: "an update of a CR no op creates",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpUpdate, CR: "widget-2", Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (update) acts on the CR widget-2, which no op before it creates",
+		},
+		{
+			name: "a delete of the sample's CR where only another was created",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget-2")},
+				Op{Type: OpDelete},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (delete) names no cr, so it acts on the sample's widget, which no op before it creates",
+		},
+		{
+			name: "a recreate that creates another CR",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpRecreate, Obj: widget("widget-2")},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (recreate) acts on the CR widget and creates widget-2",
+		},
+		{
+			name: "a create of a CR an earlier op created",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
+				Op{Type: OpCreate, Obj: widget("widget")},
+			),
+			check: &fakeChecker{},
+			want:  "op 2 (create) creates the CR widget, which op 0 created",
+		},
+		{
+			name: "a recreate of a CR only a later op creates",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpRecreate, CR: "widget-2", Obj: widget("widget-2")},
+				Op{Type: OpCreate, Obj: widget("widget-2")},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (recreate) acts on the CR widget-2, which no op before it creates",
+		},
+		{
+			name: "a create of a CR a recreate made again",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpDelete},
+				Op{Type: OpRecreate, Obj: widget("widget")},
+				Op{Type: OpCreate, Obj: widget("widget")},
+			),
+			check: &fakeChecker{},
+			want:  "op 3 (create) creates the CR widget, which op 2 created and no op since deleted",
+		},
+		{
+			name: "an update of a deleted CR",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpCreate, Obj: widget("widget-2")},
+				Op{Type: OpDelete},
+				Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
+			),
+			check: &fakeChecker{},
+			want:  "op 3 (update) acts on the CR widget, which op 2 deleted",
+		},
+		{
+			name: "a delete of a deleted CR",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpDelete},
+				Op{Type: OpDelete},
+			),
+			check: &fakeChecker{},
+			want:  "op 2 (delete) acts on the CR widget, which op 1 deleted",
+		},
+		{
+			name:     "a create of a CR with no name",
+			sequence: sequenceOf(Op{Type: OpCreate, Obj: generated("w-")}),
+			check:    &fakeChecker{},
+			want:     "op 0 (create) writes a CR with no metadata.name",
+		},
+		{
+			name: "a recreate of a CR with no name",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpRecreate, Obj: generated("widget-")},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (recreate) writes a CR with no metadata.name",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := validateRun(toyTarget, test.sequence, Options{Dir: "out", Check: test.check})
@@ -1882,6 +2168,23 @@ func TestRunValidatesTheSequenceAgainstTheTarget(t *testing.T) {
 				t.Errorf("validateRun returned %v, want an error naming %q.", err, test.want)
 			}
 		})
+	}
+}
+
+func TestRunAcceptsOpsOnTheCRsEarlierOpsCreate(t *testing.T) {
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpCreate, Obj: widget("widget-2")},
+		Op{Type: OpUpdate, CR: "widget-2", Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
+		Op{Type: OpRecreate, CR: "widget-2", Obj: widget("widget-2")},
+		Op{Type: OpDelete, CR: "widget-2"},
+		Op{Type: OpCreate, Obj: widget("widget-2")},
+		Op{Type: OpDelete},
+		Op{Type: OpSettle},
+	)
+
+	if err := validateRun(toyTarget, sequence, Options{Dir: "out", Check: &fakeChecker{}}); err != nil {
+		t.Errorf("validateRun returned %v, want every op to act on a CR an earlier op creates.", err)
 	}
 }
 
@@ -2812,6 +3115,33 @@ func TestAnExitAFaultExcusedIsOwedTSettlePastItsRestart(t *testing.T) {
 	}
 	if exits := check.inputs[1].Timeline.Exits; len(exits) != 1 {
 		t.Errorf("The checks after op 2 read the exits %+v, want the one in its wait.", exits)
+	}
+}
+
+// botbox chose to restart the target, so the wait after the restart gives it
+// T_settle past its return.
+func TestTheWaitAfterARestartIsOwedTSettlePastTheTargetsReturn(t *testing.T) {
+	h := newFakeHarness()
+	var back time.Time
+	h.inWait = func() {
+		if h.waits == 1 {
+			back = time.Now()
+			h.logged = append(h.logged, proxy.Request{Start: back, Verb: "list", Version: "v1", Resource: "configmaps"})
+		}
+	}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpRestart},
+		Op{Type: OpSettle},
+	)
+
+	_, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if want := back.Add(testTimeouts.Settle); len(h.owed) < 2 || !h.owed[1].Equal(want) {
+		t.Errorf("The waits were told the target owed %v, want the wait after op 1 told %v.", h.owed, want)
 	}
 }
 

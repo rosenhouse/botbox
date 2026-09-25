@@ -5,6 +5,8 @@ crds:
   - crds/
 primary: toy.botbox/v1/Widget
 sample: widget.yaml
+fixtures:
+  - config.yaml
 manages:
   - v1/ConfigMap
 ready: >-
@@ -19,6 +21,7 @@ launch:
   binary: bin/toy-widget
   args:
     - --kubeconfig=$KUBECONFIG
+    - --label-from=widget-config
     - --bug=0
   env:
     WATCH_NAMESPACE: $NAMESPACE

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"testing"
 
@@ -37,6 +38,147 @@ var targets = []struct {
 		[]string{"spec.dnsNames", "spec.duration", "spec.privateKey.algorithm", "spec.privateKey.rotationPolicy"},
 		[]string{"v1/Secret", "cert-manager.io/v1/CertificateRequest"}},
 	{externalSecretsTarget, []string{"spec.refreshInterval", "spec.target.name"}, []string{"v1/Secret"}},
+	{fixturesTarget, []string{"spec.count"}, []string{"v1/ConfigMap"}},
+}
+
+const fixturesTarget = "testdata/fixtures/target.yaml"
+
+// fixtureWord is what a Secret's data reads as base64 and a label takes.
+var fixtureWord = regexp.MustCompile(`^([a-z0-9]{4}){1,3}$`)
+
+func TestFixtureOpsActOnlyWhereTheTargetAllows(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, fixturesTarget), Options{})
+	rapid.Check(t, func(rt *rapid.T) {
+		for _, op := range g.sequence(rt).Ops {
+			paths, declared := fixturePaths[op.Kind+" "+op.Name]
+			switch op.Type {
+			case run.OpUpdateFixture:
+				changed := differences(nil, op.Patch, "")
+				if len(changed) != 1 || !slices.Contains(paths, changed[0]) {
+					rt.Fatalf("Op %d sets %v of the %s %s, and the target lets generation set %v.", op.Index, changed, op.Kind, op.Name, paths)
+				}
+				if value := leaf(op.Patch); !fixtureWord.MatchString(value) {
+					rt.Fatalf("Op %d sets %q, which a Secret's data does not read as base64.", op.Index, value)
+				}
+			case run.OpDeleteFixture:
+				if !declared {
+					rt.Fatalf("Op %d deletes the %s %s, which generate.fixtures does not name.", op.Index, op.Kind, op.Name)
+				}
+			}
+		}
+	})
+}
+
+// fixturePaths are the fixtures the fixtures target lets generation delete,
+// and the paths in each it lets generation set.
+var fixturePaths = map[string][]string{
+	"v1/ConfigMap widget-config": {"data.label", "data.app.properties"},
+	"v1/Secret token":            {"data.token"},
+	"v1/ConfigMap ca-bundle":     nil,
+}
+
+// A sequence's first deleteFixture finds every fixture there, so it may
+// delete any.
+func TestFixtureOpsReachEveryFixtureAndPathTheTargetAllows(t *testing.T) {
+	const seeds = 100
+	g := newGenerator(t, loadTarget(t, fixturesTarget), Options{})
+	var wantUpdated, updated, wantDeleted, deletedFirst []string
+	for fixture, paths := range fixturePaths {
+		wantDeleted = append(wantDeleted, fixture)
+		for _, path := range paths {
+			wantUpdated = append(wantUpdated, fixture+" "+path)
+		}
+	}
+	for seed := range int64(seeds) {
+		sequence, err := g.Draw(seed)
+		if err != nil {
+			t.Fatalf("Draw(%d) failed: %v.", seed, err)
+		}
+		first := true
+		for _, op := range sequence.Ops {
+			fixture := op.Kind + " " + op.Name
+			switch {
+			case op.Type == run.OpUpdateFixture:
+				updated = append(updated, fixture+" "+differences(nil, op.Patch, "")[0])
+			case op.Type == run.OpDeleteFixture && first:
+				deletedFirst, first = append(deletedFirst, fixture), false
+			}
+		}
+	}
+	if got := sortedSet(updated); !slices.Equal(got, sortedSet(wantUpdated)) {
+		t.Errorf("Seeds 0 to %d set %v, want %v.", seeds-1, got, sortedSet(wantUpdated))
+	}
+	if got := sortedSet(deletedFirst); !slices.Equal(got, sortedSet(wantDeleted)) {
+		t.Errorf("Seeds 0 to %d first delete %v, want %v.", seeds-1, got, sortedSet(wantDeleted))
+	}
+}
+
+func sortedSet(items []string) []string {
+	return slices.Compact(slices.Sorted(slices.Values(items)))
+}
+
+// leaf is the one string a patch that sets one field sets.
+func leaf(patch map[string]any) string {
+	for _, value := range patch {
+		if nested, isObject := value.(map[string]any); isObject {
+			return leaf(nested)
+		}
+		text, _ := value.(string)
+		return text
+	}
+	return ""
+}
+
+// The target may rightly not be ready while a fixture is gone, so no settle
+// wait runs without it.
+func TestADeletedFixtureComesBackBeforeTheNextOpThatSettles(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, fixturesTarget), Options{})
+	rapid.Check(t, func(rt *rapid.T) {
+		ops := g.sequence(rt).Ops
+		for i, op := range ops {
+			if op.Type != run.OpDeleteFixture {
+				continue
+			}
+			if next := i + 1 + slices.IndexFunc(ops[i+1:], run.Op.Settles); op.Until.Op != next {
+				rt.Fatalf("Op %d deletes a fixture until op %d, and op %d is the next that settles.", i, op.Until.Op, next)
+			}
+		}
+	})
+}
+
+// G7 notes a deleteManaged that follows a change of botbox's before the run
+// converged, so generation waits for the target's reaction first.
+func TestADeletedFixtureIsBackForTheNextDrawOnceAnOpSettles(t *testing.T) {
+	loaded := loadTarget(t, fixturesTarget)
+	g := newGenerator(t, loaded, Options{})
+	at := state{crs: []drawnCR{{object: loaded.Sample.Object, live: true}}, settled: true}
+	token := run.Op{Type: run.OpDeleteFixture, Kind: "v1/Secret", Name: "token"}
+
+	at.advance(token, 0)
+	if legal := g.legal(&at); slices.Contains(legal, run.OpDeleteManaged) {
+		t.Errorf("Right after a deleteFixture, generation may draw %v.", legal)
+	}
+	if present := g.present(&at); len(present) != 2 || slices.ContainsFunc(present, func(fixture target.MutableFixture) bool {
+		return fixture.Name == "token"
+	}) {
+		t.Errorf("With the token deleted, generation may delete %v, want every other fixture.", present)
+	}
+	at.advance(run.Op{Type: run.OpSettle}, 0)
+	if present := g.present(&at); len(present) != 3 {
+		t.Errorf("Once an op settled, generation may delete %v, want every fixture.", present)
+	}
+}
+
+func TestATargetWithoutGenerateFixturesDrawsNoFixtureOp(t *testing.T) {
+	// The toy declares a fixture, and no generate.fixtures.
+	g := newGenerator(t, loadTarget(t, toyTarget), Options{})
+	rapid.Check(t, func(rt *rapid.T) {
+		for _, op := range g.sequence(rt).Ops {
+			if op.Type == run.OpUpdateFixture || op.Type == run.OpDeleteFixture {
+				rt.Fatalf("Op %d is a %s, and the target names no fixture generation may change.", op.Index, op.Type)
+			}
+		}
+	})
 }
 
 func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
@@ -44,23 +186,18 @@ func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
 		t.Run(testCase.path, func(t *testing.T) {
 			// The API server enforces the CRD; the overlay only tightens what
 			// the generator draws, and the sample need not satisfy it.
-			g := newGenerator(t, loadTarget(t, testCase.path), Options{})
+			loaded := loadTarget(t, testCase.path)
+			g := newGenerator(t, loaded, Options{})
 			crd := crdSchemaOf(t, testCase.path)
 			rapid.Check(t, func(rt *rapid.T) {
-				var cr map[string]any
-				for _, op := range g.sequence(rt).Ops {
-					switch op.Type {
-					case run.OpCreate, run.OpRecreate:
-						cr = op.Obj.DeepCopy().Object
-					case run.OpUpdate:
-						cr = merge(cr, op.Patch)
-					default:
-						continue
+				follow(g.sequence(rt), loaded.Sample.GetName(), func(op run.Op, name string, crs map[string]*written) {
+					if !op.Type.OnCR() || op.Type == run.OpDelete {
+						return
 					}
-					if err := validate(crd, cr, ""); err != nil {
-						rt.Fatalf("Op %d left the CR outside its schema: %v.", op.Index, err)
+					if err := validate(crd, crs[name].object, ""); err != nil {
+						rt.Fatalf("Op %d left the CR %s outside its schema: %v.", op.Index, name, err)
 					}
-				}
+				})
 			})
 		})
 	}
@@ -103,24 +240,22 @@ func TestGeneratedGadgetsKeepTheirCRDsRules(t *testing.T) {
 	crd := crdSchemaOf(t, rulesTarget)
 	var changed, switchedMode, updated int
 	rapid.Check(t, func(rt *rapid.T) {
-		var current map[string]any
+		crs := map[string]map[string]any{}
 		for _, op := range g.sequence(rt).Ops {
 			var next, old map[string]any
+			name := orSample(op.CR, loaded.Sample.GetName())
 			switch op.Type {
 			case run.OpCreate, run.OpRecreate:
-				next = op.Obj.DeepCopy().Object
-				if !equalJSON(next, loaded.Sample.Object) {
+				next, name = op.Obj.DeepCopy().Object, op.Obj.GetName()
+				if !equalJSON(next["spec"], loaded.Sample.Object["spec"]) {
 					changed++
 				}
 				if mode, _, _ := unstructured.NestedString(next, "spec", "mode"); mode != "fast" {
 					switchedMode++
 				}
 			case run.OpUpdate:
-				next, old = merge(current, op.Patch), current
+				next, old = merge(crs[name], op.Patch), crs[name]
 				updated++
-			case run.OpDelete:
-				current = nil
-				continue
 			default:
 				continue
 			}
@@ -130,7 +265,7 @@ func TestGeneratedGadgetsKeepTheirCRDsRules(t *testing.T) {
 			if broken := gadgetRuleBroken(next, old); broken != "" {
 				rt.Fatalf("Op %d (%s) left a gadget whose %s: %v.", op.Index, op.Type, broken, next["spec"])
 			}
-			current = next
+			crs[name] = next
 		}
 	})
 	if changed == 0 || updated == 0 {
@@ -166,7 +301,8 @@ func TestARefusedUpdateIsDrawnEightTimes(t *testing.T) {
 	} {
 		draws := 0
 		g.fields = []field{countField(testCase.count, &draws)}
-		patch := rapid.Custom(func(t *rapid.T) map[string]any { return g.patch(t, loaded.Sample.Object) }).Example(0)
+		at := &state{crs: []drawnCR{{object: loaded.Sample.Object, live: true}}}
+		patch := rapid.Custom(func(t *rapid.T) map[string]any { return g.patch(t, 0, at) }).Example(0)
 		if (patch != nil) != testCase.accepted || draws != testCase.draws {
 			t.Errorf("With every count %d, an update drew %d times and patched %v, want %d draws and accepted=%t.",
 				testCase.count, draws, patch, testCase.draws, testCase.accepted)
@@ -182,7 +318,7 @@ func TestAnUpdateTheCRDAlwaysRefusesBecomesASettle(t *testing.T) {
 	refused := 0
 	rapid.Check(t, func(rt *rapid.T) {
 		before := draws
-		op := g.op(rt, 1, &state{cr: loaded.Sample.Object})
+		op := g.op(rt, 1, &state{crs: []drawnCR{{object: loaded.Sample.Object, live: true}}})
 		if draws-before != updateDraws {
 			return
 		}
@@ -200,20 +336,30 @@ func TestTheStateFollowsTheCRBotboxLastWrote(t *testing.T) {
 	spec := func(count int64) map[string]any {
 		return map[string]any{"spec": map[string]any{"count": count, "mode": "fast"}}
 	}
-	at := state{cr: spec(3)}
+	at := state{crs: []drawnCR{{object: spec(3), live: true}}}
+	holds := func(after string, want ...drawnCR) {
+		t.Helper()
+		same := len(at.crs) == len(want)
+		for n := range min(len(at.crs), len(want)) {
+			same = same && at.crs[n].live == want[n].live && equalJSON(at.crs[n].object, want[n].object)
+		}
+		if !same {
+			t.Errorf("After %s the state holds %v, want %v.", after, at.crs, want)
+		}
+	}
 
-	at.advance(run.Op{Type: run.OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(5)}}})
-	if !equalJSON(at.cr, spec(5)) {
-		t.Errorf("After an update the state holds %v, want %v.", at.cr, spec(5))
+	at.advance(run.Op{Type: run.OpCreate, Obj: &unstructured.Unstructured{Object: spec(1)}}, 1)
+	at.advance(run.Op{Type: run.OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(5)}}}, 0)
+	holds("an update of the first CR", drawnCR{spec(5), true}, drawnCR{spec(1), true})
+	at.advance(run.Op{Type: run.OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": int64(6)}}}, 1)
+	holds("an update of the second CR", drawnCR{spec(5), true}, drawnCR{spec(6), true})
+	at.advance(run.Op{Type: run.OpDelete}, 1)
+	holds("a delete of the second CR", drawnCR{spec(5), true}, drawnCR{spec(6), false})
+	if live := at.live(); !slices.Equal(live, []int{0}) {
+		t.Errorf("After a delete of the second CR the CRs %v are live, want the first alone.", live)
 	}
-	at.advance(run.Op{Type: run.OpRecreate, Obj: &unstructured.Unstructured{Object: spec(7)}})
-	if !equalJSON(at.cr, spec(7)) {
-		t.Errorf("After a recreate the state holds %v, want %v.", at.cr, spec(7))
-	}
-	at.advance(run.Op{Type: run.OpDelete})
-	if at.cr != nil {
-		t.Errorf("After a delete the state holds %v, want no CR.", at.cr)
-	}
+	at.advance(run.Op{Type: run.OpRecreate, Obj: &unstructured.Unstructured{Object: spec(7)}}, 1)
+	holds("a recreate of the second CR", drawnCR{spec(5), true}, drawnCR{spec(7), true})
 }
 
 func TestSequencesAreLegalToReplay(t *testing.T) {
@@ -238,15 +384,7 @@ func TestSequencesAreLegalToReplay(t *testing.T) {
 				if sequence.Ops[0].Type != run.OpCreate {
 					rt.Fatalf("The sequence opens with a %s, want the create of the CR.", sequence.Ops[0].Type)
 				}
-				crExists := true
 				for i, op := range sequence.Ops[1:] {
-					needsCR := []run.OpType{run.OpUpdate, run.OpDelete, run.OpDeleteManaged}
-					switch {
-					case op.Type == run.OpCreate:
-						rt.Fatalf("Op %d creates the CR a second time.", op.Index)
-					case !crExists && slices.Contains(needsCR, op.Type):
-						rt.Fatalf("Op %d is a %s while the CR is deleted.", op.Index, op.Type)
-					}
 					if op.Type == run.OpDeleteManaged {
 						if !slices.Contains(testCase.managed, op.Kind) {
 							rt.Fatalf("Op %d deletes a %s, which the target does not declare it manages.",
@@ -256,16 +394,10 @@ func TestSequencesAreLegalToReplay(t *testing.T) {
 							rt.Fatalf("Op %d deletes the managed object %d, which generation cannot know exists.",
 								op.Index, *op.Nth)
 						}
-						if previous := sequence.Ops[i]; previous.NoSettle {
-							rt.Fatalf("Op %d deletes a managed object after op %d skipped its settle wait.",
+						if previous := sequence.Ops[i]; !previous.Settles() {
+							rt.Fatalf("Op %d deletes a managed object after op %d, which waits for nothing.",
 								op.Index, previous.Index)
 						}
-					}
-					switch op.Type {
-					case run.OpDelete:
-						crExists = false
-					case run.OpRecreate:
-						crExists = true
 					}
 				}
 			})
@@ -426,12 +558,15 @@ func TestOnlyTheMutablePathsMove(t *testing.T) {
 			loaded := loadTarget(t, testCase.path)
 			g := newGenerator(t, loaded, Options{})
 			rapid.Check(t, func(rt *rapid.T) {
+				// Each CR after the first also takes a name and distinct values of
+				// its own.
+				moves := slices.Concat(testCase.mutablePaths, []string{"metadata.name"}, loaded.Generate.Distinct)
 				for _, op := range g.sequence(rt).Ops {
 					if op.Obj == nil {
 						continue
 					}
 					for _, path := range differences(loaded.Sample.Object, op.Obj.Object, "") {
-						if !slices.Contains(testCase.mutablePaths, path) {
+						if !slices.Contains(moves, path) {
 							rt.Fatalf("Op %d moved %s, and the target lets the generator move %v.",
 								op.Index, path, testCase.mutablePaths)
 						}

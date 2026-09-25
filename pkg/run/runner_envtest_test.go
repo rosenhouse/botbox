@@ -21,6 +21,7 @@ import (
 	"k8s.io/client-go/rest"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
+	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
@@ -36,6 +37,24 @@ const toySequence = `{
     {"i": 3, "t": "restart"},
     {"i": 4, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
     {"i": 5, "t": "delete"}
+  ]
+}`
+
+// oneOutlivesTheOther deletes one Widget while another lives, and runs past
+// the first's deletion deadline before the teardown cleans up.
+const oneOutlivesTheOther = `{
+  "seed": 20260920,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget-2"}, "spec": {"count": 1}}},
+    {"i": 2, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 3, "t": "delete"},
+    {"i": 4, "t": "restart"},
+    {"i": 5, "t": "settle"},
+    {"i": 6, "t": "update", "cr": "widget-2", "patch": {"spec": {"count": 2}}},
+    {"i": 7, "t": "restart"},
+    {"i": 8, "t": "settle"}
   ]
 }`
 
@@ -76,11 +95,92 @@ const createThenDeleteManaged = `{
   ]
 }`
 
+const createThenRestart = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "restart"},
+    {"i": 2, "t": "settle"}
+  ]
+}`
+
+const restartThenDeleteManaged = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "restart"},
+    {"i": 2, "t": "settle"},
+    {"i": 3, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
+  ]
+}`
+
+const changeThenDeleteTheFixture = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "updateFixture", "kind": "v1/ConfigMap", "name": "widget-config", "patch": {"data": {"label": "blue"}}},
+    {"i": 2, "t": "deleteFixture", "kind": "v1/ConfigMap", "name": "widget-config", "until": {"op": 3}},
+    {"i": 3, "t": "settle"},
+    {"i": 4, "t": "restart"},
+    {"i": 5, "t": "settle"}
+  ]
+}`
+
+const deleteTheFixture = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "deleteFixture", "kind": "v1/ConfigMap", "name": "fixture", "until": {"op": 2}},
+    {"i": 2, "t": "settle"}
+  ]
+}`
+
+const deleteTheFixtureOverASettle = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "deleteFixture", "kind": "v1/ConfigMap", "name": "fixture", "until": {"op": 3}},
+    {"i": 2, "t": "settle"},
+    {"i": 3, "t": "settle"}
+  ]
+}`
+
+// recreatingChecker judges as the engine does. At the checkpoint of the op
+// that at names, it then creates the fixture ConfigMap, as something other
+// than botbox might.
+type recreatingChecker struct {
+	configMaps dynamic.NamespaceableResourceInterface
+	at         int
+}
+
+func (c recreatingChecker) Check(in run.Input) (run.Findings, error) {
+	findings, err := run.Engine{}.Check(in)
+	if last := in.Timeline.Checkpoints[len(in.Timeline.Checkpoints)-1]; err == nil && last.Op == c.at {
+		_, err = c.configMaps.Namespace(in.Timeline.Namespace).Create(context.Background(), fixtureConfigMap(), metav1.CreateOptions{})
+	}
+	return findings, err
+}
+
+const twoWidgets = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget-2"}, "spec": {"count": 1}}}
+  ]
+}`
+
 // checkpointState is what a check saw when it ran.
 type checkpointState struct {
 	op          int
 	converged   bool
 	managed     []string
+	managedCRs  []string
 	ready       int64
 	widgetWatch int
 }
@@ -97,6 +197,9 @@ func (c *recordingChecker) Check(in run.Input) (run.Findings, error) {
 	state := checkpointState{op: last.Op, converged: last.Converged}
 	for _, managed := range in.Objects.Managed() {
 		state.managed = append(state.managed, managed.Name)
+		if managed.GVK == in.Target.Primary {
+			state.managedCRs = append(state.managedCRs, managed.Name)
+		}
 	}
 	for _, cr := range in.Objects.Current(in.Target.Primary) {
 		state.ready, _, _ = unstructured.NestedInt64(cr.Object.Object, "status", "ready")
@@ -213,6 +316,45 @@ func TestRunner(t *testing.T) {
 		requireNamespaceEmpty(t, ctx, testCluster.Config(), result.Timeline.Namespace)
 	})
 
+	t.Run("changes, deletes and restores the toy's fixture, which stays botbox's", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+
+		result, err := run.Run(ctx, toy, readSequence(t, changeThenDeleteTheFixture), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy runs without a bug.", result.Violation)
+		}
+		if len(result.Notes) > 0 {
+			t.Errorf("The run noted %q, want every check to judge.", result.Notes)
+		}
+		store := result.Recorded.Objects
+		fixture := observe.Key{GVK: configMapKind, Namespace: result.Timeline.Namespace, Name: "widget-config"}
+		var labels []string
+		for _, version := range store.History(fixture) {
+			label, _, _ := unstructured.NestedString(version.Object.Object, "data", "label")
+			if version.Deleted {
+				label = "deleted"
+			}
+			labels = append(labels, label)
+		}
+		// The teardown deletes it last.
+		if want := []string{"red", "blue", "deleted", "blue", "deleted"}; !slices.Equal(labels, want) {
+			t.Errorf("The fixture went through %v, want %v.", labels, want)
+		}
+		if store.IsManaged(fixture) {
+			t.Errorf("The fixture botbox restored counts as the target's.")
+		}
+		child := store.HistoryOf(configMapKind, "widget-0")
+		if label, _, _ := unstructured.NestedString(child[len(child)-1].Object.Object, "data", "label"); label != "blue" {
+			t.Errorf("The toy's child last carried the label %q, want the fixture's blue.", label)
+		}
+	})
+
 	// b10.json scales the toy down right after a restart, before anything
 	// settles, so botbox's update lies between the states G5 compares.
 	t.Run("passes the toy without a bug on b10.json and notes the restart", func(t *testing.T) {
@@ -236,6 +378,54 @@ func TestRunner(t *testing.T) {
 			return strings.HasPrefix(note, "G5") && strings.Contains(note, "for op 1 (restart): op 2 (update) ran")
 		}) {
 			t.Errorf("The run noted %q, want G5 to say the update of op 2 kept it from judging the restart of op 1.", result.Notes)
+		}
+	})
+
+	// The children of the Widget that lives stay past the other's deadline, and
+	// belong to it.
+	t.Run("passes the toy without a bug where one Widget outlives another", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+
+		result, err := run.Run(ctx, toy, readSequence(t, oneOutlivesTheOther), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy runs without a bug.", result.Violation)
+		}
+		if len(result.Notes) > 0 {
+			t.Errorf("The run noted %q, want every check to judge.", result.Notes)
+		}
+		deleted := result.Timeline.Ops[3].At
+		if passed := result.Timeline.Deletion.Start.Sub(deleted); passed <= toy.Timeouts.Delete {
+			t.Errorf("The teardown began %v after the first Widget's delete, so G3 never judged its deadline %v on.",
+				passed, toy.Timeouts.Delete)
+		}
+	})
+
+	t.Run("never counts a CR it created as managed, where the target manages its primary kind", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		toy.Manages = append(toy.Manages, toy.Primary)
+		check := &recordingChecker{}
+
+		_, err := run.Run(ctx, toy, readSequence(t, twoWidgets), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: check,
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if _, checked := check.at(1); !checked {
+			t.Fatalf("The checks ran after the ops %v, want op 1, which creates widget-2.", check.ops())
+		}
+		for _, state := range check.checkpoints {
+			if len(state.managedCRs) > 0 {
+				t.Errorf("After op %d the run counted the Widgets %v as managed, want none: botbox created them.",
+					state.op, state.managedCRs)
+			}
 		}
 	})
 
@@ -454,6 +644,67 @@ func TestRunner(t *testing.T) {
 		}
 	})
 
+	// A target may hold a fixture's deletion with a finalizer of its own, as
+	// external-secrets does its SecretStore's.
+	t.Run("restores a deleted fixture once a finalizer lets it go", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		held := fixtureConfigMap()
+		held.SetFinalizers([]string{"example.com/hold"})
+		toy.Fixtures = append(toy.Fixtures, held)
+		client, err := dynamic.NewForConfig(testCluster.Config())
+		if err != nil {
+			t.Fatalf("Building a client failed: %v", err)
+		}
+		releaseOnDelete(t, client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}), fixtureName, time.Second)
+
+		result, err := run.Run(ctx, toy, readSequence(t, deleteTheFixture), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy runs without a bug.", result.Violation)
+		}
+	})
+
+	t.Run("ends the run where a finalizer holds a deleted fixture past T_delete", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		toy.Timeouts.Delete = 2 * time.Second
+		held := fixtureConfigMap()
+		held.SetFinalizers([]string{"example.com/hold"})
+		toy.Fixtures = append(toy.Fixtures, held)
+
+		_, err := run.Run(ctx, toy, readSequence(t, deleteTheFixture), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		want := "op 1 (deleteFixture): the fixture v1/ConfigMap fixture was still there 2s after botbox deleted it, held by the finalizers [example.com/hold]"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("The run returned %v, want an error saying %q.", err, want)
+		}
+	})
+
+	t.Run("ends the run where something creates a deleted fixture again", func(t *testing.T) {
+		toy := loadTarget(t, binary)
+		toy.Fixtures = append(toy.Fixtures, fixtureConfigMap())
+		client, err := dynamic.NewForConfig(testCluster.Config())
+		if err != nil {
+			t.Fatalf("Building a client failed: %v", err)
+		}
+		check := recreatingChecker{configMaps: client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}), at: 2}
+
+		_, err = run.Run(ctx, toy, readSequence(t, deleteTheFixtureOverASettle), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: check,
+		})
+
+		want := "op 3 (settle): something created the fixture v1/ConfigMap fixture again after botbox deleted it"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("The run returned %v, want an error saying %q.", err, want)
+		}
+	})
+
 	t.Run("notes an owner the collector cannot resolve", func(t *testing.T) {
 		toy := loadTarget(t, binary)
 		ownedBySecret := fixtureConfigMap()
@@ -473,6 +724,53 @@ func TestRunner(t *testing.T) {
 			", because it does not watch v1/Secret, the kind of its owner absent"
 		if !slices.Equal(result.Notes, []string{want}) {
 			t.Errorf("The run carried the notes %q, want %q.", result.Notes, want)
+		}
+	})
+
+	// Only its requests show botbox that a restarted target is back, and the
+	// wait gives it T_settle from there.
+	t.Run("passes a target that takes a while to come back from a restart", func(t *testing.T) {
+		const delay = 3500 * time.Millisecond
+		toy := loadTarget(t, restartsAfter(t, binary, fmt.Sprintf("sleep %v", delay.Seconds())))
+		toy.Timeouts = target.Timeouts{Settle: 5 * time.Second, Stable: 2 * time.Second, Delete: 10 * time.Second}
+
+		result, err := run.Run(ctx, toy, readSequence(t, restartThenDeleteManaged), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s, want none: the toy runs without a bug.", result.Violation)
+		}
+		if len(result.Notes) > 0 {
+			t.Errorf("The run noted %q, want every check to judge.", result.Notes)
+		}
+		if wait := result.Timeline.Ops[2].Settled; wait == nil || !wait.Converged || wait.Window.End.Sub(wait.Window.Start) < delay+toy.Timeouts.Stable {
+			t.Errorf("The settle wait after the restart was %+v, want one that converged once the toy had been back for stable, after %v.",
+				wait, delay+toy.Timeouts.Stable)
+		}
+	})
+
+	t.Run("fails G4 on a target that never comes back from a restart", func(t *testing.T) {
+		toy := loadTarget(t, restartsAfter(t, binary, "exec sleep 600"))
+		toy.Timeouts = target.Timeouts{Settle: 3 * time.Second, Stable: time.Second, Delete: 2 * time.Second}
+
+		result, err := run.Run(ctx, toy, readSequence(t, createThenRestart), run.Options{
+			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+		})
+
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation == nil || result.Violation.ID != "G4" {
+			t.Fatalf("The run reported %v, want G4.", result.Violation)
+		}
+		const want = "the settle wait after op 2 (settle) expired with no fault active"
+		const why = "but the target had requested no resource outside leader election since op 1 (restart)"
+		if statement := result.Violation.Statement; !strings.HasPrefix(statement, want) || !strings.Contains(statement, why) {
+			t.Errorf("G4 says %q, want it to begin %q and say %q.", statement, want, why)
 		}
 	})
 
@@ -523,6 +821,19 @@ func diesAfter(t *testing.T, d time.Duration, says string) string {
 	return path
 }
 
+// restartsAfter is the toy behind a script that runs then before every start
+// but the first.
+func restartsAfter(t *testing.T, toy, then string) string {
+	t.Helper()
+	dir := t.TempDir()
+	path, started := filepath.Join(dir, "restarts-after"), filepath.Join(dir, "started")
+	script := fmt.Sprintf("#!/bin/sh\nif [ -e %q ]; then %s; fi\n: > %q\nexec %q \"$@\"\n", started, then, started, toy)
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 // putBackFinalizer adds the finalizer back to every live object of that name
 // that lacks it, until the test ends.
 func putBackFinalizer(t *testing.T, resource dynamic.NamespaceableResourceInterface, name, finalizer string) {
@@ -543,6 +854,35 @@ func putBackFinalizer(t *testing.T, resource dynamic.NamespaceableResourceInterf
 			}
 			// The API server refuses a finalizer new to an object being deleted.
 			_, _ = resource.Namespace(object.GetNamespace()).Patch(ctx, name, types.MergePatchType, patch, metav1.PatchOptions{})
+		}
+	}()
+	t.Cleanup(func() {
+		cancel()
+		watcher.Stop()
+		<-done
+	})
+}
+
+// releaseOnDelete takes the finalizers off the object of that name, in any
+// namespace, once it has been under deletion for the delay.
+func releaseOnDelete(t *testing.T, resource dynamic.NamespaceableResourceInterface, name string, delay time.Duration) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	watcher, err := resource.Watch(ctx, metav1.ListOptions{FieldSelector: "metadata.name=" + name})
+	if err != nil {
+		t.Fatalf("Watching for %s failed: %v", name, err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for event := range watcher.ResultChan() {
+			object, ok := event.Object.(*unstructured.Unstructured)
+			if !ok || object.GetDeletionTimestamp() == nil || len(object.GetFinalizers()) == 0 {
+				continue
+			}
+			time.Sleep(delay)
+			_, _ = resource.Namespace(object.GetNamespace()).Patch(ctx, name, types.MergePatchType,
+				[]byte(`{"metadata":{"finalizers":null}}`), metav1.PatchOptions{})
 		}
 	}()
 	t.Cleanup(func() {

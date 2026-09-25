@@ -2,9 +2,11 @@ package target_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -56,8 +58,8 @@ func TestLoadToyWidget(t *testing.T) {
 	if count, found, err := unstructured.NestedInt64(toy.Sample.Object, "spec", "count"); count != 3 || !found || err != nil {
 		t.Errorf("Load read sample spec.count as (%v, %v, %v), want 3.", count, found, err)
 	}
-	if len(toy.Fixtures) != 0 {
-		t.Errorf("Load read %d fixtures from a target that declares none.", len(toy.Fixtures))
+	if len(toy.Fixtures) != 1 || toy.Fixtures[0].GetName() != "widget-config" {
+		t.Errorf("Load read the fixtures %v, want the ConfigMap widget-config.", toy.Fixtures)
 	}
 	if toy.Selector != nil {
 		t.Errorf("Load read selector %v from a target that declares none.", toy.Selector)
@@ -70,7 +72,7 @@ func TestLoadToyWidget(t *testing.T) {
 	}
 	wantLaunch := target.LaunchSpec{
 		Binary: "bin/toy-widget",
-		Args:   []string{"--kubeconfig=$KUBECONFIG", "--bug=0"},
+		Args:   []string{"--kubeconfig=$KUBECONFIG", "--label-from=widget-config", "--bug=0"},
 		Env:    map[string]string{"WATCH_NAMESPACE": "$NAMESPACE"},
 	}
 	if !reflect.DeepEqual(toy.Launch, wantLaunch) {
@@ -264,6 +266,8 @@ func TestLoadRejects(t *testing.T) {
 		{"sample of another kind", minimalTarget, "apiVersion: v1\nkind: Secret\nmetadata:\n  name: s\n", []string{"widget.yaml", "Secret", "Widget"}},
 		{"sample holding two objects", minimalTarget, sampleWidget + "---\n" + sampleWidget, []string{"widget.yaml", "2 objects"}},
 		{"sample holding no object", minimalTarget, "# just a comment\n", []string{"widget.yaml", "no object"}},
+		{"sample with no name", minimalTarget, "apiVersion: toy.botbox/v1\nkind: Widget\nmetadata:\n  generateName: widget-\n",
+			[]string{"widget.yaml", "no metadata.name"}},
 		{"sample that is not YAML", minimalTarget, "name: \"unterminated\n", []string{"widget.yaml"}},
 		{"missing crds path", minimalTarget + "crds: [nosuch/]\n", "", []string{"crds", "nosuch"}},
 		{"managed group read as a version", minimalTarget + "manages:\n  - apps/Deployment\n", "", []string{"manages", "apps"}},
@@ -282,6 +286,7 @@ func TestLoadRejects(t *testing.T) {
 		{"negative timeout", minimalTarget + "timeouts:\n  delete: -1s\n", "", []string{"delete", "positive"}},
 		{"errloop of zero", minimalTarget + "thresholds:\n  errloop: 0\n", "", []string{"errloop", "positive"}},
 		{"negative quiet", minimalTarget + "thresholds:\n  quiet: -1\n", "", []string{"quiet -1", "negative"}},
+		{"no CR at all", minimalTarget + "generate:\n  maxCRs: 0\n", "", []string{"generate.maxCRs 0", "at least 1"}},
 		{"a launch env that sets the kubeconfig", minimalTargetWithEnv + "    KUBECONFIG: /elsewhere\n", "", []string{"launch.env", "KUBECONFIG"}},
 		{"a launch env name holding an equals sign", minimalTargetWithEnv + "    A=B: x\n", "", []string{"launch.env", `"A=B"`}},
 		{"an empty launch env name", minimalTargetWithEnv + "    '': x\n", "", []string{"launch.env", `""`}},
@@ -434,6 +439,8 @@ func TestLoadPointsAtAMisspelledKey(t *testing.T) {
 		// The decoder matches a key whatever its case.
 		{"below a capital", minimalTarget + "Timeouts:\n  setle: 5s\n",
 			[]string{"line 6: Timeouts.setle is not a key; did you mean settle?"}},
+		{"under a fixture generation may change", minimalTarget + "generate:\n  fixtures:\n    secret.yaml:\n      mutat: [data.token]\n",
+			[]string{"line 8: generate.fixtures.secret.yaml.mutat is not a key; did you mean mutate?"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := writeTarget(t, test.yaml, map[string]string{"widget.yaml": sampleWidget})
@@ -696,6 +703,86 @@ notRecreated:
 	}
 }
 
+const secretFixtures = `apiVersion: v1
+kind: Secret
+metadata:
+  name: token
+data:
+  token: czNjcjN0
+  app.properties: YT1i
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: other
+data:
+  token: b3RoZXI=
+  app.properties: Yz1k
+`
+
+func TestLoadReadsTheFixturesGenerationMayChange(t *testing.T) {
+	path := writeTarget(t, minimalTarget+`fixtures: [issuer.yaml, secrets.yaml]
+generate:
+  fixtures:
+    secrets.yaml:
+      mutate:
+        - data.token
+        - data["app.properties"]
+`, map[string]string{
+		"widget.yaml":  sampleWidget,
+		"issuer.yaml":  "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: issuer\n",
+		"secrets.yaml": secretFixtures,
+	})
+
+	loaded, err := target.Load(path)
+	if err != nil {
+		t.Fatalf("Load rejected generate.fixtures: %v", err)
+	}
+	var read []string
+	for _, fixture := range loaded.Generate.Fixtures {
+		for _, mutable := range fixture.Mutate {
+			read = append(read, fmt.Sprintf("%s %s %s", fixture.GVK.Kind, fixture.Name, mutable))
+		}
+	}
+	want := []string{
+		"Secret token data.token", `Secret token data["app.properties"]`,
+		"Secret other data.token", `Secret other data["app.properties"]`,
+	}
+	if !slices.Equal(read, want) {
+		t.Errorf("Load read the fixture paths %q, want %q.", read, want)
+	}
+}
+
+func TestLoadRejectsAFixtureGenerationCannotChange(t *testing.T) {
+	for _, test := range []struct {
+		name, generate, fixtures, want string
+	}{
+		{"a file fixtures does not list", "    absent.yaml: {}\n", secretFixtures,
+			"generate.fixtures absent.yaml: fixtures lists no such file"},
+		{"a path that holds no string", "    secrets.yaml:\n      mutate: [data.tokne]\n", secretFixtures,
+			"generate.fixtures secrets.yaml: the v1/Secret token holds no string at data.tokne"},
+		{"a path to a map", "    secrets.yaml:\n      mutate: [data]\n", secretFixtures,
+			"generate.fixtures secrets.yaml: the v1/Secret token holds no string at data"},
+		{"every value of a map", "    secrets.yaml:\n      mutate: ['data[*]']\n", secretFixtures,
+			`generate.fixtures secrets.yaml: mutate "data[*]": name one string, not [*]`},
+		{"a malformed path", "    secrets.yaml:\n      mutate: ['data[0]']\n", secretFixtures,
+			`generate.fixtures secrets.yaml: mutate "data[0]": offset 4`},
+		{"a fixture with no name", "    secrets.yaml: {}\n", "apiVersion: v1\nkind: Secret\nmetadata:\n  generateName: token-\n",
+			"generate.fixtures secrets.yaml: a v1/Secret there sets no metadata.name, and a fixture op names its fixture"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := writeTarget(t, minimalTarget+"fixtures: [secrets.yaml]\ngenerate:\n  fixtures:\n"+test.generate,
+				map[string]string{"widget.yaml": sampleWidget, "secrets.yaml": test.fixtures})
+
+			_, err := target.Load(path)
+
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Errorf("Load returned %v, want an error saying %q.", err, test.want)
+			}
+		})
+	}
+}
+
 func TestLoadGenerateAndSelector(t *testing.T) {
 	ignored := []string{
 		"status.lastSyncTime",
@@ -713,6 +800,8 @@ generate:
   mutate: [spec.count]
   overlay:
     spec.count: {minimum: 1, maximum: 3}
+  maxCRs: 2
+  distinct: [spec.secretName]
 `, map[string]string{"widget.yaml": sampleWidget})
 
 	loaded, err := target.Load(path)
@@ -738,5 +827,9 @@ generate:
 	}
 	if want := `{"maximum":3,"minimum":1}`; string(overlay) != want {
 		t.Errorf("Load read the overlay of spec.count as %s, want %s.", overlay, want)
+	}
+	if loaded.Generate.MaxCRs != 2 || !reflect.DeepEqual(loaded.Generate.Distinct, []string{"spec.secretName"}) {
+		t.Errorf("Load read generate.maxCRs %d and generate.distinct %v, want 2 and [spec.secretName].",
+			loaded.Generate.MaxCRs, loaded.Generate.Distinct)
 	}
 }

@@ -59,6 +59,26 @@
     },
     {
       "i": 6,
+      "t": "updateFixture",
+      "kind": "v1/Secret",
+      "name": "token",
+      "patch": {
+        "data": {
+          "token": "abcd"
+        }
+      }
+    },
+    {
+      "i": 7,
+      "t": "deleteFixture",
+      "kind": "v1/Secret",
+      "name": "token",
+      "until": {
+        "op": 8
+      }
+    },
+    {
+      "i": 8,
       "t": "recreate",
       "obj": {
         "apiVersion": "toy.botbox/v1",
@@ -72,7 +92,31 @@
       }
     },
     {
-      "i": 7,
+      "i": 9,
+      "t": "create",
+      "obj": {
+        "apiVersion": "toy.botbox/v1",
+        "kind": "Widget",
+        "metadata": {
+          "name": "widget-2"
+        },
+        "spec": {
+          "count": 2
+        }
+      }
+    },
+    {
+      "i": 10,
+      "t": "update",
+      "cr": "widget-2",
+      "patch": {
+        "spec": {
+          "count": 4
+        }
+      }
+    },
+    {
+      "i": 11,
       "t": "delete"
     }
   ]

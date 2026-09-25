@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
@@ -16,24 +17,34 @@ func Property(declared target.Property) Check {
 	return func(in Input) (Result, error) {
 		out := Result{ID: declared.ID}
 		for _, s := range in.statesAt(in.evaluationPoints(declared.When)) {
-			cr, found := s.cr(in.Target.Primary)
 			managed := s.managed(in)
-			holds, err := declared.Eval(cr.Object, objects(managed))
-			if err != nil {
-				return Result{}, fmt.Errorf("evaluating property %s: %w", declared.ID, err)
+			crs := s.crs(in.Target.Primary)
+			if len(crs) == 0 {
+				crs = []observe.Version{{}} // The predicate reads no CR.
 			}
-			if holds {
-				continue
+			for _, cr := range crs {
+				theirs := managed
+				if cr.Object != nil {
+					theirs = in.objectsOf(cr.UID, managed)
+				}
+				holds, err := declared.Eval(cr.Object, objects(theirs))
+				if err != nil {
+					return Result{}, fmt.Errorf("evaluating property %s: %w", declared.ID, err)
+				}
+				if holds {
+					continue
+				}
+				violation := Violation{
+					Statement: fmt.Sprintf("the property did not hold: %s", declared.Description),
+					At:        s.at,
+				}.quotingManaged(Sample(theirs))
+				if cr.Object != nil {
+					violation.Statement = fmt.Sprintf("the property did not hold on the CR %s: %s", cr.Name, declared.Description)
+					violation = violation.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), s.at)))
+				}
+				out.violate(violation)
+				return out, nil // A run ends at its first violation (DESIGN.md §5.5).
 			}
-			violation := Violation{
-				Statement: fmt.Sprintf("the property did not hold: %s", declared.Description),
-				At:        s.at,
-			}.quotingManaged(Sample(managed))
-			if found {
-				violation = violation.quotingVersions(RecentHistory(cr.Key, upTo(in.History.History(cr.Key), s.at)))
-			}
-			out.violate(violation)
-			return out, nil // A run ends at its first violation (DESIGN.md §5.5).
 		}
 		return out, nil
 	}

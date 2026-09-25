@@ -177,8 +177,8 @@ func reproduces(ctx context.Context, candidate Sequence, violation Violation, re
 }
 
 // without returns the sequence with op i removed, renumbered so that it is
-// legal (DESIGN.md §7). A fault still ends where it did: at the op it named,
-// or at the first op left after it.
+// legal (DESIGN.md §7). A fault still ends, and a deleted fixture still comes
+// back, where it did: at the op it named, or at the first op left after it.
 func (s Sequence) without(i int) Sequence {
 	shorter := s
 	shorter.Ops = slices.Delete(slices.Clone(s.Ops), i, i+1)
@@ -188,6 +188,9 @@ func (s Sequence) without(i int) Sequence {
 			fault := *shorter.Ops[j].Fault
 			fault.Until.Op = until
 			shorter.Ops[j].Fault = &fault
+		}
+		if until := shorter.Ops[j].Until; until != nil && until.Op > i {
+			shorter.Ops[j].Until = &Until{Op: until.Op - 1}
 		}
 	}
 	return shorter

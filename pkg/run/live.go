@@ -3,6 +3,7 @@ package run
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path/filepath"
@@ -97,22 +98,21 @@ func (l *liveRun) servedResources() ([]metav1.APIResource, error) {
 
 // createCR creates the op's object as the primary CR and tells the Observer
 // botbox created it, so that it never counts as managed (DESIGN.md §6).
-func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error) {
+func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) error {
 	cr := obj.DeepCopy()
 	switch gvk := cr.GroupVersionKind(); {
 	case gvk.Empty():
 		cr.SetGroupVersionKind(l.target.Primary)
 	case gvk != l.target.Primary:
-		return "", fmt.Errorf("the op creates a %s, and the target's primary CR is a %s",
+		return fmt.Errorf("the op creates a %s, and the target's primary CR is a %s",
 			kindName(gvk), kindName(l.target.Primary))
 	}
 	cr.SetNamespace(l.h.Namespace)
-	created, err := l.crs().Create(ctx, cr, metav1.CreateOptions{})
-	if err != nil {
-		return "", fmt.Errorf("creating the CR: %w", err)
+	if _, err := l.crs().Create(ctx, cr, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("creating the CR: %w", err)
 	}
-	l.h.Observer.Exclude(l.target.Primary, created.GetName())
-	return created.GetName(), nil
+	l.h.Observer.Exclude(l.target.Primary, cr.GetName())
+	return nil
 }
 
 // patchCR applies the op's JSON merge patch to the CR. The target writes the
@@ -185,6 +185,68 @@ func (l *liveRun) deleteManaged(ctx context.Context, gvk schema.GroupVersionKind
 		return false, fmt.Errorf("deleting the managed %s %s: %w", kindName(gvk), name, err)
 	}
 	return true, nil
+}
+
+func (l *liveRun) patchFixture(ctx context.Context, gvk schema.GroupVersionKind, name string, patch map[string]any) error {
+	data, err := json.Marshal(patch)
+	if err == nil {
+		_, err = l.of(gvk).Patch(ctx, name, types.MergePatchType, data, metav1.PatchOptions{})
+	}
+	if err != nil {
+		return fmt.Errorf("patching the fixture %s %s: %w", kindName(gvk), name, err)
+	}
+	return nil
+}
+
+// deleteFixture deletes the fixture and waits T_delete for it to go, so that
+// botbox can create it again.
+func (l *liveRun) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind, name string) error {
+	fixtures := l.of(gvk)
+	if err := fixtures.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
+		return fmt.Errorf("deleting the fixture %s %s: %w", kindName(gvk), name, err)
+	}
+	var held []string
+	deadline := time.Now().Add(l.target.Timeouts.Delete)
+	gone, err := l.await(ctx, func() time.Time { return deadline }, func() (bool, error) {
+		fixture, err := fixtures.Get(ctx, name, metav1.GetOptions{})
+		if err == nil {
+			held = fixture.GetFinalizers()
+		}
+		return fixtureGone(fixture, err)
+	})
+	switch {
+	case err != nil:
+		return fmt.Errorf("waiting for the fixture %s %s to go: %w", kindName(gvk), name, err)
+	case !gone:
+		return fmt.Errorf("the fixture %s %s was still there %v after botbox deleted it, held by the finalizers %v",
+			kindName(gvk), name, l.target.Timeouts.Delete, held)
+	}
+	return nil
+}
+
+// fixtureGone reads a Get of a fixture botbox deleted. An object that is not
+// being deleted is another under the fixture's name.
+func fixtureGone(fixture *unstructured.Unstructured, err error) (bool, error) {
+	switch {
+	case apierrors.IsNotFound(err):
+		return true, nil
+	case err != nil:
+		return false, err
+	}
+	return fixture.GetDeletionTimestamp() == nil, nil
+}
+
+func (l *liveRun) createFixture(ctx context.Context, fixture *unstructured.Unstructured) error {
+	gvk := fixture.GroupVersionKind()
+	_, err := l.of(gvk).Create(ctx, fixture, metav1.CreateOptions{})
+	switch {
+	case apierrors.IsAlreadyExists(err):
+		return fmt.Errorf("something created the fixture %s %s again after botbox deleted it, so botbox cannot restore it",
+			kindName(gvk), fixture.GetName())
+	case err != nil:
+		return fmt.Errorf("restoring the fixture %s %s: %w", kindName(gvk), fixture.GetName(), err)
+	}
+	return nil
 }
 
 func (l *liveRun) managedCount() int { return len(l.h.Observer.Managed()) }

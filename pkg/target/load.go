@@ -52,8 +52,15 @@ type propertyDeclaration struct {
 }
 
 type generateDeclaration struct {
-	Mutate  []string                  `json:"mutate"`
-	Overlay map[string]map[string]any `json:"overlay"`
+	Mutate   []string                      `json:"mutate"`
+	Overlay  map[string]map[string]any     `json:"overlay"`
+	MaxCRs   *int                          `json:"maxCRs"`
+	Distinct []string                      `json:"distinct"`
+	Fixtures map[string]fixtureDeclaration `json:"fixtures"`
+}
+
+type fixtureDeclaration struct {
+	Mutate []string `json:"mutate"`
 }
 
 type timeoutsDeclaration struct {
@@ -93,13 +100,23 @@ func load(path string) (*Target, error) {
 	dir := filepath.Dir(path)
 
 	loaded := &Target{
-		Name:     declared.Name,
-		Version:  declared.Version,
-		Generate: GenerateSpec(declared.Generate),
-		Launch:   declared.Launch,
+		Name:    declared.Name,
+		Version: declared.Version,
+		Generate: GenerateSpec{
+			Mutate:   declared.Generate.Mutate,
+			Overlay:  declared.Generate.Overlay,
+			Distinct: declared.Generate.Distinct,
+		},
+		Launch: declared.Launch,
 	}
 	if loaded.Name == "" {
 		return nil, errors.New("name is required")
+	}
+	if maxCRs := declared.Generate.MaxCRs; maxCRs != nil {
+		if *maxCRs < 1 {
+			return nil, fmt.Errorf("generate.maxCRs %d: a sequence creates at least 1 CR", *maxCRs)
+		}
+		loaded.Generate.MaxCRs = *maxCRs
 	}
 	for _, crd := range declared.CRDs {
 		crdPath := resolve(dir, crd)
@@ -148,6 +165,9 @@ func load(path string) (*Target, error) {
 	if gvk := loaded.Sample.GroupVersionKind(); gvk != loaded.Primary {
 		return nil, fmt.Errorf("sample %s: holds %s, not the primary %s", samplePath, gvk, loaded.Primary)
 	}
+	if loaded.Sample.GetName() == "" {
+		return nil, fmt.Errorf("sample %s: holds no metadata.name; give it one, since each CR a sequence creates is named after it", samplePath)
+	}
 	for _, fixture := range declared.Fixtures {
 		fixturePath := resolve(dir, fixture)
 		objects, err := loadObjects(fixturePath)
@@ -161,6 +181,18 @@ func load(path string) (*Target, error) {
 			}
 		}
 		loaded.Fixtures = append(loaded.Fixtures, objects...)
+		if drawn, mutable := declared.Generate.Fixtures[fixture]; mutable {
+			fixtures, err := mutableFixtures(fixture, objects, drawn.Mutate)
+			if err != nil {
+				return nil, err
+			}
+			loaded.Generate.Fixtures = append(loaded.Generate.Fixtures, fixtures...)
+		}
+	}
+	for _, file := range slices.Sorted(maps.Keys(declared.Generate.Fixtures)) {
+		if !slices.Contains(declared.Fixtures, file) {
+			return nil, fmt.Errorf("generate.fixtures %s: fixtures lists no such file", file)
+		}
 	}
 	crds, err := ReadCRDs(loaded.CRDs)
 	if err != nil {
@@ -228,6 +260,42 @@ func load(path string) (*Target, error) {
 		return nil, err
 	}
 	return loaded, nil
+}
+
+// mutableFixtures reads the strings generation may set in each object of a
+// fixture file.
+func mutableFixtures(file string, objects []*unstructured.Unstructured, declared []string) ([]MutableFixture, error) {
+	var paths []Path
+	for _, text := range declared {
+		path, err := ParsePath(text)
+		if err == nil && slices.ContainsFunc(path, func(step Step) bool { return step.Each }) {
+			err = errors.New("name one string, not [*]")
+		}
+		if err != nil {
+			return nil, fmt.Errorf("generate.fixtures %s: mutate %q: %w", file, text, err)
+		}
+		paths = append(paths, path)
+	}
+	fixtures := make([]MutableFixture, len(objects))
+	for i, object := range objects {
+		fixtures[i] = MutableFixture{GVK: object.GroupVersionKind(), Name: object.GetName(), Mutate: paths}
+		if fixtures[i].Name == "" {
+			return nil, fmt.Errorf("generate.fixtures %s: a %s there sets no metadata.name, and a fixture op names its fixture",
+				file, kindName(fixtures[i].GVK))
+		}
+		for _, path := range paths {
+			if value, _, _ := unstructured.NestedFieldNoCopy(object.Object, path.Keys()...); !isString(value) {
+				return nil, fmt.Errorf("generate.fixtures %s: the %s %s holds no string at %s",
+					file, kindName(fixtures[i].GVK), fixtures[i].Name, path)
+			}
+		}
+	}
+	return fixtures, nil
+}
+
+func isString(value any) bool {
+	_, is := value.(string)
+	return is
 }
 
 func readyPredicate(declared string) (ReadyFunc, error) {

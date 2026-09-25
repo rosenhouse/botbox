@@ -30,6 +30,9 @@ type Op struct {
 	// Index is the op's position in the sequence.
 	Index int    `json:"i"`
 	Type  OpType `json:"t"`
+	// CR names the CR update, delete and recreate act on. Empty names the
+	// sample's.
+	CR string `json:"cr,omitempty"`
 	// Kind and Nth select deleteManaged's object: the Nth managed object of
 	// Kind, ordered by creationTimestamp then name. Kind and Name select a
 	// fixture op's fixture.
@@ -286,7 +289,64 @@ func (o Op) validateFields() error {
 	if o.Type == OpDeleteManaged && *o.Nth < 0 {
 		return fmt.Errorf("index is %d, want the position of a managed object", *o.Nth)
 	}
+	if o.CR != "" && !slices.Contains(namingOps, o.Type) {
+		return fmt.Errorf("a %s op takes no cr", o.Type)
+	}
 	return nil
+}
+
+// namingOps act on a CR an earlier op created, which cr names.
+var namingOps = []OpType{OpUpdate, OpDelete, OpRecreate}
+
+// checkCRs reports a CR with no name, an op on a CR that is not there, a
+// recreate that creates another CR, and a create of a CR still there. An op
+// that names no CR acts on the sample's.
+func (s Sequence) checkCRs(sample string) error {
+	// live holds the op that created each CR no op has deleted since, and
+	// deleted the op that last deleted each other CR.
+	live, deleted := map[string]int{}, map[string]int{}
+	for _, op := range s.Ops {
+		if !op.Type.OnCR() {
+			continue
+		}
+		name := op.crName(sample)
+		creator, isLive := live[name]
+		deleter, wasDeleted := deleted[name]
+		switch {
+		case op.Obj != nil && op.Obj.GetName() == "":
+			return fmt.Errorf("op %d (%s) writes a CR with no metadata.name; give it one, since ops name the CR they act on", op.Index, op.Type)
+		case op.Type == OpCreate && isLive:
+			return fmt.Errorf("op %d (create) creates the CR %s, which op %d created and no op since deleted", op.Index, name, creator)
+		case op.Type == OpCreate:
+		case !isLive && !wasDeleted && op.CR == "":
+			return fmt.Errorf("op %d (%s) names no cr, so it acts on the sample's %s, which no op before it creates", op.Index, op.Type, name)
+		case !isLive && !wasDeleted:
+			return fmt.Errorf("op %d (%s) acts on the CR %s, which no op before it creates", op.Index, op.Type, name)
+		case op.Type == OpRecreate && op.Obj.GetName() != name:
+			return fmt.Errorf("op %d (recreate) acts on the CR %s and creates %s; a recreate creates the CR it deletes", op.Index, name, op.Obj.GetName())
+		case op.Type != OpRecreate && !isLive:
+			return fmt.Errorf("op %d (%s) acts on the CR %s, which op %d deleted", op.Index, op.Type, name, deleter)
+		}
+		switch op.Type {
+		case OpCreate, OpRecreate:
+			live[name] = op.Index
+		case OpDelete:
+			delete(live, name)
+			deleted[name] = op.Index
+		}
+	}
+	return nil
+}
+
+// crName is the name of the CR a CR op acts on, where sample is the sample's.
+func (o Op) crName(sample string) string {
+	switch {
+	case o.Type == OpCreate:
+		return o.Obj.GetName()
+	case o.CR == "":
+		return sample
+	}
+	return o.CR
 }
 
 // fieldsOf says which fields an op type carries.

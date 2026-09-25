@@ -1,6 +1,7 @@
 package invariant_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -273,5 +274,234 @@ func TestG3NotesOnlyTheObjectsTheCRHad(t *testing.T) {
 
 	if len(result.Notes) != 0 {
 		t.Errorf("G3 noted %v, and the CR never had the object botbox took.", result.Notes)
+	}
+}
+
+// twoWidgetsDeleted is a run of two Widgets with a child each, whose first
+// botbox deletes at 10s.
+func twoWidgetsDeleted() *run {
+	return newRun().withSecondWidget().
+		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup)),
+			secondWidget("20", spec(1), status(1, 1), finalizers(cleanup))).
+		record(time.Second, child("w-0", "11"), secondChild("w2-0", "21")).
+		op(invariant.OpDelete, 10*time.Second).
+		record(10*time.Second, widget("12", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second)))
+}
+
+func TestG3LeavesTheChildrenOfAnotherCRToIt(t *testing.T) {
+	in := twoWidgetsDeleted().
+		remove(11*time.Second, child("w-0", "13")).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		through(21 * time.Second)
+
+	silent(t, invariant.CleanDeletion, in)
+}
+
+func TestG3FiresOnTheLeftoversOfTheCRThatWent(t *testing.T) {
+	in := twoWidgetsDeleted().
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		through(21 * time.Second)
+
+	violation := fired(t, invariant.CleanDeletion, in)
+
+	if want := "the v1/ConfigMap w-0 was still there 10s after the CR w was deleted"; !strings.HasPrefix(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to begin %q.", violation.Statement, want)
+	}
+}
+
+func TestG3LeavesAChildAnotherCRStillOwnsToIt(t *testing.T) {
+	in := twoWidgetsDeleted().
+		record(time.Second, child("shared", "15", ownedByBoth)).
+		remove(11*time.Second, child("w-0", "13")).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		through(21 * time.Second)
+
+	silent(t, invariant.CleanDeletion, in)
+}
+
+// An object that names no CR may be any CR's, so the last of them answers for
+// it.
+func TestG3JudgesAnObjectThatNamesNoCRWhereNoOtherCRRemains(t *testing.T) {
+	in := twoWidgetsDeleted().
+		record(time.Second, child("kept", "15", orphaned)).
+		remove(11*time.Second, child("w-0", "13")).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		opOn(invariant.OpDelete, 30*time.Second, secondName).
+		record(30*time.Second, secondWidget("22", spec(1), status(1, 1), finalizers(cleanup), deleting(30*time.Second))).
+		remove(31*time.Second, secondChild("w2-0", "23")).
+		remove(32*time.Second, secondWidget("24", spec(1), status(1, 1), deleting(30*time.Second))).
+		through(41 * time.Second)
+
+	violation := fired(t, invariant.CleanDeletion, in)
+
+	if !strings.Contains(violation.Statement, "kept") || !violation.At.Equal(at(40*time.Second)) {
+		t.Errorf("G3 reported %q at %v, want the object w2's deletion left, at its deadline.", violation.Statement, violation.At)
+	}
+}
+
+// Each deleted CR answers for its own leftovers, even where both went.
+func TestG3HoldsEachDeletedCRToItsOwnLeftovers(t *testing.T) {
+	in := twoWidgetsDeleted().
+		remove(11*time.Second, child("w-0", "13")).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		opOn(invariant.OpDelete, 10*time.Second, secondName).
+		record(10*time.Second, secondWidget("22", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
+		remove(12*time.Second, secondWidget("24", spec(1), status(1, 1), deleting(10*time.Second))).
+		through(21 * time.Second)
+
+	violation := fired(t, invariant.CleanDeletion, in)
+
+	if !strings.Contains(violation.Statement, "w2-0") {
+		t.Errorf("The statement is %q, want it to name w2's child.", violation.Statement)
+	}
+}
+
+// The finalizer that holds a CR does not make its children another CR's.
+func TestG3FiresOnTheChildrenOfACRItsFinalizerHolds(t *testing.T) {
+	in := deletedRun().
+		record(time.Second, child("w-0", "12")).
+		through(21 * time.Second)
+
+	if result := evaluate(t, invariant.CleanDeletion, in); len(result.Violations) != 2 {
+		t.Errorf("G3 reported %v, want the finalizer and the child w-0.", statements(result))
+	}
+}
+
+// An owner of another kind is not a CR, so its object names none.
+func TestG3JudgesAnObjectWhoseOwnersAreNoCR(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		owner option
+	}{
+		{"a Pod", ownedByAPod},
+		{"a Widget of another group", ownedByAWidgetElsewhere},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := deletedRun().
+				record(time.Second, child("w-0", "12", c.owner)).
+				remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+				through(21 * time.Second)
+
+			violation := fired(t, invariant.CleanDeletion, in)
+
+			if !strings.Contains(violation.Statement, "w-0") {
+				t.Errorf("The statement is %q, want it to name w-0.", violation.Statement)
+			}
+		})
+	}
+}
+
+// Of the CRs an object may be, the last to go answers for it at its own
+// deadline.
+func TestG3LeavesAnObjectToTheLastOfItsCRsToGo(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		owner option
+	}{
+		{"an object that names no CR", orphaned},
+		{"an object that names both", ownedByBoth},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := twoWidgetsDeleted().
+				record(time.Second, child("kept", "15", c.owner)).
+				remove(11*time.Second, child("w-0", "13")).
+				remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+				opOn(invariant.OpDelete, 19*time.Second, secondName).
+				record(19*time.Second, secondWidget("22", spec(1), status(1, 1), finalizers(cleanup), deleting(19*time.Second))).
+				remove(19500*time.Millisecond, secondChild("w2-0", "23"),
+					secondWidget("24", spec(1), status(1, 1), deleting(19*time.Second))).
+				remove(21*time.Second, child("kept", "16", c.owner)).
+				through(30 * time.Second)
+
+			silent(t, invariant.CleanDeletion, in)
+		})
+	}
+}
+
+// The teardown deletes the CRs one after another.
+func TestG3HoldsTheLastCRDeletedToAnObjectThatNamesNone(t *testing.T) {
+	in := twoWidgetsDeleted().
+		record(time.Second, child("kept", "15", orphaned)).
+		opOn(invariant.OpDelete, 10100*time.Millisecond, secondName).
+		record(10100*time.Millisecond, secondWidget("22", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
+		remove(11*time.Second, child("w-0", "13"), secondChild("w2-0", "23")).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second)),
+			secondWidget("24", spec(1), status(1, 1), deleting(10*time.Second))).
+		through(21 * time.Second)
+
+	violation := fired(t, invariant.CleanDeletion, in)
+
+	if want := "the v1/ConfigMap kept was still there 10s after w2, the last CR it may belong to, was deleted"; !strings.HasPrefix(violation.Statement, want) ||
+		!violation.At.Equal(at(20100*time.Millisecond)) {
+		t.Errorf("G3 reported %q at %v, want it to begin %q, at w2's deadline.", violation.Statement, violation.At, want)
+	}
+}
+
+func TestG3JudgesAnObjectThatNamesNoCRWhereItsCRsWentAtOnce(t *testing.T) {
+	in := twoWidgetsDeleted().
+		record(time.Second, child("kept", "15", orphaned)).
+		opOn(invariant.OpDelete, 10*time.Second, secondName).
+		record(10*time.Second, secondWidget("22", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
+		remove(11*time.Second, child("w-0", "13"), secondChild("w2-0", "23")).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second)),
+			secondWidget("24", spec(1), status(1, 1), deleting(10*time.Second))).
+		through(21 * time.Second)
+
+	result := evaluate(t, invariant.CleanDeletion, in)
+
+	if !slices.ContainsFunc(statements(result), func(s string) bool { return strings.Contains(s, "kept") }) {
+		t.Errorf("G3 reported %v, want the object kept.", statements(result))
+	}
+}
+
+// A CR that came after the deleted one and took the object on keeps it.
+func TestG3LeavesAnObjectToACRThatAdoptedIt(t *testing.T) {
+	in := deletedRun().withSecondWidget().
+		record(time.Second, child("w-0", "12")).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		opOn(invariant.OpCreate, 13*time.Second, secondName).
+		record(13*time.Second, secondWidget("20", spec(1), status(1, 1))).
+		record(14*time.Second, child("w-0", "15", ownedByBoth)).
+		through(21 * time.Second)
+
+	silent(t, invariant.CleanDeletion, in)
+}
+
+// w answers for an object that names no CR, since w2 goes first, and botbox
+// took the object inside w's window.
+func TestG3NotesAnObjectBotboxTookFromTheLastOfItsCRs(t *testing.T) {
+	in := newRun().withSecondWidget().
+		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup)),
+			secondWidget("20", spec(1), status(1, 1), finalizers(cleanup))).
+		record(time.Second, child("kept", "11", orphaned)).
+		opOn(invariant.OpDelete, 9*time.Second, secondName).
+		record(9*time.Second, secondWidget("21", spec(1), status(1, 1), finalizers(cleanup), deleting(9*time.Second))).
+		op(invariant.OpDelete, 10*time.Second).
+		record(10*time.Second, widget("12", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
+		deletedManaged(11*time.Second, "kept").
+		remove(11*time.Second, child("kept", "13", orphaned)).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second)),
+			secondWidget("22", spec(1), status(1, 1), deleting(9*time.Second))).
+		through(21 * time.Second)
+
+	result := silent(t, invariant.CleanDeletion, in)
+
+	want := "for the deletion of w: op 2 (deleteManaged) deleted v1/ConfigMap kept"
+	if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], want) {
+		t.Errorf("G3 noted %v, want one note saying %q.", result.Notes, want)
+	}
+}
+
+func TestG3NotesNothingBotboxTookFromAnotherCR(t *testing.T) {
+	in := twoWidgetsDeleted().
+		remove(11*time.Second, child("w-0", "13")).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		deletedManaged(13*time.Second, "w2-0").
+		remove(13*time.Second, secondChild("w2-0", "25")).
+		record(14*time.Second, secondChild("w2-0", "26", uid("uid-w2-0-again"))).
+		through(21 * time.Second)
+
+	if notes := silent(t, invariant.CleanDeletion, in).Notes; len(notes) > 0 {
+		t.Errorf("G3 noted %v, and botbox took w2's child, not w's.", notes)
 	}
 }

@@ -116,7 +116,7 @@ examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 5m --launch-ar
 
 ```
 run 1: seed 23, generated
-run 1: G3 the v1/Secret example-tls was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR
+run 1: G3 the v1/Secret example-tls was still there 1m0s after example, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-21T05:59:08.980624165Z; 1 version, the first v1/Secret example-tls
   the evidence is in botbox-out/20260921T055744Z-23/run-1
   the sequence is 1 op, in botbox-out/20260921T055744Z-23/run-1/sequence.json
@@ -152,7 +152,7 @@ that control. It fails unless the control reports G3 and its evidence hides the 
 
 ```
 run 1: seed 20260922, sequence examples/external-secrets/sequences/orphan.json
-run 1: G3 the v1/Secret example-secret was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR
+run 1: G3 the v1/Secret example-secret was still there 1m0s after example, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-22T16:43:05.836050746Z; 1 version, the first v1/Secret example-secret
   the evidence is in botbox-out/external-secrets-control/20260922T164150Z-20260922/run-1
 ```
@@ -182,6 +182,9 @@ ready: >-                                     # CEL over metadata, spec, status;
   has(status.conditions) && status.conditions.exists(c,
     c.type == "Ready" && c.status == "True"
     && has(c.observedGeneration) && c.observedGeneration == metadata.generation)
+generate:
+  distinct:                                   # spec paths no two CRs may share, such as a child's name
+    - spec.secretName
 launch:
   binary: bin/cert-manager-controller       # relative to the working directory, not to this file
   args:
@@ -256,14 +259,28 @@ controller creates an owner of an undeclared kind, add the kind to `manages`. Ot
 point `botbox run --kubeconfig` at a cluster such as kind, whose garbage collector resolves
 every kind.
 
-Every sequence starts by creating your `sample`, then draws from `update`, `delete`, `recreate`,
-`settle`, `restart` and `deleteManaged`, which deletes one managed object behind the
-controller's back. G7 then requires your controller to recreate an object of that kind and
-name before the run settles. Where your `ready` still holds without the object, the run settles
-once nothing has changed for `stable`, so your controller has `stable` to recreate it, however
-wide `settle` is. If your controller leaves a kind deleted by design, or recreates it under a
-new name, list the kind under `notRecreated`. cert-manager lists CertificateRequest, because a
-Ready Certificate does not replace a deleted request.
+Every sequence starts by creating your `sample`, then draws from `create`, `update`, `delete`,
+`recreate`, `settle`, `restart` and `deleteManaged`.
+
+A drawn `create` adds a second or a third CR, named after your sample with `-2` or `-3`, so
+that botbox tries several CRs side by side. If your CR names a child in its spec, as
+cert-manager's `spec.secretName` names its Secret, list that path under `generate.distinct`.
+Each CR after the first then appends its suffix to your sample's value there, and no two CRs
+ever hold one value. Otherwise two CRs name one child, and botbox reports the fight that
+follows as your controller's. `generate.maxCRs: 1` keeps every sequence to your sample, for a
+controller that takes one CR per namespace. Your sample needs a `metadata.name`, which the
+other CRs extend. botbox holds each CR to the objects whose ownerReferences name it: deleting
+a CR must remove its own children. An object that names no CR may be any CR's, so it may stay
+until the last CR goes. A property's `managed` holds the objects that name the CR it judges,
+and those that name no CR.
+
+`deleteManaged` deletes one managed object behind the controller's back. G7 then requires
+your controller to recreate an object of that kind and name before the run settles. Where your
+`ready` still holds without the object, the run settles once nothing has changed for `stable`,
+so your controller has `stable` to recreate it, however wide `settle` is. If your controller
+leaves a kind deleted by design, or recreates it under a new name, list the kind under
+`notRecreated`. cert-manager lists CertificateRequest, because a Ready Certificate does not
+replace a deleted request.
 
 Your controller may read an object it does not own, such as a Secret or an Issuer. Declare it
 under `fixtures`, and name its file under `generate.fixtures` to let generation change it:
@@ -361,9 +378,14 @@ A sequence file runs as written and is never minimized. This is
 `botbox replay --target target.yaml sequence.json` re-executes one, which is how you re-examine
 a failure, and `make test-example` runs every pinned sequence so none can rot.
 
+A `create` names its CR in `obj`. An `update`, `delete` or `recreate` acts on the CR named as
+your sample unless it names another in `cr`, such as `{"i": 2, "t": "delete", "cr":
+"example-2"}`. botbox refuses an op on a CR that no op before it creates, and an `update` or
+`delete` of a CR deleted since it was last created.
+
 In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
 before it settles. G5 compares the states the controller settled in on either side, and leaves a
-note instead of a verdict when another op changed something in between. G7 likewise notes a
+note instead of a verdict on what another op may have changed in between. G7 likewise notes a
 `deleteManaged` that follows a `restart` before your controller has requested a resource outside
 leader election, since botbox cannot otherwise tell that it is back. The `settle` op after the
 `restart` waits for that request.
@@ -521,8 +543,8 @@ Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-gene
 |---|---|
 | G1 | Bounded reconciliation. Under an unchanged spec, one quiet window holds no more requests than `quiet` allows, zero by default. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
-| G3 | Clean deletion. Deleting the CR removes everything it manages and clears its finalizers. |
-| G4 | Convergence. `ready` holds within `T_settle` of every spec change, `updateFixture` or return of a deleted fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
+| G3 | Clean deletion. Deleting a CR removes everything it manages and clears its finalizers. |
+| G4 | Convergence. `ready` holds on every CR within `T_settle` of every spec change, `updateFixture` or return of a deleted fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
 | G7 | Self-healing. An object `deleteManaged` deletes exists again, by kind and name, once the run settles. |

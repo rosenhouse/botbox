@@ -37,16 +37,6 @@ func (in Input) statesAt(times []time.Time) []state {
 
 func (in Input) stateAt(t time.Time) state { return in.statesAt([]time.Time{t})[0] }
 
-// cr returns the primary CR, which a run has until it is deleted.
-func (s state) cr(gvk schema.GroupVersionKind) (observe.Version, bool) {
-	for _, v := range s.live {
-		if v.GVK == gvk {
-			return v, true
-		}
-	}
-	return observe.Version{}, false
-}
-
 // version returns one object, which a state holds until it is deleted.
 func (s state) version(key observe.Key) (observe.Version, bool) {
 	for _, v := range s.live {

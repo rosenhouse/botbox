@@ -266,6 +266,8 @@ func TestLoadRejects(t *testing.T) {
 		{"sample of another kind", minimalTarget, "apiVersion: v1\nkind: Secret\nmetadata:\n  name: s\n", []string{"widget.yaml", "Secret", "Widget"}},
 		{"sample holding two objects", minimalTarget, sampleWidget + "---\n" + sampleWidget, []string{"widget.yaml", "2 objects"}},
 		{"sample holding no object", minimalTarget, "# just a comment\n", []string{"widget.yaml", "no object"}},
+		{"sample with no name", minimalTarget, "apiVersion: toy.botbox/v1\nkind: Widget\nmetadata:\n  generateName: widget-\n",
+			[]string{"widget.yaml", "no metadata.name"}},
 		{"sample that is not YAML", minimalTarget, "name: \"unterminated\n", []string{"widget.yaml"}},
 		{"missing crds path", minimalTarget + "crds: [nosuch/]\n", "", []string{"crds", "nosuch"}},
 		{"managed group read as a version", minimalTarget + "manages:\n  - apps/Deployment\n", "", []string{"manages", "apps"}},
@@ -284,6 +286,7 @@ func TestLoadRejects(t *testing.T) {
 		{"negative timeout", minimalTarget + "timeouts:\n  delete: -1s\n", "", []string{"delete", "positive"}},
 		{"errloop of zero", minimalTarget + "thresholds:\n  errloop: 0\n", "", []string{"errloop", "positive"}},
 		{"negative quiet", minimalTarget + "thresholds:\n  quiet: -1\n", "", []string{"quiet -1", "negative"}},
+		{"no CR at all", minimalTarget + "generate:\n  maxCRs: 0\n", "", []string{"generate.maxCRs 0", "at least 1"}},
 		{"a launch env that sets the kubeconfig", minimalTargetWithEnv + "    KUBECONFIG: /elsewhere\n", "", []string{"launch.env", "KUBECONFIG"}},
 		{"a launch env name holding an equals sign", minimalTargetWithEnv + "    A=B: x\n", "", []string{"launch.env", `"A=B"`}},
 		{"an empty launch env name", minimalTargetWithEnv + "    '': x\n", "", []string{"launch.env", `""`}},
@@ -797,6 +800,8 @@ generate:
   mutate: [spec.count]
   overlay:
     spec.count: {minimum: 1, maximum: 3}
+  maxCRs: 2
+  distinct: [spec.secretName]
 `, map[string]string{"widget.yaml": sampleWidget})
 
 	loaded, err := target.Load(path)
@@ -822,5 +827,9 @@ generate:
 	}
 	if want := `{"maximum":3,"minimum":1}`; string(overlay) != want {
 		t.Errorf("Load read the overlay of spec.count as %s, want %s.", overlay, want)
+	}
+	if loaded.Generate.MaxCRs != 2 || !reflect.DeepEqual(loaded.Generate.Distinct, []string{"spec.secretName"}) {
+		t.Errorf("Load read generate.maxCRs %d and generate.distinct %v, want 2 and [spec.secretName].",
+			loaded.Generate.MaxCRs, loaded.Generate.Distinct)
 	}
 }

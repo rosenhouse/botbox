@@ -410,12 +410,13 @@ func TestG7FiresSoonAfterARecreate(t *testing.T) {
 		record(5100*time.Millisecond, widget("15", spec(2), status(2, 1), deleting(5*time.Second), finalizers(cleanup))).
 		remove(5200*time.Millisecond, child("w-0", "16"), child("w-1", "17")).
 		remove(5300*time.Millisecond, widget("18", spec(2), status(2, 1), deleting(5*time.Second))).
-		record(5400*time.Millisecond, widget("20", spec(2), uid("uid-w2"), finalizers(cleanup))).
-		record(5500*time.Millisecond, child("w-0", "21", uid("uid-w-0-2")), child("w-1", "22", uid("uid-w-1-2"))).
-		record(5600*time.Millisecond, widget("23", spec(2), status(2, 1), uid("uid-w2"), finalizers(cleanup))).
+		record(5400*time.Millisecond, widget("20", spec(2), uid("uid-w-again"), finalizers(cleanup))).
+		record(5500*time.Millisecond, child("w-0", "21", uid("uid-w-0-2"), ownedByRecreated),
+			child("w-1", "22", uid("uid-w-1-2"), ownedByRecreated)).
+		record(5600*time.Millisecond, widget("23", spec(2), status(2, 1), uid("uid-w-again"), finalizers(cleanup))).
 		checkpoint(7600*time.Millisecond, invariant.Converged).
 		deletedManaged(8*time.Second, "w-0").
-		remove(8100*time.Millisecond, child("w-0", "24", uid("uid-w-0-2"))).
+		remove(8100*time.Millisecond, child("w-0", "24", uid("uid-w-0-2"), ownedByRecreated)).
 		checkpoint(10100*time.Millisecond, invariant.Converged).
 		through(10100 * time.Millisecond)
 
@@ -495,6 +496,63 @@ func TestG7IgnoresAnObjectDeletedWhileTheCRWasGoing(t *testing.T) {
 
 			if notes := silent(t, invariant.SelfHealing, in).Notes; len(notes) > 0 {
 				t.Errorf("G7 noted %v, want nothing: there was no CR to restore the object for.", notes)
+			}
+		})
+	}
+}
+
+// twoConverged is two Widgets with a child each, converged at 2.4s, and an
+// object that names neither.
+func twoConverged() *run {
+	return newRun().withSecondWidget().
+		op(invariant.OpCreate, 0).
+		opOn(invariant.OpCreate, 50*time.Millisecond, secondName).
+		record(100*time.Millisecond, widget("11", spec(1), status(1, 1), finalizers(cleanup)),
+			secondWidget("21", spec(1), status(1, 1), finalizers(cleanup))).
+		record(200*time.Millisecond, child("w-0", "12"), secondChild("w2-0", "22"), child("kept", "13", orphaned)).
+		checkpoint(2400*time.Millisecond, invariant.Converged)
+}
+
+// oneDeleting has botbox delete the Widget named at 5s, which its finalizer
+// then holds.
+func oneDeleting(name string) func(*run) *run {
+	return func(r *run) *run {
+		deleting := deleting(5 * time.Second)
+		if name == secondName {
+			return r.opOn(invariant.OpDelete, 5*time.Second, secondName).
+				record(5100*time.Millisecond, secondWidget("23", spec(1), status(1, 1), finalizers(cleanup), deleting))
+		}
+		return r.op(invariant.OpDelete, 5*time.Second).
+			record(5100*time.Millisecond, widget("14", spec(1), status(1, 1), finalizers(cleanup), deleting))
+	}
+}
+
+func TestG7AsksOnlyTheCRsAnObjectNamesForItBack(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		deleting string
+		taken    string
+		fires    bool
+	}{
+		{"w2's child while w2 goes", secondName, "w2-0", false},
+		{"w2's child while w goes", widgetName, "w2-0", true},
+		{"an object that names no CR while w goes", widgetName, "kept", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			in := oneDeleting(c.deleting)(twoConverged()).
+				checkpoint(7500*time.Millisecond, invariant.Converged).
+				deletedManaged(10*time.Second, c.taken).
+				remove(10100*time.Millisecond, object(configMapGVK, c.taken, "30")).
+				checkpoint(12100*time.Millisecond, invariant.Converged).
+				through(12100 * time.Millisecond)
+
+			result := evaluate(t, invariant.SelfHealing, in)
+
+			if fired := len(result.Violations) > 0; fired != c.fires {
+				t.Errorf("G7 reported %v, want a violation: %t.", statements(result), c.fires)
+			}
+			if len(result.Notes) > 0 {
+				t.Errorf("G7 noted %v, want a verdict.", result.Notes)
 			}
 		})
 	}

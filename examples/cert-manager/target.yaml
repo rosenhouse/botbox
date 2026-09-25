@@ -37,6 +37,11 @@ properties:
 # out one RFC 1123 label, because neither the CRD nor the API server rejects a
 # label that starts or ends with a hyphen.
 generate:
+  # Two Certificates that name one Secret fight over it, which is a user's
+  # mistake and not cert-manager's. Each CR after the first takes the sample's
+  # secretName with a suffix of its own.
+  distinct:
+    - spec.secretName
   mutate:
     - spec.dnsNames
     - spec.duration

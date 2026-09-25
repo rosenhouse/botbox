@@ -264,8 +264,8 @@ func (f *fakeHarness) faultWindow(id proxy.FaultID) proxy.FaultWindow {
 	return window
 }
 
-func (f *fakeHarness) createCR(_ context.Context, obj *unstructured.Unstructured) (string, error) {
-	return obj.GetName(), f.record("createCR " + obj.GetName())
+func (f *fakeHarness) createCR(_ context.Context, obj *unstructured.Unstructured) error {
+	return f.record("createCR " + obj.GetName())
 }
 
 func (f *fakeHarness) patchCR(_ context.Context, name string, patch map[string]any) error {
@@ -424,6 +424,7 @@ func (c *fakeChecker) Check(in Input) (Findings, error) {
 var toyTarget = &target.Target{
 	Name:      "toy-widget",
 	Primary:   widgetKind,
+	Sample:    widget("widget"),
 	Manages:   []schema.GroupVersionKind{configMapKind},
 	Timeouts:  testTimeouts,
 	Ready:     readyCountsChildren,
@@ -440,6 +441,13 @@ func widget(name string) *unstructured.Unstructured {
 	object := &unstructured.Unstructured{Object: map[string]any{"spec": map[string]any{"count": float64(3)}}}
 	object.SetGroupVersionKind(widgetKind)
 	object.SetName(name)
+	return object
+}
+
+// generated is a Widget the API server would name from the prefix.
+func generated(prefix string) *unstructured.Unstructured {
+	object := widget("")
+	object.SetGenerateName(prefix)
 	return object
 }
 
@@ -610,11 +618,11 @@ func TestRunRefusesAnOpOnAFixtureTheTargetDoesNotDeclare(t *testing.T) {
 func TestRunNamesTheCREachCROpWrote(t *testing.T) {
 	sequence := sequenceOf(
 		Op{Type: OpCreate, Obj: widget("a")},
-		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+		Op{Type: OpUpdate, CR: "a", Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
 		Op{Type: OpSettle},
 		Op{Type: OpRestart},
-		Op{Type: OpRecreate, Obj: widget("b")},
-		Op{Type: OpDelete},
+		Op{Type: OpRecreate, CR: "a", Obj: widget("a")},
+		Op{Type: OpDelete, CR: "a"},
 	)
 
 	result, err := runFake(t, newFakeHarness(), nil, sequence)
@@ -626,8 +634,67 @@ func TestRunNamesTheCREachCROpWrote(t *testing.T) {
 	for _, op := range result.Timeline.Ops {
 		got = append(got, op.CR)
 	}
-	if want := []string{"a", "a", "", "", "b", "b"}; !slices.Equal(got, want) {
+	if want := []string{"a", "a", "", "", "a", "a"}; !slices.Equal(got, want) {
 		t.Errorf("The ops name the CRs %q, want %q.", got, want)
+	}
+}
+
+func TestRunActsOnTheCREachOpNames(t *testing.T) {
+	h := newFakeHarness()
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpCreate, Obj: widget("widget-2")},
+		Op{Type: OpUpdate, CR: "widget-2", Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+		Op{Type: OpRecreate, CR: "widget-2", Obj: widget("widget-2")},
+		Op{Type: OpDelete, CR: "widget-2"},
+		Op{Type: OpDelete},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	want := []string{
+		"createCR widget", "settle", "supervise",
+		"createCR widget-2", "settle",
+		"patchCR widget-2 map[spec:map[count:5]]", "settle",
+		"deleteCR widget-2", "awaitCRGone widget-2", "createCR widget-2", "settle",
+		"deleteCR widget-2", "settle",
+		"deleteCR widget", "settle",
+	}
+	if got := h.opCalls(); !slices.Equal(got, want) {
+		t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
+	}
+	var crs []string
+	for _, op := range result.Timeline.Ops {
+		crs = append(crs, op.CR)
+	}
+	if want := []string{"widget", "widget-2", "widget-2", "widget-2", "widget-2", "widget"}; !slices.Equal(crs, want) {
+		t.Errorf("The ops name the CRs %q, want %q.", crs, want)
+	}
+}
+
+func TestTheTeardownDeletesEveryCRTheRunCreated(t *testing.T) {
+	h := newFakeHarness()
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpCreate, Obj: widget("widget-2")},
+		Op{Type: OpRecreate, Obj: widget("widget")},
+	)
+
+	if _, err := runFake(t, h, nil, sequence); err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+
+	var deleted []string
+	for _, call := range h.teardownCalls() {
+		if strings.HasPrefix(call, "deleteCR ") {
+			deleted = append(deleted, call)
+		}
+	}
+	if want := []string{"deleteCR widget", "deleteCR widget-2"}; !slices.Equal(deleted, want) {
+		t.Errorf("The teardown did %v, want each CR the run created deleted once: %v.", deleted, want)
 	}
 }
 
@@ -1716,18 +1783,20 @@ func TestRunGivesEachCheckTheRunSoFar(t *testing.T) {
 }
 
 func TestRunNeedsACRBeforeAnOpThatActsOnOne(t *testing.T) {
-	for _, opType := range []OpType{OpUpdate, OpDelete} {
+	for _, opType := range []OpType{OpUpdate, OpDelete, OpRecreate} {
 		t.Run(string(opType), func(t *testing.T) {
-			h := newFakeHarness()
 			op := Op{Type: opType, Index: 0}
-			if opType == OpUpdate {
+			switch opType {
+			case OpUpdate:
 				op.Patch = map[string]any{"spec": map[string]any{}}
+			case OpRecreate:
+				op.Obj = widget("widget")
 			}
 
-			_, err := runFake(t, h, nil, Sequence{Seed: 1, Target: toyTarget.Name, Ops: []Op{op}})
+			err := validateRun(toyTarget, Sequence{Seed: 1, Target: toyTarget.Name, Ops: []Op{op}}, Options{Dir: "out", Check: &fakeChecker{}})
 
-			if err == nil || !strings.Contains(err.Error(), "no CR") {
-				t.Errorf("The run returned %v, want an error: the sequence creates no CR.", err)
+			if err == nil || !strings.Contains(err.Error(), "which no op before it creates") {
+				t.Errorf("validateRun returned %v, want an error: the sequence creates no CR.", err)
 			}
 		})
 	}
@@ -1839,6 +1908,100 @@ func TestRunValidatesTheSequenceAgainstTheTarget(t *testing.T) {
 			sequence: Sequence{Target: toyTarget.Name},
 			want:     "check",
 		},
+		{
+			name: "an update of a CR no op creates",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpUpdate, CR: "widget-2", Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (update) acts on the CR widget-2, which no op before it creates",
+		},
+		{
+			name: "a delete of the sample's CR where only another was created",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget-2")},
+				Op{Type: OpDelete},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (delete) names no cr, so it acts on the sample's widget, which no op before it creates",
+		},
+		{
+			name: "a recreate that creates another CR",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpRecreate, Obj: widget("widget-2")},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (recreate) acts on the CR widget and creates widget-2",
+		},
+		{
+			name: "a create of a CR an earlier op created",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
+				Op{Type: OpCreate, Obj: widget("widget")},
+			),
+			check: &fakeChecker{},
+			want:  "op 2 (create) creates the CR widget, which op 0 created",
+		},
+		{
+			name: "a recreate of a CR only a later op creates",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpRecreate, CR: "widget-2", Obj: widget("widget-2")},
+				Op{Type: OpCreate, Obj: widget("widget-2")},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (recreate) acts on the CR widget-2, which no op before it creates",
+		},
+		{
+			name: "a create of a CR a recreate made again",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpDelete},
+				Op{Type: OpRecreate, Obj: widget("widget")},
+				Op{Type: OpCreate, Obj: widget("widget")},
+			),
+			check: &fakeChecker{},
+			want:  "op 3 (create) creates the CR widget, which op 2 created and no op since deleted",
+		},
+		{
+			name: "an update of a deleted CR",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpCreate, Obj: widget("widget-2")},
+				Op{Type: OpDelete},
+				Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
+			),
+			check: &fakeChecker{},
+			want:  "op 3 (update) acts on the CR widget, which op 2 deleted",
+		},
+		{
+			name: "a delete of a deleted CR",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpDelete},
+				Op{Type: OpDelete},
+			),
+			check: &fakeChecker{},
+			want:  "op 2 (delete) acts on the CR widget, which op 1 deleted",
+		},
+		{
+			name:     "a create of a CR with no name",
+			sequence: sequenceOf(Op{Type: OpCreate, Obj: generated("w-")}),
+			check:    &fakeChecker{},
+			want:     "op 0 (create) writes a CR with no metadata.name",
+		},
+		{
+			name: "a recreate of a CR with no name",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpRecreate, Obj: generated("widget-")},
+			),
+			check: &fakeChecker{},
+			want:  "op 1 (recreate) writes a CR with no metadata.name",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			err := validateRun(toyTarget, test.sequence, Options{Dir: "out", Check: test.check})
@@ -1847,6 +2010,23 @@ func TestRunValidatesTheSequenceAgainstTheTarget(t *testing.T) {
 				t.Errorf("validateRun returned %v, want an error naming %q.", err, test.want)
 			}
 		})
+	}
+}
+
+func TestRunAcceptsOpsOnTheCRsEarlierOpsCreate(t *testing.T) {
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpCreate, Obj: widget("widget-2")},
+		Op{Type: OpUpdate, CR: "widget-2", Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
+		Op{Type: OpRecreate, CR: "widget-2", Obj: widget("widget-2")},
+		Op{Type: OpDelete, CR: "widget-2"},
+		Op{Type: OpCreate, Obj: widget("widget-2")},
+		Op{Type: OpDelete},
+		Op{Type: OpSettle},
+	)
+
+	if err := validateRun(toyTarget, sequence, Options{Dir: "out", Check: &fakeChecker{}}); err != nil {
+		t.Errorf("validateRun returned %v, want every op to act on a CR an earlier op creates.", err)
 	}
 }
 

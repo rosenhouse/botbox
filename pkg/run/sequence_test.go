@@ -272,6 +272,21 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 			ops:  `{"i": 0, "t": "update", "patch": {"spec": {"count": 1}}, "until": {"op": 1}}`,
 			want: "until",
 		},
+		{
+			name: "a create naming a CR apart from its object",
+			ops:  `{"i": 0, "t": "create", "cr": "widget-2", "obj": {"kind": "Widget"}}`,
+			want: "a create op takes no cr",
+		},
+		{
+			name: "a deleteManaged naming a CR",
+			ops:  `{"i": 0, "t": "deleteManaged", "cr": "widget-2", "kind": "v1/ConfigMap", "index": 0}`,
+			want: "a deleteManaged op takes no cr",
+		},
+		{
+			name: "a restart naming a CR",
+			ops:  `{"i": 0, "t": "restart", "cr": "widget-2"}`,
+			want: "a restart op takes no cr",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			_, err := UnmarshalSequence([]byte(`{"seed": 1, "target": "toy-widget", "ops": [` + test.ops + `]}`))
@@ -292,6 +307,9 @@ func TestSequenceAcceptsTheOpsTheRunnerExecutes(t *testing.T) {
 		`{"i": 0, "t": "update", "patch": {"spec": {"count": null}}}`,
 		`{"i": 0, "t": "delete", "noSettle": true}`,
 		`{"i": 0, "t": "recreate", "obj": {"kind": "Widget"}}`,
+		`{"i": 0, "t": "update", "cr": "widget-2", "patch": {"spec": {"count": 1}}}`,
+		`{"i": 0, "t": "delete", "cr": "widget-2"}`,
+		`{"i": 0, "t": "recreate", "cr": "widget-2", "obj": {"kind": "Widget"}}`,
 		`{"i": 0, "t": "fault", "spec": {"action": {"delay": "250ms"}, "until": {"for": "5s"}}}`,
 		`{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 3}}}`,
 		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "get"}, "action": {"drop": true}}}`,

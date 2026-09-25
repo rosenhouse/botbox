@@ -70,7 +70,33 @@
         },
         {
           "i": 1,
-          "t": "delete"
+          "t": "create",
+          "obj": {
+            "apiVersion": "cert-manager.io/v1",
+            "kind": "Certificate",
+            "metadata": {
+              "name": "example-2"
+            },
+            "spec": {
+              "commonName": "example.test",
+              "dnsNames": [
+                "example.test"
+              ],
+              "issuerRef": {
+                "kind": "Issuer",
+                "name": "selfsigned"
+              },
+              "privateKey": {
+                "algorithm": "Ed25519"
+              },
+              "secretName": "example-tls-2"
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "settle"
         }
       ]
     },
@@ -174,17 +200,28 @@
         },
         {
           "i": 1,
-          "t": "deleteManaged",
-          "kind": "v1/Secret",
-          "index": 0
+          "t": "create",
+          "obj": {
+            "apiVersion": "cert-manager.io/v1",
+            "kind": "Certificate",
+            "metadata": {
+              "name": "example-2"
+            },
+            "spec": {
+              "commonName": "example.test",
+              "dnsNames": [
+                "1.example.test"
+              ],
+              "issuerRef": {
+                "kind": "Issuer",
+                "name": "selfsigned"
+              },
+              "secretName": "example-tls-2"
+            }
+          }
         },
         {
           "i": 2,
-          "t": "delete",
-          "noSettle": true
-        },
-        {
-          "i": 3,
           "t": "settle"
         }
       ]
@@ -305,16 +342,16 @@
             "spec": {
               "commonName": "example.test",
               "dnsNames": [
-                "03n8nd02--t23f-no2ypzo1-b041.example.test"
+                "1.example.test"
               ],
-              "duration": "1h",
               "issuerRef": {
                 "kind": "Issuer",
                 "name": "selfsigned"
               },
               "secretName": "example-tls"
             }
-          }
+          },
+          "noSettle": true
         },
         {
           "i": 2,
@@ -358,9 +395,7 @@
           "t": "update",
           "patch": {
             "spec": {
-              "privateKey": {
-                "algorithm": "RSA"
-              }
+              "duration": "24h"
             }
           }
         }
@@ -437,14 +472,29 @@
         },
         {
           "i": 1,
-          "t": "settle"
+          "t": "create",
+          "obj": {
+            "apiVersion": "cert-manager.io/v1",
+            "kind": "Certificate",
+            "metadata": {
+              "name": "example-2"
+            },
+            "spec": {
+              "commonName": "example.test",
+              "issuerRef": {
+                "kind": "Issuer",
+                "name": "selfsigned"
+              },
+              "privateKey": {
+                "algorithm": "RSA"
+              },
+              "secretName": "example-tls-2"
+            }
+          },
+          "noSettle": true
         },
         {
           "i": 2,
-          "t": "restart"
-        },
-        {
-          "i": 3,
           "t": "settle"
         }
       ]
@@ -515,11 +565,14 @@
         },
         {
           "i": 1,
-          "t": "delete",
-          "noSettle": true
+          "t": "delete"
         },
         {
           "i": 2,
+          "t": "restart"
+        },
+        {
+          "i": 3,
           "t": "settle"
         }
       ]
@@ -560,9 +613,14 @@
           "t": "update",
           "patch": {
             "spec": {
-              "duration": "1h"
+              "duration": "24h"
             }
-          }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "settle"
         }
       ]
     },
@@ -598,40 +656,42 @@
         },
         {
           "i": 1,
-          "t": "delete",
-          "noSettle": true
+          "t": "delete"
         },
         {
           "i": 2,
-          "t": "recreate",
+          "t": "create",
           "obj": {
             "apiVersion": "cert-manager.io/v1",
             "kind": "Certificate",
             "metadata": {
-              "name": "example"
+              "name": "example-2"
             },
             "spec": {
               "commonName": "example.test",
+              "dnsNames": [
+                "example.test"
+              ],
               "issuerRef": {
                 "kind": "Issuer",
                 "name": "selfsigned"
               },
-              "secretName": "example-tls"
+              "secretName": "example-tls-2"
             }
           },
           "noSettle": true
         },
         {
           "i": 3,
-          "t": "settle"
-        },
-        {
-          "i": 4,
-          "t": "restart"
-        },
-        {
-          "i": 5,
-          "t": "settle"
+          "t": "update",
+          "cr": "example-2",
+          "patch": {
+            "spec": {
+              "privateKey": {
+                "rotationPolicy": "Always"
+              }
+            }
+          }
         }
       ]
     }
@@ -713,17 +773,35 @@
         },
         {
           "i": 1,
-          "t": "deleteManaged",
-          "kind": "v1/Secret",
-          "index": 0
-        },
-        {
-          "i": 2,
-          "t": "delete",
+          "t": "create",
+          "obj": {
+            "apiVersion": "external-secrets.io/v1",
+            "kind": "ExternalSecret",
+            "metadata": {
+              "name": "example-2"
+            },
+            "spec": {
+              "data": [
+                {
+                  "remoteRef": {
+                    "key": "/token"
+                  },
+                  "secretKey": "token"
+                }
+              ],
+              "refreshInterval": "24h0m0s",
+              "refreshPolicy": "OnChange",
+              "secretStoreRef": {
+                "kind": "SecretStore",
+                "name": "fake"
+              },
+              "target": {}
+            }
+          },
           "noSettle": true
         },
         {
-          "i": 3,
+          "i": 2,
           "t": "settle"
         }
       ]
@@ -974,7 +1052,7 @@
               "name": "widget"
             },
             "spec": {
-              "count": 0
+              "count": 3
             }
           },
           "noSettle": true
@@ -989,7 +1067,7 @@
               "name": "widget"
             },
             "spec": {
-              "count": 3
+              "count": 4
             }
           }
         }
@@ -1127,22 +1205,21 @@
         },
         {
           "i": 2,
-          "t": "restart"
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 1
+            }
+          },
+          "noSettle": true
         },
         {
           "i": 3,
-          "t": "settle"
-        },
-        {
-          "i": 4,
-          "t": "restart"
-        },
-        {
-          "i": 5,
-          "t": "settle"
-        },
-        {
-          "i": 6,
           "t": "update",
           "patch": {
             "spec": {
@@ -1151,7 +1228,22 @@
           }
         },
         {
-          "i": 7,
+          "i": 4,
+          "t": "recreate",
+          "cr": "widget-2",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 5,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -1160,9 +1252,14 @@
               "name": "widget"
             },
             "spec": {
-              "count": 10
+              "count": 3
             }
-          }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 6,
+          "t": "settle"
         }
       ]
     },
@@ -1194,44 +1291,40 @@
           "t": "update",
           "patch": {
             "spec": {
-              "count": 2
-            }
-          }
-        },
-        {
-          "i": 3,
-          "t": "restart"
-        },
-        {
-          "i": 4,
-          "t": "settle"
-        },
-        {
-          "i": 5,
-          "t": "restart"
-        },
-        {
-          "i": 6,
-          "t": "settle"
-        },
-        {
-          "i": 7,
-          "t": "recreate",
-          "obj": {
-            "apiVersion": "toy.botbox/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget"
-            },
-            "spec": {
-              "count": 10
+              "count": 4
             }
           },
           "noSettle": true
         },
         {
-          "i": 8,
+          "i": 3,
           "t": "settle"
+        },
+        {
+          "i": 4,
+          "t": "restart"
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        },
+        {
+          "i": 6,
+          "t": "delete"
+        },
+        {
+          "i": 7,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
         }
       ]
     },
@@ -1269,19 +1362,14 @@
             "spec": {
               "count": 3
             }
-          },
-          "noSettle": true
+          }
         },
         {
           "i": 3,
-          "t": "delete"
-        },
-        {
-          "i": 4,
           "t": "restart"
         },
         {
-          "i": 5,
+          "i": 4,
           "t": "settle"
         }
       ]

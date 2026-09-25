@@ -73,15 +73,15 @@ func TestTheAPIServerAcceptsEveryGeneratedCROp(t *testing.T) {
 					t.Fatalf("Draw(%d) failed: %v", seed, err)
 				}
 				for _, op := range sequence.Ops {
-					written, err := apply(ctx, crs, declared.Sample.GetName(), op)
+					written, err := apply(ctx, crs, orSample(op.CR, declared.Sample.GetName()), op)
 					if err != nil {
 						t.Errorf("The API server refused op %d (%s) of seed %d: %v", op.Index, op.Type, seed, err)
 						break
 					}
 					writes += written
 				}
-				if err := crs.Delete(ctx, declared.Sample.GetName(), metav1.DeleteOptions{}); err != nil && !apierrors.IsNotFound(err) {
-					t.Fatalf("Deleting the CR after seed %d failed: %v", seed, err)
+				if err := crs.DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{}); err != nil {
+					t.Fatalf("Deleting the CRs after seed %d failed: %v", seed, err)
 				}
 			}
 			if writes < seeds {

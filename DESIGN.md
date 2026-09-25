@@ -57,10 +57,10 @@ external-secrets, upstream open-source projects, unmodified and pinned by versio
 | **Proxy** | An HTTP reverse proxy between the target and the API server. Observes every request; injects faults. |
 | **Observer** | Watches the cluster state directly (not via the proxy) and records object versions and events. |
 | **Test cluster** | The API server a run executes against: an envtest control plane that botbox starts (default), or an existing cluster given by kubeconfig (§5.8). |
-| **Primary CR** | The one custom resource that a sequence's CR ops act on. Declared by the target. |
+| **Primary CR** | A custom resource of the kind the target declares primary. A sequence creates up to three, and each CR op acts on one by name (§7). |
 | **Fixture** | An object botbox applies to the run namespace before op 0, such as an Issuer. Only a fixture op changes it; not a managed object. |
 | **Managed object** | An object of a kind the target declares it manages, in the run namespace, that neither botbox nor the cluster created (§6). |
-| **Op** | One step in a test sequence. The ops on the primary CR are `Create`, `Update`, `Delete` and `Recreate`; the fixture ops are `UpdateFixture` and `DeleteFixture`; the control ops are `Restart`, `Fault`, `Settle` and `DeleteManaged` (§5.4). A CR op may set `noSettle` to skip the Runner's implicit settle wait (§5.5). |
+| **Op** | One step in a test sequence. The ops on a primary CR are `Create`, `Update`, `Delete` and `Recreate`; the fixture ops are `UpdateFixture` and `DeleteFixture`; the control ops are `Restart`, `Fault`, `Settle` and `DeleteManaged` (§5.4). A CR op may set `noSettle` to skip the Runner's implicit settle wait (§5.5). |
 | **Sequence** | An ordered list of ops plus a seed. The unit of generation, replay, and shrinking. |
 | **Invariant** | A generic check that applies to every target. IDs `G1..Gn`. |
 | **Property** | A per-target check declared by the target. IDs `P1..Pn`. |
@@ -180,11 +180,20 @@ Deleting a managed object behind the target's back is a Runner control op
 
 The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
 
-- Ops on the primary CR: `Create`, `Update` (field-level mutation), `Delete`, `Recreate`.
-- Control ops: `Restart` (launcher), `Fault{FaultSpec}`, `Settle` (wait for convergence
-  before continuing; used to make properties checkable mid-sequence), and
-  `DeleteManaged{kind, index}` (delete one managed object behind the target's back, §7).
-  The Runner issues `DeleteManaged` directly to the API server, as it does the CR ops.
+- Ops on the primary CRs: `Create`, `Update` (field-level mutation), `Delete`, `Recreate`.
+  A sequence creates the sample first, and may create further CRs, up to
+  `generate.maxCRs` in all, three by default. The second and third take the sample's name
+  with `-2` and `-3` appended, and so does their value at each `generate.distinct` path,
+  which must hold a string in the sample. A spec field that names a child is such a path,
+  since two CRs that name one child fight over it, which is a user's mistake and not the
+  target's. No draw gives a CR another CR's value at a distinct path, whether or not that
+  CR is live, nor the value another CR's suffix makes. An update or a delete acts on a
+  live CR, and a recreate on any CR the sequence created.
+- Control ops: `Restart` (launcher), `Settle` (wait for convergence before continuing;
+  used to make properties checkable mid-sequence), and `DeleteManaged{kind, index}`
+  (delete one managed object behind the target's back, §7). The Runner issues
+  `DeleteManaged` directly to the API server, as it does the CR ops. The generator draws
+  no `Fault`; only a sequence written by hand carries one.
 - Fixture ops: `UpdateFixture` (set one string of a fixture) and `DeleteFixture` (delete a
   fixture until a later op, §7), only on the fixtures `generate.fixtures` names (§8.1).
   Built-in kinds carry no schema botbox reads, so a drawn value is a word of 4, 8 or 12
@@ -202,7 +211,7 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   can still refuse a draw. The generator runs the API server's own code for this (D55). A
   create keeps a drawn field only if the CRD accepts it. A refused update is drawn again up
   to eight times, then becomes a `Settle`. Judging consumes no randomness. The sample must
-  pass its CRD.
+  pass its CRD, and so must each further CR as the sample makes it.
 - Generation starts from the target's `sample` object. When the target declares
   `generate.mutate`, only those paths are mutated, and `generate.overlay` tightens the
   schema for a path (§8.3). An overlay keyword the generator does not read is a
@@ -230,27 +239,28 @@ The Runner executes one sequence:
    managed objects (§6). Apply the target's fixtures. Start the target via the Launcher.
 2. Apply ops in order. Before an op acts, but after its instant is stamped, create again
    each fixture a `DeleteFixture` deleted until that op (§7). After each op that mutates
-   the CR or a managed object, or updates a fixture, wait up to `T_settle` for convergence
+   a CR or a managed object, or updates a fixture, wait up to `T_settle` for convergence
    unless the op sets `noSettle`, and longer while the target is still owed time to
    recover from a fault that stopped (§6) or to delete a primary CR. The wait ends once
-   the `Ready` predicate holds, no primary CR is being deleted, and neither the CR nor a
-   managed object has changed for `T_stable`, so a checkpoint lands after the target's
-   reaction, not before it. After a deletion of the primary CR, the wait may run until the
-   deletion's G3 deadline, or `T_settle` past the instant the CR went if it went by then.
-   A `recreate` waits `T_delete` for its old CR to go, and longer while the target is owed
-   time as above. A CR still there where that wait ends is judged there, as an expired
-   settle wait is. A wait in which a CR outlived a G3 deadline that no fault reached into
-   is G3's to judge (§6). Any other wait that expires while no fault excuses it records a
-   G4 violation, which says why from the Observer's history of the wait: `Ready` never
-   held, held and then stopped, or held while the namespace kept changing within
-   `T_stable`; a CR was still being deleted; or no CR was left to be ready. It also says
-   where the target was waiting to restart, restarted within `T_stable`, had not yet shown
-   it runs, or first did within `T_stable`, and then leaves out what changed. Where
-   `Ready` held and nothing changed within `T_stable`, it says that.
-   The Runner and the engine raise it with one function, so they agree. A fault excuses it
-   while active, which is once the proxy has applied it and until the proxy stops (D36),
-   and while the target is still owed time to recover from it (§6). A `recreate` whose old
-   CR stays where no check reports it cannot go on, so the run ends as a harness error.
+   the `Ready` predicate holds on every primary CR, no primary CR is being deleted, and
+   neither a CR nor a managed object has changed for `T_stable`, so a checkpoint lands
+   after the target's reaction, not before it. After a deletion of a primary CR, the wait
+   may run until the deletion's G3 deadline, or `T_settle` past the instant the CR went if
+   it went by then. A `recreate` waits `T_delete` for its old CR to go, and longer while
+   the target is owed time as above. A CR still there where that wait ends is judged
+   there, as an expired settle wait is. A wait in which a CR outlived a G3 deadline that
+   no fault reached into is G3's to judge (§6). Any other wait that expires while no fault
+   excuses it records a G4 violation, which says why from the Observer's history of the
+   wait: `Ready` never held, held and then stopped, or held while the namespace kept
+   changing within `T_stable`; a CR was still being deleted; or no CR was left to be
+   ready. It also says where the target was waiting to restart, restarted within
+   `T_stable`, had not yet shown it runs, or first did within `T_stable`, and then leaves
+   out what changed. Where `Ready` held and nothing changed within `T_stable`, it says
+   that. The Runner and the engine raise it with one function, so they agree. A fault
+   excuses it while active, which is once the proxy has applied it and until the proxy
+   stops (D36), and while the target is still owed time to recover from it (§6). A
+   `recreate` whose old CR stays where no check reports it cannot go on, so the run ends
+   as a harness error.
    Until a settle wait has converged, normally op 0's, a wait also ends where the target's
    process exits, and the Runner checks the target is running before it applies each op. A
    target that stopped then ends the run as a harness error naming the op it was at (§11):
@@ -286,7 +296,7 @@ The Runner executes one sequence:
    step 2 does and checkpoint where the wait ends. This recovery wait is judged as an op's
    wait is, so the caller's deadline can end it and no later step. A run that ended at a
    violation or a harness error gets none. Then wait `T_stable`, which is the last quiet
-   window (§6). Delete the primary CR if it still exists and wait for the G3 window. A
+   window (§6). Delete every primary CR the run created and wait for the G3 window. A
    target that stopped for good, before supervision or because a restart failed, cleaned
    nothing up, so the run ends as that harness error rather than at a verdict on the
    deletion. G3 judges a target that is waiting to restart, and the notes carry its exits.
@@ -425,9 +435,9 @@ real targets; the toy target sets much shorter ones (§9).
 | ID | Name | Statement | Signal |
 |---|---|---|---|
 | **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault or a deletion (§5.5), the target makes no more than `N_quiet` (default 0) API requests in `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io`, whose leases and lease candidates leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
-| **G2** | No churn | Once converged under a stable spec, the primary CR, the set of managed objects and their resourceVersions do not change for `T_stable`. A status write whose content is unchanged moves no resourceVersion, so G2 counts status subresource writes from the proxy log, and more than `N_quiet` of them is churn. `N_quiet` never excuses a resourceVersion that moves. | Observer + proxy log |
-| **G3** | Clean deletion | After deleting the CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains. | Observer |
-| **G4** | Convergence | Within `T_settle` after any spec change, `UpdateFixture` or restore of a deleted fixture, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds with `T_stable` of quiet behind it (§5.5). A `Restart` gives the target `T_settle` past its return. A target waiting to restart, or not back since it last started, has not converged. This is ESR as a test. | Observer + target predicate |
+| **G2** | No churn | Once converged under a stable spec, the primary CRs, the set of managed objects and their resourceVersions do not change for `T_stable`. A status write whose content is unchanged moves no resourceVersion, so G2 counts status subresource writes from the proxy log, and more than `N_quiet` of them is churn. `N_quiet` never excuses a resourceVersion that moves. | Observer + proxy log |
+| **G3** | Clean deletion | After deleting a CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains once no CR does. | Observer |
+| **G4** | Convergence | Within `T_settle` after any spec change, `UpdateFixture` or restore of a deleted fixture, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds on every primary CR with `T_stable` of quiet behind it (§5.5). A `Restart` gives the target `T_settle` past its return. A target waiting to restart, or not back since it last started, has not converged. This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
 | **G6** | No error loop | The target does not make the same failing request (same verb/resource/name, 4xx/5xx) more than `N_errloop` (default 10) times within `T_settle` under an unchanged spec and fixtures, with no faults. A 409 Conflict on an `update` or a `patch` does not count. | Proxy log |
 | **G7** | Self-healing | An object a `DeleteManaged` op deleted exists again, by kind and name, when the settle wait after the op ends: on convergence, or at `T_settle` or later after a fault or a deletion (§5.5). Its content may differ. A kind the target lists in `notRecreated` is exempt (§8.1). | Observer |
@@ -475,7 +485,7 @@ where G3 can judge it, and G4 leaves that wait to G3. Where a fault reached into
 deletion, G3 only notes it, and G4 judges the wait.
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
-namespace that neither botbox nor the cluster created. Fixtures and the primary CR are
+namespace that neither botbox nor the cluster created. Fixtures and the primary CRs are
 botbox's. The cluster's are what the namespace holds before the fixtures and the target,
 once §5.8's wait is over. Both are excluded by name, so an object the cluster recreates
 stays excluded. The namespace is private to one run, since a kubeconfig cluster serves one
@@ -483,8 +493,11 @@ invocation at a time (§5.8). Everything else in it came from the target, except
 cluster adds later: the optional selector leaves that out. A change a cluster makes to a
 managed object still counts as the target's. On a kubeconfig cluster G2 therefore fails
 where the garbage collector deletes a child after `T_stable` of quiet (§14, question 5).
-ownerReferences and the selector refine attribution to a particular CR; they are not
-required for it.
+ownerReferences refine attribution to a particular CR; they are not required for it. An
+object belongs to the primary CRs its ownerReferences name, by UID, and one that names
+none may belong to any CR. G3, G5, G7 and the properties attribute by that rule, so that
+a run of several CRs holds each to its own objects (below). An object owned through
+another, such as a ReplicaSet of a Deployment a CR owns, names no CR.
 
 **Fixtures.** A fixture stays botbox's, whatever its kind, and so does the object botbox
 creates again under its name, so G3 never counts one as left behind and G7 never asks for
@@ -504,7 +517,10 @@ namespace until it is clean or `T_delete` expires (§5.5 step 4). The settle wai
 deletion where the wait ends if the CR outlived `T_delete`. A namespace that came clean
 satisfies G3 at that instant, which is how a target that cleans up promptly is judged
 rather than left unjudged: the run stops watching long before `T_delete` is up. An object
-a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (D38).
+a `DeleteManaged` op took inside the window is not cleanup: G3 notes it (D38). An object
+there when a CR went belongs to the CRs it names, or to every CR there then if it names
+none. The last of those CRs to go answers for it, at its own deadline: a CR still there at
+another's deadline, or deleted after it, keeps the object.
 
 **Periodic work.** A controller that resyncs on a timer makes requests after it has
 converged, often a write that changes nothing. `N_quiet` is how many of those one quiet
@@ -565,13 +581,17 @@ that differs across it, judged at the snapshot after it. The Runner snapshots wh
 settle wait converges, implicit or explicit. A `Restart` is compared against the last
 converged snapshot before it and the first converged snapshot after it. If either is
 missing, G5 is not evaluated for that `Restart` and the report says so. The same holds
-where botbox applied, between the two snapshots, an op that changed the CR, a managed
-object or a fixture: a `Create`, `Update`, `Delete`, `Recreate`, a `DeleteManaged` that
-deleted something, a fixture op, or an op before which botbox restored a fixture. It also
-holds where a fault's window reaches between them. A difference could
-then be the op's or the fault's. A `Settle`, another `Restart`, a `DeleteManaged` that
-deleted nothing or a `Fault` that faulted no request leaves the comparison standing.
-Snapshots are keyed by kind and name.
+where a fault's window reaches between them. An op botbox applied between the two
+snapshots that changed a CR, a managed object or a fixture leaves unjudged what it may have
+changed: a `Create`, `Update`, `Delete` or `Recreate` reaches its CR, and a `DeleteManaged`
+that deleted something reaches its object and the CRs that object named, or every CR where
+it named none. A fixture op, or an op before which botbox restored a fixture, reaches every
+object, since any CR may read the fixture. What a reached CR owns, and every object that
+names no CR, is reached too (§6, attribution). A difference there could be the op's. G5
+compares the rest and notes what it left out, and where nothing is left it is not evaluated
+for that `Restart`. A `Settle`, another `Restart`, a `DeleteManaged` that deleted nothing
+or a `Fault` that faulted no request leaves the comparison standing. Snapshots are keyed by
+kind and name.
 
 **G5 equality.** The default ignores exactly `metadata.resourceVersion`, `metadata.uid`,
 `metadata.creationTimestamp`, `metadata.generation`, `metadata.managedFields`,
@@ -589,20 +609,21 @@ window is that wait: up to `T_settle` or later after a fault or a deletion, clos
 `Ready` holds with `T_stable` of quiet behind it (§5.5). Where `Ready` holds without the
 object, the target therefore has `T_stable` to recreate it. An object of the deleted one's
 kind and name satisfies G7, whatever its UID and content, since a recreated object carries
-a new UID. Where none exists, G7 does not judge an op where no primary CR is live, or
-where the CR is being deleted, when the wait ends: nothing asks for the object back. It
-notes an op where botbox changed the CR, a managed object or a fixture after the last
-settle wait that converged, since the target may then have meant to delete the object
-itself. It notes one where a fault was active during the op or its wait, or where the wait
-ended while the target was still owed time to recover from a fault. It also notes an op
-that follows a restart, by a `Restart` op or by `Supervise` after an exit, where the
-target requested nothing between the last restart and the op but leader election's leases
-and lease candidates, and paths that name no resource. botbox has no other sign that the
-target is back (§5.1), and a process starting up or waiting to lead requests only those. A
-settle wait that converged after the restart rules this out (§5.5). It notes an op where
-the target exited, or waited to restart, during the op or its wait. Where several of these
-apply, the note names the first. A violation quotes the object's history and the managed
-objects where the wait ended, which show an object recreated under a new name.
+a new UID. Where none exists, G7 does not judge an op where nothing asks for the object
+back when the wait ends: no CR the object named, or no CR at all where it named none, is
+live and not being deleted. It notes an op where botbox changed a CR, a managed object or a
+fixture after the last settle wait that converged, since the target may then have meant to
+delete the object itself. It notes one where a fault was active during the op or its wait,
+or where the wait ended while the target was still owed time to recover from a fault. It
+also notes an op that follows a restart, by a `Restart` op or by `Supervise` after an exit,
+where the target requested nothing between the last restart and the op but leader
+election's leases and lease candidates, and paths that name no resource. botbox has no
+other sign that the target is back (§5.1), and a process starting up or waiting to lead
+requests only those. A settle wait that converged after the restart rules this out (§5.5).
+It notes an op where the target exited, or waited to restart, during the op or its wait.
+Where several of these apply, the note names the first. A violation quotes the object's
+history and the managed objects where the wait ended, which show an object recreated under
+a new name.
 
 ## 7. Sequence format
 
@@ -626,13 +647,21 @@ objects where the wait ended, which show an object recreated under a new name.
 Details the example does not show:
 
 - Any CR op may carry `"noSettle": true`, which skips the Runner's implicit settle wait.
+- `update`, `delete` and `recreate` act on the CR that `"cr"` names, or on the sample's name
+  where they name none, so a sequence of one CR named as the sample names none. A `create`
+  names its CR in `obj`, and a `recreate` creates the CR it deletes. These are
+  configuration errors: an `obj` with no `metadata.name`, an op on a CR that no earlier
+  `create` or `recreate` creates, an `update` or `delete` of a CR deleted since it was last
+  created, a `recreate` whose `obj` names another CR, and a `create` of a CR that no
+  `delete` has removed since.
 - A sequence ends with an op that settles, or nothing judges the state it leaves behind
   (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
-- G5 judges a `restart` only between two converged settle waits with no CR op, no
-  `deleteManaged` that deleted something and no fault's window between them (§6). Put a
-  `settle` op after a `restart`, and one before it unless the op before it settles. G7
-  judges a `deleteManaged` after a `restart` only once the target has requested a
-  resource outside leader election, which a `settle` op between them waits for.
+- G5 judges a `restart` only between two converged settle waits with no fault's window
+  between them, and leaves out what a CR op, a fixture op or a `deleteManaged` between
+  them may have changed (§6). Put a `settle` op after a `restart`, and one before it
+  unless the op before it settles. G7 judges a `deleteManaged` after a `restart` only once
+  the target has requested a resource outside leader election, which a `settle` op
+  between them waits for.
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
 - A fault's `match.verb` is one of `get`, `list`, `watch`, `create`, `update`, `patch`,
@@ -658,9 +687,9 @@ Details the example does not show:
   before it acts on that fixture. A `deleteFixture` does not settle.
   A fixture op names a fixture the target declares, or the run ends as a configuration
   error.
-- `recreate` is a delete, a wait for the object to disappear, and a create of `obj`. An
-  object still there where the wait ends is judged there, and the op creates nothing
-  (§5.5).
+- `recreate` is a delete, a wait for the object to disappear, and a create of `obj` under
+  the same name. An object still there where the wait ends is judged there, and the op
+  creates nothing (§5.5).
 - `deleteManaged` selects the i-th managed object of `kind`, ordered by creationTimestamp
   then name. The index is resolved at execution time against what the Observer has seen.
   An index that resolves to nothing is skipped and reported as a note, since a target that
@@ -710,6 +739,9 @@ properties:                                   # optional per-target checks, IDs 
       || managed.exists(o, o.kind == "Secret" && o.metadata.name == spec.secretName)
     when: checkpoint                          # always | checkpoint | end
 generate:
+  maxCRs: 3                                   # CRs a sequence may create; 3 by default
+  distinct:                                   # paths at which no two CRs hold one value
+    - spec.secretName
   mutate:                                     # allowlist of paths; absent means every schema path
     - spec.dnsNames
     - spec.duration
@@ -744,6 +776,16 @@ did nothing wrong.
 A key target.yaml does not take is a configuration error. It names the key's line and
 dotted path, and the key within two edits of it, or else the keys its block takes. A swap
 of two adjacent letters counts as one edit.
+
+`generate.maxCRs` bounds the primary CRs a sequence creates, and `1` keeps a run to the
+sample alone, for a controller that takes one CR per namespace. `generate.distinct` names
+the spec paths at which no two CRs may hold one value, such as a field that names a
+child. Each CR after the first appends `-2` or `-3` to the sample's string there (§5.4). A
+distinct path the sample holds no string at is a configuration error, as is a CR so made
+that its CRD refuses.
+
+The sample must set `metadata.name`, since each further CR extends it and ops name the CR
+they act on.
 
 `crds`, `sample` and `fixtures` are relative to the directory holding target.yaml.
 `launch.binary` is relative to the directory botbox runs in, or a name on `PATH`, because
@@ -896,9 +938,11 @@ a configuration error that names the run and the sequence file holding the op.
 not CEL: it is the §6 default with the `equalIgnore` paths also ignored, or a Go hook.
 JSONPath is not supported anywhere.
 
-`ready` binds `metadata`, `spec` and `status` to the corresponding top-level fields of the
-primary CR as dynamic maps; a missing field binds to an empty map. A property binds those
-three plus `managed`, the list of managed objects as dynamic maps, each carrying
+`ready` binds `metadata`, `spec` and `status` to the corresponding top-level fields of a
+primary CR as dynamic maps; a missing field binds to an empty map. `Ready` holds where it
+holds on every primary CR. A property binds those three to each primary CR in turn, and
+holds where it holds on each. It also binds `managed`, the managed objects that name that
+CR in their ownerReferences or name no CR (§6), as dynamic maps, each carrying
 `apiVersion`, `kind`, `metadata` and the object's other top-level fields. The standard
 macros (`exists`, `all`, `has`, `map`, `filter`) and the string extensions are available. At a checkpoint the harness reads `managed` from the API server, not from the
 Observer cache, so cross-informer ordering cannot produce a false finding.
@@ -967,6 +1011,7 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 | B12 | Once it has written status, logs what percentage of its children are ready, dividing by `count`. It runs without controller-runtime's panic recovery, so a `count` of 0 ends the process after the toy converged. Every restart reconciles the same spec and exits again | crash loop | G4 |
 | B13 | Never runs its cleanup, so a deleted Widget keeps its finalizer and its children for good | stuck-finalizer | G3 |
 | B14 | Does not watch the ConfigMap `--label-from` names, so a changed label reaches no child until something else reconciles the Widget | unobserved-state | G5 (after an `UpdateFixture` and a `Restart`) |
+| B15 | Names each child `widget-<i>`, after the kind, rather than `<widget>-<i>`. A second Widget finds its children owned by the first, and its every reconcile fails before it writes a status. The sample is named `widget`, so a run of one Widget cannot tell | name collision | G4 |
 
 Three of the classes are Sieve's bug patterns (§13): intermediate-state, stale-state,
 and unobserved-state. The other classes are this repo's own.
@@ -981,9 +1026,11 @@ because the belief lives in the process. B12's row creates the Widget at a count
 then sets 0 and settles once more. An exit before a settle wait has converged is a harness
 error (§5.5), and a restart that exits again more than `T_stable` after its first request
 looks converged to the wait it lands in. B14's row changes the label and then restarts the
-toy, which reconciles the Widget. `fault.json`, the README's fault example, holds a
-fault that outlasts the sequence. The envtest tier runs it, not the matrix: the toy with
-no bug recovers once the teardown clears the fault, and B11 fails G4 there.
+toy, which reconciles the Widget. B15's row creates a second Widget, then deletes a child,
+restarts the toy and deletes the second Widget, which the toy with no bug passes.
+`fault.json`, the README's fault example, holds a fault that outlasts the sequence. The
+envtest tier runs it, not the matrix: the toy with no bug recovers once the teardown
+clears the fault, and B11 fails G4 there.
 
 Acceptance for M3: a matrix in `docs/bug-matrix.md` showing which invariant or property
 catches each bug, generated by CI, with no empty rows and no check firing on any sequence
@@ -1234,6 +1281,9 @@ the proxy; the `Image` launcher. Separate design addendum.
    explains? On kind, just after the owner's CRD was installed, the garbage collector
    deleted an owned Deployment 2.3 s after its owner. With a `T_stable` of 2 s, that delete
    landed in the quiet window, and G2 counted it as the target's.
+6. G5 takes an op on one CR to change only that CR and what it owns (§6). Should it judge
+   less for a controller whose CRs refer to one another, such as one CR delegating to
+   another of its kind?
 
 ## 15. Decision log
 
@@ -1805,3 +1855,31 @@ built from source and run as a black-box binary.
   the Widget. A generated sequence finds it too, and the correct toy passes every seed up
   to 60 that draws a fixture op. A target without `generate.fixtures` draws what it drew
   before, which the golden draws pin.
+- **D@47 A sequence creates up to three CRs, and G3, G5 and G7 attribute objects to them
+  by ownerReference.** A run acted on one CR, so botbox never tried two CRs side by side.
+  `update`, `delete` and `recreate` take an optional `cr`, the sample's name by default,
+  so a sequence whose one CR takes the sample's name means what it did. One that creates
+  its CR under another name must name it in `cr`. A CR with no `metadata.name`, and a
+  sample with none, are configuration errors: ops name the CR they act on, and further CRs
+  extend the sample's name. About a quarter of drawn sequences create a second CR. A CR
+  made by renaming the sample keeps every spec field, including cert-manager's
+  `spec.secretName` and external-secrets' `spec.target.name`, which name the Secret each
+  CR owns. Two CRs that name one Secret fight over it, which is a user's mistake. Without
+  `generate.distinct`, cert-manager's seed 5 drew two Certificates that name
+  `example-tls`, and cert-manager made 5226 requests in 30 s and failed G4. No draw takes
+  another CR's value at a distinct path, nor the value another CR's suffix makes:
+  external-secrets' pattern for `spec.target.name` allows `example-secret-2`. Making
+  several CRs opt-in was rejected, since generation is on by default and a target already
+  narrows it where the schema says too little (§8.3). `maxCRs: 1` turns it off. Checks
+  that read "the CR" were ambiguous: G3 failed the toy with no bug when one Widget went
+  and another outlived its deadline. An object now belongs to the CRs its ownerReferences
+  name, and one that names none to any. G3 holds it to the last of those CRs to go, at
+  that CR's deadline, since the garbage collector keeps an object until its last owner
+  goes, and a grandchild names no CR at all. G5 judges what botbox's changes between its
+  states could not have reached, which assumes one CR does not change another's objects
+  (§14, question 6). B15 names its children after the kind, which a run of one Widget
+  named `widget` cannot tell from correct. Seeds 1 to 30 of cert-manager passed, 11 of
+  them with two Certificates or more, and so did seeds 36, 66, 157 and 178, which draw
+  three. Seeds 1 to 40 of external-secrets passed, 7 of them with two. cert-manager's
+  seeds 23 to 27 no longer draw a delete or a `deleteManaged`, and its pinned sequences
+  hold both.

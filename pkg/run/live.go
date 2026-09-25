@@ -96,22 +96,21 @@ func (l *liveRun) servedResources() ([]metav1.APIResource, error) {
 
 // createCR creates the op's object as the primary CR and tells the Observer
 // botbox created it, so that it never counts as managed (DESIGN.md §6).
-func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) (string, error) {
+func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) error {
 	cr := obj.DeepCopy()
 	switch gvk := cr.GroupVersionKind(); {
 	case gvk.Empty():
 		cr.SetGroupVersionKind(l.target.Primary)
 	case gvk != l.target.Primary:
-		return "", fmt.Errorf("the op creates a %s, and the target's primary CR is a %s",
+		return fmt.Errorf("the op creates a %s, and the target's primary CR is a %s",
 			kindName(gvk), kindName(l.target.Primary))
 	}
 	cr.SetNamespace(l.h.Namespace)
-	created, err := l.crs().Create(ctx, cr, metav1.CreateOptions{})
-	if err != nil {
-		return "", fmt.Errorf("creating the CR: %w", err)
+	if _, err := l.crs().Create(ctx, cr, metav1.CreateOptions{}); err != nil {
+		return fmt.Errorf("creating the CR: %w", err)
 	}
-	l.h.Observer.Exclude(l.target.Primary, created.GetName())
-	return created.GetName(), nil
+	l.h.Observer.Exclude(l.target.Primary, cr.GetName())
+	return nil
 }
 
 // patchCR applies the op's JSON merge patch to the CR. The target writes the

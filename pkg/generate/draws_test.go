@@ -95,14 +95,17 @@ func TestCertManagersSeed23DrawsOneCreate(t *testing.T) {
 	}
 }
 
-func TestCertManagersSeeds23To27DrawEveryOpTheExampleExercises(t *testing.T) {
-	drawn := map[run.OpType]bool{}
+func TestCertManagersSeeds23To27DrawWhatTheMakefileSays(t *testing.T) {
+	drawn := map[string]bool{}
 	for seed := int64(23); seed <= 27; seed++ {
 		for _, op := range drawOps(t, certManagerTarget, seed) {
-			drawn[op.Type] = true
+			drawn[string(op.Type)] = true
+			if op.Type == run.OpCreate && op.Obj.GetName() != "example" {
+				drawn["a second Certificate"] = true
+			}
 		}
 	}
-	for _, want := range []run.OpType{run.OpCreate, run.OpDelete, run.OpRecreate, run.OpRestart, run.OpDeleteManaged} {
+	for _, want := range []string{"a second Certificate", string(run.OpRecreate), string(run.OpRestart)} {
 		if !drawn[want] {
 			t.Errorf("Seeds 23 to 27 draw no %s, and the Makefile says they do.", want)
 		}

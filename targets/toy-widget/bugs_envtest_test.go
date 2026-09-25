@@ -307,6 +307,25 @@ func TestSeededBugs(t *testing.T) {
 			return nil
 		})
 	})
+
+	t.Run("B15 lets the first of two Widgets keep the ConfigMap both name", func(t *testing.T) {
+		namespace := createNamespace(t, ctx, c)
+		runReconciler(t, testCluster, namespace, controller.B15)
+		first := createWidgetIn(t, ctx, c, namespace, "w", 1)
+		requireStatus(t, ctx, c, first, 1)
+
+		second := createWidgetIn(t, ctx, c, namespace, "w2", 1)
+
+		consistently(t, 2*time.Second, func() error {
+			if names, err := configMapNames(ctx, c, namespace); err != nil || !slices.Equal(names, []string{"widget-0"}) {
+				return fmt.Errorf("the namespace holds the ConfigMaps %v (%v), want widget-0 alone", names, err)
+			}
+			if observed := readWidget(t, ctx, c, second).Status.ObservedGeneration; observed != 0 {
+				return fmt.Errorf("w2 observed generation %d, want none: its reconcile fails", observed)
+			}
+			return nil
+		})
+	})
 }
 
 // runReconciler runs one seeded bug's reconciler over one namespace and returns

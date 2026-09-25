@@ -1797,7 +1797,7 @@ built from source and run as a black-box binary.
   derived deadline ends no run the Runner would end on its own, unless a request hangs or
   a target exits more than once per fault op while faults are active. The Runner owes
   each such exit `T_settle` past its restart, so a crash loop under an active fault runs
-  until the deadline and exits 2 rather than failing G4.
+  until the deadline and exits 2 rather than failing G4 (#79).
 - **D65 G6 counts each namespace's requests apart.** Ten runs of external-secrets with
   no flags failed G6 at run 8: the controller repeated `create events` 34 times in 30 s.
   None went to the run namespace. envtest never finishes deleting a namespace, so each

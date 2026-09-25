@@ -29,6 +29,7 @@ func yieldsAnInt(*unstructured.Unstructured) (bool, error) {
 func unreadyCreate(ready, observed int64) *run {
 	return newRun().
 		op(invariant.OpCreate, 0).
+		running(100*time.Millisecond).
 		record(time.Second, widget("10", spec(3), status(ready, observed)))
 }
 
@@ -36,6 +37,7 @@ func unreadyCreate(ready, observed int64) *run {
 // became ready. No spec changed, so G4 judges the expired wait alone.
 func expiredSettle() *run {
 	return newRun().
+		running(100*time.Millisecond).
 		record(500*time.Millisecond, widget("10", spec(3), status(0, 1))).
 		op(invariant.OpSettle, time.Second).
 		checkpoint(6*time.Second, invariant.Expired)
@@ -62,12 +64,19 @@ func requireStatement(t *testing.T, violation invariant.Violation, want string) 
 	}
 }
 
+func requireEnding(t *testing.T, violation invariant.Violation, want string) {
+	t.Helper()
+	if !strings.HasSuffix(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to end %q.", violation.Statement, want)
+	}
+}
+
 func TestAnExpiredWaitSaysReadyNeverHeld(t *testing.T) {
 	in := unreadyCreate(0, 1).checkpoint(5*time.Second, invariant.Expired).through(8 * time.Second)
 
 	violation := expiredWait(t, in)
 
-	requireStatement(t, violation, "the settle wait after op 0 (create) expired with no fault active: in 5s, ready never held: it evaluated to false")
+	requireEnding(t, violation, "the settle wait after op 0 (create) expired with no fault active: in 5s, ready never held: it evaluated to false")
 }
 
 func TestAnExpiredWaitQuotesWhyReadyCouldNotBeEvaluated(t *testing.T) {
@@ -77,7 +86,7 @@ func TestAnExpiredWaitQuotesWhyReadyCouldNotBeEvaluated(t *testing.T) {
 
 	violation := expiredWait(t, in)
 
-	requireStatement(t, violation, `in 5s, ready never held: evaluating ready "status.readyy == spec.count": no such key: readyy`)
+	requireEnding(t, violation, `in 5s, ready never held: evaluating ready "status.readyy == spec.count": no such key: readyy`)
 }
 
 func TestAnExpiredWaitSaysWhenReadyStoppedHolding(t *testing.T) {
@@ -88,7 +97,7 @@ func TestAnExpiredWaitSaysWhenReadyStoppedHolding(t *testing.T) {
 
 	violation := expiredWait(t, in)
 
-	requireStatement(t, violation, "in 5s, ready held until 2.5s: it evaluated to false")
+	requireEnding(t, violation, "in 5s, ready held until 2.5s: it evaluated to false")
 }
 
 // A target that holds Ready while it keeps writing never gives the wait its
@@ -214,9 +223,7 @@ func TestAnExpiredWaitSaysTheTargetHadNotShownItRuns(t *testing.T) {
 
 			violation := expiredWait(t, in)
 
-			if !strings.HasSuffix(violation.Statement, test.want) {
-				t.Errorf("The statement is %q, want it to end %q.", violation.Statement, test.want)
-			}
+			requireEnding(t, violation, test.want)
 		})
 	}
 }
@@ -233,9 +240,7 @@ func TestAnExpiredWaitIgnoresARestartAtItsEnd(t *testing.T) {
 
 	violation := expiredWait(t, in)
 
-	if want := "and nothing changed in the last stable (2s)"; !strings.HasSuffix(violation.Statement, want) {
-		t.Errorf("The statement is %q, want it to end %q.", violation.Statement, want)
-	}
+	requireEnding(t, violation, "and nothing changed in the last stable (2s)")
 }
 
 // Ready holds on the CR as it was when the wait began, which the Observer
@@ -259,10 +264,12 @@ func TestAnExpiredWaitReadsTheCRAsTheWaitFoundIt(t *testing.T) {
 func TestAnExpiredWaitJudgesTheCRFromTheWriteOn(t *testing.T) {
 	for name, r := range map[string]*run{
 		"an update": newRun().
+			running(100*time.Millisecond).
 			record(time.Second, widget("10", spec(3), status(3, 1))).
 			op(invariant.OpUpdate, 2*time.Second).
 			record(2001*time.Millisecond, widget("11", spec(4), generation(2), status(3, 1))),
 		"an update, the CR recorded as it was applied": newRun().
+			running(100*time.Millisecond).
 			record(2*time.Second, widget("10", spec(3), status(3, 1))).
 			op(invariant.OpUpdate, 2*time.Second).
 			record(2001*time.Millisecond, widget("11", spec(4), generation(2), status(3, 1))),
@@ -270,7 +277,7 @@ func TestAnExpiredWaitJudgesTheCRFromTheWriteOn(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			violation := expiredWait(t, r.checkpoint(7*time.Second, invariant.Expired).through(9*time.Second))
 
-			requireStatement(t, violation, "in 5s, ready never held: it evaluated to false")
+			requireEnding(t, violation, "in 5s, ready never held: it evaluated to false")
 		})
 	}
 }
@@ -281,6 +288,7 @@ func TestAnExpiredWaitSaysTheCRWasStillBeingDeleted(t *testing.T) {
 	stuck := []option{spec(3), finalizers("example.com/stuck", "toy"), deleting(2 * time.Second)}
 	deleted := func() *run {
 		return newRun().
+			running(100*time.Millisecond).
 			record(time.Second, widget("10", spec(3), finalizers("example.com/stuck"), status(3, 1))).
 			op(invariant.OpDelete, 2*time.Second)
 	}
@@ -310,7 +318,7 @@ func TestAnExpiredWaitSaysTheCRWasStillBeingDeleted(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			violation := expiredWait(t, c.run.checkpoint(7*time.Second, invariant.Expired).through(9*time.Second))
 
-			requireStatement(t, violation, c.want)
+			requireEnding(t, violation, c.want)
 		})
 	}
 }
@@ -328,6 +336,7 @@ func TestAnExpiredWaitJudgesTheWriteWhereverTheWaitBegan(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			in := newRun().
+				running(100*time.Millisecond).
 				record(time.Second, widget("10", spec(3), status(3, 1))).
 				op(invariant.OpUpdate, 2*time.Second).
 				record(2005*time.Millisecond, widget("11", spec(3), labelled("x"), status(3, 1))).
@@ -338,7 +347,7 @@ func TestAnExpiredWaitJudgesTheWriteWhereverTheWaitBegan(t *testing.T) {
 
 			violation := expiredWait(t, in)
 
-			requireStatement(t, violation, c.want)
+			requireEnding(t, violation, c.want)
 		})
 	}
 }
@@ -354,6 +363,7 @@ func TestAnExpiredWaitReadsTheWriteOnTheOpsCR(t *testing.T) {
 		{
 			"another CR recorded before the op",
 			newRun().
+				running(100*time.Millisecond).
 				record(500*time.Millisecond, object(widgetGVK, "v", "9", generation(1), spec(3), status(3, 1))).
 				op(invariant.OpCreate, time.Second).
 				record(1100*time.Millisecond, widget("10", spec(3), status(3, 1))).
@@ -365,6 +375,7 @@ func TestAnExpiredWaitReadsTheWriteOnTheOpsCR(t *testing.T) {
 		{
 			"another CR changed before the op's write was recorded",
 			newRun().
+				running(100*time.Millisecond).
 				record(500*time.Millisecond, object(widgetGVK, "v", "9", generation(1), spec(3), status(3, 1))).
 				record(time.Second, widget("10", spec(3), status(3, 1))).
 				op(invariant.OpUpdate, 2*time.Second).
@@ -377,7 +388,7 @@ func TestAnExpiredWaitReadsTheWriteOnTheOpsCR(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			violation := expiredWait(t, c.run.through(9*time.Second))
 
-			requireStatement(t, violation, c.want)
+			requireEnding(t, violation, c.want)
 		})
 	}
 }
@@ -387,18 +398,20 @@ func TestAnExpiredWaitSaysReadyStoppedHoldingAfterARestart(t *testing.T) {
 	in := newRun().
 		record(time.Second, widget("10", spec(3), status(3, 1))).
 		op(invariant.OpRestart, 2*time.Second).
+		running(2100*time.Millisecond).
 		record(3*time.Second, widget("11", spec(3), status(0, 1))).
 		checkpoint(7*time.Second, invariant.Expired).
 		through(9 * time.Second)
 
 	violation := expiredWait(t, in)
 
-	requireStatement(t, violation, "in 5s, ready held until 1s: it evaluated to false")
+	requireEnding(t, violation, "in 5s, ready held until 1s: it evaluated to false")
 }
 
 // The wait holds Ready only where it holds on every CR, as the wait reads it.
 func TestAnExpiredWaitHoldsReadyOnlyOnEveryCR(t *testing.T) {
 	in := newRun().
+		running(100*time.Millisecond).
 		record(500*time.Millisecond, object(widgetGVK, "v", "9", spec(3), status(0, 1))).
 		op(invariant.OpCreate, time.Second).
 		record(1100*time.Millisecond, widget("10", spec(3), status(3, 1))).
@@ -407,11 +420,12 @@ func TestAnExpiredWaitHoldsReadyOnlyOnEveryCR(t *testing.T) {
 
 	violation := expiredWait(t, in)
 
-	requireStatement(t, violation, "in 5s, ready never held: it evaluated to false")
+	requireEnding(t, violation, "in 5s, ready never held: it evaluated to false")
 }
 
 func TestAnExpiredWaitQuotesTheCRReadyFailedOn(t *testing.T) {
 	in := newRun().
+		running(100*time.Millisecond).
 		record(500*time.Millisecond, object(widgetGVK, "v", "9", generation(1), spec(3), status(3, 1))).
 		op(invariant.OpCreate, time.Second).
 		record(1100*time.Millisecond, widget("10", spec(3), status(0, 1))).
@@ -420,7 +434,7 @@ func TestAnExpiredWaitQuotesTheCRReadyFailedOn(t *testing.T) {
 
 	violation := expiredWait(t, in)
 
-	requireStatement(t, violation, "in 5s, ready never held: it evaluated to false")
+	requireEnding(t, violation, "in 5s, ready never held: it evaluated to false")
 	if ready := violation.Ready; ready == nil || ready.CR != "w" || ready.Status["ready"] != int64(0) {
 		t.Errorf("The violation quotes %+v, want the status of w, where ready failed.", ready)
 	}
@@ -449,7 +463,7 @@ func TestAnExpiredWaitQuotesTheFirstCRWhereReadyHeld(t *testing.T) {
 }
 
 func TestAnExpiredWaitSaysWhereNothingChanged(t *testing.T) {
-	in := unreadyCreate(3, 1).running(1100*time.Millisecond).checkpoint(5*time.Second, invariant.Expired).through(8 * time.Second)
+	in := unreadyCreate(3, 1).checkpoint(5*time.Second, invariant.Expired).through(8 * time.Second)
 
 	violation := fired(t, invariant.Convergence, in)
 
@@ -486,8 +500,8 @@ func TestAnExpiredWaitQuotesNoRequestMadeAfterIt(t *testing.T) {
 
 	violation := fired(t, invariant.Convergence, in)
 
-	if len(violation.Requests) != 2 || violation.Requests[1].Name != "w-1" || violation.RequestsTotal != 2 {
-		t.Errorf("The violation quotes %v of %d requests, want the two made by its end.", violation.Requests, violation.RequestsTotal)
+	if n := len(violation.Requests); n != 3 || violation.Requests[n-1].Name != "w-1" || violation.RequestsTotal != 3 {
+		t.Errorf("The violation quotes %v of %d requests, want the three made by its end.", violation.Requests, violation.RequestsTotal)
 	}
 }
 

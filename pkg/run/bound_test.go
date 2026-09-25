@@ -8,7 +8,9 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -32,6 +34,10 @@ type waitingHarness struct {
 	// each restart, at back.
 	returnsLate bool
 	back        time.Time
+	// goesLate has held, the CR botbox deleted last, go just before the wait
+	// for it ends.
+	goesLate bool
+	held     *unstructured.Unstructured
 }
 
 func newWaitingHarness(timeouts target.Timeouts) *waitingHarness {
@@ -60,9 +66,7 @@ func (w *waitingHarness) settle(ctx context.Context, owed func() time.Time) (boo
 		if owes := owed(); owes.After(deadline) {
 			deadline = owes
 		}
-		if !w.back.IsZero() && deadline.After(w.back) {
-			w.at, w.back = w.back, time.Time{}
-			w.logged = append(w.logged, proxy.Request{Start: w.at, Verb: "list", Resource: "widgets"})
+		if w.returnBefore(deadline) {
 			continue
 		}
 		if deadline.After(w.at) && len(w.exitsLate) > 0 && w.exitsLate[0] == w.waits {
@@ -95,6 +99,21 @@ func (w *waitingHarness) returnLate(restart time.Time) {
 	}
 }
 
+// returnBefore logs the late target's return if it comes before deadline, and
+// reports whether it did. The clock stays where a fixed wait took it past the
+// return.
+func (w *waitingHarness) returnBefore(deadline time.Time) bool {
+	if w.back.IsZero() || !deadline.After(w.back) {
+		return false
+	}
+	w.logged = append(w.logged, proxy.Request{Start: w.back, Verb: "list", Resource: "widgets"})
+	if w.back.After(w.at) {
+		w.at = w.back
+	}
+	w.back = time.Time{}
+	return true
+}
+
 func (w *waitingHarness) sleep(ctx context.Context, d time.Duration) error {
 	w.at = w.at.Add(d)
 	return w.fakeHarness.sleep(ctx, d)
@@ -102,19 +121,30 @@ func (w *waitingHarness) sleep(ctx context.Context, d time.Duration) error {
 
 // deleteCR leaves the CR under deletion, as a finalizer would hold it.
 func (w *waitingHarness) deleteCR(ctx context.Context, name string) error {
-	held := widget(name)
-	held.SetNamespace(fakeNamespace)
-	held.SetResourceVersion(w.at.Format(time.RFC3339Nano))
-	held.SetFinalizers([]string{"toy.botbox/cleanup"})
-	held.SetDeletionTimestamp(&metav1.Time{Time: w.at})
-	w.store.Record(widgetKind, held, w.at)
+	w.held = widget(name)
+	w.held.SetNamespace(fakeNamespace)
+	w.held.SetResourceVersion(w.at.Format(time.RFC3339Nano))
+	w.held.SetUID(types.UID(w.held.GetResourceVersion()))
+	w.held.SetFinalizers([]string{"toy.botbox/cleanup"})
+	w.held.SetDeletionTimestamp(&metav1.Time{Time: w.at})
+	w.store.Record(widgetKind, w.held, w.at)
 	return w.fakeHarness.deleteCR(ctx, name)
 }
 
 // awaitCRGone waits until what until returns, which can move during the wait.
+// A CR that goes late goes just before then.
 func (w *waitingHarness) awaitCRGone(ctx context.Context, name string, until func() time.Time) (bool, error) {
-	for deadline := until(); deadline.After(w.at); deadline = until() {
-		w.at = deadline
+	end := until
+	if w.goesLate {
+		end = func() time.Time { return until().Add(-time.Millisecond) }
+	}
+	for deadline := end(); deadline.After(w.at); deadline = end() {
+		if !w.returnBefore(deadline) {
+			w.at = deadline
+		}
+	}
+	if w.goesLate {
+		w.store.RecordDeletion(widgetKind, w.held, w.at)
 	}
 	return w.fakeHarness.awaitCRGone(ctx, name, until)
 }
@@ -163,6 +193,10 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 	// Long beside the harness's own margins, so that a wait Bound leaves out
 	// shows.
 	long := target.Timeouts{Settle: 20 * time.Minute, Stable: 10 * time.Minute, Delete: 40 * time.Minute}
+	// Where T_settle outlasts T_delete and the reap, a recreate's wait for its
+	// CR can outlast T_delete.
+	settlesLonger := target.Timeouts{Settle: 20 * time.Minute, Stable: 10 * time.Minute, Delete: time.Minute}
+	recreateOp := Op{Type: OpRecreate, Obj: widget("widget"), NoSettle: true}
 	for _, test := range []struct {
 		name     string
 		timeouts target.Timeouts
@@ -173,6 +207,7 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 		exitsLate   []int
 		runsOut     []int
 		returnsLate bool
+		goesLate    bool
 		// waits is what the Runner's waits take, which shows the case holds
 		// what it names.
 		waits time.Duration
@@ -215,11 +250,15 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 		{name: "exits the target returns from late", timeouts: target.DefaultTimeouts,
 			ops: []Op{createOp, faultOp, updateOp}, settles: []bool{true, false}, exitsLate: []int{2, 3}, returnsLate: true,
 			waits: 22*time.Minute + 20*time.Second},
+		{name: "a recreate right after a restart the target returns from late", timeouts: settlesLonger,
+			ops: []Op{createOp, {Type: OpRestart}, recreateOp}, returnsLate: true, waits: time.Hour + 12*time.Minute + 10*time.Second},
+		{name: "a recreate right after a CR went", timeouts: settlesLonger,
+			ops: []Op{createOp, recreateOp, recreateOp}, goesLate: true, waits: 53*time.Minute + 10*time.Second},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newWaitingHarness(test.timeouts)
 			h.settles, h.exitsLate, h.restartsIn, h.runsOut = test.settles, test.exitsLate, launch.MaxBackoff, test.runsOut
-			h.returnsLate = test.returnsLate
+			h.returnsLate, h.goesLate = test.returnsLate, test.goesLate
 			exercised, sequence := withTimeouts(test.timeouts), sequenceOf(test.ops...)
 			exercised.Fixtures = withSecret().Fixtures
 
@@ -293,6 +332,15 @@ func TestBoundAddsWhatEachOpCanWait(t *testing.T) {
 				t.Errorf("Bound adds %v for %s, want %v.", adds, test.name, test.adds)
 			}
 		})
+	}
+}
+
+func TestBoundGivesARecreateTSettleWhereThatIsLonger(t *testing.T) {
+	settlesLonger := withTimeouts(target.Timeouts{Settle: 2 * time.Minute, Stable: 10 * time.Second, Delete: time.Minute})
+	recreate := Op{Type: OpRecreate, Obj: widget("widget"), NoSettle: true}
+
+	if adds := Bound(settlesLonger, sequenceOf(createOp, recreate)) - Bound(settlesLonger, sequenceOf(createOp)); adds != 2*time.Minute {
+		t.Errorf("Bound adds %v for a recreate, want 2m0s.", adds)
 	}
 }
 

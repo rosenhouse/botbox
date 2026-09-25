@@ -35,8 +35,12 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 	faults, stops, untriggered := 0, 0, false
 	for _, op := range s.Ops {
 		switch op.Type {
-		case OpDelete, OpRecreate, OpDeleteFixture:
+		case OpDelete, OpDeleteFixture:
 			waits += deletion
+		case OpRecreate:
+			// Its wait for the CR to go lasts while the run is owed time,
+			// which can run T_settle past what the ops before it were given.
+			waits += max(deletion, settle)
 		case OpRestart:
 			// The target is owed T_settle past its return, which can come
 			// T_settle after the restart.

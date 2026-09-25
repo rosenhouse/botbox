@@ -152,21 +152,26 @@ func TestAnExpiredWaitQuotesTheLastExitSinceTheTargetConverged(t *testing.T) {
 func TestAnExpiredWaitSaysARestartKeptItFromConverging(t *testing.T) {
 	for _, test := range []struct {
 		name          string
+		ready         int64
 		exit, restart time.Duration
 		want          string
 	}{
-		{"waiting to restart", 5 * time.Second, 15 * time.Second,
+		{"waiting to restart", 1, 5 * time.Second, 15 * time.Second,
 			"in 5s, ready held from 0s on, but the target was waiting to restart; the target exited 1 time"},
-		{"restarted in the last stable", 5 * time.Second, 8 * time.Second,
+		{"waiting to restart, where ready never held", 0, 5 * time.Second, 15 * time.Second,
+			"in 5s, ready never held: it evaluated to false, but the target was waiting to restart; the target exited 1 time"},
+		{"restarted in the last stable", 1, 5 * time.Second, 8 * time.Second,
 			"in 5s, ready held from 0s on, but the target restarted in the last stable (2s); the target exited 1 time"},
-		{"restarted before the last stable", 5 * time.Second, 6 * time.Second,
+		{"restarted in the last stable, where ready never held", 0, 5 * time.Second, 8 * time.Second,
+			"in 5s, ready never held: it evaluated to false, but the target restarted in the last stable (2s); the target exited 1 time"},
+		{"restarted before the last stable", 1, 5 * time.Second, 6 * time.Second,
 			"in 5s, ready held from 0s on, and nothing changed in the last stable (2s); the target exited 1 time"},
-		{"exited after the wait", 10 * time.Second, 20 * time.Second,
+		{"exited after the wait", 1, 10 * time.Second, 20 * time.Second,
 			"in 5s, ready held from 0s on, and nothing changed in the last stable (2s)"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			in := newRun().
-				record(time.Second, widget("10", spec(1), status(1, 1))).
+				record(time.Second, widget("10", spec(1), status(test.ready, 1))).
 				running(1100*time.Millisecond).
 				op(invariant.OpSettle, 4*time.Second).
 				exit(test.exit, test.restart).

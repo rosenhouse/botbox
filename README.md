@@ -32,7 +32,8 @@ kind delete cluster --kubeconfig kind.kubeconfig
 
 - botbox installs the target's `crds`, replacing any CRD of the same name, and leaves them
   installed.
-- Each run creates a namespace and deletes it at the end, unless botbox is killed.
+- Each run creates a namespace and deletes it at the end, even when you interrupt botbox. A
+  SIGKILL leaves it behind.
 - Your controller still runs on your machine, behind botbox's proxy. Do not also deploy it to
   the cluster, or run a second botbox against the cluster at the same time: botbox would
   count the other copy's work as your controller's.
@@ -95,6 +96,7 @@ examples/cert-manager/quickstart.sh --seed 23
 ```
 
 ```
+the deadline is 25m50s: these 5 runs can take 21m50s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.
 run 1: seed 23, generated
 run 2: seed 24, generated
 run 3: seed 25, generated
@@ -102,6 +104,10 @@ run 4: seed 26, generated
 run 5: seed 27, generated
 every run passed.
 ```
+
+botbox derives the deadline from the `timeouts` your target declares, or their defaults: the
+longest the runs' waits can take, and 4 minutes to minimize a failure. A correct controller
+finishes well inside it.
 
 ### The negative control
 
@@ -123,10 +129,11 @@ run 1: G3 the v1/Secret example-tls was still there 1m0s after example, the last
 ```
 
 Seed 23 draws a single op, so there is nothing to minimize. A longer sequence is cut to the ops
-the failure needs before it is reported, which costs a replay each: give `--deadline` room for
-that. `make test-example` runs this same control. It fails unless the default configuration
-passes, the control fails on G3 naming that Secret, and the control's evidence hides the
-Secret's private key. A nightly workflow draws its own seeds.
+the failure needs before it is reported, which costs a replay each. A derived deadline gives
+that at least 4 minutes, and a longer `--deadline` gives it more. `make test-example` runs this
+same control. It fails unless the default configuration passes, the control fails on G3 naming
+that Secret, and the control's evidence hides the Secret's private key. A nightly workflow draws
+its own seeds.
 
 ## A second example: external-secrets
 
@@ -329,6 +336,8 @@ that matches no request changes nothing and hides nothing ([DESIGN.md §5.2](DES
 `match.verb` is a Kubernetes verb such as `create` or `list`, and `match.resource` is the
 plural the API server serves, such as `configmaps`. botbox refuses any other value, because
 the fault would match nothing. A run notes each fault the proxy applied to no request.
+The deadline botbox derives allows for how long each fault can hold a run open, which for a
+few faults that stop one after another is hours. Give a sequence with faults `--deadline`.
 
 Field values come from the CRD's own schema: its numeric ranges, enums, patterns, list
 lengths and map sizes. Every CR botbox draws also passes the CRD's validation rules, CEL
@@ -392,6 +401,16 @@ leader election, since botbox cannot otherwise tell that it is back. The `settle
 
 ## Reading a report
 
+Once botbox has read or drawn its sequences and made `botbox-out/<timestamp>-<seed>/`, it
+writes `summary.json` and `summary.md` there, and rewrites them as each run starts and when
+it finishes. They list each planned run: its seed, how it ended, the faults the proxy
+applied, the times your controller exited, and what the checks could not judge. A run that
+was under way when botbox was killed reads `unfinished`, unless it had found a violation
+that botbox was minimizing. Its directory then holds no report, and `summary.md` says
+whether it holds the run's evidence or a partial run of the minimized sequence.
+`summary.json` also holds each run's sequence, for a machine. Its `schema` changes when a
+field changes meaning or goes away ([DESIGN.md §11](DESIGN.md#11-repo-conventions)).
+
 A run that violates an invariant prints the ID, what it saw and where the evidence is, then
 exits 1. A configuration or harness error exits 2, so your CI can tell a find from a broken
 target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
@@ -399,7 +418,7 @@ target. The evidence is in `botbox-out/<timestamp>-<seed>/run-<n>/`:
 - `report.md` — what failed, the command that reproduces it, the sequence and the evidence.
 - `report.json` — the same, for a machine.
 - `sequence.json` — the sequence the rest of the directory is evidence of.
-- `sequence.shrunk.json` — a smaller sequence the deadline left unrun. Present only then.
+- `sequence.shrunk.json` — a smaller sequence the deadline or an interrupt left unrun. Present only then.
 - `requests.jsonl` — every request the target made, as the proxy saw it.
 - `objects.jsonl` — every version of every object the Observer saw. Each value of a Secret's
   `data` and annotations is a marker such as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`.
@@ -416,7 +435,7 @@ The report quotes the last twenty requests and the last twenty object versions t
 chose from, says how many that was, and names the file holding the rest. A G4 or a
 property also quotes the state of the objects your controller managed where it failed,
 over the kinds your target declares: a second table with its own bound of twenty and
-the count beside it. Passing runs are not kept ([DESIGN.md §5.7](DESIGN.md#57-report)).
+the count beside it. A passing run leaves only its entry in the summary.
 
 A G4 also quotes your `ready`, the error evaluating it, and your CR's status where it
 failed. The status holds whatever your controller wrote, so the report cuts it: twenty
@@ -510,30 +529,105 @@ Exit 2 means botbox could not test your controller, and the message says what to
 
 ## Running in CI
 
+Copy this workflow into `.github/workflows/`, and replace its build and `target.yaml` with your
+own. Set `BOTBOX_VERSION` to a commit of main, because `@latest` tracks main. The workflow needs
+no go.mod, no cluster and no registry.
+
+<!-- embed: examples/ci/github-actions.yml -->
 ```yaml
-- uses: actions/setup-go@v5
-  with:
-    go-version-file: go.mod
-- run: go install github.com/rosenhouse/botbox/cmd/botbox@<commit>   # a commit of main
-- run: go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
-- run: |
-    index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
-    echo "KUBEBUILDER_ASSETS=$(setup-envtest use 1.37.0 --index $index -p path)" >>"$GITHUB_ENV"
-- run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
-- run: botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m
+name: botbox
+
+on:
+  pull_request:
+  schedule:
+    - cron: '17 6 * * *'
+
+env:
+  BOTBOX_VERSION: <commit>   # a commit of main
+  SETUP_ENVTEST_VERSION: v0.25.1
+  ENVTEST_K8S_VERSION: 1.37.0
+  ENVTEST_INDEX_URL: https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
+
+permissions:
+  contents: read
+
+jobs:
+  botbox:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache: false   # true needs a go.sum
+      - id: tools
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/go/bin
+            bin/envtest
+          key: ${{ runner.os }}-${{ runner.arch }}-botbox-${{ env.BOTBOX_VERSION }}-${{ env.SETUP_ENVTEST_VERSION }}-${{ env.ENVTEST_K8S_VERSION }}
+      - if: steps.tools.outputs.cache-hit != 'true'
+        run: |
+          go install "github.com/rosenhouse/botbox/cmd/botbox@$BOTBOX_VERSION"
+          go install "sigs.k8s.io/controller-runtime/tools/setup-envtest@$SETUP_ENVTEST_VERSION"
+      - run: |
+          assets=$(setup-envtest use "$ENVTEST_K8S_VERSION" --index "$ENVTEST_INDEX_URL" --bin-dir bin/envtest -p path)
+          echo "KUBEBUILDER_ASSETS=$assets" >>"$GITHUB_ENV"
+      # Saving before botbox runs fills the cache even when botbox fails.
+      - if: steps.tools.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/go/bin
+            bin/envtest
+          key: ${{ steps.tools.outputs.cache-primary-key }}
+      - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
+      # exec lets a cancel's signal reach botbox, which bash does not pass on.
+      - if: github.event_name == 'pull_request'
+        run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-out
+      - if: github.event_name == 'schedule'
+        run: exec botbox run --target target.yaml --runs 20 --deadline 30m --out botbox-out
+      - if: always()
+        run: cat botbox-out/*/summary.md >>"$GITHUB_STEP_SUMMARY" || true
+      # gh run download <run-id> --name botbox-out --dir botbox-out restores
+      # the paths that the replay command in report.md names.
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: botbox-out
+          path: botbox-out/
 ```
 
-`$GITHUB_ENV` is what carries `KUBEBUILDER_ASSETS` between steps; an `export` does not. Give
-`--deadline` room for your controller, because a run that overruns it, or an invocation it stops
-before the last run, exits 2 rather than reporting a find. Cache the control plane and the target as
-[.github/workflows/ci.yml](.github/workflows/ci.yml) does. The job needs no cluster and no registry.
+The job caches botbox and setup-envtest in `~/go/bin`, and the control plane in `bin/envtest`,
+under a key of their versions. `--deadline` caps the job, which botbox otherwise lets run as long
+as its runs can take. Give it room for your controller, because a run that overruns it, or an
+invocation it stops before the last run, exits 2 rather than reporting a find. botbox stops within
+seconds of the deadline. A Go repository may instead read Go's version from its go.mod and turn
+setup-go's cache on.
 
-Pin botbox to a commit, because `@latest` tracks main. Fix the seed on pull requests, and draw
-fresh seeds on a schedule, as [nightly.yml](.github/workflows/nightly.yml) does. A seed names a
-sequence for one build of botbox and one target declaration: its CRD schema, `sample`,
-`generate` and `manages`. A botbox upgrade, or a pull request that edits any of those, draws
-different sequences under the same seed. To tell whether a failure comes from the change under
-review, replay its `sequence.json` against the base branch's controller.
+The job's page shows the summary, and the job uploads `botbox-out/`, which keeps each run's
+sequence and a failing run's evidence. Anyone who can read the repository can download the
+artifact, and botbox hides only the values of a Secret's `data` and annotations
+([Reading a report](#reading-a-report)). Download it with the command in the workflow's last
+comment and build your controller. The replay command in `report.md` then runs as written from the
+repository root. On GitLab or Jenkins, `--junit botbox.xml` writes the runs as JUnit XML for
+`artifacts:reports:junit` or the `junit` step.
+
+SIGINT, SIGTERM, SIGHUP and a terminal's Ctrl-C all stop botbox cleanly. It abandons the run
+under way, stops your controller and the control plane, and deletes the run namespace.
+`botbox run` and `botbox replay` name the unfinished run's directory. A run that failed before
+the interrupt still says why. Then botbox dies of the signal. That takes a few seconds. A second
+signal kills botbox at once and leaves those processes running, as SIGKILL does. GitHub Actions
+cancels a job by sending the step's shell SIGINT and, 7.5 s later, SIGTERM. The shell passes
+neither on, so the workflow runs botbox with `exec`.
+
+A pull request runs fixed seeds, and the nightly run draws fresh ones. GitHub tells whoever last
+edited the schedule when a nightly run fails. [nightly.yml](.github/workflows/nightly.yml) also
+files an issue. A seed names a sequence for one build of botbox and one target declaration: its
+CRD schema, `sample`, `generate` and `manages`. A botbox upgrade, or a pull request that edits any
+of those, draws different sequences under the same seed. To tell whether a failure comes from the
+change under review, replay its `sequence.json` against the base branch's controller.
 
 ## Invariants
 

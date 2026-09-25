@@ -113,7 +113,7 @@ func TestKubeconfigModeJudgesOnlyWhatTheTargetDid(t *testing.T) {
 			args := append([]string{"run", "--target", toyTarget, "--kubeconfig", kubeconfig, "--out", t.TempDir()}, test.args...)
 			args = append(args, filepath.Join(sequences, test.sequence))
 			var stdout, stderr bytes.Buffer
-			c := &cli{stdout: &stdout, stderr: &stderr, open: openSession, newGenerator: rapidGenerator}
+			c := newCLI(&stdout, &stderr)
 
 			code := c.main(t.Context(), args)
 

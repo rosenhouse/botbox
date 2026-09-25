@@ -70,13 +70,25 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	if err != nil {
 		return c.fail(fmt.Errorf("creating the matrix's run directory: %w", err))
 	}
-	defer os.RemoveAll(dir)
+	// Remove leaves the directory while it holds a run that erred.
+	defer os.Remove(dir)
+	var runs []run.Sequence
+	for _, row := range rows {
+		runs = append(runs, row.sequence)
+		if row.bug != control {
+			runs = append(runs, row.sequence)
+		}
+	}
+	c.derive(&opts, exercised, runs, false)
 
 	ctx, cancel := context.WithTimeout(ctx, opts.deadline)
 	defer cancel()
 	for i := range rows {
-		if err := c.exerciseRow(ctx, s, exercised, &rows[i], dir); err != nil {
-			return c.fail(opts.named(ctx, err))
+		if failed := c.exerciseRow(ctx, opts, s, exercised, &rows[i], dir); failed != nil {
+			c.fail(failed.err)
+			c.showRunFiles(failed.dir)
+			fmt.Fprintf(c.stderr, "  run it again with\n    %s\n", opts.replayRun(rows[i], failed.bugArgs))
+			return exitError
 		}
 	}
 
@@ -87,35 +99,44 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	return c.judge(opts, rows)
 }
 
+// erred is a matrix run that could not finish.
+type erred struct {
+	bugArgs []string
+	dir     string
+	err     error
+}
+
 // exerciseRow runs the row's sequence under its bug, and then without it.
-func (c *cli) exerciseRow(ctx context.Context, s session, t *target.Target, row *bugRow, dir string) error {
-	var err error
+func (c *cli) exerciseRow(ctx context.Context, opts options, s session, t *target.Target, row *bugRow, dir string) *erred {
+	var failed *erred
 	if row.bug != control {
-		if row.bugged, err = c.exerciseUnder(ctx, s, t, row, row.bugArgs(), filepath.Join(dir, row.name())); err != nil {
-			return err
+		if row.bugged, failed = c.exerciseUnder(ctx, opts, s, t, row, row.bugArgs(), filepath.Join(dir, row.name())); failed != nil {
+			return failed
 		}
 	}
-	row.correct, err = c.exerciseUnder(ctx, s, t, row, nil, filepath.Join(dir, row.name()+"-no-bug"))
+	row.correct, failed = c.exerciseUnder(ctx, opts, s, t, row, nil, filepath.Join(dir, row.name()+"-no-bug"))
 	if row.bug == control {
 		row.bugged = row.correct
 	}
-	return err
+	return failed
 }
 
 // exerciseUnder runs the row's sequence with bugArgs appended to the target's
-// launch args, and records what the checks found over the whole run.
-func (c *cli) exerciseUnder(ctx context.Context, s session, t *target.Target, row *bugRow, bugArgs []string, dir string) (checked, error) {
+// launch args, and records what the checks found over the whole run. It
+// removes the run's files unless the run erred.
+func (c *cli) exerciseUnder(ctx context.Context, opts options, s session, t *target.Target, row *bugRow, bugArgs []string, dir string) (checked, *erred) {
 	exercised := *t
 	exercised.Launch.Args = slices.Concat(t.Launch.Args, bugArgs)
 	ran := row.describe(bugArgs)
 	result, err := s.execute(ctx, &exercised, row.sequence, dir, observing{})
 	if err != nil {
-		return checked{}, fmt.Errorf("%s: %w", ran, err)
+		return checked{}, &erred{bugArgs, dir, fmt.Errorf("%s: %w", ran, opts.named(ctx, err))}
 	}
 	results, err := run.Evaluate(result.Recorded)
 	if err != nil {
-		return checked{}, fmt.Errorf("%s: %w", ran, err)
+		return checked{}, &erred{bugArgs, dir, fmt.Errorf("%s: %w", ran, err)}
 	}
+	os.RemoveAll(dir)
 	var found checked
 	notes := slices.Clone(result.Notes)
 	for _, check := range results {
@@ -153,10 +174,15 @@ func (c *cli) judge(opts options, rows []bugRow) int {
 
 // unexpected reports a run that broke the acceptance, and how to run it again.
 func (c *cli) unexpected(opts options, row bugRow, found checked, bugArgs []string) {
-	replay := opts
-	replay.launchArgs = slices.Concat(opts.launchArgs, bugArgs)
 	fmt.Fprintf(c.stderr, "botbox: %s: %s fired %s; reproduce it with\n  %s\n",
-		row.name(), row.describe(bugArgs), found.summary(), replay.replayCommand(filepath.Join(opts.sequences, row.file)))
+		row.name(), row.describe(bugArgs), found.summary(), opts.replayRun(row, bugArgs))
+}
+
+// replayRun is the command that runs the row's sequence again with bugArgs.
+func (o options) replayRun(row bugRow, bugArgs []string) string {
+	replay := o
+	replay.launchArgs = slices.Concat(o.launchArgs, bugArgs)
+	return replay.replayCommand(filepath.Join(o.sequences, row.file))
 }
 
 func (r bugRow) name() string { return "B" + strconv.Itoa(r.bug) }

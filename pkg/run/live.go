@@ -74,6 +74,8 @@ func (l *liveRun) crs() dynamic.ResourceInterface { return l.of(l.target.Primary
 
 func (l *liveRun) namespace() string { return l.h.Namespace }
 
+func (l *liveRun) now() time.Time { return time.Now() }
+
 func (l *liveRun) settle(ctx context.Context, owed func() time.Time) (bool, error) {
 	return l.h.Settle(ctx, owed)
 }
@@ -308,8 +310,8 @@ func (l *liveRun) targetStatus() launch.Status { return l.h.Launcher.Status() }
 // supervise records why the target stopped before the launcher restarts it.
 // Each process writes to one log, so an exit is quoted from what the log
 // gained since the exit before it.
-func (l *liveRun) supervise() {
-	l.h.Launcher.Supervise(func(exit error, restart time.Time) {
+func (l *liveRun) supervise(ctx context.Context) {
+	l.h.Launcher.Supervise(ctx, func(exit error, restart time.Time) {
 		l.h.mu.Lock()
 		defer l.h.mu.Unlock()
 		said, end := whyItStopped(filepath.Join(l.h.dir, targetLogFile), l.h.logQuoted)

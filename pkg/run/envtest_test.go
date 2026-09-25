@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
+	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/run"
@@ -132,6 +133,33 @@ func TestHarness(t *testing.T) {
 		if namespace, _, err := clientcmd.NewDefaultClientConfig(*kubeconfig, nil).Namespace(); namespace != h.Namespace {
 			t.Errorf("The kubeconfig names the namespace %q (%v), want %s.", namespace, err, h.Namespace)
 		}
+	})
+
+	// An interrupt ends the run's context before its teardown stops the harness.
+	t.Run("kills the target at once and deletes the namespace under a context that ended", func(t *testing.T) {
+		sh := loadTarget(t, "/bin/sh")
+		sh.Launch.Args = []string{"-c", `trap "" TERM; echo started; while :; do sleep 0.1; done`}
+		dir := t.TempDir()
+		h := startHarness(t, ctx, sh, testCluster.Config(), dir)
+		eventually(t, func() error {
+			if logged, err := os.ReadFile(filepath.Join(dir, "target.log")); !strings.Contains(string(logged), "started") {
+				return fmt.Errorf("target.log holds %q (%v)", logged, err)
+			}
+			return nil
+		})
+		ended, cancel := context.WithCancel(ctx)
+		cancel()
+
+		began := time.Now()
+		err := h.Stop(ended)
+
+		if err != nil {
+			t.Errorf("Stopping the harness failed: %v", err)
+		}
+		if took := time.Since(began); took >= launch.DefaultGracePeriod {
+			t.Errorf("Stopping the harness took %v, want the target killed at once.", took)
+		}
+		requireNoRunNamespaceLive(t, ctx, testCluster.Config())
 	})
 
 	t.Run("takes back what it started when the target cannot start", func(t *testing.T) {

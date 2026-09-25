@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="botbox" tests="3" failures="1" errors="0" time="58.000">
+  <testsuite name="toy-widget" tests="3" failures="1" errors="0" skipped="1" time="58.000" timestamp="2026-09-24T01:02:03">
+    <properties>
+      <property name="botbox" value="v0.0.0-test"></property>
+      <property name="seed" value="7"></property>
+      <property name="summary" value="botbox-out/20260924T010203Z-7/summary.json"></property>
+    </properties>
+    <testcase name="run 1: seed 7" classname="toy-widget" time="21.500">
+      <system-out>the target exited during op 1 (fault) with exit status 2 after writing &#34;panic: lost the lease&#34;</system-out>
+    </testcase>
+    <testcase name="run 2: seed 8" classname="toy-widget" time="31.000">
+      <failure type="G3" message="the target deletes what it manages once the CR is deleted">the v1/ConfigMap widget-1 was still there 10s after the CR was deleted&#xA;botbox-out/20260924T010203Z-7/run-2 holds the report and the evidence.</failure>
+      <system-out>the proxy applied the fault of op 1 to no request&#xA;P1 &#34;status.ready &lt;= 3 &amp;&amp; has(spec)&#34; is not evaluated</system-out>
+    </testcase>
+    <testcase name="run 3: seed 9" classname="toy-widget">
+      <skipped message="botbox stopped before this run"></skipped>
+    </testcase>
+  </testsuite>
+</testsuites>

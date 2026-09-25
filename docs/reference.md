@@ -1,0 +1,246 @@
+# Reference
+
+This page lists every key of target.yaml, every field of a sequence file, every op and every
+fault field. `make test` fails when one of them has no row here.
+
+## target.yaml
+
+botbox reads `crds`, `sample` and `fixtures` relative to target.yaml, and `launch.binary`
+relative to the directory it runs in. A key it does not take is an error. A duration is a Go
+duration, such as `30s` or `1m30s`.
+
+This example sets every key but `equal`:
+
+<!-- embed: docs/reference/target.yaml -->
+```yaml
+# Every key but equal, which takes no equalIgnore. The files are the toy
+# controller's, so this loads. It is no target to run: the toy has no
+# spec.prefix, labels no child, and manages no Secret.
+name: widget-controller
+version: v1.2.3
+crds:
+  - ../../targets/toy-widget/crds/
+primary: toy.botbox/v1/Widget
+sample: ../../targets/toy-widget/widget.yaml
+fixtures:
+  - ../../targets/toy-widget/config.yaml
+manages:
+  - v1/ConfigMap
+  - v1/Secret
+notRecreated:
+  - v1/Secret
+selector: app.kubernetes.io/managed-by=widget-controller
+ready: >-
+  has(status.observedGeneration) && status.observedGeneration == metadata.generation
+  && has(status.ready) && status.ready == spec.count
+equalIgnore:
+  - metadata.annotations["example.com/started-at"]
+  - status.conditions[*].lastHeartbeatTime
+properties:
+  - id: P1
+    description: status.ready never exceeds the ConfigMaps present.
+    cel: '!has(status.ready) || status.ready <= managed.filter(o, o.kind == "ConfigMap").size()'
+    when: checkpoint
+generate:
+  mutate:
+    - spec.count
+  overlay:
+    spec.count: {minimum: 1, maximum: 5}
+  maxCRs: 2
+  distinct:
+    - spec.prefix
+  fixtures:
+    ../../targets/toy-widget/config.yaml:
+      mutate:
+        - data.label
+launch:
+  binary: bin/widget-controller
+  args:
+    - --kubeconfig=$KUBECONFIG
+    - --health-probe-bind-address=127.0.0.1:0
+  env:
+    WATCH_NAMESPACE: $NAMESPACE
+timeouts:
+  settle: 30s
+  stable: 10s
+  delete: 60s
+thresholds:
+  errloop: 10
+  quiet: 1
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | required | The target's name. A sequence file names it in `target`. |
+| `version` | none | Free text, such as your controller's release. Reports print it. |
+| `crds` | none | Files or directories of CRD YAML, which botbox installs. A directory contributes its `.yaml`, `.yml` and `.json` files. |
+| `primary` | required | Your CR's kind, as `group/version/Kind`. |
+| `sample` | required | A file holding one CR of the primary kind, with a `metadata.name`. Every sequence botbox draws creates it first, and changes copies of it. |
+| `fixtures` | none | Files of objects botbox creates in each run's namespace before op 0, such as a Secret your controller reads. A fixture sets no `metadata.namespace`. botbox never counts a fixture as your controller's. |
+| `manages` | none | The kinds your controller creates, as `group/version/Kind`, or `v1/Kind` for the core group. botbox watches them and judges your controller by them. |
+| `notRecreated` | none | Managed kinds your controller leaves deleted, or recreates under another name. G7 does not require them back. Each is also under `manages`. |
+| `selector` | every object | A label selector. Only the managed objects it matches count as your controller's. |
+| `ready` | `has(status.observedGeneration) && status.observedGeneration == metadata.generation` | CEL that says whether a CR is ready, or `go:<name>`. G4 requires it of every CR. |
+| `equal` | none | `go:<name>`, a hook that replaces G5's comparison of the states on either side of a restart. It takes no `equalIgnore`. |
+| `equalIgnore` | none | Paths G5 does not compare. |
+| `properties` | none | Checks of your own. Each must hold on every CR. |
+| `properties[*].id` | required | The property's name in output, such as `P1`. No two properties share one. |
+| `properties[*].description` | none | What the property means. Reports print it. |
+| `properties[*].cel` | required | CEL that says whether the property holds. |
+| `properties[*].when` | `checkpoint` | Where botbox evaluates it. `always` evaluates it at every change botbox observes, `checkpoint` wherever the checks run, and `end` at the last checkpoint. |
+| `generate.mutate` | every spec path the schema describes | Dotted spec paths generation may change. It changes no others. |
+| `generate.overlay` | none | Schema keywords per dotted path, such as `{enum: [1h, 24h]}`. For generation, they replace the CRD's keywords there. botbox reads `additionalProperties`, `enum`, `exclusiveMaximum`, `exclusiveMinimum`, `format`, `items`, `maxItems`, `maxLength`, `maxProperties`, `maximum`, `minItems`, `minLength`, `minProperties`, `minimum`, `pattern`, `properties`, `required`, `type`, `x-kubernetes-int-or-string` and `x-kubernetes-list-type`, and refuses any other. |
+| `generate.maxCRs` | `3` | How many CRs a sequence creates at most, the sample included. `1` keeps every sequence to the sample. |
+| `generate.distinct` | none | Dotted paths at which the sample holds a string, such as a field that names a child. Each CR after the first appends its `-2` or `-3` there, so no two CRs share a value. |
+| `generate.fixtures` | none | Maps a file under `fixtures` to what generation may do to its objects. Generation may delete the objects of any file it names. |
+| `generate.fixtures[*].mutate` | none | Paths to strings that generation may set to a short word of letters and digits, written as `equalIgnore` writes a path. Every object in the file holds a string there. |
+| `launch.binary` | required | Your controller's executable, relative to the directory botbox runs in, or a name on `PATH`. |
+| `launch.args` | none | Its arguments. botbox replaces `$KUBECONFIG` with the path of the kubeconfig it writes, and `$NAMESPACE` with the run's namespace. `--launch-arg` appends more. |
+| `launch.env` | none | Variables botbox sets over those your controller inherits, with the same replacements. botbox sets `KUBECONFIG` itself. Quote a name or value that YAML would change, such as `0022` or `yes`. |
+| `timeouts.settle` | `30s` | How long a settle wait gives your controller to converge after a change. |
+| `timeouts.stable` | `10s` | How long nothing may change before a settle wait converges. G1 and G2 judge a window this long. It is shorter than `settle`. |
+| `timeouts.delete` | `60s` | How long a deleted CR has to go, with everything it manages. A `recreate` and a `deleteFixture` wait as long for their object to go. |
+| `thresholds.errloop` | `10` | G6 fails a failing request repeated more than this many times within `settle`. It is positive. |
+| `thresholds.quiet` | `0` | How many requests one quiet window may hold for G1, and how many status writes that change nothing for G2. |
+
+DESIGN.md writes `settle`, `stable`, `delete`, `errloop` and `quiet` as `T_settle`,
+`T_stable`, `T_delete`, `N_errloop` and `N_quiet`.
+
+### CEL and hooks
+
+`ready` binds `metadata`, `spec` and `status` of one CR. A field the CR lacks binds to an
+empty map, so guard an optional field with `has()`. An error while evaluating `ready` means
+not ready. A property also binds `managed`: the managed objects whose ownerReferences name that
+CR or no CR. The string extensions are available. An expression that yields no bool, and an
+error while evaluating a property, end the run as a configuration error.
+
+`go:<name>` names a function registered with `target.RegisterReady` or `target.RegisterEqual`.
+Only a botbox built with that function can load the target.
+
+### equalIgnore paths
+
+A path joins keys with `.`, and `[*]` names every item of a list or value of a map. A key
+that holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
+as in `metadata.annotations["example.com/started-at"]`. Write the list in block style, and
+quote a path that starts with `[` or holds `: ` or ` #`. botbox refuses a list index such as
+`[0]`.
+
+G5 always skips `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`,
+`metadata.generation`, `metadata.managedFields`, `status.conditions[*].lastTransitionTime`,
+and each ownerReference whose owner is gone.
+
+## Sequences
+
+A sequence file is JSON. `botbox run --target target.yaml <file>...` runs files as written,
+and `botbox replay` runs one. botbox refuses a field it does not know, and an op that lacks a
+field its type needs or carries one it does not take.
+
+This example holds every op and every fault field. `make test-envtest` runs it against the
+toy controller of `targets/toy-widget/target.yaml`, which passes it:
+
+<!-- embed: docs/reference/sequence.json -->
+```json
+{"seed": 20260922, "target": "toy-widget", "ops": [
+  {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
+    "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+  {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps", "fraction": 0.5},
+    "action": {"error": 500}, "until": {"count": 2}}},
+  {"i": 2, "t": "update", "patch": {"spec": {"count": 3}}},
+  {"i": 3, "t": "fault", "spec": {"match": {"verb": "patch", "resource": "widgets", "name": "widget-*"},
+    "action": {"delay": "500ms"}, "until": {"for": "2s"}}},
+  {"i": 4, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
+    "metadata": {"name": "widget-2"}, "spec": {"count": 1}}},
+  {"i": 5, "t": "update", "cr": "widget-2", "patch": {"spec": {"count": 2}}, "noSettle": true},
+  {"i": 6, "t": "fault", "spec": {"match": {"verb": "delete", "resource": "configmaps"},
+    "action": {"drop": true}, "until": {"op": 8}}},
+  {"i": 7, "t": "update", "cr": "widget-2", "patch": {"spec": {"count": 0}}},
+  {"i": 8, "t": "settle"},
+  {"i": 9, "t": "restart"},
+  {"i": 10, "t": "settle"},
+  {"i": 11, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+  {"i": 12, "t": "updateFixture", "kind": "v1/ConfigMap", "name": "widget-config",
+    "patch": {"data": {"label": "blue"}}},
+  {"i": 13, "t": "deleteFixture", "kind": "v1/ConfigMap", "name": "widget-config", "until": {"op": 14}},
+  {"i": 14, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
+    "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+  {"i": 15, "t": "delete", "cr": "widget-2"}]}
+```
+
+Op 1 refuses about half the ConfigMap creates until it has refused two. Op 3 delays each
+patch of a Widget whose name matches `widget-*` by 500ms, for 2s. Op 6 drops every ConfigMap
+delete until op 8, so op 7's wait runs out, which the fault excuses. Op 8's wait gives the toy
+time to recover.
+
+### Sequence fields
+
+| Field | Meaning |
+|---|---|
+| `seed` | Seeds the draws `match.fraction` makes, so a replay repeats them. |
+| `target` | The target's `name`. |
+| `ops` | The ops, in order. The last one settles. |
+
+### Ops
+
+A settle wait follows each op that settles. It ends once `ready` holds on every CR and nothing
+has changed for `timeouts.stable`, or once `timeouts.settle` runs out. The checks run where it
+ends.
+
+| Op | Fields | Settles | What it does |
+|---|---|---|---|
+| `create` | `obj` | yes | Creates `obj`, whose name no live CR has. |
+| `update` | `patch`, `cr` | yes | Applies `patch` to the CR as a JSON merge patch. |
+| `delete` | `cr` | yes | Deletes the CR and waits up to `timeouts.delete` for it to go. |
+| `recreate` | `obj`, `cr` | yes | Deletes the CR, waits up to `timeouts.delete` for it to go, and creates `obj`, which has the CR's name. |
+| `settle` | none | yes | Waits for your controller to converge. |
+| `restart` | none | no | Kills your controller and starts it again. |
+| `fault` | `spec` | no | Adds a fault the proxy applies to your controller's requests. |
+| `deleteManaged` | `kind`, `index` | yes | Deletes a managed object behind your controller's back. G7 requires an object of its kind and name once the wait ends, unless `notRecreated` lists the kind. |
+| `updateFixture` | `kind`, `name`, `patch` | yes | Applies `patch` to a fixture as a JSON merge patch. |
+| `deleteFixture` | `kind`, `name`, `until.op` | no | Deletes a fixture, waits up to `timeouts.delete` for it to go, and creates it again before op `until.op` acts. |
+
+- End a sequence with an op that settles.
+- Put a `settle` after a `restart`, and one before it unless the op before it settles. G5
+  compares the states those waits end in.
+- Put a `settle` between a `noSettle` op and a `deleteManaged`.
+
+### Op fields
+
+| Field | Meaning |
+|---|---|
+| `i` | The op's position, counting from 0. |
+| `t` | The op's type. |
+| `cr` | The name of the CR an `update`, `delete` or `recreate` acts on. It defaults to the sample's `metadata.name`. |
+| `kind` | A `deleteManaged` names a kind under `manages`, and a fixture op its fixture's kind. Both write it as target.yaml does, such as `v1/ConfigMap`. |
+| `index` | Which object of `kind` a `deleteManaged` deletes, counting from 0 by creationTimestamp, then name. Where fewer exist, it deletes nothing, and the run notes that. |
+| `name` | The fixture's `metadata.name`. |
+| `obj` | The CR a `create` or `recreate` writes, with a `metadata.name`. |
+| `patch` | A JSON merge patch (RFC 7386). |
+| `spec` | A `fault` op's fault. |
+| `until.op` | The op before which a `deleteFixture` creates its fixture again. It is a later op, up to the last, and no op before it acts on that fixture. |
+| `noSettle` | `true` skips the settle wait after a `create`, `update`, `delete` or `recreate`. |
+
+### Fault fields
+
+A fault sets exactly one action. It ends at the first of its `until` triggers, or at the end of
+the run where it sets none. The proxy tries faults in op order, and the first that applies to
+a request wins. The checks do not judge a window a fault applied in, and they give your
+controller as long as the faults lasted, plus `timeouts.settle`, to recover. botbox clears a
+fault still active at the end, and waits for your controller to recover. A fault that applies
+to no request tests nothing, and the run notes it.
+
+| Field | Default | Meaning |
+|---|---|---|
+| `match.verb` | every verb | One of `get`, `list`, `watch`, `create`, `update`, `patch`, `delete` and `deletecollection`. |
+| `match.resource` | every resource | The plural the API server serves, such as `configmaps`, in any group. It matches subresource requests too, such as those to `widgets/status`. botbox refuses one that holds a slash or that the API server does not serve. |
+| `match.name` | every name | A glob over the object name in the request path, as Go's `path.Match` reads it. A list, a watch and a create of an object carry no name there. |
+| `match.fraction` | every request | The share of matching requests the fault applies to, from 0 to 1. The sequence's `seed` draws which. |
+| `action.error` | none | The proxy answers with this status, from 400 to 599, and forwards nothing. |
+| `action.delay` | none | The proxy holds the request this long, such as `"500ms"`, then forwards it. |
+| `action.drop` | none | `true` has the proxy close the connection without an answer. It forwards nothing. |
+| `until.op` | none | The fault ends before this op acts. |
+| `until.count` | none | The fault ends once it has applied to this many requests. |
+| `until.for` | none | The fault ends this long after its op, such as `"2s"`. |
+
+A fault names a resource, such as `configmaps`, because it matches the URL of a request.
+`manages`, `deleteManaged` and the fixture ops name a kind, such as `v1/ConfigMap`, as an
+object's `apiVersion` and `kind` do.

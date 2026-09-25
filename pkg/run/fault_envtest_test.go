@@ -148,6 +148,32 @@ func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
 	})
 }
 
+// The reference's example holds every op and fault field. A correct
+// controller passes it, and each of its faults applies to a request.
+func TestTheReferenceSequencePassesTheToy(t *testing.T) {
+	t.Parallel()
+	toy := loadTarget(t, buildToy(t))
+	testCluster := startCluster(t, toy.CRDs)
+	sequence, err := run.ReadSequence(repoRoot + "/docs/reference/sequence.json")
+	if err != nil {
+		t.Fatalf("Reading the sequence failed: %v", err)
+	}
+
+	result, err := run.Run(t.Context(), toy, sequence, run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %s: %s", result.Violation.ID, result.Violation.Statement)
+	}
+	for i, window := range result.Timeline.Faults {
+		if window.Start.IsZero() {
+			t.Errorf("The proxy applied fault %d to no request.", i)
+		}
+	}
+}
+
 // The fault names the toy's CRD, which the API server serves as widgets.
 func TestAFaultOnAKindNameEndsTheRun(t *testing.T) {
 	t.Parallel()

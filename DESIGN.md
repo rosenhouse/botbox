@@ -713,7 +713,8 @@ Details the example does not show:
   `noSettle` op and a `deleteManaged`.
 
 `botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
-embed the minimized sequence in this format.
+embed the minimized sequence in this format. `docs/reference.md` lists every field, op and
+fault field, and its example sequence sets each one (§11).
 
 ## 8. Target contract
 
@@ -787,7 +788,8 @@ did nothing wrong.
 
 A key target.yaml does not take is a configuration error. It names the key's line and
 dotted path, and the key within two edits of it, or else the keys its block takes. A swap
-of two adjacent letters counts as one edit.
+of two adjacent letters counts as one edit. `docs/reference.md` lists every key with its
+default and meaning (§11).
 
 `generate.maxCRs` bounds the primary CRs a sequence creates, and `1` keeps a run to the
 sample alone, for a controller that takes one CR per namespace. `generate.distinct` names
@@ -1257,6 +1259,12 @@ the proxy; the `Image` launcher. Separate design addendum.
   with the line `🤖 Created by Claude 🤖` (CLAUDE.md). The description then names the
   milestone and the invariant/property IDs it touches, and carries a "Design change"
   section whenever it edits this document.
+- **Reference.** `docs/reference.md` gives every target.yaml key, sequence field, op and
+  fault field a row with its meaning. `make test` fails where one lacks a row, a row names
+  none, the rows of `generate.overlay` and `match.verb` omit a keyword or a verb botbox
+  reads, or the page's examples leave one unset. The target.yaml example sets every key but
+  `equal`, which takes no `equalIgnore`. The envtest tier runs the example sequence against
+  the toy, which must pass it with each fault applied to a request.
 - **No flaky-test retries in CI.** A flaky harness test is a P0 bug in the harness.
 - **Seeds are always printed.** Every failure is reproducible from its sequence, and from
   its seed with the same botbox build and target declaration (§5.4).
@@ -2042,3 +2050,17 @@ built from source and run as a black-box binary.
   `sequence.json`, `kubeconfig` and `target.log`, under a summary that said the directory
   held a partial run of the minimized sequence. Naming the run each file came from was
   rejected, because a run that ends replaces the drawn run's recordings anyway.
+- **D@61 One page lists every key, op and fault field, and tests keep it whole.** An
+  adopter found keys, op fields and fault actions that only the Go source named, and the
+  README's target.yaml called itself a trimmed cert-manager file while adding keys that file
+  lacks. `docs/reference.md` gives each a row with its default and meaning. Tests compare
+  the rows with the JSON tags of the loader and the sequence format, both ways, so a new key
+  fails `make test` until it has a row. The page's examples set every key but `equal`, and
+  every op and fault field. The envtest tier runs the example sequence against the toy, so
+  it cannot fail a correct controller as the README's fault example once did. A fault field
+  value that tests something else is refused: a fraction outside 0 to 1, an error status
+  outside 400 to 599, a negative delay, count or duration, and a malformed name glob.
+  Refusing a fault whose `until.op` names its own op was rejected, because it ends at the
+  next op, which a Runner test pins. Keeping the reference in DESIGN.md was rejected: `go
+  install` ships no DESIGN.md, and DESIGN.md mixes the contract with milestones and
+  decisions.

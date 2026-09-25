@@ -1,6 +1,7 @@
 package run
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -11,7 +12,7 @@ import (
 const stamp = "20060102T150405Z"
 
 // Output is one invocation's directory tree: <out>/<timestamp>-<seed>/, with a
-// run-<n>/ per run. Passing runs are not persisted (DESIGN.md §11).
+// run-<n>/ per run until Discard removes a passing one.
 type Output struct{ dir string }
 
 // sameSecond is how many invocations of one seed can open a directory in the
@@ -47,6 +48,25 @@ func (o *Output) Dir() string { return o.dir }
 
 // RunDir is where run n writes its recordings.
 func (o *Output) RunDir(n int) string { return filepath.Join(o.dir, fmt.Sprintf("run-%d", n)) }
+
+// WriteAtomic replaces path with content. A reader sees the old file or the
+// new one, never part of either.
+func WriteAtomic(path string, content []byte) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	_, err = temp.Write(content)
+	err = errors.Join(err, temp.Chmod(0o644), temp.Close())
+	if err == nil {
+		err = os.Rename(temp.Name(), path)
+	}
+	if err != nil {
+		_ = os.Remove(temp.Name())
+		return fmt.Errorf("writing %s: %w", path, err)
+	}
+	return nil
+}
 
 // Discard removes a passing run's directory.
 func (o *Output) Discard(n int) error {

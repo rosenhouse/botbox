@@ -7,12 +7,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -43,6 +45,9 @@ type fakeSession struct {
 	fails func(sequence run.Sequence, dir string) *run.Violation
 	// notes are what a run fails answers for notes.
 	notes []string
+	// applies is how many ops a run fails answers for applied. Nil applies
+	// none.
+	applies func(sequence run.Sequence) int
 	// after runs once a sequence has executed, which is where a test expires
 	// the deadline.
 	after func()
@@ -59,12 +64,28 @@ type fakeSession struct {
 	closed       bool
 	// refused is what vet answers.
 	refused error
+	// unopened fails opening the session.
+	unopened error
+	// opening runs as botbox opens the session.
+	opening func()
+	// closing runs as the session closes.
+	closing func()
+	// unclosed is what close returns.
+	unclosed error
+	// deadlines are when each execute's context ends.
+	deadlines []time.Time
+	// now is botbox's clock, where it is not the real one.
+	now func() time.Time
+	// discarding fails discarding a passing run.
+	discarding error
 }
 
 func (s *fakeSession) vet(*target.Target) error { return s.refused }
 
-func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
+func (s *fakeSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
 	s.sequences = append(s.sequences, sequence)
+	deadline, _ := ctx.Deadline()
+	s.deadlines = append(s.deadlines, deadline)
 	s.dirs = append(s.dirs, dir)
 	s.args = append(s.args, t.Launch.Args)
 	s.checks = append(s.checks, check)
@@ -85,14 +106,21 @@ func (s *fakeSession) execute(_ context.Context, t *target.Target, sequence run.
 		return s.results[n], failure
 	}
 	if s.fails != nil {
-		return run.Result{Violation: s.fails(sequence, dir), Notes: s.notes}, failure
+		result := run.Result{Violation: s.fails(sequence, dir), Notes: s.notes}
+		if s.applies != nil {
+			result.Timeline.Ops = make([]run.AppliedOp, s.applies(sequence))
+		}
+		return result, failure
 	}
 	return run.Result{}, failure
 }
 
 func (s *fakeSession) close() error {
+	if s.closing != nil {
+		s.closing()
+	}
 	s.closed = true
-	return nil
+	return s.unclosed
 }
 
 // invoke runs the CLI over args with a fake session, and returns its exit code
@@ -112,14 +140,23 @@ func invokeCtx(t *testing.T, ctx context.Context, fake *fakeSession,
 	newGenerator func(*target.Target) (Generator, []string, error), args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
-	c := &cli{
-		stdout: &stdout,
-		stderr: &stderr,
-		open: func(options, *target.Target) (session, error) {
-			fake.stderrAtOpen = stderr.String()
-			return fake, nil
-		},
-		newGenerator: newGenerator,
+	c := newCLI(&stdout, &stderr)
+	c.open = func(options, *target.Target) (session, error) {
+		fake.stderrAtOpen = stderr.String()
+		if fake.opening != nil {
+			fake.opening()
+		}
+		if fake.unopened != nil {
+			return nil, fake.unopened
+		}
+		return fake, nil
+	}
+	c.newGenerator = newGenerator
+	if fake.now != nil {
+		c.now = fake.now
+	}
+	if fake.discarding != nil {
+		c.discard = func(*run.Output, int) error { return fake.discarding }
 	}
 	return c.main(ctx, args), stdout.String(), stderr.String()
 }
@@ -214,6 +251,9 @@ func TestConfigurationErrorsExitTwo(t *testing.T) {
 		{name: "replay with two sequences", args: []string{"replay", "--target", toyTargetYAML, sequence, sequence}, want: "one sequence"},
 		{name: "--runs with a named sequence", args: []string{"run", "--target", toyTargetYAML, "--runs", "5", sequence}, want: "--runs"},
 		{name: "no runs at all", args: []string{"run", "--target", toyTargetYAML, "--runs", "0"}, want: "--runs"},
+		{name: "a deadline of no time", args: []string{"replay", "--target", toyTargetYAML, "--deadline", "0s", sequence},
+			want: "--deadline is 0s, and an invocation needs time to run: leave the flag out, and botbox derives one\n"},
+		{name: "a deadline in the past", args: []string{"matrix", "--target", toyTargetYAML, "--sequences", ".", "--deadline", "-1m"}, want: "--deadline is -1m0s"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			code, _, stderr := invoke(t, &fakeSession{}, test.args...)
@@ -745,6 +785,401 @@ func TestADeadlineThatStopsTheInvocationBetweenRunsExitsTwo(t *testing.T) {
 	}
 }
 
+// targetWithoutTimeouts is the toy target declaring no timeouts, so that it
+// takes the defaults.
+func targetWithoutTimeouts(t *testing.T) string {
+	t.Helper()
+	toy, err := filepath.Abs("../../targets/toy-widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := fmt.Sprintf(`name: toy-widget
+crds:
+  - %s/crds/
+primary: toy.botbox/v1/Widget
+sample: %s/widget.yaml
+manages:
+  - v1/ConfigMap
+launch:
+  binary: bin/toy-widget
+`, toy, toy)
+	path := filepath.Join(t.TempDir(), "target.yaml")
+	if err := os.WriteFile(path, []byte(declared), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// growingGenerator draws a create and as many settles as the seed, so that no
+// two runs take the same time.
+func growingGenerator(t *target.Target) (Generator, []string, error) {
+	return func(seed int64) (run.Sequence, error) {
+		sequence := run.Sequence{Seed: seed, Target: t.Name, Ops: []run.Op{{Type: run.OpCreate}}}
+		for i := range int(seed) {
+			sequence.Ops = append(sequence.Ops, run.Op{Index: i + 1, Type: run.OpSettle})
+		}
+		return sequence, nil
+	}, nil, nil
+}
+
+// Without --deadline, the runs get what they can take, and a sequence botbox
+// drew gets time to be minimized.
+func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
+	targetFile := targetWithoutTimeouts(t)
+	loaded, err := target.Load(targetFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sequence := writeSequence(t, 1)
+	longer := filepath.Join(t.TempDir(), "longer.json")
+	settles := []run.Op{{Type: run.OpSettle}, {Index: 1, Type: run.OpSettle}}
+	if err := run.WriteSequence(longer, run.Sequence{Seed: 2, Target: "toy-widget", Ops: settles}); err != nil {
+		t.Fatal(err)
+	}
+	named := "the deadline is %[1]s: this run can take that long at the target's timeouts. --deadline sets another.\n"
+	for _, test := range []struct {
+		name       string
+		args       []string
+		minimizing time.Duration
+		says       string
+	}{
+		{"drawn runs", []string{"run", "--runs", "10", "--seed", "1"}, 4 * time.Minute,
+			"the deadline is %[1]s: these 10 runs can take %[2]s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.\n"},
+		{"a named sequence", []string{"run", sequence}, 0, named},
+		{"named sequences", []string{"run", sequence, longer}, 0,
+			"the deadline is %[1]s: these 2 runs can take that long at the target's timeouts. --deadline sets another.\n"},
+		{"a replay", []string{"replay", sequence}, 0, named},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			session := &fakeSession{}
+			args := slices.Concat(test.args[:1], []string{"--target", targetFile, "--out", t.TempDir()}, test.args[1:])
+			before := time.Now()
+
+			code, stdout, stderr := invokeWith(t, session, growingGenerator, args...)
+
+			after := time.Now()
+			if code != exitOK {
+				t.Fatalf("botbox %v exited %d: %s", args, code, stderr)
+			}
+			var runs time.Duration
+			for _, sequence := range session.sequences {
+				runs += run.Bound(loaded, sequence)
+			}
+			want := runs + test.minimizing
+			if deadline := session.deadlines[0]; deadline.Before(before.Add(want)) || deadline.After(after.Add(want)) {
+				t.Errorf("The runs had %v, want %v.", deadline.Sub(before), want)
+			}
+			if says := fmt.Sprintf(test.says, want, runs); !strings.Contains(stdout, says) {
+				t.Errorf("botbox %v printed %q, want %q.", args, stdout, says)
+			}
+		})
+	}
+}
+
+// Runs whose waits no duration can count get the longest deadline, not one
+// that has already passed.
+func TestADeadlineTooLongToCountIsTheLongest(t *testing.T) {
+	generate := func(t *target.Target) (Generator, []string, error) {
+		return func(seed int64) (run.Sequence, error) {
+			ops := []run.Op{{Type: run.OpCreate}}
+			for range 64 {
+				ops = append(ops, run.Op{Type: run.OpFault, Fault: &run.Fault{Action: run.Action{Error: 500}, Until: run.Trigger{Count: 1}}})
+			}
+			ops = append(ops, run.Op{Type: run.OpSettle})
+			for i := range ops {
+				ops[i].Index = i
+			}
+			return run.Sequence{Seed: seed, Target: t.Name, Ops: ops}, nil
+		}, nil, nil
+	}
+	session := &fakeSession{}
+
+	code, stdout, stderr := invokeWith(t, session, generate, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "2")
+
+	if code != exitOK || len(session.sequences) != 2 {
+		t.Fatalf("botbox run exited %d after %d runs: %s", code, len(session.sequences), stderr)
+	}
+	if longest := time.Duration(math.MaxInt64).String(); !strings.Contains(stdout, "the deadline is "+longest) {
+		t.Errorf("botbox run printed %q, want the deadline of %s.", stdout, longest)
+	}
+}
+
+func TestAGivenDeadlineIsUsedAsGiven(t *testing.T) {
+	session := &fakeSession{}
+	before := time.Now()
+
+	code, stdout, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "2", "--deadline", "1m")
+
+	after := time.Now()
+	if code != exitOK {
+		t.Fatalf("botbox run exited %d: %s", code, stderr)
+	}
+	if deadline := session.deadlines[0]; deadline.Before(before.Add(time.Minute)) || deadline.After(after.Add(time.Minute)) {
+		t.Errorf("The runs had %v, want the 1m given.", deadline.Sub(before))
+	}
+	if strings.Contains(stdout, "the deadline is") {
+		t.Errorf("botbox run printed %q, and the deadline was given.", stdout)
+	}
+}
+
+// No flag set a derived deadline, so what it stopped says botbox derived it.
+func TestADerivedDeadlineSaysSoWhereItStops(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		failure error
+		want    string
+	}{
+		{"a run", fmt.Errorf("op 0 (settle): %w", context.DeadlineExceeded), "run 1: the derived deadline of "},
+		{"the invocation", nil, "the derived deadline of "},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithDeadline(t.Context(), time.Now())
+			defer cancel()
+			session := &fakeSession{failures: []error{test.failure}}
+
+			code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
+				"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3", "--seed", "1")
+
+			if code != exitError {
+				t.Errorf("botbox run exited %d, want %d.", code, exitError)
+			}
+			if !strings.Contains(stderr, test.want) || strings.Contains(stderr, "--deadline") {
+				t.Errorf("botbox run printed %q on stderr, want %q.", stderr, test.want)
+			}
+		})
+	}
+}
+
+func TestAnInterruptBeforeTheFirstRunStartsNone(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	cancel(interrupt{syscall.SIGINT})
+	session := &fakeSession{}
+
+	code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
+
+	if code != 128+int(syscall.SIGINT) {
+		t.Errorf("botbox run exited %d, want %d.", code, 128+int(syscall.SIGINT))
+	}
+	if len(session.sequences) != 0 {
+		t.Errorf("The session executed %d sequences after the interrupt.", len(session.sequences))
+	}
+	if !session.closed {
+		t.Error("botbox run left the test cluster running.")
+	}
+	if want := "an interrupt stopped the invocation after 0 of 3 runs"; !strings.Contains(stderr, want) {
+		t.Errorf("botbox run printed %q on stderr, want %q.", stderr, want)
+	}
+}
+
+// A terminal's interrupt reaches the target too, which then stops. The
+// interrupt is what the caller needs to hear about.
+func TestAnInterruptDuringARunStopsTheInvocation(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+	}{
+		{"ending a wait", fmt.Errorf("op 0 (settle): %w", context.Canceled)},
+		{"stopping the target", fmt.Errorf("op 0 (settle): %w: %w: signal: interrupt", context.Canceled, run.ErrTargetStopped)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(t.Context())
+			session := &fakeSession{failures: []error{test.err}}
+			session.after = func() { cancel(interrupt{syscall.SIGTERM}) }
+
+			code, stdout, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
+				"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
+
+			if code != 128+int(syscall.SIGTERM) {
+				t.Errorf("botbox run exited %d, want %d.", code, 128+int(syscall.SIGTERM))
+			}
+			if len(session.sequences) != 1 {
+				t.Errorf("The session executed %d sequences, want the one the interrupt stopped.", len(session.sequences))
+			}
+			for _, want := range []string{"run 1: an interrupt stopped the run", session.dirs[0]} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("botbox run printed %q on stderr, which does not mention %q.", stderr, want)
+				}
+			}
+			for _, unwanted := range []string{"--deadline", "no longer running", "canceled"} {
+				if strings.Contains(stderr, unwanted) {
+					t.Errorf("botbox run printed %q on stderr, which blames %q for the interrupt.", stderr, unwanted)
+				}
+			}
+			if strings.Contains(stdout, "every run passed") {
+				t.Errorf("botbox run printed %q, but not every run ran.", stdout)
+			}
+		})
+	}
+}
+
+// A run that failed on its own before the interrupt says why.
+func TestAnInterruptKeepsARunsOwnError(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		// then is where botbox points next, given the run's directory.
+		then func(dir string) string
+	}{
+		{"a refusal",
+			&run.Refused{Op: run.Op{Index: 0, Type: run.OpCreate}, Reason: errors.New("spec.count: must be at most 10")},
+			func(dir string) string { return "the op is in " + filepath.Join(dir, "sequence.json") }},
+		{"a target that stopped", fmt.Errorf("op 0 (create): %w: exit status 1; it wrote %q", run.ErrTargetStopped,
+			"toy-widget: flag provided but not defined: -no-such-flag"),
+			func(dir string) string { return "the run's files are in " + dir }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(t.Context())
+			session := &fakeSession{failures: []error{test.err}}
+			session.after = func() { cancel(interrupt{syscall.SIGTERM}) }
+
+			code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
+				"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
+
+			if code != 128+int(syscall.SIGTERM) {
+				t.Errorf("botbox run exited %d, want %d.", code, 128+int(syscall.SIGTERM))
+			}
+			for _, want := range []string{"run 1: " + test.err.Error(), test.then(session.dirs[0])} {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("botbox run printed %q on stderr, which does not say %q.", stderr, want)
+				}
+			}
+		})
+	}
+}
+
+// A violation found before the interrupt is reported, and says what cut its
+// minimization short.
+func TestAnInterruptEndsMinimization(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		// replays is how many executes the interrupt waits for: the run
+		// itself, then the candidates of the shrink pass.
+		replays int
+		want    string
+	}{
+		{name: "before a smaller sequence", replays: 1, want: "an interrupt ended minimization before it found a smaller sequence"},
+		{name: "with a smaller sequence unrun", replays: 2, want: "an interrupt ended minimization with 2 ops"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancelCause(t.Context())
+			violation := run.Violation{ID: "G4", Statement: "the target converges"}
+			session := &fakeSession{fails: func(run.Sequence, string) *run.Violation { return &violation }}
+			session.after = func() {
+				if len(session.sequences) == test.replays {
+					cancel(interrupt{syscall.SIGINT})
+				}
+			}
+			generate := countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle)
+
+			code, _, stderr := invokeCtx(t, ctx, session, generate,
+				"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+			if code != 128+int(syscall.SIGINT) {
+				t.Fatalf("botbox run exited %d, want %d: %s", code, 128+int(syscall.SIGINT), stderr)
+			}
+			written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(written), test.want) || strings.Contains(string(written)+stderr, "deadline") {
+				t.Errorf("botbox run printed %q and the report\n%s\nwant it to say %q.", stderr, written, test.want)
+			}
+		})
+	}
+}
+
+// The minimized sequence runs again into the run directory. A run of it that
+// did not finish holds part of a run, which is not a pass.
+func TestAnUnfinishedRunOfTheMinimizedSequenceIsNoPass(t *testing.T) {
+	ctx, cancel := context.WithCancelCause(t.Context())
+	violation := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{failures: make([]error, 10)}
+	rerun := func() bool { n := len(session.sequences); return n > 1 && session.dirs[n-1] == session.dirs[0] }
+	session.after = func() {
+		if rerun() {
+			cancel(interrupt{syscall.SIGINT})
+			session.failures[len(session.sequences)-1] = fmt.Errorf("op 1 (settle): %w", context.Canceled)
+		}
+	}
+	session.fails = func(sequence run.Sequence, _ string) *run.Violation {
+		if rerun() || len(sequence.Ops) < 2 {
+			return nil
+		}
+		return &violation
+	}
+	session.applies = func(sequence run.Sequence) int {
+		if rerun() {
+			return 1
+		}
+		return len(sequence.Ops)
+	}
+	generate := countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle)
+
+	_, _, stderr := invokeCtx(t, ctx, session, generate,
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if said := string(written) + stderr; strings.Contains(said, "passed when it ran again") || !strings.Contains(said, "did not finish when it ran again") {
+		t.Errorf("botbox run printed %q and the report\n%s\nwant them to say the run did not finish.", stderr, written)
+	}
+	if want := fmt.Sprintf("botbox: the minimized sequence did not finish when it ran again, so %s holds that partial run: an interrupt stopped the run",
+		session.dirs[0]); !strings.Contains(stderr, want) {
+		t.Errorf("botbox run printed %q on stderr, want %q.", stderr, want)
+	}
+	encoded, err := os.ReadFile(filepath.Join(session.dirs[0], report.JSONFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var carried struct{ Applied, Ops int }
+	if err := json.Unmarshal(encoded, &carried); err != nil {
+		t.Fatal(err)
+	}
+	if carried.Applied != 1 || carried.Ops != 2 {
+		t.Errorf("The report says the run applied %d of %d ops, want the 1 of 2 the unfinished run applied.", carried.Applied, carried.Ops)
+	}
+}
+
+// A run writes its recordings as it ends, so a run of the minimized sequence
+// that botbox is killed in would leave the drawn run's beside its own.
+func TestTheMinimizedSequenceRunsAgainIntoAnEmptyDirectory(t *testing.T) {
+	violation := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{}
+	var held []string
+	reran := false
+	session.fails = func(sequence run.Sequence, dir string) *run.Violation {
+		switch {
+		case len(session.dirs) == 1:
+			if err := os.WriteFile(filepath.Join(dir, "requests.jsonl"), nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		case dir == session.dirs[0]:
+			reran = true
+			entries, _ := os.ReadDir(dir)
+			for _, entry := range entries {
+				held = append(held, entry.Name())
+			}
+		}
+		if len(sequence.Ops) < 2 {
+			return nil
+		}
+		return &violation
+	}
+
+	code, _, stderr := invokeWith(t, session, countingGenerator(nil, run.OpSettle, run.OpSettle, run.OpSettle),
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+	if code != exitViolation || !reran {
+		t.Fatalf("botbox run exited %d and ran the minimized sequence again: %t, want %d and true: %s", code, reran, exitViolation, stderr)
+	}
+	if len(held) > 0 {
+		t.Errorf("As the minimized sequence ran again, its directory already held %q.", held)
+	}
+}
+
 func TestAGeneratorThatFailsExitsTwo(t *testing.T) {
 	broken := errors.New("the CRD declares no schema to draw from")
 	for _, test := range []struct {
@@ -899,13 +1334,16 @@ func TestATargetTheClusterRefusesEndsTheInvocationBeforeARun(t *testing.T) {
 		t.Run(args[0], func(t *testing.T) {
 			session := &fakeSession{refused: refused}
 
-			code, _, stderr := invoke(t, session, args...)
+			code, stdout, stderr := invoke(t, session, args...)
 
 			if code != exitError {
 				t.Errorf("botbox %s exited %d, want %d.", args[0], code, exitError)
 			}
 			if !strings.Contains(stderr, refused.Error()) {
 				t.Errorf("botbox %s reported %q, want %q.", args[0], stderr, refused)
+			}
+			if stdout != "" {
+				t.Errorf("botbox %s printed %q, and ran nothing.", args[0], stdout)
 			}
 			if len(session.sequences) != 0 {
 				t.Errorf("botbox %s ran %d sequences against a target the cluster refused.", args[0], len(session.sequences))
@@ -1069,7 +1507,7 @@ func TestParseReadsTheFlagsOfSection11(t *testing.T) {
 	if opts.target != "t.yaml" || opts.runs != 3 || opts.seed != 42 || opts.out != "elsewhere" {
 		t.Errorf("parse read %+v.", opts)
 	}
-	if opts.deadline.String() != "1m30s" || opts.kubeconfig != "kubeconfig" {
+	if opts.deadline.String() != "1m30s" || !opts.deadlineGiven || opts.kubeconfig != "kubeconfig" {
 		t.Errorf("parse read the deadline %v and the kubeconfig %q.", opts.deadline, opts.kubeconfig)
 	}
 	if !slices.Equal(opts.launchArgs, []string{"--bug=1"}) {
@@ -1088,15 +1526,15 @@ func TestParseReadsTheSequenceFiles(t *testing.T) {
 	}
 }
 
-func TestParseDefaultsTheDeadlineAndTheOutputDirectory(t *testing.T) {
+func TestParseDefaultsTheOutputDirectoryAndLeavesTheDeadlineToDerive(t *testing.T) {
 	opts, _, err := parse([]string{"replay", "--target", "t.yaml", "a.json"})
 
 	if err != nil {
 		t.Fatalf("parse failed: %v", err)
 	}
-	if opts.deadline != defaultDeadline || opts.out != defaultOut {
-		t.Errorf("parse defaulted to the deadline %v and the directory %q, want %v and %q.",
-			opts.deadline, opts.out, defaultDeadline, defaultOut)
+	if opts.deadlineGiven || opts.deadline != 0 || opts.out != defaultOut {
+		t.Errorf("parse read a deadline of %v and defaulted to the directory %q, want no deadline and %q.",
+			opts.deadline, opts.out, defaultOut)
 	}
 }
 
@@ -1220,7 +1658,7 @@ func TestTheReplayCommandQuotesEveryOtherByte(t *testing.T) {
 // carries it, or it does not. This test makes its author say which.
 func TestEveryFlagIsReplayedOrSelectsNothing(t *testing.T) {
 	replayed := []string{"target", "kubeconfig", "launch-arg"}
-	inert := []string{"runs", "seed", "out", "deadline", "sequences"}
+	inert := []string{"runs", "seed", "out", "deadline", "sequences", "junit"}
 	for _, command := range []string{"run", "replay", "matrix"} {
 		(&options{command: command}).flags().VisitAll(func(f *flag.Flag) {
 			if !slices.Contains(replayed, f.Name) && !slices.Contains(inert, f.Name) {

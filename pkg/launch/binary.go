@@ -30,10 +30,10 @@ type Launcher interface {
 	// Exited is closed once the target has stopped and will not start again,
 	// so that a caller waiting on the target ends where it does.
 	Exited() <-chan struct{}
-	// Supervise restarts the target from now on whenever it exits on its own,
-	// as a kubelet restarts a container, and tells onExit why it stopped and
-	// when it starts again.
-	Supervise(onExit func(exit error, restart time.Time))
+	// Supervise restarts the target whenever it exits on its own, as a
+	// kubelet restarts a container, until ctx ends. It tells onExit why the
+	// target stopped and when it starts again.
+	Supervise(ctx context.Context, onExit func(exit error, restart time.Time))
 }
 
 // Status is what the launcher knows of the target process. It is the process's
@@ -59,6 +59,13 @@ var ErrExitedZero = errors.New("exit status 0")
 
 // DefaultGracePeriod is how long Stop waits after SIGTERM before it escalates.
 const DefaultGracePeriod = 5 * time.Second
+
+// At DefaultGracePeriod, Restart takes at most RestartWithin and Stop at most
+// StopWithin.
+const (
+	RestartWithin = DefaultGracePeriod
+	StopWithin    = 2 * DefaultGracePeriod
+)
 
 // A supervised target restarts at once the first time. Each later restart
 // waits twice as long as the one before, from DefaultBackoff up to MaxBackoff.
@@ -96,10 +103,11 @@ type Binary struct {
 	running    *process
 	kubeconfig string
 	// onExit hears each exit of a supervised target. It is nil until
-	// Supervise.
-	onExit   func(error, time.Time)
-	restarts int
-	// gone closes once a supervised target failed to start again, and failed
+	// Supervise, and supervision ends with supervising.
+	onExit      func(error, time.Time)
+	supervising context.Context
+	restarts    int
+	// gone closes once a supervised target will not start again, and failed
 	// says why.
 	gone   chan struct{}
 	failed error
@@ -222,13 +230,13 @@ func (b *Binary) Exited() <-chan struct{} {
 	return b.running.done
 }
 
-// Supervise restarts the target whenever it exits on its own: at once the
-// first time, and after the backoff every later time. A target that exited
-// before the call restarts now.
-func (b *Binary) Supervise(onExit func(exit error, restart time.Time)) {
+// Supervise restarts the target whenever it exits on its own, until ctx ends:
+// at once the first time, and after the backoff every later time. A target that
+// exited before the call restarts now.
+func (b *Binary) Supervise(ctx context.Context, onExit func(exit error, restart time.Time)) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	b.onExit, b.gone = onExit, make(chan struct{})
+	b.onExit, b.supervising, b.gone = onExit, ctx, make(chan struct{})
 	if b.running != nil && b.running.reaped {
 		b.restartLater(b.running)
 	}
@@ -249,6 +257,10 @@ func (b *Binary) reap(exited *process) {
 // again, then starts it once the backoff has passed. The caller holds b.mu, so
 // that Stop and Restart wait until the exit is heard.
 func (b *Binary) restartLater(exited *process) {
+	if b.supervising.Err() != nil {
+		b.stayDown(exited.exit)
+		return
+	}
 	delay := b.backoff(b.restarts)
 	b.restarts++
 	b.onExit(exited.exit, time.Now().Add(delay))
@@ -256,17 +268,24 @@ func (b *Binary) restartLater(exited *process) {
 }
 
 // restart starts the target again, unless Stop or Restart already replaced the
-// process that exited.
+// process that exited or supervision has ended.
 func (b *Binary) restart(exited *process) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.running != exited {
-		return
+	switch {
+	case b.running != exited:
+	case b.supervising.Err() != nil:
+		b.stayDown(exited.exit)
+	default:
+		if err := b.start(b.kubeconfig); err != nil {
+			b.stayDown(fmt.Errorf("%w, and restarting it failed: %w", exited.exit, err))
+		}
 	}
-	if err := b.start(b.kubeconfig); err != nil {
-		b.failed = fmt.Errorf("%w, and restarting it failed: %w", exited.exit, err)
-		close(b.gone)
-	}
+}
+
+func (b *Binary) stayDown(why error) {
+	b.failed = why
+	close(b.gone)
 }
 
 // backoff is how long the restart that follows the given number of restarts

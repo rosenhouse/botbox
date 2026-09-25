@@ -31,7 +31,7 @@ func TestACrashLoopIsAFindingWithAReport(t *testing.T) {
 	}
 	t.Chdir(dir) // launch.binary is relative to the working directory.
 	var stdout, stderr bytes.Buffer
-	c := &cli{stdout: &stdout, stderr: &stderr, open: openSession, newGenerator: rapidGenerator}
+	c := newCLI(&stdout, &stderr)
 
 	code := c.main(t.Context(), []string{"replay", "--target", targetFile, "--out", "out", "--launch-arg", "--bug=12", sequence})
 
@@ -54,5 +54,14 @@ func TestACrashLoopIsAFindingWithAReport(t *testing.T) {
 	}
 	if want := `last with exit status 2 after writing "panic: runtime error: integer divide by zero`; !strings.Contains(string(report), want) {
 		t.Errorf("The report does not say %q:\n%s", want, report)
+	}
+	ran := readSummary(t, "out").Runs[0]
+	if len(ran.Exits) == 0 {
+		t.Fatalf("The summary lists run 1 as %+v, with none of the target's exits.", ran)
+	}
+	for _, exit := range ran.Exits {
+		if exit.Error != "exit status 2" || !strings.HasPrefix(exit.Said, "panic: runtime error: integer divide by zero") {
+			t.Errorf("The summary lists an exit as %+v, want the toy's panic.", exit)
+		}
 	}
 }

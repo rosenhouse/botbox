@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"maps"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -20,6 +21,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
 
@@ -499,7 +501,7 @@ func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	live.supervise()
+	live.supervise(t.Context())
 
 	for deadline := time.Now().Add(10 * time.Second); len(live.exits()) < 2 && time.Now().Before(deadline); {
 		time.Sleep(5 * time.Millisecond)
@@ -522,5 +524,120 @@ func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
 		if down := exit.Restart.Sub(exit.At); down > want.backoff || down < want.backoff-time.Second {
 			t.Errorf("Exit %d restarts %v after it, want %v.", i+1, down, want.backoff)
 		}
+	}
+}
+
+// An interrupt has ended the run's context, and an API server may never answer.
+func TestTheRunNamespaceIsDeletedAfterAnInterruptWithinABound(t *testing.T) {
+	requests := make(chan string, 10)
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests <- r.Method + " " + r.URL.Path
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	t.Cleanup(server.Close)
+	t.Cleanup(func() { close(release) })
+	core, err := kubernetes.NewForConfig(&rest.Config{Host: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ended, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	deleted := make(chan error, 1)
+	go func() { deleted <- deleteNamespace(ended, core, "botbox-run", 100*time.Millisecond) }()
+
+	select {
+	case err := <-deleted:
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("Deleting the namespace returned %v, want it to give up.", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Deleting the namespace still waited on the API server after 10s.")
+	}
+	select {
+	case got := <-requests:
+		if want := "DELETE /api/v1/namespaces/botbox-run"; got != want {
+			t.Errorf("The API server got %q, want %q.", got, want)
+		}
+	default:
+		t.Error("The API server got no request to delete the namespace.")
+	}
+}
+
+// The API server serves no Widget, so Start fails once it has created the
+// namespace, and takes the namespace back as Stop would.
+func TestTheRunNamespaceIsDeletedOnTheBudgetBoundGivesIt(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.Method + " " + r.URL.Path {
+		case "GET /api":
+			fmt.Fprint(w, `{"kind":"APIVersions","versions":["v1"]}`)
+		case "GET /apis":
+			fmt.Fprint(w, `{"kind":"APIGroupList","apiVersion":"v1","groups":[]}`)
+		case "GET /api/v1":
+			fmt.Fprint(w, `{"kind":"APIResourceList","groupVersion":"v1","resources":[]}`)
+		case "POST /api/v1/namespaces":
+			w.WriteHeader(http.StatusCreated)
+			fmt.Fprint(w, `{"kind":"Namespace","apiVersion":"v1","metadata":{"name":"botbox-run"}}`)
+		default:
+			fmt.Fprint(w, `{"kind":"Status","apiVersion":"v1","status":"Success"}`)
+		}
+	}))
+	t.Cleanup(server.Close)
+	budgets := make(chan time.Duration, 10)
+	config := &rest.Config{Host: server.URL, WrapTransport: func(next http.RoundTripper) http.RoundTripper {
+		return roundTripper(func(r *http.Request) (*http.Response, error) {
+			if deadline, ok := r.Context().Deadline(); ok && r.Method == http.MethodDelete {
+				budgets <- time.Until(deadline)
+			}
+			return next.RoundTrip(r)
+		})
+	}}
+
+	h, err := Start(t.Context(), toyTarget, Options{Dir: t.TempDir(), Config: config})
+
+	if h != nil || err == nil {
+		t.Fatalf("Start returned (%v, %v), want an error: the API server serves no Widget.", h, err)
+	}
+	select {
+	case budget := <-budgets:
+		if want := stopBudget - launch.StopWithin; budget > want || budget < want-time.Second {
+			t.Errorf("Deleting the namespace had %v, want %v.", budget, want)
+		}
+	default:
+		t.Error("The API server got no request to delete the namespace on a budget.")
+	}
+}
+
+type roundTripper func(*http.Request) (*http.Response, error)
+
+func (f roundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+// The launcher supervises the target under the run's context, so a target that
+// exits after an interrupt is not restarted.
+func TestTheHarnessSupervisesUnderTheContextItIsGiven(t *testing.T) {
+	dir := t.TempDir()
+	binary := launch.NewBinary(launch.Options{Path: "/bin/sh", Args: []string{"-c", "exit 3"}})
+	t.Cleanup(func() { _ = binary.Stop(context.Background()) })
+	live := &liveRun{h: &Harness{dir: dir, Launcher: binary}}
+	if err := binary.Start(t.Context(), "kubeconfig"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	live.supervise(ctx)
+
+	select {
+	case <-binary.Exited():
+	case <-time.After(10 * time.Second):
+		t.Fatal("The target was still supervised after its context ended.")
+	}
+	if exits := live.exits(); len(exits) != 0 {
+		t.Errorf("The harness recorded the exits %+v, and supervision had ended.", exits)
 	}
 }

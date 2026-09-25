@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -387,6 +388,23 @@ func (f *Fault) validate() error {
 	if strings.Contains(f.Match.Resource, "/") {
 		return fmt.Errorf("match.resource %q holds a slash; name the plural alone, such as configmaps. "+
 			"A fault on a resource matches its subresources' requests too", f.Match.Resource)
+	}
+	if _, err := path.Match(f.Match.Name, ""); err != nil {
+		return fmt.Errorf("match.name %q is not a glob: %w", f.Match.Name, err)
+	}
+	if fraction := f.Match.Fraction; fraction < 0 || fraction > 1 {
+		return fmt.Errorf("match.fraction %v is not a share of requests from 0 to 1", fraction)
+	}
+	if code := f.Action.Error; code != 0 && (code < 400 || code > 599) {
+		return fmt.Errorf("action.error %d is not an HTTP error status from 400 to 599", code)
+	}
+	switch {
+	case f.Action.Delay < 0:
+		return fmt.Errorf("action.delay %s is negative", time.Duration(f.Action.Delay))
+	case f.Until.Count < 0:
+		return fmt.Errorf("until.count %d is negative", f.Until.Count)
+	case f.Until.For < 0:
+		return fmt.Errorf("until.for %s is negative", time.Duration(f.Until.For))
 	}
 	return nil
 }

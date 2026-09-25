@@ -213,6 +213,51 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 			want: slashRefused("configmaps/"),
 		},
 		{
+			name: "a fault on a percentage of requests",
+			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"fraction": 50}, "action": {"drop": true}}}`,
+			want: "match.fraction 50 is not a share of requests from 0 to 1",
+		},
+		{
+			name: "a fault on a negative fraction of requests",
+			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"fraction": -0.5}, "action": {"drop": true}}}`,
+			want: "match.fraction -0.5 is not a share of requests from 0 to 1",
+		},
+		{
+			name: "a fault on a name that is not a glob",
+			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"name": "widget-["}, "action": {"drop": true}}}`,
+			want: `match.name "widget-[" is not a glob`,
+		},
+		{
+			name: "a fault answering with a success",
+			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"error": 200}}}`,
+			want: "action.error 200 is not an HTTP error status from 400 to 599",
+		},
+		{
+			name: "a fault answering with a status past 599",
+			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"error": 600}}}`,
+			want: "action.error 600 is not an HTTP error status from 400 to 599",
+		},
+		{
+			name: "a fault answering with a negative status",
+			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"error": -500}}}`,
+			want: "action.error -500 is not an HTTP error status from 400 to 599",
+		},
+		{
+			name: "a fault delaying by a negative duration",
+			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"delay": "-1s"}}}`,
+			want: "action.delay -1s is negative",
+		},
+		{
+			name: "a fault that runs out after a negative count",
+			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": -3}}}`,
+			want: "until.count -3 is negative",
+		},
+		{
+			name: "a fault that runs out after a negative duration",
+			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"for": "-2s"}}}`,
+			want: "until.for -2s is negative",
+		},
+		{
 			name: "a restart that skips its settle",
 			ops:  `{"i": 0, "t": "restart", "noSettle": true}`,
 			want: "noSettle",
@@ -320,6 +365,8 @@ func TestSequenceAcceptsTheOpsTheRunnerExecutes(t *testing.T) {
 		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "patch"}, "action": {"drop": true}}}`,
 		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "delete"}, "action": {"drop": true}}}`,
 		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "deletecollection"}, "action": {"drop": true}}}`,
+		`{"i": 0, "t": "fault", "spec": {"match": {"name": "widget-*", "fraction": 1}, "action": {"error": 400}}}`,
+		`{"i": 0, "t": "fault", "spec": {"match": {"fraction": 0.25}, "action": {"error": 599}}}`,
 		`{"i": 0, "t": "updateFixture", "kind": "v1/Secret", "name": "token", "patch": {"data": {"token": "abcd"}}}`,
 		`{"i": 0, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 1}}`,
 	} {

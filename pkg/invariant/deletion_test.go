@@ -11,6 +11,7 @@ import (
 // deletion at 10.1s. Its deletion deadline is 20.1s.
 func beingDeleted() *run {
 	return converged().
+		running(5*time.Second).
 		op(invariant.OpDelete, 10*time.Second).
 		record(10100*time.Millisecond, deletedWidget("15", finalizers(cleanup)))
 }

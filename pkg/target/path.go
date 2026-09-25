@@ -151,6 +151,15 @@ func at(text string, i int, format string, args ...any) error {
 	return fmt.Errorf("offset %d: %s", utf8.RuneCountInString(text[:i]), fmt.Sprintf(format, args...))
 }
 
+// Keys are the path's keys, with an empty one for each [*].
+func (p Path) Keys() []string {
+	keys := make([]string, len(p))
+	for i, step := range p {
+		keys[i] = step.Key
+	}
+	return keys
+}
+
 // String prints the path so that ParsePath reads it back.
 func (p Path) String() string {
 	var b strings.Builder

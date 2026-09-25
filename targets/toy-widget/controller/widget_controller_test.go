@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"errors"
+	"maps"
 	"reflect"
 	"slices"
 	"testing"
@@ -35,7 +36,7 @@ func deletingWidget(count int32) *toyv1.Widget {
 }
 
 func TestDesiredChildrenNamesAndIndexesOnePerCount(t *testing.T) {
-	children := desiredChildren(newWidget(3), 3)
+	children := desiredChildren(newWidget(3), 3, "")
 
 	want := []corev1.ConfigMap{
 		{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "w-0"}, Data: map[string]string{"index": "0"}},
@@ -48,10 +49,10 @@ func TestDesiredChildrenNamesAndIndexesOnePerCount(t *testing.T) {
 }
 
 func TestDesiredChildrenFollowsTheCountItIsGiven(t *testing.T) {
-	if children := desiredChildren(newWidget(3), 0); len(children) != 0 {
+	if children := desiredChildren(newWidget(3), 0, ""); len(children) != 0 {
 		t.Errorf("desiredChildren returned %v for count 0.", children)
 	}
-	if children := desiredChildren(newWidget(0), 2); len(children) != 2 {
+	if children := desiredChildren(newWidget(0), 2, ""); len(children) != 2 {
 		t.Errorf("desiredChildren returned %v for count 2.", children)
 	}
 }
@@ -81,6 +82,108 @@ func TestStatusForReportsAChangeOnlyWhenOneIsNeeded(t *testing.T) {
 	widget.Generation = 2
 	if _, changed := statusFor(widget, 3); !changed {
 		t.Error("statusFor kept a stale observedGeneration.")
+	}
+}
+
+func labelConfig(label string) *corev1.ConfigMap {
+	return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "ns", Name: "config"}, Data: map[string]string{"label": label}}
+}
+
+func TestEachChildCopiesTheLabelOfTheConfigMapLabelFromNames(t *testing.T) {
+	widget := newWidget(1)
+	config := labelConfig("red")
+	r := fixture(t, 0, interceptor.Funcs{}, widget, config)
+	r.LabelFrom = "config"
+	mustReconcile(t, r, widget)
+
+	config.Data["label"] = "blue"
+	if err := r.Update(t.Context(), config); err != nil {
+		t.Fatal(err)
+	}
+	mustReconcile(t, r, widget)
+
+	if data, want := child(t, r, widget, "w-0").Data, map[string]string{"index": "0", "label": "blue"}; !maps.Equal(data, want) {
+		t.Errorf("w-0 holds %v, want %v.", data, want)
+	}
+}
+
+func TestAChildCopiesNoLabelWhereTheConfigMapIsMissing(t *testing.T) {
+	for _, labelFrom := range []string{"", "config"} {
+		widget := newWidget(1)
+		r := fixture(t, 0, interceptor.Funcs{}, widget)
+		r.LabelFrom = labelFrom
+
+		mustReconcile(t, r, widget)
+
+		if data, want := child(t, r, widget, "w-0").Data, map[string]string{"index": "0"}; !maps.Equal(data, want) {
+			t.Errorf("With LabelFrom %q, w-0 holds %v, want %v.", labelFrom, data, want)
+		}
+	}
+}
+
+func TestAFailedReadOfTheLabelFailsTheReconcile(t *testing.T) {
+	refused := errors.New("the API server refused the read")
+	refuseTheConfig := interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if key.Name == "config" {
+				return refused
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	}
+	widget := newWidget(1)
+	r := fixture(t, 0, refuseTheConfig, widget, labelConfig("red"))
+	r.LabelFrom = "config"
+
+	if err := reconcile(t, r, widget); !errors.Is(err, refused) {
+		t.Errorf("Reconcile returned %v, want the refused read.", err)
+	}
+}
+
+// The watch on the ConfigMap wakes every Widget that copies its label.
+func TestAChangeToTheConfigMapReconcilesEveryWidgetInItsNamespace(t *testing.T) {
+	other := newWidget(1)
+	other.Name, other.UID = "v", "other-uid"
+	elsewhere := newWidget(1)
+	elsewhere.Namespace = "elsewhere"
+	r := fixture(t, 0, interceptor.Funcs{}, newWidget(1), other, elsewhere)
+	r.LabelFrom = "config"
+
+	for _, test := range []struct {
+		namespace, name string
+		want            []string
+	}{
+		{"ns", "config", []string{"ns/v", "ns/w"}},
+		{"elsewhere", "config", []string{"elsewhere/w"}},
+		{"ns", "unrelated", nil},
+	} {
+		changed := labelConfig("blue")
+		changed.Namespace, changed.Name = test.namespace, test.name
+
+		var woken []string
+		for _, request := range r.widgetsCopying(t.Context(), changed) {
+			woken = append(woken, request.String())
+		}
+
+		slices.Sort(woken)
+		if !slices.Equal(woken, test.want) {
+			t.Errorf("A change to the ConfigMap %s reconciles %v, want %v.", test.name, woken, test.want)
+		}
+	}
+}
+
+func TestAListThatFailsWakesNoWidget(t *testing.T) {
+	failsWithAWidget := interceptor.Funcs{
+		List: func(_ context.Context, _ client.WithWatch, list client.ObjectList, _ ...client.ListOption) error {
+			list.(*toyv1.WidgetList).Items = []toyv1.Widget{*newWidget(1)}
+			return errors.New("the API server cut the list short")
+		},
+	}
+	r := fixture(t, 0, failsWithAWidget)
+	r.LabelFrom = "config"
+
+	if woken := r.widgetsCopying(t.Context(), labelConfig("blue")); len(woken) != 0 {
+		t.Errorf("A failed list reconciles %v, want none.", woken)
 	}
 }
 

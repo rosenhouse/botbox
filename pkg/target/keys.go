@@ -27,6 +27,12 @@ func keyIn(node *yamlv3.Node, declared reflect.Type, path string) error {
 				return err
 			}
 		}
+	case declared.Kind() == reflect.Map && node.Kind == yamlv3.MappingNode:
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			if err := keyIn(node.Content[i+1], declared.Elem(), path+"."+node.Content[i].Value); err != nil {
+				return err
+			}
+		}
 	case declared.Kind() == reflect.Struct && node.Kind == yamlv3.MappingNode:
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			key, value := node.Content[i], node.Content[i+1]

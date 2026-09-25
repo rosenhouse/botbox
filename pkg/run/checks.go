@@ -85,7 +85,7 @@ func engineInput(in Input) invariant.Input {
 func engineOps(t *target.Target, timeline Timeline) []invariant.Op {
 	ops := make([]invariant.Op, len(timeline.Ops))
 	for i, op := range timeline.Ops {
-		ops[i] = invariant.Op{Index: op.Op.Index, Type: invariant.OpType(op.Op.Type), Time: op.At}
+		ops[i] = invariant.Op{Index: op.Op.Index, Type: invariant.OpType(op.Op.Type), Time: op.At, Restored: op.Restored}
 		if op.CR != "" {
 			ops[i].CR = observe.Key{GVK: t.Primary, Namespace: timeline.Namespace, Name: op.CR}
 		}

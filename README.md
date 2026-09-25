@@ -265,6 +265,30 @@ wide `settle` is. If your controller leaves a kind deleted by design, or recreat
 new name, list the kind under `notRecreated`. cert-manager lists CertificateRequest, because a
 Ready Certificate does not replace a deleted request.
 
+Your controller may read an object it does not own, such as a Secret or an Issuer. Declare it
+under `fixtures`, and name its file under `generate.fixtures` to let generation change it:
+
+```yaml
+generate:
+  fixtures:
+    secret.yaml:                              # a file under fixtures
+      mutate:                                 # strings in it generation may set
+        - data.token
+```
+
+Generation then also draws `updateFixture`, which sets one of those strings to a short word of
+letters and digits, and `deleteFixture`, which deletes the fixture until the next op that
+settles and then creates it again. Name only strings in which your controller accepts any such
+word, because `ready` must hold after each change. A Secret's `data` decodes the word to
+arbitrary bytes. botbox waits up to `timeouts.delete` for a deleted fixture to go, so a
+finalizer your controller puts on it may hold it that long. Your `ready` may fail while the
+fixture is gone, so generation runs no settle wait without it. A controller that reads the
+fixture without watching it misses the change until something else reconciles its CR, and G5
+reports what a restart then changes. G7 never asks your controller to recreate a fixture. A
+sequence you write names the op before which botbox creates a deleted fixture again:
+`{"i": 2, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 3}}`.
+Without `generate.fixtures`, generation leaves every fixture alone.
+
 A sequence you write yourself can also carry a `fault`, which makes the proxy refuse, delay or
 drop the requests it matches. This is `targets/toy-widget/sequences/fault.json`:
 
@@ -341,7 +365,8 @@ In a sequence you write, put a `settle` op after a `restart`, and one before it 
 before it settles. G5 compares the states the controller settled in on either side, and leaves a
 note instead of a verdict when another op changed something in between. G7 likewise notes a
 `deleteManaged` that follows a `restart` before your controller has requested a resource outside
-leader election, since botbox cannot otherwise tell that it is back.
+leader election, since botbox cannot otherwise tell that it is back. The `settle` op after the
+`restart` waits for that request.
 
 ## Reading a report
 
@@ -383,11 +408,14 @@ its path into `equalIgnore` as written. A Secret's values appear there as marker
 Once a settle wait has converged, botbox restarts a controller that exits, as a kubelet
 would: at once, then after 10s, doubling up to 5 minutes. The run prints a note for each
 exit, quoting the line the controller wrote as it stopped. A settle wait does not converge
-while the controller waits to restart, nor until a restarted controller has run for
-`stable`. A controller that crashes again that soon after each restart never converges,
-even where it wrote its converged state first, so G4 reports it and quotes the last exit.
-A controller that exits during a fault, or while it recovers from one, has `settle` past
-its restart to converge. G7 notes a `deleteManaged` after a restart that follows an exit as
+while the controller waits to restart. Nor does it converge until the controller has
+requested a resource outside leader election since it last started and then run for
+`stable`, because botbox has no other sign that it is back. After a `restart` op, a
+controller has `settle` to come back, and `settle` past its return to converge. A
+controller that crashes again within `stable` of each return never converges, even where
+it wrote its converged state first, so G4 reports it and quotes the last exit.
+A controller that exits during a fault, or while it recovers from one, has the same once
+botbox restarts it. G7 notes a `deleteManaged` after a restart that follows an exit as
 it does one after a `restart`, and notes one where your controller exited, or waited to
 restart, during the op or its settle wait.
 The toy controller converges a count of 0 and then crashes under `--launch-arg --bug=12`,
@@ -418,9 +446,13 @@ A settle wait expired. What follows `expired with no fault active` says why:
   controller converged and kept writing. The Object versions table lists the writes. A
   status field rewritten on every reconcile, such as a timestamp, does this.
 - `ready held until …` means `ready` held and then stopped holding.
-- `ready held from … on, but the target was waiting to restart`, or `but the target
+- A line that goes on `but the target was waiting to restart`, or `but the target
   restarted in the last stable`, means your controller exited. The line counts the exits
   since it last converged and quotes the last.
+- A line that goes on `but the target had requested no resource outside leader election
+  since …` means your controller had not come back from a restart, or had not started, when
+  the wait gave up. `until the last stable` means it came back too late to run for
+  `stable` before then. A controller slow to start needs a wider `settle`.
 
 After a `delete`, the run waits up to `timeouts.delete` for the CR to go and then up to
 `settle` for the rest to settle, so a slow cleanup needs no wider `settle`. A `recreate`
@@ -490,7 +522,7 @@ Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-gene
 | G1 | Bounded reconciliation. Under an unchanged spec, one quiet window holds no more requests than `quiet` allows, zero by default. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
 | G3 | Clean deletion. Deleting the CR removes everything it manages and clears its finalizers. |
-| G4 | Convergence. `ready` holds within `T_settle` of every spec change, and again once a fault stops. A controller waiting to restart after a crash has not converged. |
+| G4 | Convergence. `ready` holds within `T_settle` of every spec change, `updateFixture` or return of a deleted fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
 | G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
 | G7 | Self-healing. An object `deleteManaged` deletes exists again, by kind and name, once the run settles. |

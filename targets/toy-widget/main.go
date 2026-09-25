@@ -40,6 +40,7 @@ func run(args []string, out io.Writer) error {
 	metricsAddress := flags.String("metrics-bind-address", "0", "address the metrics server binds to; 0 disables it")
 	resync := flags.Duration("resync", 0, "requeue every Widget this often and write its status each time; 0 disables it")
 	cleanupDelay := flags.Duration("cleanup-delay", 0, "how long a deleted Widget keeps its finalizer before the controller cleans up")
+	labelFrom := flags.String("label-from", "", "a ConfigMap in the Widget's namespace whose data.label each child copies")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(out)
@@ -81,6 +82,7 @@ func run(args []string, out io.Writer) error {
 		B1Hold:       b1Hold,
 		Resync:       *resync,
 		CleanupDelay: *cleanupDelay,
+		LabelFrom:    *labelFrom,
 	}
 	if err := reconciler.SetupWithManager(manager); err != nil {
 		return fmt.Errorf("setting up the controller: %w", err)

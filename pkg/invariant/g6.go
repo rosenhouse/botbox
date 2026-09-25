@@ -97,12 +97,12 @@ func conflicted(r proxy.Request) bool {
 	return r.Status == http.StatusConflict && (r.Verb == "update" || r.Verb == "patch")
 }
 
-// specSetAt is when the run last gave the target a new spec, which opens the
-// stretch G6 counts within. Teardown closes the last one.
+// specSetAt is when the run last gave the target a new spec or fixture, which
+// opens the stretch G6 counts within. Teardown closes the last one.
 func (in Input) specSetAt(t time.Time) time.Time {
 	var since time.Time
 	for _, op := range in.Ops {
-		if op.Type.touchesCR() && !op.Time.After(t) {
+		if (op.Type.touchesCR() || op.Type.onFixture() || op.Restored) && !op.Time.After(t) {
 			since = op.Time
 		}
 	}

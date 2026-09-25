@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
+	"sigs.k8s.io/controller-runtime/pkg/handler"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	toyv1 "github.com/rosenhouse/botbox/targets/toy-widget/api/v1"
@@ -26,7 +27,10 @@ import (
 // Finalizer names the cleanup path a deleted Widget runs.
 const Finalizer = "widget.botbox/cleanup"
 
-const indexKey = "index"
+const (
+	indexKey = "index"
+	labelKey = "label"
+)
 
 // NewScheme returns a scheme holding the core Kubernetes types and the Widget API.
 func NewScheme() (*runtime.Scheme, error) {
@@ -56,6 +60,9 @@ type Reconciler struct {
 	// CleanupDelay is how long a deleted Widget keeps its finalizer before
 	// the cleanup begins.
 	CleanupDelay time.Duration
+	// LabelFrom names a ConfigMap in the Widget's namespace whose data.label
+	// each child copies. Empty turns this off.
+	LabelFrom string
 
 	// createdFor holds the Widgets this process created a child for. Only B10
 	// reads it, and a restart loses it. Reconciles run on one worker (the
@@ -72,7 +79,28 @@ func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	if r.Bug != B8 {
 		builder = builder.Owns(&corev1.ConfigMap{}) // B8 (§9.1): without this watch, a deleted child goes unnoticed.
 	}
+	if r.Bug != B14 {
+		// B14: without this watch, a changed label reaches no child.
+		builder = builder.Watches(&corev1.ConfigMap{}, handler.EnqueueRequestsFromMapFunc(r.widgetsCopying))
+	}
 	return builder.WithOptions(r.controllerOptions()).Complete(r)
+}
+
+// widgetsCopying names every Widget in the namespace of the ConfigMap
+// LabelFrom names.
+func (r *Reconciler) widgetsCopying(ctx context.Context, configMap client.Object) []ctrl.Request {
+	if configMap.GetName() != r.LabelFrom {
+		return nil
+	}
+	widgets := &toyv1.WidgetList{}
+	if err := r.List(ctx, widgets, client.InNamespace(configMap.GetNamespace())); err != nil {
+		return nil
+	}
+	requests := make([]ctrl.Request, len(widgets.Items))
+	for i := range widgets.Items {
+		requests[i] = ctrl.Request{NamespacedName: client.ObjectKeyFromObject(&widgets.Items[i])}
+	}
+	return requests
 }
 
 // controllerOptions let a panic end B12's process.
@@ -181,8 +209,8 @@ func (r *Reconciler) patchStatus(ctx context.Context, widget *toyv1.Widget, stat
 }
 
 // desiredChildren returns the ConfigMaps a Widget requires, one per index below
-// count.
-func desiredChildren(widget *toyv1.Widget, count int32) []corev1.ConfigMap {
+// count, each carrying the label unless it is empty.
+func desiredChildren(widget *toyv1.Widget, count int32, label string) []corev1.ConfigMap {
 	children := make([]corev1.ConfigMap, count)
 	for index := range children {
 		children[index] = corev1.ConfigMap{
@@ -192,8 +220,24 @@ func desiredChildren(widget *toyv1.Widget, count int32) []corev1.ConfigMap {
 			},
 			Data: map[string]string{indexKey: strconv.Itoa(index)},
 		}
+		if label != "" {
+			children[index].Data[labelKey] = label
+		}
 	}
 	return children
+}
+
+// label is the data.label of the ConfigMap LabelFrom names, or empty.
+func (r *Reconciler) label(ctx context.Context, namespace string) (string, error) {
+	if r.LabelFrom == "" {
+		return "", nil
+	}
+	config := &corev1.ConfigMap{}
+	err := r.Get(ctx, client.ObjectKey{Namespace: namespace, Name: r.LabelFrom}, config)
+	if err != nil {
+		return "", client.IgnoreNotFound(err)
+	}
+	return config.Data[labelKey], nil
 }
 
 // statusFor returns the status a Widget should carry and whether that differs
@@ -217,7 +261,11 @@ func (r *Reconciler) syncChildren(ctx context.Context, widget *toyv1.Widget) (in
 	if r.Bug == B4 {
 		count = widget.Status.Ready // B4 (§9.1): the count comes from the status.
 	}
-	desired := desiredChildren(widget, count)
+	label, err := r.label(ctx, widget.Namespace)
+	if err != nil {
+		return 0, fmt.Errorf("reading ConfigMap %s: %w", r.LabelFrom, err)
+	}
+	desired := desiredChildren(widget, count, label)
 	for index := range desired {
 		if err := r.ensureChild(ctx, widget, index, &desired[index]); err != nil {
 			return 0, err

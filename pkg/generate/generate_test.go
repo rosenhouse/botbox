@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"slices"
 	"testing"
 
@@ -37,6 +38,147 @@ var targets = []struct {
 		[]string{"spec.dnsNames", "spec.duration", "spec.privateKey.algorithm", "spec.privateKey.rotationPolicy"},
 		[]string{"v1/Secret", "cert-manager.io/v1/CertificateRequest"}},
 	{externalSecretsTarget, []string{"spec.refreshInterval", "spec.target.name"}, []string{"v1/Secret"}},
+	{fixturesTarget, []string{"spec.count"}, []string{"v1/ConfigMap"}},
+}
+
+const fixturesTarget = "testdata/fixtures/target.yaml"
+
+// fixtureWord is what a Secret's data reads as base64 and a label takes.
+var fixtureWord = regexp.MustCompile(`^([a-z0-9]{4}){1,3}$`)
+
+func TestFixtureOpsActOnlyWhereTheTargetAllows(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, fixturesTarget), Options{})
+	rapid.Check(t, func(rt *rapid.T) {
+		for _, op := range g.sequence(rt).Ops {
+			paths, declared := fixturePaths[op.Kind+" "+op.Name]
+			switch op.Type {
+			case run.OpUpdateFixture:
+				changed := differences(nil, op.Patch, "")
+				if len(changed) != 1 || !slices.Contains(paths, changed[0]) {
+					rt.Fatalf("Op %d sets %v of the %s %s, and the target lets generation set %v.", op.Index, changed, op.Kind, op.Name, paths)
+				}
+				if value := leaf(op.Patch); !fixtureWord.MatchString(value) {
+					rt.Fatalf("Op %d sets %q, which a Secret's data does not read as base64.", op.Index, value)
+				}
+			case run.OpDeleteFixture:
+				if !declared {
+					rt.Fatalf("Op %d deletes the %s %s, which generate.fixtures does not name.", op.Index, op.Kind, op.Name)
+				}
+			}
+		}
+	})
+}
+
+// fixturePaths are the fixtures the fixtures target lets generation delete,
+// and the paths in each it lets generation set.
+var fixturePaths = map[string][]string{
+	"v1/ConfigMap widget-config": {"data.label", "data.app.properties"},
+	"v1/Secret token":            {"data.token"},
+	"v1/ConfigMap ca-bundle":     nil,
+}
+
+// A sequence's first deleteFixture finds every fixture there, so it may
+// delete any.
+func TestFixtureOpsReachEveryFixtureAndPathTheTargetAllows(t *testing.T) {
+	const seeds = 100
+	g := newGenerator(t, loadTarget(t, fixturesTarget), Options{})
+	var wantUpdated, updated, wantDeleted, deletedFirst []string
+	for fixture, paths := range fixturePaths {
+		wantDeleted = append(wantDeleted, fixture)
+		for _, path := range paths {
+			wantUpdated = append(wantUpdated, fixture+" "+path)
+		}
+	}
+	for seed := range int64(seeds) {
+		sequence, err := g.Draw(seed)
+		if err != nil {
+			t.Fatalf("Draw(%d) failed: %v.", seed, err)
+		}
+		first := true
+		for _, op := range sequence.Ops {
+			fixture := op.Kind + " " + op.Name
+			switch {
+			case op.Type == run.OpUpdateFixture:
+				updated = append(updated, fixture+" "+differences(nil, op.Patch, "")[0])
+			case op.Type == run.OpDeleteFixture && first:
+				deletedFirst, first = append(deletedFirst, fixture), false
+			}
+		}
+	}
+	if got := sortedSet(updated); !slices.Equal(got, sortedSet(wantUpdated)) {
+		t.Errorf("Seeds 0 to %d set %v, want %v.", seeds-1, got, sortedSet(wantUpdated))
+	}
+	if got := sortedSet(deletedFirst); !slices.Equal(got, sortedSet(wantDeleted)) {
+		t.Errorf("Seeds 0 to %d first delete %v, want %v.", seeds-1, got, sortedSet(wantDeleted))
+	}
+}
+
+func sortedSet(items []string) []string {
+	return slices.Compact(slices.Sorted(slices.Values(items)))
+}
+
+// leaf is the one string a patch that sets one field sets.
+func leaf(patch map[string]any) string {
+	for _, value := range patch {
+		if nested, isObject := value.(map[string]any); isObject {
+			return leaf(nested)
+		}
+		text, _ := value.(string)
+		return text
+	}
+	return ""
+}
+
+// The target may rightly not be ready while a fixture is gone, so no settle
+// wait runs without it.
+func TestADeletedFixtureComesBackBeforeTheNextOpThatSettles(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, fixturesTarget), Options{})
+	rapid.Check(t, func(rt *rapid.T) {
+		ops := g.sequence(rt).Ops
+		for i, op := range ops {
+			if op.Type != run.OpDeleteFixture {
+				continue
+			}
+			if next := i + 1 + slices.IndexFunc(ops[i+1:], run.Op.Settles); op.Until.Op != next {
+				rt.Fatalf("Op %d deletes a fixture until op %d, and op %d is the next that settles.", i, op.Until.Op, next)
+			}
+		}
+	})
+}
+
+// G7 notes a deleteManaged that follows a change of botbox's before the run
+// converged, so generation waits for the target's reaction first.
+func TestADeletedFixtureIsBackForTheNextDrawOnceAnOpSettles(t *testing.T) {
+	loaded := loadTarget(t, fixturesTarget)
+	g := newGenerator(t, loaded, Options{})
+	at := state{cr: loaded.Sample.Object, settled: true}
+	token := run.Op{Type: run.OpDeleteFixture, Kind: "v1/Secret", Name: "token"}
+
+	at.advance(token)
+	if legal := g.legal(&at); slices.Contains(legal, run.OpDeleteManaged) {
+		t.Errorf("Right after a deleteFixture, generation may draw %v.", legal)
+	}
+	if present := g.present(&at); len(present) != 2 || slices.ContainsFunc(present, func(fixture target.MutableFixture) bool {
+		return fixture.Name == "token"
+	}) {
+		t.Errorf("With the token deleted, generation may delete %v, want every other fixture.", present)
+	}
+	at.advance(run.Op{Type: run.OpSettle})
+	if present := g.present(&at); len(present) != 3 {
+		t.Errorf("Once an op settled, generation may delete %v, want every fixture.", present)
+	}
+}
+
+func TestATargetWithoutGenerateFixturesDrawsNoFixtureOp(t *testing.T) {
+	// The toy declares a fixture, and no generate.fixtures.
+	g := newGenerator(t, loadTarget(t, toyTarget), Options{})
+	rapid.Check(t, func(rt *rapid.T) {
+		for _, op := range g.sequence(rt).Ops {
+			if op.Type == run.OpUpdateFixture || op.Type == run.OpDeleteFixture {
+				rt.Fatalf("Op %d is a %s, and the target names no fixture generation may change.", op.Index, op.Type)
+			}
+		}
+	})
 }
 
 func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
@@ -256,8 +398,8 @@ func TestSequencesAreLegalToReplay(t *testing.T) {
 							rt.Fatalf("Op %d deletes the managed object %d, which generation cannot know exists.",
 								op.Index, *op.Nth)
 						}
-						if previous := sequence.Ops[i]; previous.NoSettle {
-							rt.Fatalf("Op %d deletes a managed object after op %d skipped its settle wait.",
+						if previous := sequence.Ops[i]; !previous.Settles() {
+							rt.Fatalf("Op %d deletes a managed object after op %d, which waits for nothing.",
 								op.Index, previous.Index)
 						}
 					}

@@ -190,6 +190,7 @@ func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 		{"with discovery reads alone", deletedAfter(restarted().request(9100*time.Millisecond, nonResource("/api"))), wantNote},
 		{"with a request before the restart alone", deletedAfter(restarted().request(8500*time.Millisecond, get("w-1"))), wantNote},
 		{"with a request in the wait alone", deletedAfter(restarted().request(10500*time.Millisecond, watch())), wantNote},
+		{"with a request at the op's instant alone", deletedAfter(restarted().request(10*time.Second, watch())), wantNote},
 		{"with an exit in the wait too", deletedAfter(restarted().exit(10500*time.Millisecond, 10500*time.Millisecond)), wantNote},
 		{"with a request before the last restart alone", deletedAfter(converged().
 			op(invariant.OpRestart, 8*time.Second).

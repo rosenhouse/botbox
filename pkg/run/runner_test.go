@@ -108,6 +108,8 @@ type fakeHarness struct {
 	// cancel ends the run's context at the call cancelsAfter names.
 	cancel       context.CancelFunc
 	cancelsAfter string
+	// restoredAt is when botbox last created a fixture.
+	restoredAt time.Time
 }
 
 func newFakeHarness() *fakeHarness {
@@ -302,6 +304,19 @@ func (f *fakeHarness) deleteManaged(_ context.Context, gvk schema.GroupVersionKi
 	return err == nil && !slices.Contains(f.gone, name), err
 }
 
+func (f *fakeHarness) patchFixture(_ context.Context, gvk schema.GroupVersionKind, name string, patch map[string]any) error {
+	return f.record(fmt.Sprintf("patchFixture %s %s %v", kindName(gvk), name, patch))
+}
+
+func (f *fakeHarness) deleteFixture(_ context.Context, gvk schema.GroupVersionKind, name string) error {
+	return f.record("deleteFixture " + kindName(gvk) + " " + name)
+}
+
+func (f *fakeHarness) createFixture(_ context.Context, fixture *unstructured.Unstructured) error {
+	f.restoredAt = time.Now()
+	return f.record(fmt.Sprintf("createFixture %s %s %v", kindName(fixture.GroupVersionKind()), fixture.GetName(), fixture.Object["data"]))
+}
+
 func (f *fakeHarness) managedCount() int { return f.count }
 
 func (f *fakeHarness) awaitClean(_ context.Context, within time.Duration) (bool, error) {
@@ -481,6 +496,114 @@ func TestRunAppliesTheOpsInOrder(t *testing.T) {
 	}
 	if got := h.opCalls(); !slices.Equal(got, want) {
 		t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
+	}
+}
+
+// withSecret is the toy with a Secret fixture.
+func withSecret() *target.Target {
+	withFixture := *toyTarget
+	secret := &unstructured.Unstructured{Object: map[string]any{"data": map[string]any{"token": "czNjcjN0"}}}
+	secret.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Secret"})
+	secret.SetName("token")
+	withFixture.Fixtures = []*unstructured.Unstructured{secret}
+	return &withFixture
+}
+
+func TestRunChangesDeletesAndRestoresAFixture(t *testing.T) {
+	h := newFakeHarness()
+	declared := withSecret()
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpUpdateFixture, Kind: "v1/Secret", Name: "token", Patch: map[string]any{"data": map[string]any{"token": "abcd"}}},
+		Op{Type: OpDeleteFixture, Kind: "v1/Secret", Name: "token", Until: &Until{Op: 4}},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}, NoSettle: true},
+		Op{Type: OpRestart},
+		Op{Type: OpSettle},
+	)
+
+	result, err := runSequence(t.Context(), declared, sequence, Options{Check: &fakeChecker{}}, h)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	want := []string{
+		"createCR widget", "settle", "supervise",
+		"patchFixture v1/Secret token map[data:map[token:abcd]]", "settle",
+		"deleteFixture v1/Secret token",
+		"patchCR widget map[spec:map[count:5]]",
+		"createFixture v1/Secret token map[token:abcd]", "restart",
+		"settle",
+	}
+	if got := h.opCalls(); !slices.Equal(got, want) {
+		t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
+	}
+	var restored []int
+	for _, applied := range result.Timeline.Ops {
+		if applied.Restored {
+			restored = append(restored, applied.Op.Index)
+		}
+		if applied.Deleted != "" {
+			t.Errorf("Op %d names %s as deleted, and G7 asks back only a managed object.", applied.Op.Index, applied.Deleted)
+		}
+	}
+	if !slices.Equal(restored, []int{4}) {
+		t.Errorf("The ops %v restored a fixture, want op 4.", restored)
+	}
+	// Anything the target did in reply came after op 4 began.
+	if h.restoredAt.Before(result.Timeline.Ops[4].At) {
+		t.Errorf("botbox restored the fixture at %v, before op 4 began at %v.", h.restoredAt, result.Timeline.Ops[4].At)
+	}
+	if token := declared.Fixtures[0].Object["data"].(map[string]any)["token"]; token != "czNjcjN0" {
+		t.Errorf("The target's fixture holds the token %v, want the one it declares: the next run starts from it.", token)
+	}
+}
+
+func TestAnOpRestoredAFixtureOnlyWhereACreateSucceeded(t *testing.T) {
+	declared := withSecret()
+	other := declared.Fixtures[0].DeepCopy()
+	other.SetName("other")
+	declared.Fixtures = append(declared.Fixtures, other)
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpDeleteFixture, Kind: "v1/Secret", Name: "token", Until: &Until{Op: 3}},
+		Op{Type: OpDeleteFixture, Kind: "v1/Secret", Name: "other", Until: &Until{Op: 3}},
+		Op{Type: OpSettle},
+	)
+	for _, test := range []struct {
+		failing  string
+		restored bool
+	}{
+		{failing: "token", restored: false},
+		{failing: "other", restored: true},
+	} {
+		t.Run("where the restore of "+test.failing+" fails", func(t *testing.T) {
+			h := newFakeHarness()
+			refused := errors.New("the API server refused the create")
+			h.fail["createFixture v1/Secret "+test.failing+" map[token:czNjcjN0]"] = refused
+
+			result, err := runSequence(t.Context(), declared, sequence, Options{Check: &fakeChecker{}}, h)
+
+			if !errors.Is(err, refused) {
+				t.Fatalf("The run returned %v, want the refused create.", err)
+			}
+			if restored := result.Timeline.Ops[3].Restored; restored != test.restored {
+				t.Errorf("Op 3 restored a fixture: %t, want %t.", restored, test.restored)
+			}
+		})
+	}
+}
+
+func TestRunRefusesAnOpOnAFixtureTheTargetDoesNotDeclare(t *testing.T) {
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpDeleteFixture, Kind: "v1/Secret", Name: "other", Until: &Until{Op: 2}},
+		Op{Type: OpSettle},
+	)
+
+	_, err := runSequence(t.Context(), withSecret(), sequence, Options{Check: &fakeChecker{}}, newFakeHarness())
+
+	if want := "op 1 (deleteFixture): the target declares no fixture v1/Secret other"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("The run returned %v, want an error saying %q.", err, want)
 	}
 }
 
@@ -2648,6 +2771,33 @@ func TestAnExitAFaultExcusedIsOwedTSettlePastItsRestart(t *testing.T) {
 	}
 	if exits := check.inputs[1].Timeline.Exits; len(exits) != 1 {
 		t.Errorf("The checks after op 2 read the exits %+v, want the one in its wait.", exits)
+	}
+}
+
+// botbox chose to restart the target, so the wait after the restart gives it
+// T_settle past its return.
+func TestTheWaitAfterARestartIsOwedTSettlePastTheTargetsReturn(t *testing.T) {
+	h := newFakeHarness()
+	var back time.Time
+	h.inWait = func() {
+		if h.waits == 1 {
+			back = time.Now()
+			h.logged = append(h.logged, proxy.Request{Start: back, Verb: "list", Version: "v1", Resource: "configmaps"})
+		}
+	}
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpRestart},
+		Op{Type: OpSettle},
+	)
+
+	_, err := runFake(t, h, nil, sequence)
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if want := back.Add(testTimeouts.Settle); len(h.owed) < 2 || !h.owed[1].Equal(want) {
+		t.Errorf("The waits were told the target owed %v, want the wait after op 1 told %v.", h.owed, want)
 	}
 }
 

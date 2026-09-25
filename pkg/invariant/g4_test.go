@@ -90,6 +90,55 @@ func TestG4IgnoresAWindowALaterSpecChangeCutShort(t *testing.T) {
 	silent(t, invariant.Convergence, in)
 }
 
+func TestG4RequiresConvergenceAfterAFixtureChanges(t *testing.T) {
+	for _, change := range []struct {
+		name  string
+		apply func(*run) *run
+		want  string
+	}{
+		{"an update", func(r *run) *run { return r.op(invariant.OpUpdateFixture, 10*time.Second) }, "op 1 (updateFixture)"},
+		{"a restore", func(r *run) *run { return r.restoring(invariant.OpSettle, 10*time.Second) },
+			"op 1 (settle), where botbox restored a fixture"},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			in := change.apply(newRun().
+				op(invariant.OpCreate, 0).
+				record(time.Second, widget("10", spec(1), status(1, 1)))).
+				record(11*time.Second, widget("11", spec(1), status(0, 1))).
+				through(16 * time.Second)
+
+			violation := fired(t, invariant.Convergence, in)
+
+			if want := "the CR w was not ready 5s after " + change.want; violation.Statement != want {
+				t.Errorf("The statement is %q, want %q.", violation.Statement, want)
+			}
+		})
+	}
+}
+
+// A dependency that is gone may leave the CR rightly not ready, so a change to
+// a fixture hands the window to the next.
+func TestG4IgnoresAWindowAFixtureOpCutShort(t *testing.T) {
+	for _, change := range []struct {
+		name  string
+		apply func(*run) *run
+	}{
+		{"a delete never restored", func(r *run) *run { return r.op(invariant.OpDeleteFixture, time.Second) }},
+		{"an update", func(r *run) *run { return r.op(invariant.OpUpdateFixture, time.Second) }},
+		{"a restore", func(r *run) *run { return r.restoring(invariant.OpSettle, time.Second) }},
+	} {
+		t.Run(change.name, func(t *testing.T) {
+			in := change.apply(newRun().
+				op(invariant.OpCreate, 0).
+				record(500*time.Millisecond, widget("10", spec(1), status(0, 1)))).
+				record(5500*time.Millisecond, widget("11", spec(1), status(1, 1))).
+				through(8 * time.Second)
+
+			silent(t, invariant.Convergence, in)
+		})
+	}
+}
+
 // A fault that lasted 3s leaves the target 3s and T_settle to recover.
 func TestG4RequiresConvergenceAfterAFaultStops(t *testing.T) {
 	in := newRun().
@@ -210,6 +259,59 @@ func TestG4GivesASpecChangeAfterAFaultTheTimeTheFaultLeaves(t *testing.T) {
 		through(13 * time.Second)
 
 	silent(t, invariant.Convergence, in)
+}
+
+// botbox chose to restart the target, so G4 gives it T_settle past its return
+// to converge on a spec change made around the restart.
+func TestG4GivesARestartedTargetTSettlePastItsReturn(t *testing.T) {
+	converged := func() *run {
+		return newRun().
+			op(invariant.OpCreate, 0).
+			record(500*time.Millisecond, widget("10", spec(2), status(2, 1))).
+			running(600*time.Millisecond).
+			checkpoint(3*time.Second, invariant.Converged)
+	}
+	readyAt := func(r *run, back, ready time.Duration) invariant.Input {
+		return r.
+			record(4200*time.Millisecond, widget("11", spec(3), generation(2), status(2, 1))).
+			running(back).
+			record(ready, widget("12", spec(3), generation(2), status(3, 2))).
+			checkpoint(ready+stableWindow, invariant.Converged).
+			through(ready + 3*time.Second)
+	}
+	restartThenUpdate := func() *run {
+		return converged().op(invariant.OpRestart, 4*time.Second).op(invariant.OpUpdate, 4100*time.Millisecond)
+	}
+	updateThenRestart := func() *run {
+		return converged().op(invariant.OpUpdate, 4*time.Second).op(invariant.OpRestart, 4100*time.Millisecond)
+	}
+
+	restartAfterConverging := newRun().
+		op(invariant.OpCreate, 0).
+		record(500*time.Millisecond, widget("10", spec(2), status(2, 1))).
+		running(600*time.Millisecond).
+		checkpoint(2500*time.Millisecond, invariant.Converged).
+		op(invariant.OpRestart, 4*time.Second).
+		running(4500*time.Millisecond).
+		checkpoint(6500*time.Millisecond, invariant.Converged).
+		record(8*time.Second, widget("11", spec(2), status(1, 1))).
+		record(11*time.Second, widget("12", spec(2), status(2, 1))).
+		through(14 * time.Second)
+
+	for name, in := range map[string]invariant.Input{
+		"a restart before the change":                readyAt(restartThenUpdate(), 8900*time.Millisecond, 10*time.Second),
+		"a restart after the change":                 readyAt(updateThenRestart(), 8900*time.Millisecond, 10*time.Second),
+		"a restart after the target converged on it": restartAfterConverging,
+	} {
+		t.Run(name, func(t *testing.T) { silent(t, invariant.Convergence, in) })
+	}
+	t.Run("a target back only T_settle after the restart", func(t *testing.T) {
+		violation := fired(t, invariant.Convergence, readyAt(restartThenUpdate(), 9*time.Second, 10*time.Second))
+
+		if want := "not ready 5s after op 2 (update)"; !strings.Contains(violation.Statement, want) {
+			t.Errorf("The statement is %q, want it to say %q.", violation.Statement, want)
+		}
+	})
 }
 
 func TestG4IgnoresADeadlineWhoseCRIsNotBackYet(t *testing.T) {

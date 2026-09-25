@@ -6,15 +6,15 @@ import (
 )
 
 // Owed is when the target must have converged by, after the faults that
-// stopped by t. An exit the faults excused owes T_settle past the restart that
-// followed it, since botbox chose the restart's backoff. Owed is zero where
-// the target owes nothing.
+// stopped by t. An exit the faults excused owes what settledBy gives its
+// restart, since botbox chose the restart's backoff. Owed is zero where the
+// target owes nothing.
 func (in Input) Owed(t time.Time) time.Time {
 	owed := in.faultsOwed(t)
 	recovered := in.lastConverged(t)
 	for _, exit := range in.Exits {
 		if !exit.At.After(t) && exit.At.After(recovered) && in.faultsExcuse(exit.At) {
-			owed = later(owed, exit.Restart.Add(in.timeouts().Settle))
+			owed = later(owed, in.settledBy(exit.Restart))
 		}
 	}
 	return owed

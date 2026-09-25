@@ -133,6 +133,14 @@ func (r *run) deletedManagedOf(when time.Duration, gvk schema.GroupVersionKind, 
 	return r
 }
 
+// restoring is an op of the type given, before which botbox restored a fixture
+// it had deleted.
+func (r *run) restoring(opType invariant.OpType, when time.Duration) *run {
+	r.op(opType, when)
+	r.in.Ops[len(r.in.Ops)-1].Restored = true
+	return r
+}
+
 // checkpoint ends the settle wait of the last op, which began where the op
 // was applied.
 func (r *run) checkpoint(when time.Duration, result invariant.SettleResult) *run {
@@ -196,6 +204,9 @@ func (r *run) request(when time.Duration, req proxy.Request) *run {
 	r.in.Requests = append(r.in.Requests, req)
 	return r
 }
+
+// running records a request that shows the target runs.
+func (r *run) running(when time.Duration) *run { return r.request(when, watch()) }
 
 // requests repeats one request at a fixed interval.
 func (r *run) requests(first, every time.Duration, count int, req proxy.Request) *run {

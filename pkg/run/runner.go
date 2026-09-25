@@ -189,6 +189,9 @@ type AppliedOp struct {
 	CR string
 	// Deleted is the object a deleteManaged op deleted (DESIGN.md §7).
 	Deleted string
+	// Restored says botbox created a fixture it had deleted again, after At
+	// and before the op's own change.
+	Restored bool
 	// Settled is the settle wait that followed the op, or nil if none did.
 	Settled *Wait
 }
@@ -290,6 +293,9 @@ type harness interface {
 	// deleteManaged deletes the object, and reports false where it was
 	// already gone.
 	deleteManaged(ctx context.Context, gvk schema.GroupVersionKind, name string) (bool, error)
+	patchFixture(ctx context.Context, gvk schema.GroupVersionKind, name string, patch map[string]any) error
+	deleteFixture(ctx context.Context, gvk schema.GroupVersionKind, name string) error
+	createFixture(ctx context.Context, fixture *unstructured.Unstructured) error
 	managedCount() int
 	// awaitClean waits for the run namespace to empty, and reports whether it
 	// did within the window.
@@ -340,6 +346,10 @@ type runner struct {
 	faults []heldFault
 	// faultOps is the op index of each of Timeline.Faults.
 	faultOps []int
+	// fixtures are the fixtures as botbox last wrote them, by kind and name.
+	fixtures map[string]*unstructured.Unstructured
+	// deleted are the deleteFixture ops whose fixture is still gone.
+	deleted []Op
 }
 
 // heldFault is a fault op's fault. The Runner holds it to read its window from
@@ -365,6 +375,10 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 		dir:      opts.Dir,
 		now:      time.Now,
 		timeline: Timeline{Namespace: h.namespace()},
+		fixtures: map[string]*unstructured.Unstructured{},
+	}
+	for _, fixture := range t.Fixtures {
+		r.fixtures[kindName(fixture.GroupVersionKind())+" "+fixture.GetName()] = fixture.DeepCopy()
 	}
 	failure := r.applyOps(ctx)
 	r.failed = failure != nil
@@ -422,7 +436,11 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 		return r.targetStopped(status)
 	}
 	r.expireFaults(op.Index)
-	applied, err := r.apply(ctx, op)
+	applied := AppliedOp{Op: op, At: r.now()}
+	var err error
+	if applied.Restored, err = r.restoreFixtures(ctx, op.Index); err == nil {
+		applied.Deleted, err = r.apply(ctx, op)
+	}
 	if op.Type.OnCR() {
 		applied.CR = r.cr
 	}
@@ -439,39 +457,78 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 	return nil
 }
 
-func (r *runner) apply(ctx context.Context, op Op) (AppliedOp, error) {
-	applied := AppliedOp{Op: op, At: r.now()}
+// apply applies the op, and names the managed object a deleteManaged op
+// deleted.
+func (r *runner) apply(ctx context.Context, op Op) (string, error) {
 	switch op.Type {
 	case OpCreate:
-		return applied, r.create(ctx, op)
+		return "", r.create(ctx, op)
 	case OpUpdate:
 		if err := r.haveCR(); err != nil {
-			return applied, err
+			return "", err
 		}
-		return applied, refusal(op, r.h.patchCR(ctx, r.cr, op.Patch))
+		return "", refusal(op, r.h.patchCR(ctx, r.cr, op.Patch))
 	case OpDelete:
 		if err := r.haveCR(); err != nil {
-			return applied, err
+			return "", err
 		}
-		return applied, r.h.deleteCR(ctx, r.cr)
+		return "", r.h.deleteCR(ctx, r.cr)
 	case OpRecreate:
-		return applied, r.recreate(ctx, op)
+		return "", r.recreate(ctx, op)
 	case OpRestart:
-		return applied, r.h.restart(ctx)
+		return "", r.h.restart(ctx)
 	case OpFault:
 		if err := r.checkResource(op.Fault.Match.Resource); err != nil {
-			return applied, err
+			return "", err
 		}
 		r.inject(op)
-		return applied, nil
+		return "", nil
 	case OpDeleteManaged:
-		name, err := r.applyDeleteManaged(ctx, op)
-		applied.Deleted = name
-		return applied, err
+		return r.applyDeleteManaged(ctx, op)
+	case OpUpdateFixture, OpDeleteFixture:
+		return "", r.applyToFixture(ctx, op)
 	case OpSettle:
-		return applied, nil
+		return "", nil
 	}
-	return applied, fmt.Errorf("%q is not an op type", op.Type)
+	return "", fmt.Errorf("%q is not an op type", op.Type)
+}
+
+// applyToFixture changes or deletes a fixture. The fixture is botbox's, so a
+// deleted one is not the target's to recreate.
+func (r *runner) applyToFixture(ctx context.Context, op Op) error {
+	fixture, declared := r.fixtures[op.fixture()]
+	if !declared {
+		return fmt.Errorf("the target declares no fixture %s %s", op.Kind, op.Name)
+	}
+	gvk := fixture.GroupVersionKind()
+	if op.Type == OpDeleteFixture {
+		r.deleted = append(r.deleted, op)
+		return r.h.deleteFixture(ctx, gvk, op.Name)
+	}
+	if err := r.h.patchFixture(ctx, gvk, op.Name, op.Patch); err != nil {
+		return err
+	}
+	MergePatch(fixture.Object, op.Patch)
+	return nil
+}
+
+// restoreFixtures creates again, as botbox last wrote them, the fixtures
+// deleted until this op, and reports whether it created any.
+func (r *runner) restoreFixtures(ctx context.Context, op int) (bool, error) {
+	var gone []Op
+	restored := false
+	for _, deleted := range r.deleted {
+		if deleted.Until.Op > op {
+			gone = append(gone, deleted)
+			continue
+		}
+		if err := r.h.createFixture(ctx, r.fixtures[deleted.fixture()]); err != nil {
+			return restored, err
+		}
+		restored = true
+	}
+	r.deleted = gone
+	return restored, nil
 }
 
 func (r *runner) create(ctx context.Context, op Op) error {
@@ -606,7 +663,9 @@ func (r *runner) asOf(t time.Time) invariant.Input {
 	r.readExits()
 	return invariant.Input{
 		Target:      r.target,
+		Requests:    r.h.requests(),
 		History:     r.h.objects(),
+		Ops:         engineOps(r.target, r.timeline),
 		Checkpoints: engineCheckpoints(r.timeline.Checkpoints),
 		Faults:      engineFaults(r.timeline.Faults),
 		Exits:       engineExits(r.timeline.Exits),

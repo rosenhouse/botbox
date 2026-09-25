@@ -30,18 +30,28 @@ type Op struct {
 	// Index is the op's position in the sequence.
 	Index int    `json:"i"`
 	Type  OpType `json:"t"`
+	// Kind and Nth select deleteManaged's object: the Nth managed object of
+	// Kind, ordered by creationTimestamp then name. Kind and Name select a
+	// fixture op's fixture.
+	Kind string `json:"kind,omitempty"`
+	Nth  *int   `json:"index,omitempty"`
+	Name string `json:"name,omitempty"`
 	// Obj is what create and recreate create.
 	Obj *unstructured.Unstructured `json:"obj,omitempty"`
-	// Patch is the JSON merge patch (RFC 7386) update applies.
+	// Patch is the JSON merge patch (RFC 7386) update and updateFixture apply.
 	Patch map[string]any `json:"patch,omitempty"`
 	// Fault is the fault a fault op injects.
 	Fault *Fault `json:"spec,omitempty"`
-	// Kind and Nth select deleteManaged's object: the Nth managed object of
-	// Kind, ordered by creationTimestamp then name.
-	Kind string `json:"kind,omitempty"`
-	Nth  *int   `json:"index,omitempty"`
+	// Until is where botbox creates the fixture of a deleteFixture op again.
+	Until *Until `json:"until,omitempty"`
 	// NoSettle skips the Runner's implicit settle wait (DESIGN.md §5.5).
 	NoSettle bool `json:"noSettle,omitempty"`
+}
+
+// Until names the op before which botbox creates a deleted fixture again, as
+// it last wrote it.
+type Until struct {
+	Op int `json:"op"`
 }
 
 // OpType is an op's "t" (DESIGN.md §5.4).
@@ -56,10 +66,13 @@ const (
 	OpRestart       OpType = "restart"
 	OpFault         OpType = "fault"
 	OpDeleteManaged OpType = "deleteManaged"
+	OpUpdateFixture OpType = "updateFixture"
+	OpDeleteFixture OpType = "deleteFixture"
 )
 
 // opTypes are every op type the format defines.
-var opTypes = []OpType{OpCreate, OpUpdate, OpDelete, OpRecreate, OpSettle, OpRestart, OpFault, OpDeleteManaged}
+var opTypes = []OpType{OpCreate, OpUpdate, OpDelete, OpRecreate, OpSettle, OpRestart, OpFault, OpDeleteManaged,
+	OpUpdateFixture, OpDeleteFixture}
 
 // crOps act on the primary CR and may carry noSettle (DESIGN.md §4).
 var crOps = []OpType{OpCreate, OpUpdate, OpDelete, OpRecreate}
@@ -125,9 +138,9 @@ func (o Op) Settles() bool {
 	return o.Type == OpSettle || (!o.NoSettle && slices.Contains(mutatingOps, o.Type))
 }
 
-// mutatingOps change the CR or a managed object, so the Runner settles after
-// them.
-var mutatingOps = append(slices.Clone(crOps), OpDeleteManaged)
+// mutatingOps change the CR or a managed object, or update a fixture, so the
+// Runner settles after them.
+var mutatingOps = append(slices.Clone(crOps), OpDeleteManaged, OpUpdateFixture)
 
 // ReadSequence reads and validates a sequence file.
 func ReadSequence(path string) (Sequence, error) {
@@ -197,6 +210,32 @@ func (s Sequence) Validate() error {
 	if !s.Ops[len(s.Ops)-1].Settles() {
 		return fmt.Errorf("the sequence does not end with an op that settles")
 	}
+	return s.validateFixtures()
+}
+
+// fixture names a fixture op's fixture by kind and name.
+func (o Op) fixture() string { return o.Kind + " " + o.Name }
+
+// validateFixtures reports a deleted fixture that does not come back by the
+// last op, and an op on a fixture while it is deleted.
+func (s Sequence) validateFixtures() error {
+	deletedBy := map[string]Op{}
+	for i, op := range s.Ops {
+		if op.Type != OpUpdateFixture && op.Type != OpDeleteFixture {
+			continue
+		}
+		fixture := op.fixture()
+		if deleted, gone := deletedBy[fixture]; gone && i < deleted.Until.Op {
+			return fmt.Errorf("op %d acts on the fixture %s, which op %d deleted until op %d", i, fixture, deleted.Index, deleted.Until.Op)
+		}
+		if op.Type != OpDeleteFixture {
+			continue
+		}
+		if op.Until.Op <= i || op.Until.Op >= len(s.Ops) {
+			return fmt.Errorf("op %d: until names op %d; want an op after it, up to the last", i, op.Until.Op)
+		}
+		deletedBy[fixture] = op
+	}
 	return nil
 }
 
@@ -220,7 +259,7 @@ func (o Op) validate(position int) error {
 }
 
 // opFields are the fields an op may carry, in the order errors report them.
-var opFields = []string{"obj", "patch", "spec", "kind", "index"}
+var opFields = []string{"obj", "patch", "spec", "kind", "name", "index", "until"}
 
 // validateFields reports a field the op's type does not take, or one it needs
 // and does not carry.
@@ -230,7 +269,9 @@ func (o Op) validateFields() error {
 		"patch": o.Patch != nil,
 		"spec":  o.Fault != nil,
 		"kind":  o.Kind != "",
+		"name":  o.Name != "",
 		"index": o.Nth != nil,
+		"until": o.Until != nil,
 	}
 	wanted := fieldsOf(o.Type)
 	for _, field := range opFields {
@@ -260,6 +301,10 @@ func fieldsOf(opType OpType) map[string]bool {
 		fields["spec"] = true
 	case OpDeleteManaged:
 		fields["kind"], fields["index"] = true, true
+	case OpUpdateFixture:
+		fields["kind"], fields["name"], fields["patch"] = true, true, true
+	case OpDeleteFixture:
+		fields["kind"], fields["name"], fields["until"] = true, true, true
 	}
 	return fields
 }

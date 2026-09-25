@@ -1816,7 +1816,7 @@ built from source and run as a black-box binary.
   that wait ends is judged there. A harness error there hid B13 from G3 on generated runs.
   The op cannot create its CR while the old one stays, so one that no check reports stays a
   harness error.
-- **D@77 A settle wait converges only once the target has shown it runs since it last
+- **D63 A settle wait converges only once the target has shown it runs since it last
   started.** Nothing changes while a restarted target starts up, so a settle wait after a
   `Restart`, or after `Supervise` restarted the target, converged before the target was
   back. The correct toy behind a wrapper that delayed each restart by 5 s came back inside
@@ -1835,7 +1835,7 @@ built from source and run as a black-box binary.
   startup and `T_stable` outlast the wait. Such a wait converged before, while the target
   was not back. Leaving G1 and G2 unjudged in the window after an op G7 notes was rejected,
   because it judges less.
-- **D@47 A sequence changes and deletes fixtures.** No op touched a fixture, so botbox
+- **D64 A sequence changes and deletes fixtures.** No op touched a fixture, so botbox
   never tried a referenced Secret that changes or an Issuer that disappears, and a
   controller that reads such an object without watching it passed. `updateFixture`
   merge-patches a fixture, and `deleteFixture` deletes one until the op its `until` names.
@@ -1855,7 +1855,7 @@ built from source and run as a black-box binary.
   the Widget. A generated sequence finds it too, and the correct toy passes every seed up
   to 60 that draws a fixture op. A target without `generate.fixtures` draws what it drew
   before, which the golden draws pin.
-- **D@47 A sequence creates up to three CRs, and G3, G5 and G7 attribute objects to them
+- **D65 A sequence creates up to three CRs, and G3, G5 and G7 attribute objects to them
   by ownerReference.** A run acted on one CR, so botbox never tried two CRs side by side.
   `update`, `delete` and `recreate` take an optional `cr`, the sample's name by default,
   so a sequence whose one CR takes the sample's name means what it did. One that creates

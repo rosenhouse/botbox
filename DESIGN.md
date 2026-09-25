@@ -1202,7 +1202,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   relative to the summary, and its error, or the violation and notes its report carries.
   Until botbox writes the report, those are the run's own, and `run-<n>/` holds no report.
   botbox empties `run-<n>/` before it runs the minimized sequence there, and meanwhile
-  `summary.md` and the JUnit file say `run-<n>/` holds a partial run of it (D@57).
+  `summary.md` and the JUnit file say `run-<n>/` holds a partial run of it (D72).
   `summary.md` leaves out the ops by type, the checkpoints, what each exit said and the
   sequences. `summary.json` carries `schema: 1`, which changes when a field changes
   meaning or goes away. `--junit FILE` writes the runs as JUnit XML with the summary,
@@ -2030,7 +2030,7 @@ built from source and run as a black-box binary.
   three. Seeds 1 to 40 of external-secrets passed, 7 of them with two. cert-manager's
   seeds 23 to 27 no longer draw a delete or a `deleteManaged`, and its pinned sequences
   hold both.
-- **D@57 botbox empties a run's directory before it runs the minimized sequence there.** A
+- **D72 botbox empties a run's directory before it runs the minimized sequence there.** A
   run writes `requests.jsonl` and `objects.jsonl` as it ends. A SIGKILL during that run left
   the drawn run's recordings and the shrink pass's replays beside the new run's
   `sequence.json`, `kubeconfig` and `target.log`, under a summary that said the directory

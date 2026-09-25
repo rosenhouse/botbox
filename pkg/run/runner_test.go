@@ -1599,11 +1599,11 @@ func TestRunRecordsG4WhenTheRecoveryExpires(t *testing.T) {
 
 // An interrupt or the deadline ends the run's context, and the run is
 // abandoned wherever it is. Its teardown waits for nothing more and judges
-// nothing, and it still takes back what the run made.
+// nothing, and it still takes back what the run made, every CR included.
 func TestAnAbandonedRunWaitsForNothing(t *testing.T) {
 	quiet := "sleep " + testTimeouts.Stable.String()
 	deletion := "awaitClean " + (testTimeouts.Delete + deletionMargin).String()
-	cleanup := []string{"deleteCR widget", "empty", "forceFinalizers", "stop"}
+	cleanup := []string{"deleteCR widget", "deleteCR widget-2", "empty", "forceFinalizers", "stop"}
 	for _, test := range []struct {
 		name  string
 		at    string
@@ -1614,14 +1614,14 @@ func TestAnAbandonedRunWaitsForNothing(t *testing.T) {
 		{name: "in the recovery", at: "clearFaults", fault: true, want: slices.Concat([]string{"clearFaults", "settle"}, cleanup)},
 		{name: "in the quiet window", at: quiet, want: slices.Concat([]string{"clearFaults", quiet}, cleanup)},
 		{name: "in the deletion window", at: deletion,
-			want: []string{"clearFaults", quiet, "deleteCR widget", deletion, "empty", "forceFinalizers", "stop"}},
+			want: []string{"clearFaults", quiet, "deleteCR widget", "deleteCR widget-2", deletion, "empty", "forceFinalizers", "stop"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newFakeHarness()
 			h.clean, h.forced = false, []string{"toy.botbox/v1/Widget widget"}
 			ctx, cancel := context.WithCancel(t.Context())
 			h.cancel, h.cancelsAfter = cancel, test.at
-			ops := []Op{{Type: OpCreate, Obj: widget("widget")}}
+			ops := []Op{{Type: OpCreate, Obj: widget("widget"), NoSettle: true}, {Type: OpCreate, Obj: widget("widget-2")}}
 			if test.fault {
 				h.faulting = true
 				ops = append(ops, Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}}, Op{Type: OpSettle})

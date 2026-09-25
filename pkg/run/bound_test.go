@@ -8,6 +8,7 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -27,6 +28,10 @@ type waitingHarness struct {
 	runsOut   []int
 	ranOut    int
 	exitsLate []int
+	// returnsLate has the target show it runs only just before T_settle past
+	// each restart, at back.
+	returnsLate bool
+	back        time.Time
 }
 
 func newWaitingHarness(timeouts target.Timeouts) *waitingHarness {
@@ -55,10 +60,18 @@ func (w *waitingHarness) settle(ctx context.Context, owed func() time.Time) (boo
 		if owes := owed(); owes.After(deadline) {
 			deadline = owes
 		}
+		if !w.back.IsZero() && deadline.After(w.back) {
+			w.at, w.back = w.back, time.Time{}
+			w.logged = append(w.logged, proxy.Request{Start: w.at, Verb: "list", Resource: "widgets"})
+			continue
+		}
 		if deadline.After(w.at) && len(w.exitsLate) > 0 && w.exitsLate[0] == w.waits {
 			w.exitsLate = w.exitsLate[1:]
 			w.at = deadline.Add(-time.Millisecond)
 			w.exit()
+			if exits := w.exits(); len(exits) > 0 {
+				w.returnLate(exits[len(exits)-1].Restart)
+			}
 			continue
 		}
 		if deadline.After(w.at) {
@@ -71,6 +84,14 @@ func (w *waitingHarness) settle(ctx context.Context, owed func() time.Time) (boo
 		w.runsOut = w.runsOut[1:]
 		w.remove(proxy.FaultID(w.ranOut))
 		w.ranOut++
+	}
+}
+
+// returnLate has a target that returns late show it runs just before T_settle
+// past the restart.
+func (w *waitingHarness) returnLate(restart time.Time) {
+	if w.returnsLate {
+		w.back = restart.Add(w.timeouts.Settle - time.Millisecond)
 	}
 }
 
@@ -104,8 +125,14 @@ func (w *waitingHarness) awaitClean(ctx context.Context, within time.Duration) (
 }
 
 func (w *waitingHarness) restart(ctx context.Context) error {
+	w.returnLate(w.at)
 	w.at = w.at.Add(launch.RestartWithin)
 	return w.fakeHarness.restart(ctx)
+}
+
+func (w *waitingHarness) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind, name string) error {
+	w.at = w.at.Add(w.timeouts.Delete)
+	return w.fakeHarness.deleteFixture(ctx, gvk, name)
 }
 
 func (w *waitingHarness) stop(ctx context.Context) error {
@@ -142,9 +169,10 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 		ops      []Op
 		// settles are the outcomes of the settle waits. The target restarts
 		// after the longest backoff.
-		settles   []bool
-		exitsLate []int
-		runsOut   []int
+		settles     []bool
+		exitsLate   []int
+		runsOut     []int
+		returnsLate bool
 		// waits is what the Runner's waits take, which shows the case holds
 		// what it names.
 		waits time.Duration
@@ -156,6 +184,8 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 		{name: "a recreate that does not settle", timeouts: long,
 			ops: []Op{createOp, {Type: OpRecreate, Obj: widget("widget"), NoSettle: true}, settleOp}},
 		{name: "a restart", timeouts: long, ops: []Op{createOp, {Type: OpRestart}, settleOp}},
+		{name: "a restart the target returns from late", timeouts: long,
+			ops: []Op{createOp, {Type: OpRestart}, settleOp}, returnsLate: true},
 		{name: "a deleteManaged", timeouts: long, ops: []Op{createOp, {Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)}}},
 		{name: "a fault the teardown stops", timeouts: long,
 			ops: []Op{createOp, faultOp, updateOp, updateOp, updateOp}, settles: []bool{true, false, false, false},
@@ -180,11 +210,18 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 			waits: 9*time.Minute + 50*time.Second},
 		{name: "a delete that does not settle", timeouts: long,
 			ops: []Op{createOp, {Type: OpDelete, NoSettle: true}, settleOp}},
+		{name: "a deleteFixture", timeouts: long,
+			ops: []Op{createOp, {Type: OpDeleteFixture, Kind: "v1/Secret", Name: "token", Until: &Until{Op: 2}}, settleOp}},
+		{name: "exits the target returns from late", timeouts: target.DefaultTimeouts,
+			ops: []Op{createOp, faultOp, updateOp}, settles: []bool{true, false}, exitsLate: []int{2, 3}, returnsLate: true,
+			waits: 22*time.Minute + 20*time.Second},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newWaitingHarness(test.timeouts)
 			h.settles, h.exitsLate, h.restartsIn, h.runsOut = test.settles, test.exitsLate, launch.MaxBackoff, test.runsOut
+			h.returnsLate = test.returnsLate
 			exercised, sequence := withTimeouts(test.timeouts), sequenceOf(test.ops...)
+			exercised.Fixtures = withSecret().Fixtures
 
 			if _, err := runSequence(t.Context(), exercised, sequence, Options{Check: &fakeChecker{}}, h); err != nil {
 				t.Fatalf("The run failed: %v", err)
@@ -245,9 +282,11 @@ func TestBoundAddsWhatEachOpCanWait(t *testing.T) {
 		{"a delete that does not settle", Op{Type: OpDelete, NoSettle: true}, timeouts.Delete},
 		{"a recreate", Op{Type: OpRecreate, Obj: widget("widget")}, timeouts.Delete + timeouts.Settle},
 		{"a recreate that does not settle", Op{Type: OpRecreate, Obj: widget("widget"), NoSettle: true}, timeouts.Delete},
-		{"a restart", Op{Type: OpRestart}, launch.RestartWithin},
+		{"a restart", Op{Type: OpRestart}, launch.RestartWithin + timeouts.Settle},
 		{"a deleteManaged", Op{Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)}, timeouts.Settle},
 		{"a settle", settleOp, timeouts.Settle},
+		{"an updateFixture", Op{Type: OpUpdateFixture, Kind: "v1/Secret", Name: "token", Patch: map[string]any{"data": nil}}, timeouts.Settle},
+		{"a deleteFixture", Op{Type: OpDeleteFixture, Kind: "v1/Secret", Name: "token", Until: &Until{Op: 2}}, timeouts.Delete},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if adds := Bound(defaults, sequenceOf(createOp, test.op)) - alone; adds != test.adds {
@@ -267,14 +306,15 @@ func TestBoundOfACreateAlone(t *testing.T) {
 }
 
 // A target that exits while a fault excuses it restarts after a backoff of up
-// to 5m and is owed T_settle past the restart. Once faults stop, they are owed
-// as long as they lasted and T_settle. So each fault allows an exit, and each
-// time faults stop the time before the teardown doubles and another exit is
-// allowed. Faults with no trigger stop together at the teardown.
+// to 5m, and is owed T_settle past its return, which can come T_settle after
+// the restart. Once faults stop, they are owed as long as they lasted and
+// T_settle. So each fault allows an exit, and each time faults stop the time
+// before the teardown doubles and another exit is allowed. Faults with no
+// trigger stop together at the teardown.
 func TestBoundDoublesTheRunEachTimeFaultsStop(t *testing.T) {
 	defaults := withTimeouts(target.DefaultTimeouts)
 	const settle, teardown = 30 * time.Second, 140 * time.Second
-	exit := launch.MaxBackoff + settle
+	exit := launch.MaxBackoff + 2*settle
 	stop := func(before time.Duration) time.Duration { return 2*before + settle + exit }
 	// The start, the create and the update take 90s.
 	const run = 90 * time.Second

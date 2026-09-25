@@ -96,7 +96,7 @@ examples/cert-manager/quickstart.sh --seed 23
 ```
 
 ```
-the deadline is 25m50s: these 5 runs can take 21m50s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.
+the deadline is 25m20s: these 5 runs can take 21m20s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.
 run 1: seed 23, generated
 run 2: seed 24, generated
 run 3: seed 25, generated

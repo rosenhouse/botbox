@@ -41,8 +41,9 @@ func TestG3FiresOnAnOrphanTheCollectorCannotReach(t *testing.T) {
 	if violation.ID != "G3" {
 		t.Errorf("The violation is %q, want G3.", violation.ID)
 	}
-	if !strings.Contains(violation.Statement, "w-0") || !strings.Contains(violation.Statement, "ownerReference") {
-		t.Errorf("The statement is %q, want it to name the orphan w-0.", violation.Statement)
+	if want := "the v1/ConfigMap w-0 was still there 10s after w, the last CR it may belong to, was deleted, " +
+		"orphaned: it carries no ownerReference to the CR"; violation.Statement != want {
+		t.Errorf("The statement is %q, want %q.", violation.Statement, want)
 	}
 	if want := timelineOf(configMapGVK, "w-0"); violation.VersionsOf != want {
 		t.Errorf("The timeline is of %q, want %q.", violation.VersionsOf, want)

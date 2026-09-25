@@ -1819,9 +1819,9 @@ built from source and run as a black-box binary.
 - **D63 A settle wait converges only once the target has shown it runs since it last
   started.** Nothing changes while a restarted target starts up, so a settle wait after a
   `Restart`, or after `Supervise` restarted the target, converged before the target was
-  back. The correct toy behind a wrapper that delayed each restart by 5 s came back inside
-  the quiet window after a `deleteManaged` and failed G1 there. With a 2.2 s delay and a
-  `T_stable` of 1 s, it failed P1 instead. A wait now converges only once the process
+  back. The correct toy behind a wrapper that delayed each restart by 5 s, or by 2.2 s
+  with a `T_stable` of 1 s, was not back when the wait after a `deleteManaged` converged.
+  P1 failed there, and G7 only noted the op. A wait now converges only once the process
   running now has requested a resource outside leader election, the sign G7 reads (D60),
   and that request counts as a change, so the target's startup falls inside the wait. A
   controller lists what it watches as it starts, so a correct one makes such a request.

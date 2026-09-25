@@ -166,11 +166,11 @@ run 1: G3 the v1/Secret example-secret was still there 1m0s after example, the l
 
 ## Your own controller
 
-A target is one YAML file, here `examples/cert-manager/target.yaml` trimmed. Four keys are
+A target is one YAML file. This one is adapted from `examples/cert-manager/target.yaml`, and
+[docs/reference.md](docs/reference.md) lists every key with its default. Four keys are
 required: `name`, `primary`, `sample` and `launch.binary`. Everything else is optional. A target
 that declares no `ready` is judged by `has(status.observedGeneration) && status.observedGeneration
-== metadata.generation`, so declare one if your CR does not carry `observedGeneration`
-([DESIGN.md §8.1](DESIGN.md#81-targetyaml)).
+== metadata.generation`, so declare one if your CR does not carry `observedGeneration`.
 
 ```yaml
 name: cert-manager
@@ -189,6 +189,13 @@ ready: >-                                     # CEL over metadata, spec, status;
   has(status.conditions) && status.conditions.exists(c,
     c.type == "Ready" && c.status == "True"
     && has(c.observedGeneration) && c.observedGeneration == metadata.generation)
+properties:                                   # checks of your own, CEL over the CR and what it manages
+  - id: P1
+    description: A Ready Certificate's Secret exists.
+    cel: >-
+      !has(status.conditions)
+      || !status.conditions.exists(c, c.type == "Ready" && c.status == "True")
+      || managed.exists(o, o.kind == "Secret" && o.metadata.name == spec.secretName)
 generate:
   distinct:                                   # spec paths no two CRs may share, such as a child's name
     - spec.secretName
@@ -338,6 +345,8 @@ plural the API server serves, such as `configmaps`. botbox refuses any other val
 the fault would match nothing. A run notes each fault the proxy applied to no request.
 The deadline botbox derives allows for how long each fault can hold a run open, which for a
 few faults that stop one after another is hours. Give a sequence with faults `--deadline`.
+[docs/reference.md](docs/reference.md#sequences) lists every op and fault field, and its example
+sequence sets each one.
 
 Field values come from the CRD's own schema: its numeric ranges, enums, patterns, list
 lengths and map sizes. Every CR botbox draws also passes the CRD's validation rules, CEL
@@ -373,7 +382,7 @@ inside a list, so a run notes a path such as `status.conditions.lastHeartbeatTim
 where the `[*]` goes.
 
 A sequence file runs as written and is never minimized. This is
-`examples/cert-manager/sequences/issue.json`, reflowed ([DESIGN.md §7](DESIGN.md#7-sequence-format)):
+`examples/cert-manager/sequences/issue.json`, reflowed:
 
 ```json
 {"seed": 20260920, "target": "cert-manager", "ops": [
@@ -635,12 +644,12 @@ Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-gene
 
 | ID | Checks |
 |---|---|
-| G1 | Bounded reconciliation. Under an unchanged spec, one quiet window holds no more requests than `quiet` allows, zero by default. |
+| G1 | Bounded reconciliation. Under an unchanged spec, one quiet window holds no more requests than `thresholds.quiet` allows, zero by default. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
 | G3 | Clean deletion. Deleting a CR removes everything it manages and clears its finalizers. |
-| G4 | Convergence. `ready` holds on every CR within `T_settle` of every spec change, `updateFixture` or return of a deleted fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
+| G4 | Convergence. `ready` holds on every CR within `timeouts.settle` of every spec change, `updateFixture` or return of a deleted fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
-| G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
+| G6 | No error loop. The target does not repeat one failing request more than `thresholds.errloop` times. |
 | G7 | Self-healing. An object `deleteManaged` deletes exists again, by kind and name, once the run settles. |
 
 [docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs. Each bug's sequence also runs against the toy with no bug, and CI fails if a check fires there.

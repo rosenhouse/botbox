@@ -2,9 +2,11 @@ package target
 
 import (
 	"os"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,9 +21,9 @@ const (
 )
 
 func TestTheReferenceListsEveryKey(t *testing.T) {
-	keys := declaredKeys(reflect.TypeFor[declaration](), "")
+	keys := reference.Keys(reflect.TypeFor[declaration]())
 
-	documented := reference.Keys(t, keysHeading)
+	documented := reference.Listed(t, keysHeading)
 
 	for _, key := range keys {
 		if !slices.Contains(documented, key) {
@@ -41,8 +43,9 @@ func TestTheReferenceGivesEachDefault(t *testing.T) {
 		"timeouts.stable": DefaultTimeouts.Stable,
 		"timeouts.delete": DefaultTimeouts.Delete,
 	} {
-		if got, err := time.ParseDuration(documentedDefault(t, key)); err != nil || got != want {
-			t.Errorf("The reference gives %s the default %q, want %s.", key, documentedDefault(t, key), want)
+		documented := documentedDefault(t, key)
+		if got, err := time.ParseDuration(documented); err != nil || got != want {
+			t.Errorf("The reference gives %s the default %q, want %s.", key, documented, want)
 		}
 	}
 	for key, want := range map[string]string{
@@ -67,6 +70,78 @@ func documentedDefault(t *testing.T, key string) string {
 	return spans[0]
 }
 
+// A target of the keys the reference calls required loads, and one that lacks
+// any of them does not.
+func TestTheReferenceSaysWhichKeysAreRequired(t *testing.T) {
+	sample, err := filepath.Abs("../../targets/toy-widget/widget.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	values := map[string]any{
+		"name":              "toy-widget",
+		"primary":           "toy.botbox/v1/Widget",
+		"sample":            sample,
+		"launch.binary":     "bin/toy-widget",
+		"properties[*].id":  "P1",
+		"properties[*].cel": "true",
+	}
+	var required []string
+	for _, key := range reference.Keys(reflect.TypeFor[declaration]()) {
+		if reference.Row(t, keysHeading, key)[0] == "required" {
+			required = append(required, key)
+		}
+	}
+
+	if err := loadKeys(t, values, required); err != nil {
+		t.Errorf("A target of the required keys %v does not load: %v", required, err)
+	}
+	for _, key := range required {
+		if err := loadKeys(t, values, slices.DeleteFunc(slices.Clone(required), func(k string) bool { return k == key })); err == nil {
+			t.Errorf("A target without %s loads, and the reference says it is required.", key)
+		}
+	}
+}
+
+// loadKeys loads a target that sets each key to its value, where [*] stands
+// for a list of one item.
+func loadKeys(t *testing.T, values map[string]any, keys []string) error {
+	t.Helper()
+	declared := map[string]any{}
+	for _, key := range keys {
+		value, known := values[key]
+		if !known {
+			t.Fatalf("The test has no value for the required key %s.", key)
+		}
+		steps := strings.Split(key, ".")
+		block := declared
+		for _, step := range steps[:len(steps)-1] {
+			name, isList := strings.CutSuffix(step, "[*]")
+			if block[name] == nil {
+				block[name] = map[string]any{}
+				if isList {
+					block[name] = []any{map[string]any{}}
+				}
+			}
+			if isList {
+				block = block[name].([]any)[0].(map[string]any)
+			} else {
+				block = block[name].(map[string]any)
+			}
+		}
+		block[steps[len(steps)-1]] = value
+	}
+	data, err := yaml.Marshal(declared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "target.yaml")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = Load(path)
+	return err
+}
+
 // equal replaces what equalIgnore feeds, and the loader refuses the two
 // together.
 func TestTheReferenceExampleSetsEveryKeyButEqual(t *testing.T) {
@@ -79,58 +154,12 @@ func TestTheReferenceExampleSetsEveryKeyButEqual(t *testing.T) {
 		t.Fatalf("%s does not decode: %v", referenceExample, err)
 	}
 
-	if unset := unsetKeys(reflect.ValueOf(declared), ""); !slices.Equal(unset, []string{"equal"}) {
+	set := reference.SetKeys(reflect.ValueOf(declared))
+	unset := slices.DeleteFunc(reference.Keys(reflect.TypeFor[declaration]()), func(key string) bool { return slices.Contains(set, key) })
+	if !slices.Equal(unset, []string{"equal"}) {
 		t.Errorf("%s leaves %v unset, want equal alone.", referenceExample, unset)
 	}
 	if _, err := Load(referenceExample); err != nil {
 		t.Errorf("Load rejected the example: %v", err)
 	}
-}
-
-// declaredKeys lists the keys a declaration type takes, dotted, with [*] for
-// each item of a list or value of a map. A block of keys is not a key itself.
-func declaredKeys(declared reflect.Type, prefix string) []string {
-	var keys []string
-	for field := range declared.Fields() {
-		key := prefix + jsonName(field)
-		switch element := itemStruct(field.Type); {
-		case field.Type.Kind() == reflect.Struct:
-			keys = append(keys, declaredKeys(field.Type, key+".")...)
-		case element != nil:
-			keys = append(keys, key)
-			keys = append(keys, declaredKeys(element, key+"[*].")...)
-		default:
-			keys = append(keys, key)
-		}
-	}
-	return keys
-}
-
-// unsetKeys lists the keys declaredKeys names that a declaration leaves unset,
-// in any item of a list or value of a map.
-func unsetKeys(declared reflect.Value, prefix string) []string {
-	var unset []string
-	for i, field := range slices.Collect(declared.Type().Fields()) {
-		key, value := prefix+jsonName(field), declared.Field(i)
-		switch {
-		case value.Kind() == reflect.Struct:
-			unset = append(unset, unsetKeys(value, key+".")...)
-		case value.IsZero() || (value.Kind() == reflect.Slice || value.Kind() == reflect.Map) && value.Len() == 0:
-			unset = append(unset, key)
-		case itemStruct(field.Type) != nil:
-			for _, item := range value.Seq2() {
-				unset = append(unset, unsetKeys(item, key+"[*].")...)
-			}
-		}
-	}
-	slices.Sort(unset)
-	return slices.Compact(unset)
-}
-
-// itemStruct is the struct a list or a map holds, or nil.
-func itemStruct(declared reflect.Type) reflect.Type {
-	if kind := declared.Kind(); (kind == reflect.Slice || kind == reflect.Map) && declared.Elem().Kind() == reflect.Struct {
-		return declared.Elem()
-	}
-	return nil
 }

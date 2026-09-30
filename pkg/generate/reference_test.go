@@ -11,10 +11,8 @@ import (
 func TestTheReferenceNamesEveryOverlayKeyword(t *testing.T) {
 	documented := reference.Spans(reference.Row(t, "## target.yaml", "generate.overlay")[1])
 
-	for _, keyword := range keywords {
-		if !slices.Contains(documented, keyword) {
-			t.Errorf("The row for generate.overlay does not name %s.", keyword)
-		}
+	if !slices.Equal(slices.Sorted(slices.Values(documented)), keywords) {
+		t.Errorf("The row for generate.overlay names %v, want the keywords botbox reads, %v.", documented, keywords)
 	}
 }
 

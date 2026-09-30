@@ -1,11 +1,9 @@
 package run
 
 import (
-	"encoding/json"
 	"maps"
 	"reflect"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/rosenhouse/botbox/internal/reference"
@@ -17,25 +15,28 @@ const (
 	referenceSequence = "../../docs/reference/sequence.json"
 )
 
-func TestTheReferenceListsEveryField(t *testing.T) {
-	for _, test := range []struct {
-		heading string
-		fields  []string
-	}{
-		{"### Sequence fields", fieldKeys(reflect.TypeFor[Sequence](), "", reflect.TypeFor[Op]())},
-		{"### Op fields", fieldKeys(reflect.TypeFor[Op](), "", reflect.TypeFor[Fault]())},
-		{"### Fault fields", fieldKeys(reflect.TypeFor[Fault](), "", nil)},
-	} {
-		t.Run(test.heading, func(t *testing.T) {
-			documented := reference.Keys(t, test.heading)
+var (
+	sequenceKeys = reference.Keys(reflect.TypeFor[Sequence](), reflect.TypeFor[Op]())
+	opKeys       = reference.Keys(reflect.TypeFor[Op](), reflect.TypeFor[Fault]())
+	faultKeys    = reference.Keys(reflect.TypeFor[Fault]())
+)
 
-			for _, field := range test.fields {
+func TestTheReferenceListsEveryField(t *testing.T) {
+	for heading, fields := range map[string][]string{
+		"### Sequence fields": sequenceKeys,
+		"### Op fields":       opKeys,
+		"### Fault fields":    faultKeys,
+	} {
+		t.Run(heading, func(t *testing.T) {
+			documented := reference.Listed(t, heading)
+
+			for _, field := range fields {
 				if !slices.Contains(documented, field) {
 					t.Errorf("%s has no row for %s.", reference.Path, field)
 				}
 			}
 			for _, row := range documented {
-				if !slices.Contains(test.fields, row) {
+				if !slices.Contains(fields, row) {
 					t.Errorf("%s has a row for %s, which is no such field.", reference.Path, row)
 				}
 			}
@@ -49,7 +50,7 @@ func TestTheReferenceListsEveryOpType(t *testing.T) {
 		want = append(want, string(opType))
 	}
 
-	if documented := reference.Keys(t, opsHeading); !slices.Equal(documented, want) {
+	if documented := reference.Listed(t, opsHeading); !slices.Equal(documented, want) {
 		t.Errorf("%s lists the ops %v, want %v.", reference.Path, documented, want)
 	}
 }
@@ -101,82 +102,29 @@ func TestTheReferenceSequenceHoldsEveryOpAndSetsEveryField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	held, opFields, faultFields := map[OpType]bool{}, map[string]bool{}, map[string]bool{}
+	var held []OpType
+	var opsSet, faultsSet []string
 	for _, op := range sequence.Ops {
-		held[op.Type] = true
-		for _, field := range setFieldKeys(reflect.ValueOf(op), "", reflect.TypeFor[Fault]()) {
-			opFields[field] = true
-		}
+		held = append(held, op.Type)
+		opsSet = append(opsSet, reference.SetKeys(reflect.ValueOf(op), reflect.TypeFor[Fault]())...)
 		if op.Fault != nil {
-			for _, field := range setFieldKeys(reflect.ValueOf(*op.Fault), "", nil) {
-				faultFields[field] = true
-			}
+			faultsSet = append(faultsSet, reference.SetKeys(reflect.ValueOf(*op.Fault))...)
 		}
 	}
 
 	for _, opType := range opTypes {
-		if !held[opType] {
+		if !slices.Contains(held, opType) {
 			t.Errorf("%s holds no %s op.", referenceSequence, opType)
 		}
 	}
-	for _, field := range fieldKeys(reflect.TypeFor[Op](), "", reflect.TypeFor[Fault]()) {
-		if !opFields[field] {
+	for _, field := range opKeys {
+		if !slices.Contains(opsSet, field) {
 			t.Errorf("No op in %s sets %s.", referenceSequence, field)
 		}
 	}
-	for _, field := range fieldKeys(reflect.TypeFor[Fault](), "", nil) {
-		if !faultFields[field] {
+	for _, field := range faultKeys {
+		if !slices.Contains(faultsSet, field) {
 			t.Errorf("No fault in %s sets %s.", referenceSequence, field)
 		}
 	}
-}
-
-// fieldKeys lists the JSON fields a type takes, dotted. A nested object is not
-// a field itself. The fields of stop, and of a type that marshals itself, are
-// not listed.
-func fieldKeys(declared reflect.Type, prefix string, stop reflect.Type) []string {
-	var keys []string
-	for field := range declared.Fields() {
-		key := prefix + jsonField(field)
-		if nested := nestedObject(field.Type, stop); nested != nil {
-			keys = append(keys, fieldKeys(nested, key+".", stop)...)
-			continue
-		}
-		keys = append(keys, key)
-	}
-	return keys
-}
-
-// setFieldKeys lists the fields fieldKeys names that a value sets.
-func setFieldKeys(value reflect.Value, prefix string, stop reflect.Type) []string {
-	var keys []string
-	for i, field := range slices.Collect(value.Type().Fields()) {
-		key, set := prefix+jsonField(field), value.Field(i)
-		switch nested := nestedObject(field.Type, stop); {
-		case set.IsZero():
-		case nested != nil:
-			keys = append(keys, setFieldKeys(reflect.Indirect(set), key+".", stop)...)
-		default:
-			keys = append(keys, key)
-		}
-	}
-	return keys
-}
-
-// nestedObject is the struct a field holds, directly or through a pointer,
-// unless it is stop or marshals itself. It is nil otherwise.
-func nestedObject(field, stop reflect.Type) reflect.Type {
-	if field.Kind() == reflect.Pointer {
-		field = field.Elem()
-	}
-	marshaler := reflect.TypeFor[json.Marshaler]()
-	if field.Kind() != reflect.Struct || field == stop || field.Implements(marshaler) || reflect.PointerTo(field).Implements(marshaler) {
-		return nil
-	}
-	return field
-}
-
-func jsonField(field reflect.StructField) string {
-	name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
-	return name
 }

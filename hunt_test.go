@@ -385,6 +385,27 @@ func TestNoPullRequestReachesAHunt(t *testing.T) {
 	}
 }
 
+func TestMakeHelpListsEveryTarget(t *testing.T) {
+	if _, err := exec.LookPath("make"); err != nil {
+		t.Skipf("The Makefile needs make: %v", err)
+	}
+	cmd := exec.Command("make", "--no-print-directory", "help")
+	cmd.Env = outsideMake(os.Environ())
+	help, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("make help: %v", err)
+	}
+	targets := regexp.MustCompile(`(?m)^\.PHONY: (\S+)$`).FindAllStringSubmatch(readFile(t, "Makefile"), -1)
+	if len(targets) == 0 {
+		t.Fatal("the Makefile declares no phony target, so this test checks nothing")
+	}
+	for _, m := range targets {
+		if listed := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(m[1]) + ` `); m[1] != "help" && !listed.Match(help) {
+			t.Errorf("make help does not list %s:\n%s", m[1], help)
+		}
+	}
+}
+
 // triggers names the events a workflow's on key lists, in any of its forms.
 func triggers(on any) []string {
 	switch on := on.(type) {

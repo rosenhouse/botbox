@@ -456,11 +456,11 @@ controller has `settle` to come back, and `settle` past its return to converge. 
 controller that crashes again within `stable` of each return never converges, even where
 it wrote its converged state first, so G4 reports it and quotes the last exit.
 A controller that exits during a fault, or while it recovers from one, has the same once
-botbox restarts it. While a fault is active, only the first exit after each fault began
-gets that time, since the fault excuses the wait anyway. Once no fault is active, botbox
-applies no op while your controller waits to restart after such an exit. A controller that
-keeps crashing under a fault therefore fails G4 once the fault stops, or once the teardown
-clears it. G7 notes a `deleteManaged` after a restart that follows an exit as it does one
+botbox restarts it. While a fault is active, only its first such exit during each op gets
+that time, so a wait in which it exits again can end while it waits to restart, and the
+properties are checked there. botbox applies no op while your controller waits to restart
+after such an exit. A controller that keeps crashing under a fault therefore fails G4 once
+the fault stops, or once the teardown clears it. G7 notes a `deleteManaged` after a restart that follows an exit as it does one
 after a `restart`, and notes one where your controller exited, or waited to restart,
 during the op or its settle wait.
 The toy controller converges a count of 0 and then crashes under `--launch-arg --bug=12`,

@@ -8,8 +8,8 @@ import (
 // Owed is when the target must have converged by, after the faults that
 // stopped by t. An exit the faults excused owes what settledBy gives its
 // restart, since botbox chose the restart's backoff. While a fault is active,
-// only the first exit after each fault began owes it, so that a crash loop
-// under a fault is not owed time for good. Owed is zero where the target owes
+// only the first such exit during each op owes it, so that a crash loop under
+// a fault is not owed time for good. Owed is zero where the target owes
 // nothing.
 func (in Input) Owed(t time.Time) time.Time {
 	owed := in.faultsOwed(t)
@@ -17,20 +17,19 @@ func (in Input) Owed(t time.Time) time.Time {
 	active := in.faulted(t, t)
 	for _, exit := range in.Exits {
 		excused := !exit.At.After(t) && exit.At.After(recovered) && in.faultsExcuse(exit.At)
-		if excused && (!active || in.firstExitOfAFault(exit.At)) {
+		if excused && (!active || in.firstExcusedExitDuringItsOp(exit)) {
 			owed = later(owed, in.settledBy(exit.Restart))
 		}
 	}
 	return owed
 }
 
-// firstExitOfAFault reports whether an exit at t is the target's first since
-// some fault began.
-func (in Input) firstExitOfAFault(t time.Time) bool {
-	return slices.ContainsFunc(in.Faults, func(fault FaultWindow) bool {
-		return !fault.Start.After(t) && !slices.ContainsFunc(in.Exits, func(exit Exit) bool {
-			return !exit.At.Before(fault.Start) && exit.At.Before(t)
-		})
+// firstExcusedExitDuringItsOp reports whether no earlier exit the faults
+// excused came since the op before this one.
+func (in Input) firstExcusedExitDuringItsOp(exit Exit) bool {
+	op := in.opBy(exit.At)
+	return !slices.ContainsFunc(in.Exits, func(earlier Exit) bool {
+		return !earlier.At.Before(op.Time) && earlier.At.Before(exit.At) && in.faultsExcuse(earlier.At)
 	})
 }
 
@@ -74,12 +73,8 @@ func (in Input) faultsExcuse(t time.Time) bool {
 }
 
 // PendingRestart is when the target starts again after an exit the faults
-// excused, where it is waiting to at t and no fault is active then. It is zero
-// otherwise.
+// excused, where it is waiting to at t. It is zero otherwise.
 func (in Input) PendingRestart(t time.Time) time.Time {
-	if in.faulted(t, t) {
-		return time.Time{}
-	}
 	for _, exit := range in.Exits {
 		if !exit.At.After(t) && exit.Restart.After(t) && in.faultsExcuse(exit.At) {
 			return exit.Restart

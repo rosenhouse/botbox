@@ -286,10 +286,10 @@ The Runner executes one sequence:
    restart the target after a `Restart` op and after an exit a fault excuses (§6), so a
    wait gives it `T_settle` past its return from either, where it returns within `T_settle`
    of the restart, and `T_settle` past the restart where it does not. While a fault is
-   active, only the first exit after each fault began gets that time (§6). Where no fault
-   is active as an op is about to be stamped, the Runner first waits for any restart that
-   follows an exit a fault excused, so the op never lands while the target waits for it.
-   Any other restart gives it no more time, and its startup requests count toward G1 where
+   active, only the first exit a fault excused during each op gets that time (§6). An exit
+   is during the last op stamped before it. Before it stamps an op, the Runner waits for
+   any restart that follows an exit a fault excused, so the op never lands while the
+   target waits for it. Any other restart gives it no more time, and its startup requests count toward G1 where
    they land in a quiet window (§6). A target not back when a wait expires fails G4. A
    restart that fails ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
@@ -480,13 +480,14 @@ time early. A target that exits while a fault excuses it, as controller-runtime 
 leader election on does when it loses its lease, then waits out the restart's backoff
 (§5.1), which botbox chose. G4 gives it `T_settle` past its return from that restart too,
 as after a `Restart` (§5.5), and does not judge a window the exit falls in, as it does not
-judge one a fault reaches into. While a fault is active, only the target's first exit
-after each fault began is owed that time. A fault excuses every wait it is active in, and
-owing each later exit would hold a crash loop's wait open for as long as the fault lasts.
-Once no fault is active, every exit a fault excused is owed its time, and no op lands while
-the target waits to restart after one (§5.5). Only a fault excuses an exit, so a crash loop
-that a fault set off still fails G4, at the latest in the wait the teardown gives the
-target once it has cleared the faults.
+judge one a fault reaches into. While a fault is active, only the target's first such exit
+during each op is owed that time, because owing each later exit would hold a crash loop's
+wait open for as long as the fault lasts. A wait in which the target exits again can
+therefore end while it waits to restart, and the properties are checked there. No op
+lands while the target waits to restart after an exit a fault excused (§5.5). Once no
+fault is active, every exit a fault excused is owed its time. Only a fault excuses an exit,
+so a crash loop that a fault set off still fails G4, at the latest in the wait the teardown
+gives the target once it has cleared the faults.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -1913,16 +1914,17 @@ built from source and run as a black-box binary.
   for the target's return (D69), the teardown, stopping the target and deleting the
   namespace. A target that exits while a fault excuses it is owed `T_settle` past its
   return, which can come `T_settle` after a restart whose backoff can reach 5 min (§5.1),
-  so each fault op allows one such exit. Faults that stopped are owed as long as they
-  lasted plus `T_settle` (§6), so each time faults stop, the deadline doubles what the run
-  had and allows another exit. Faults with no trigger stop together, at the teardown.
-  Minimizing gets what the runs left plus 4m, so it may still stop early. At §6's
-  timeouts, a create and an update get 3m50s, and ten drawn runs tens of minutes. A fault
-  that stops before the update raises the 3m50s to 24 min. Four such faults, each before
-  an update of its own, give 9 h, past GitHub Actions' 6 h job limit. botbox prints the
-  deadline, and a sequence with faults should set `--deadline`. An explicit `--deadline`
-  must be positive and is used as given. The derived deadline ends no run the Runner would
-  end on its own, unless a request hangs.
+  so from the first fault op on, each op allows one such exit (§6). Each op after it may
+  first wait up to 5 min for a restart (§5.5). Faults that stopped are owed as long as
+  they lasted plus `T_settle` (§6), so each time faults stop, the deadline doubles what
+  the run had and allows another exit. Faults with no trigger stop together, at the
+  teardown. Minimizing gets what the runs left plus 4m, so it may still stop early. At
+  §6's timeouts, a create and an update get 3m50s, and ten drawn runs tens of minutes. A
+  fault that stops before the update raises the 3m50s to 46 min. Four such faults, each
+  before an update of its own, give 25 h, past GitHub Actions' 6 h job limit. botbox
+  prints the deadline, and a sequence with faults should set `--deadline`. An explicit
+  `--deadline` must be positive and is used as given. The derived deadline ends no run the
+  Runner would end on its own, unless a request hangs.
 - **D65 G6 counts each namespace's requests apart.** Ten runs of external-secrets with
   no flags failed G6 at run 8: the controller repeated `create events` 34 times in 30 s.
   None went to the run namespace. envtest never finishes deleting a namespace, so each
@@ -2048,21 +2050,19 @@ built from source and run as a black-box binary.
   `sequence.json`, `kubeconfig` and `target.log`, under a summary that said the directory
   held a partial run of the minimized sequence. Naming the run each file came from was
   rejected, because a run that ends replaces the drawn run's recordings anyway.
-- **D@79 While a fault is active, a wait owes only the first exit after each fault
-  began.** B12, under a fault that never stopped, crashed six times and ran until a 3m
-  deadline. Each exit the fault excused owed `T_settle` past a restart whose backoff
-  doubled, so the wait after the update never ended, and the derived deadline was 2h45m.
-  A fault excuses every wait it is active in, so owing a later exit changes no verdict.
-  Once no fault is active, every exit a fault excused is owed, and nothing excuses an exit
-  past the faults' recovery. B12 therefore fails G4 in the teardown's recovery wait, about
-  100 s in. A wait that ends sooner could let the next op land during a backoff of up to
-  5 min, where G3 would judge a deletion the target cannot act on. A fault active as the op
-  lands reaches every window the op opens, so the Runner waits for such a restart only
-  where no fault is active. It waits for the restart, not the return, because G4 still
-  owes `T_settle` past the return, and G7 notes a `deleteManaged` the target was not back
-  for. Owing the first exit since the target last converged was rejected: a target that
-  converges between exits would be owed an exit per wait, which no count of fault ops
-  bounds. The derived deadline allows an exit per fault op, so it now ends no run the
-  Runner would end on its own. The toy's `--lease` elects a leader, so a fault on leases
-  makes the correct toy exit as controller-runtime does. Under a fault that failed 80% of
-  lease updates until the teardown, it lost its lease twice and passed.
+- **D@79 While a fault is active, a wait owes only the first exit during each op, and no
+  op lands while the target waits to restart.** B12, under a fault that never stopped,
+  crashed six times and ran until a 3m deadline. Each exit the fault excused owed
+  `T_settle` past a restart whose backoff doubled, so the wait after the update never
+  ended, and the derived deadline was 2h45m. Owing one exit per op bounds each wait, and a
+  correct controller that loses its lease once during an op still gets `T_settle` past its
+  return before the next op. Once no fault is active, every exit a fault excused is owed,
+  and nothing excuses an exit past the faults' recovery. B12 therefore fails G4 in the
+  teardown's recovery wait, about a minute in. Owing only the first exit after each fault
+  began was rejected. Under a fault that failed 80% of its lease updates, the correct toy
+  then saw a `deleteManaged` land while it waited out a later backoff, and P1 failed. A
+  `recreate` in its place ended as a harness error. A fault excuses G4, not a property, so
+  the Runner waits for such a restart before each op whatever the faults. The derived
+  deadline allows an exit per op from the first fault op on and a backoff per op after it,
+  so it ends no run the Runner would end on its own. The toy's `--lease` elects a leader,
+  so a fault on leases makes the correct toy exit as controller-runtime does.

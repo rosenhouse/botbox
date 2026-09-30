@@ -96,10 +96,10 @@ func TestOwedRunsPastTheReturnFromAnExitAFaultExcused(t *testing.T) {
 
 // A crash loop under a fault that never stops would otherwise be owed time for
 // good. Once no fault is active, every exit a fault excused is owed.
-func TestWhileAFaultIsActiveOnlyTheFirstExitAfterEachFaultBeganIsOwed(t *testing.T) {
+func TestWhileAFaultIsActiveOnlyTheFirstExitDuringEachOpIsOwed(t *testing.T) {
 	crashLoop := func(faultEnd time.Duration) *run {
-		return newRun().fault(time.Second, faultEnd).exit(3*time.Second, 3*time.Second).running(3500*time.Millisecond).
-			exit(4*time.Second, 14*time.Second).exit(14500*time.Millisecond, 34500*time.Millisecond)
+		return newRun().fault(time.Second, faultEnd).op(invariant.OpUpdate, 2*time.Second).exit(3*time.Second, 3*time.Second).
+			running(3500*time.Millisecond).exit(4*time.Second, 14*time.Second).exit(14500*time.Millisecond, 34500*time.Millisecond)
 	}
 	for _, test := range []struct {
 		name string
@@ -110,22 +110,27 @@ func TestWhileAFaultIsActiveOnlyTheFirstExitAfterEachFaultBeganIsOwed(t *testing
 	}{
 		{name: "a crash loop under an active fault", run: crashLoop(time.Minute), at: 20 * time.Second, want: 8500 * time.Millisecond},
 		{name: "a crash loop once the fault stopped", run: crashLoop(16 * time.Second), at: 20 * time.Second, want: 39500 * time.Millisecond},
-		{name: "the first exits after each of two faults",
-			run: newRun().fault(time.Second, time.Minute).fault(10*time.Second, time.Minute).exit(3*time.Second, 3*time.Second).
-				exit(4*time.Second, 14*time.Second).exit(12*time.Second, 22*time.Second).exit(23*time.Second, 43*time.Second),
-			at: 30 * time.Second, want: 27 * time.Second},
+		{name: "the first exits during each of two ops",
+			run: newRun().fault(time.Second, time.Minute).op(invariant.OpUpdate, 2*time.Second).exit(3*time.Second, 3*time.Second).
+				exit(4*time.Second, 14*time.Second).op(invariant.OpSettle, 14*time.Second).exit(15*time.Second, 35*time.Second).
+				exit(36*time.Second, 56*time.Second),
+			at: 30 * time.Second, want: 40 * time.Second},
 		{name: "an exit no fault excused before one a fault did",
-			run: newRun().fault(time.Second, time.Minute).exit(500*time.Millisecond, 500*time.Millisecond).
+			run: newRun().op(invariant.OpUpdate, 0).fault(time.Second, time.Minute).exit(500*time.Millisecond, 500*time.Millisecond).
 				exit(2*time.Second, 12*time.Second).exit(12500*time.Millisecond, 32500*time.Millisecond),
 			at: 20 * time.Second, want: 17 * time.Second},
-		{name: "an exit before a later fault began",
-			run: newRun().fault(time.Second, time.Minute).fault(25*time.Second, time.Minute).exit(3*time.Second, 3*time.Second).
-				exit(4*time.Second, 14*time.Second),
-			at: 20 * time.Second, want: 8 * time.Second},
-		{name: "an exit after the target converged under the same fault",
+		{name: "an exit after the target converged during the same op",
 			run: newRun().op(invariant.OpCreate, 0).fault(time.Second, time.Minute).exit(3*time.Second, 3*time.Second).
 				checkpoint(10*time.Second, invariant.Converged).exit(12*time.Second, 22*time.Second),
 			at: 20 * time.Second},
+		{name: "an exit at the instant of an op",
+			run: newRun().fault(time.Second, time.Minute).op(invariant.OpUpdate, 2*time.Second).exit(3*time.Second, 3*time.Second).
+				op(invariant.OpSettle, 4*time.Second).exit(4*time.Second, 14*time.Second),
+			at: 10 * time.Second, want: 19 * time.Second},
+		{name: "an exit after one at the instant of an op",
+			run: newRun().fault(time.Second, time.Minute).op(invariant.OpUpdate, 2*time.Second).op(invariant.OpSettle, 4*time.Second).
+				exit(4*time.Second, 4*time.Second).running(4500*time.Millisecond).exit(5*time.Second, 15*time.Second),
+			at: 10 * time.Second, want: 9500 * time.Millisecond},
 		{name: "the first exit after a fault that stopped, while another is active",
 			run: newRun().fault(time.Second, 2*time.Second).exit(4*time.Second, 14*time.Second).fault(6*time.Second, time.Minute),
 			at:  10 * time.Second, want: 19 * time.Second},
@@ -136,9 +141,8 @@ func TestWhileAFaultIsActiveOnlyTheFirstExitAfterEachFaultBeganIsOwed(t *testing
 	}
 }
 
-// An op must not land while the target waits out a restart a fault excused,
-// unless a fault active then excuses the op.
-func TestPendingRestartIsARestartAFaultExcusedWithNoFaultActive(t *testing.T) {
+// No op lands while the target waits out a restart a fault excused.
+func TestPendingRestartIsARestartAFaultExcused(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		run  *run
@@ -149,7 +153,7 @@ func TestPendingRestartIsARestartAFaultExcusedWithNoFaultActive(t *testing.T) {
 		{name: "a restart after the fault stopped", run: newRun().fault(time.Second, 10*time.Second).exit(8*time.Second, 30*time.Second),
 			at: 12 * time.Second, want: 30 * time.Second},
 		{name: "a restart while the fault is active", run: newRun().fault(time.Second, 10*time.Second).exit(8*time.Second, 30*time.Second),
-			at: 9 * time.Second},
+			at: 9 * time.Second, want: 30 * time.Second},
 		{name: "a restart that came", run: newRun().fault(time.Second, 10*time.Second).exit(8*time.Second, 11*time.Second),
 			at: 12 * time.Second},
 		{name: "a restart at the instant asked about", run: newRun().fault(time.Second, 10*time.Second).exit(8*time.Second, 12*time.Second),
@@ -162,6 +166,14 @@ func TestPendingRestartIsARestartAFaultExcusedWithNoFaultActive(t *testing.T) {
 			at: 12 * time.Second},
 		{name: "an exit after the instant asked about", run: newRun().fault(time.Second, 10*time.Second).exit(13*time.Second, 30*time.Second),
 			at: 12 * time.Second},
+		{name: "a restart after an exit only another exit excused",
+			run: newRun().fault(time.Second, 2*time.Second).exit(7*time.Second, 7*time.Second).running(7500*time.Millisecond).
+				exit(10*time.Second, 30*time.Second),
+			at: 12 * time.Second},
+		{name: "a restart still pending where the target converged",
+			run: newRun().op(invariant.OpCreate, 0).fault(time.Second, 20*time.Second).exit(8*time.Second, 30*time.Second).
+				checkpoint(9*time.Second, invariant.Converged),
+			at: 12 * time.Second, want: 30 * time.Second},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			got := test.run.through(time.Minute).PendingRestart(at(test.at))

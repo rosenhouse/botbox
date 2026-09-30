@@ -3145,33 +3145,99 @@ func TestTheWaitAfterARestartIsOwedTSettlePastTheTargetsReturn(t *testing.T) {
 	}
 }
 
-// An op lands no sooner than a restart a fault excused, unless a fault active
-// then excuses the op. While the fault is active, the wait after op 2 is owed
-// only the first exit.
-func TestAnOpWaitsForARestartAFaultExcusedWhereNoFaultIsActive(t *testing.T) {
+// An op lands no sooner than a restart a fault excused. While the fault is
+// active, the wait after op 2 is owed only the first exit.
+func TestAnOpWaitsForARestartAFaultExcused(t *testing.T) {
 	for _, test := range []struct {
-		name  string
-		fault Op
-		waits bool
+		name      string
+		fault, op Op
 	}{
-		{name: "a fault that stops at the op", fault: faultUntil(3), waits: true},
-		{name: "a fault still active", fault: faultOp},
+		{name: "a fault that stops at the op", fault: faultUntil(3), op: Op{Type: OpDelete}},
+		{name: "a fault still active", fault: faultOp, op: Op{Type: OpDelete}},
+		{name: "a restart op", fault: faultOp, op: Op{Type: OpRestart}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newWaitingHarness(testTimeouts)
 			h.settles, h.exitsLate, h.restartsIn = []bool{true, false}, []int{2, 2}, time.Minute
 
-			result, err := runSequence(t.Context(), toyTarget, sequenceOf(createOp, test.fault, updateOp, Op{Type: OpDelete}),
+			result, err := runSequence(t.Context(), toyTarget, sequenceOf(createOp, test.fault, updateOp, test.op),
 				Options{Check: &fakeChecker{}}, h)
 
 			if err != nil {
 				t.Fatalf("The run failed: %v", err)
 			}
-			restart := h.exited[1].Restart
-			if landed := result.Timeline.Ops[3].At; landed.Equal(restart) != test.waits || landed.After(restart) {
-				t.Errorf("Op 3 landed %v before the restart; want it to wait for the restart: %t.", restart.Sub(landed), test.waits)
+			if landed, restart := result.Timeline.Ops[3].At, h.exited[1].Restart; !landed.Equal(restart) {
+				t.Errorf("Op 3 landed %v after the restart, want at it.", landed.Sub(restart))
 			}
 		})
+	}
+}
+
+// Under a fault still active, the target exits twice in the wait after op 2,
+// and then once during op 3. Op 3's wait is owed T_settle past the restart
+// after that exit, as op 2's is after its first.
+func TestAWaitUnderAFaultOwesTheFirstExitDuringItsOp(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		op    Op
+		exits func(*waitingHarness)
+		ended func(*waitingHarness, Result) time.Time
+	}{
+		{name: "a settle", op: settleOp,
+			exits: func(h *waitingHarness) { h.exitsLate = append(h.exitsLate, 3) },
+			ended: func(_ *waitingHarness, result Result) time.Time { return result.Timeline.Ops[3].Settled.Window.End }},
+		{name: "a recreate's wait for its CR to go", op: Op{Type: OpRecreate, Obj: widget("widget"), NoSettle: true},
+			exits: func(h *waitingHarness) { h.stopsAfter = "deleteCR widget" },
+			ended: func(h *waitingHarness, _ Result) time.Time { return h.awaitedUntil[0] }},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newWaitingHarness(testTimeouts)
+			h.settles, h.exitsLate, h.restartsIn = []bool{true, false, false}, []int{2, 2}, time.Minute
+			test.exits(h)
+
+			result, err := runSequence(t.Context(), toyTarget, sequenceOf(createOp, faultOp, updateOp, test.op),
+				Options{Check: &fakeChecker{}}, h)
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if len(h.exited) < 3 {
+				t.Fatalf("The target exited %d times, want 3 by op 3.", len(h.exited))
+			}
+			restart := h.exited[2].Restart
+			if ended := test.ended(h, result); !ended.Equal(restart.Add(testTimeouts.Settle)) {
+				t.Errorf("The wait ended %v after the restart, want T_settle after it.", ended.Sub(restart))
+			}
+		})
+	}
+}
+
+// sleepEnds ends the run's context as a sleep begins, as a deadline would.
+type sleepEnds struct {
+	*waitingHarness
+	cancel context.CancelFunc
+}
+
+func (s sleepEnds) sleep(ctx context.Context, d time.Duration) error {
+	s.cancel()
+	return s.waitingHarness.sleep(ctx, d)
+}
+
+// A deadline that ends the wait for a restart ends the run before the op.
+func TestAnOpDoesNotLandOnceItsWaitForARestartEnds(t *testing.T) {
+	h := newWaitingHarness(testTimeouts)
+	h.settles, h.exitsLate, h.restartsIn = []bool{true, false}, []int{2, 2}, time.Minute
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	result, err := runSequence(ctx, toyTarget, sequenceOf(createOp, faultOp, updateOp, updateOp),
+		Options{Check: &fakeChecker{}}, sleepEnds{waitingHarness: h, cancel: cancel})
+
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("The run ended with %v, want the context's end.", err)
+	}
+	if landed := len(result.Timeline.Ops); landed != 3 {
+		t.Errorf("%d ops landed, want the 3 before the wait for the restart.", landed)
 	}
 }
 

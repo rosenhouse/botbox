@@ -443,7 +443,10 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 	if err := r.awaitRestart(ctx); err != nil {
 		return err
 	}
-	applied := AppliedOp{Op: op, At: r.now()}
+	// The op is on the timeline while it acts, so that an exit during it is
+	// the op's.
+	r.timeline.Ops = append(r.timeline.Ops, AppliedOp{Op: op, At: r.now()})
+	applied := &r.timeline.Ops[len(r.timeline.Ops)-1]
 	if op.Type.OnCR() {
 		applied.CR = op.crName(r.target.Sample.GetName())
 	}
@@ -451,7 +454,6 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 	if applied.Restored, err = r.restoreFixtures(ctx, op.Index); err == nil {
 		applied.Deleted, err = r.apply(ctx, op, applied.CR)
 	}
-	r.timeline.Ops = append(r.timeline.Ops, applied)
 	if stayed := (*crStayed)(nil); errors.As(err, &stayed) {
 		return r.judgeStayed(ctx, op, stayed)
 	}
@@ -464,8 +466,7 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 	return nil
 }
 
-// awaitRestart waits for the target to restart after an exit a fault excused,
-// where no fault is active to excuse the op.
+// awaitRestart waits for the target to restart after an exit a fault excused.
 func (r *runner) awaitRestart(ctx context.Context) error {
 	now := r.now()
 	if restart := r.asOf(now).PendingRestart(now); !restart.IsZero() {

@@ -245,7 +245,15 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 			waits: 32*time.Minute + 50*time.Second},
 		{name: "a crash loop under a fault the teardown stops", timeouts: target.DefaultTimeouts,
 			ops: []Op{createOp, faultOp, updateOp, settleOp}, settles: []bool{true, false, false}, exitsLate: []int{2, 2, 2, 3, 3, 4, 4},
-			waits: 21*time.Minute + 50*time.Second},
+			waits: 42*time.Minute + 50*time.Second},
+		{name: "exits before each op under a fault the teardown stops", timeouts: target.DefaultTimeouts,
+			ops:     []Op{createOp, faultOp, updateOp, updateOp, updateOp, updateOp},
+			settles: []bool{true, false, false, false, false}, exitsLate: []int{2, 2, 3, 3, 4, 4, 5, 5}, returnsLate: true,
+			waits: time.Hour + 25*time.Minute + 20*time.Second},
+		{name: "exits before ops that do not settle under a fault the teardown stops", timeouts: target.DefaultTimeouts,
+			ops:     []Op{createOp, faultOp, updateOp, {Type: OpUpdate, Patch: updateOp.Patch, NoSettle: true}, recreateOp, settleOp},
+			settles: []bool{true, false, false}, exitsLate: []int{2, 2}, returnsLate: true,
+			waits: 29*time.Minute + 20*time.Second},
 		{name: "a crash loop under a fault that stops at an op", timeouts: target.DefaultTimeouts,
 			ops: []Op{createOp, faultUntil(3), updateOp, settleOp}, settles: []bool{true, false, false}, exitsLate: []int{2, 2, 2, 3, 3},
 			waits: 20*time.Minute + 50*time.Second},
@@ -365,28 +373,38 @@ func TestBoundOfACreateAlone(t *testing.T) {
 // A target that exits while a fault excuses it restarts after a backoff of up
 // to 5m, and is owed T_settle past its return, which can come T_settle after
 // the restart. Once faults stop, they are owed as long as they lasted and
-// T_settle. So each fault allows an exit, and each time faults stop the time
-// before the teardown doubles and another exit is allowed. Faults with no
-// trigger stop together at the teardown.
+// T_settle. So from the first fault on each op allows an exit, and each op
+// after it may first wait out a backoff. Each time faults stop, the time before
+// the teardown doubles and another exit is allowed. Faults with no trigger stop
+// together at the teardown.
 func TestBoundDoublesTheRunEachTimeFaultsStop(t *testing.T) {
 	defaults := withTimeouts(target.DefaultTimeouts)
 	const settle, teardown = 30 * time.Second, 140 * time.Second
 	exit := launch.MaxBackoff + 2*settle
 	stop := func(before time.Duration) time.Duration { return 2*before + settle + exit }
+	const backoff = launch.MaxBackoff
 	// The start, the create and the update take 90s.
 	const run = 90 * time.Second
 	timed := Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{For: Duration(time.Second)}}}
+	noSettle := func(op Op) Op {
+		op.NoSettle = true
+		return op
+	}
 	for _, test := range []struct {
 		name string
 		ops  []Op
 		want time.Duration
 	}{
-		{"a fault", []Op{createOp, faultOp, updateOp}, stop(run+exit) + teardown},
-		{"faults that stop together", []Op{createOp, faultOp, faultOp, updateOp}, stop(run+2*exit) + teardown},
-		{"a fault that stops at an op", []Op{createOp, faultUntil(2), updateOp}, stop(run+exit) + teardown},
-		{"faults that stop apart", []Op{createOp, faultUntil(3), countedOp, timed, updateOp}, stop(stop(stop(run+3*exit))) + teardown},
+		{"a fault", []Op{createOp, faultOp, updateOp}, stop(run+2*exit+backoff) + teardown},
+		{"faults that stop together", []Op{createOp, faultOp, faultOp, updateOp}, stop(run+3*exit+2*backoff) + teardown},
+		{"a fault that stops at an op", []Op{createOp, faultUntil(2), updateOp}, stop(run+2*exit+backoff) + teardown},
+		{"faults that stop apart", []Op{createOp, faultUntil(3), countedOp, timed, updateOp},
+			stop(stop(stop(run+4*exit+3*backoff))) + teardown},
 		{"faults that stop apart and together", []Op{createOp, faultUntil(3), faultOp, faultOp, updateOp},
-			stop(stop(run+3*exit)) + teardown},
+			stop(stop(run+4*exit+3*backoff)) + teardown},
+		// The recreate waits T_delete of 60s for its CR to go.
+		{"ops that do not settle after a fault", []Op{createOp, faultOp, noSettle(updateOp), noSettle(Op{Type: OpRecreate, Obj: widget("widget")}), updateOp},
+			stop(run+time.Minute+4*exit+3*backoff) + teardown},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if bound := Bound(defaults, sequenceOf(test.ops...)); bound != test.want {

@@ -2053,17 +2053,16 @@ built from source and run as a black-box binary.
   `sequence.json`, `kubeconfig` and `target.log`, under a summary that said the directory
   held a partial run of the minimized sequence. Naming the run each file came from was
   rejected, because a run that ends replaces the drawn run's recordings anyway.
-- **D@61 One page lists every key, op and fault field, and tests keep it whole.** An
-  adopter found keys, op fields and fault actions that only the Go source named, and the
-  README's target.yaml called itself a trimmed cert-manager file while adding keys that file
-  lacks. `docs/reference.md` gives each a row with its default and meaning. Tests compare
-  the rows with the JSON tags of the loader and the sequence format, both ways, so a new key
-  fails `make test` until it has a row. The page's examples set every key but `equal`, and
-  every op and fault field. The envtest tier runs the example sequence against the toy, so
-  it cannot fail a correct controller as the README's fault example once did. A fault field
-  value that tests something else is refused: a fraction outside 0 to 1, an error status
-  outside 400 to 599, a negative delay, count or duration, and a malformed name glob.
-  Refusing a fault whose `until.op` names its own op was rejected, because it ends at the
-  next op, which a Runner test pins. Keeping the reference in DESIGN.md was rejected: `go
-  install` ships no DESIGN.md, and DESIGN.md mixes the contract with milestones and
-  decisions.
+- **D@61 One page lists every key, op and fault field, and tests keep it whole.** Some
+  keys, op fields and fault actions appeared only in the Go source. `docs/reference.md`
+  gives each a row with its meaning, and each key its default. Tests compare the rows with
+  the JSON tags of the loader and the sequence format, both ways, so a new key fails `make
+  test` until it has a row. They also hold each default to the one botbox applies, and each
+  op's row to what the op needs, what it may carry and whether it settles. The page's
+  examples set every key but `equal`, and every op and fault field. The envtest tier runs
+  the example sequence against the toy, so a documented example cannot fail a correct
+  controller. A fault field value that tests something else is refused: a fraction that is
+  not above 0 and up to 1, an error status outside 400 to 599, a negative delay, count or
+  duration, and a malformed name glob. A fraction of 0 had faulted every request, as an
+  unset one does. Keeping the reference in DESIGN.md was rejected, because DESIGN.md mixes
+  the contract with internals, milestones and decisions.

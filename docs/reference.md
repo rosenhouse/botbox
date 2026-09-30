@@ -13,9 +13,9 @@ This example sets every key but `equal`:
 
 <!-- embed: docs/reference/target.yaml -->
 ```yaml
-# Every key but equal, which takes no equalIgnore. The files are the toy
-# controller's, so this loads. It is no target to run: the toy has no
-# spec.prefix, labels no child, and manages no Secret.
+# This sets every key but equal, which botbox refuses beside equalIgnore. It
+# loads, because it names the toy controller's files. It would not run: the toy
+# has no spec.prefix, labels no child and manages no Secret.
 name: widget-controller
 version: v1.2.3
 crds:
@@ -108,11 +108,12 @@ DESIGN.md writes `settle`, `stable`, `delete`, `errloop` and `quiet` as `T_settl
 
 ### CEL and hooks
 
-`ready` binds `metadata`, `spec` and `status` of one CR. A field the CR lacks binds to an
-empty map, so guard an optional field with `has()`. An error while evaluating `ready` means
-not ready. A property also binds `managed`: the managed objects whose ownerReferences name that
-CR or no CR. The string extensions are available. An expression that yields no bool, and an
-error while evaluating a property, end the run as a configuration error.
+`ready` binds `metadata`, `spec` and `status` of one CR, and an empty map to one the CR
+lacks. Reading a key a map lacks is an error, so guard an optional field with `has()`. An
+error while evaluating `ready` means not ready. A property also binds `managed`: the managed
+objects whose ownerReferences name that CR or no CR. The string extensions are available. An
+expression that yields no bool, and an error while evaluating a property, end the run as a
+configuration error.
 
 `go:<name>` names a function registered with `target.RegisterReady` or `target.RegisterEqual`.
 Only a botbox built with that function can load the target.
@@ -131,9 +132,10 @@ and each ownerReference whose owner is gone.
 
 ## Sequences
 
-A sequence file is JSON. `botbox run --target target.yaml <file>...` runs files as written,
-and `botbox replay` runs one. botbox refuses a field it does not know, and an op that lacks a
-field its type needs or carries one it does not take.
+A sequence file is JSON, such as the `sequence.json` of a failing run.
+`botbox run --target target.yaml <file>...` runs files as written, and `botbox replay` runs
+one. botbox refuses a field it does not know, and an op that lacks a field its type needs or
+carries one it does not take.
 
 This example holds every op and every fault field. `make test-envtest` runs it against the
 toy controller of `targets/toy-widget/target.yaml`, which passes it:
@@ -176,7 +178,7 @@ time to recover.
 | Field | Meaning |
 |---|---|
 | `seed` | Seeds the draws `match.fraction` makes, so a replay repeats them. |
-| `target` | The target's `name`. |
+| `target` | The target's `name`. botbox refuses a sequence for another target. |
 | `ops` | The ops, in order. The last one settles. |
 
 ### Ops

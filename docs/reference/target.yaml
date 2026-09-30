@@ -1,6 +1,6 @@
-# Every key but equal, which takes no equalIgnore. The files are the toy
-# controller's, so this loads. It is no target to run: the toy has no
-# spec.prefix, labels no child, and manages no Secret.
+# This sets every key but equal, which botbox refuses beside equalIgnore. It
+# loads, because it names the toy controller's files. It would not run: the toy
+# has no spec.prefix, labels no child and manages no Secret.
 name: widget-controller
 version: v1.2.3
 crds:

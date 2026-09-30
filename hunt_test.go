@@ -151,7 +151,7 @@ func TestTheHuntKeepsGoingAfterAFailureAndNamesEachOne(t *testing.T) {
 	if h.code != 1 {
 		t.Errorf("The hunt exited %d, and an invocation that did not pass makes it exit 1", h.code)
 	}
-	for _, failed := range []string{"out/a exited 1", "out/seed-7 exited 2"} {
+	for _, failed := range []string{"Each is a candidate to triage, not yet a bug:", "out/a exited 1", "out/seed-7 exited 2"} {
 		if !strings.Contains(h.output, failed) {
 			t.Errorf("The hunt did not say %q:\n%s", failed, h.output)
 		}
@@ -307,6 +307,15 @@ func TestEachHuntTargetHuntsItsExampleWithItsPinnedController(t *testing.T) {
 				t.Errorf("make hunt-%s passes the hunt no default for a variable it needs:\n%s", example.name, defaulted)
 			}
 		})
+	}
+}
+
+func TestTheREADMEGivesTheHuntsDefaults(t *testing.T) {
+	pins, readme := makefilePins(t), readFile(t, "README.md")
+	for _, name := range []string{"HUNT_MINUTES", "HUNT_RUNS", "HUNT_SEED"} {
+		if want := fmt.Sprintf("`%s` (default %s)", name, pins[name]); pins[name] == "" || !strings.Contains(readme, want) {
+			t.Errorf("README.md does not say %q", want)
+		}
 	}
 }
 

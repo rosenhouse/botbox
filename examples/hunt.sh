@@ -64,6 +64,6 @@ all() {
 all
 echo "$passed passed."
 if [ -n "$failed" ]; then
-  echo "These did not pass:$failed"
+  echo "These did not pass. Each is a candidate to triage, not yet a bug:$failed"
   exit 1
 fi

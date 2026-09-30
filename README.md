@@ -675,9 +675,11 @@ Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-gene
 - `make test`, `make test-envtest`, `make test-example` and `make test-example-external-secrets` are the tiers CI runs on every PR.
 - `make test-kind` runs the toy through `--kubeconfig` against a kind cluster that it creates and deletes. It needs Docker. The nightly workflow runs the same runs with `make test-kind-runs`.
 - `make hunt-cert-manager` and `make hunt-external-secrets` hunt for bugs in the pinned controllers
-  for `HUNT_MINUTES`. Each runs the families in `examples/<example>/sequences/hunt/`, then drawn
-  seeds from `HUNT_SEED`, and keeps each failing run's evidence in `botbox-out/hunt-<example>/`.
-  No pull request runs them.
+  for `HUNT_MINUTES` (default 120). Each runs the families in `examples/<example>/sequences/hunt/`,
+  then up to `HUNT_RUNS` (default 1000) seeds from `HUNT_SEED` (default 1000) on. It keeps each
+  failing run's evidence, and the botbox that found it, in `botbox-out/hunt-<example>/`. A run
+  that fails is a candidate to triage, not yet a bug: see
+  [DESIGN.md §11](DESIGN.md#11-repo-conventions). No pull request runs a hunt.
 - A block after `<!-- embed: path -->` holds that file byte for byte, and `make test` enforces it.
 - [DESIGN.md](DESIGN.md) is the governing design. Code and docs must not contradict it.
 - [docs/journal.md](docs/journal.md) and [docs/spikes/](docs/spikes/) hold the milestone journal and the experiments behind DESIGN.md §15.

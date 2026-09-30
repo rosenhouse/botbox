@@ -263,6 +263,16 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 			want: "until.for -2s is negative",
 		},
 		{
+			name: "a fault that runs out at its own op",
+			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"op": 0}}}`,
+			want: "until.op names op 0; want an op after the fault",
+		},
+		{
+			name: "a fault that runs out at an op before it",
+			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"op": -1}}}`,
+			want: "until.op names op -1; want an op after the fault",
+		},
+		{
 			name: "a restart that skips its settle",
 			ops:  `{"i": 0, "t": "restart", "noSettle": true}`,
 			want: "noSettle",
@@ -372,6 +382,8 @@ func TestSequenceAcceptsTheOpsTheRunnerExecutes(t *testing.T) {
 		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "deletecollection"}, "action": {"drop": true}}}`,
 		`{"i": 0, "t": "fault", "spec": {"match": {"name": "widget-*", "fraction": 1}, "action": {"error": 400}}}`,
 		`{"i": 0, "t": "fault", "spec": {"match": {"fraction": 0.25}, "action": {"error": 599}}}`,
+		`{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"op": 1}}}`,
+		`{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"op": 2}}}`,
 		`{"i": 0, "t": "updateFixture", "kind": "v1/Secret", "name": "token", "patch": {"data": {"token": "abcd"}}}`,
 		`{"i": 0, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 1}}`,
 	} {

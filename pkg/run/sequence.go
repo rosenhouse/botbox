@@ -257,7 +257,7 @@ func (o Op) validate(position int) error {
 		return err
 	}
 	if o.Type == OpFault {
-		return o.Fault.validate()
+		return o.Fault.validate(position)
 	}
 	return nil
 }
@@ -370,7 +370,7 @@ func fieldsOf(opType OpType) map[string]bool {
 	return fields
 }
 
-func (f *Fault) validate() error {
+func (f *Fault) validate(position int) error {
 	actions := 0
 	for _, set := range []bool{f.Action.Error != 0, f.Action.Delay != 0, f.Action.Drop} {
 		if set {
@@ -399,6 +399,8 @@ func (f *Fault) validate() error {
 		return fmt.Errorf("action.error %d is not an HTTP error status from 400 to 599", code)
 	}
 	switch {
+	case f.Until.Op != nil && *f.Until.Op <= position:
+		return fmt.Errorf("until.op names op %d; want an op after the fault", *f.Until.Op)
 	case f.Action.Delay < 0:
 		return fmt.Errorf("action.delay %s is negative", time.Duration(f.Action.Delay))
 	case f.Until.Count < 0:

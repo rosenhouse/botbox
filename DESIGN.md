@@ -682,7 +682,8 @@ Details the example does not show:
 - A fault's `match.name` is a glob as Go's `path.Match` reads it. `match.fraction` is a
   share above 0 and up to 1, and a fault without one applies to every request it
   matches. `action.error` is a status from 400 to 599. `action.delay`, `until.count` and
-  `until.for` are not negative. Any other value is a configuration error.
+  `until.for` are not negative. `until.op` names an op after the fault's. Any other value
+  is a configuration error.
 - Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
   tries faults in op order, the first that applies to a request wins, and each runs out on
   its own `until`.

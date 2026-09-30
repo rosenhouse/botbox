@@ -241,7 +241,7 @@ to no request tests nothing, and the run notes it.
 | `action.error` | none | The proxy answers with this status, from 400 to 599, and forwards nothing. |
 | `action.delay` | none | The proxy holds the request this long, such as `"500ms"`, then forwards it. |
 | `action.drop` | none | `true` has the proxy close the connection without an answer. It forwards nothing. |
-| `until.op` | none | The fault ends before this op acts. |
+| `until.op` | none | The fault ends before this op acts. It names an op after the fault's. |
 | `until.count` | none | The fault ends once it has applied to this many requests. |
 | `until.for` | none | The fault ends this long after its op, such as `"2s"`. |
 

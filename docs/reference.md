@@ -89,10 +89,10 @@ thresholds:
 | `properties[*].cel` | required | It is CEL that says whether the property holds. |
 | `properties[*].when` | `checkpoint` | It says where botbox evaluates the property: `always` at every change botbox observes, `checkpoint` wherever the checks run, and `end` at the last checkpoint. |
 | `generate.mutate` | every spec path the schema describes | It lists the dotted spec paths generation may change. Generation changes no others. |
-| `generate.overlay` | none | It maps a dotted path to schema keywords, which replace the CRD's keywords there for generation. botbox reads `additionalProperties`, `enum`, `exclusiveMaximum`, `exclusiveMinimum`, `format`, `items`, `maxItems`, `maxLength`, `maxProperties`, `maximum`, `minItems`, `minLength`, `minProperties`, `minimum`, `pattern`, `properties`, `required`, `type`, `x-kubernetes-int-or-string` and `x-kubernetes-list-type`, and refuses any other. |
+| `generate.overlay` | none | It maps a dotted path to schema keywords. For generation, they win over the CRD's keywords there, and the CRD keeps those they do not name. botbox reads `additionalProperties`, `enum`, `exclusiveMaximum`, `exclusiveMinimum`, `format`, `items`, `maxItems`, `maxLength`, `maxProperties`, `maximum`, `minItems`, `minLength`, `minProperties`, `minimum`, `pattern`, `properties`, `required`, `type`, `x-kubernetes-int-or-string` and `x-kubernetes-list-type`, and refuses any other. |
 | `generate.maxCRs` | `3` | It bounds the CRs a sequence creates, the sample included. `1` keeps every sequence to the sample. |
 | `generate.distinct` | none | It lists dotted paths at which the sample holds a string, such as a field that names a child. Each CR after the first appends its `-2` or `-3` there, so no two CRs share a value. |
-| `generate.fixtures` | none | It maps a file under `fixtures` to what generation may do to its objects. Generation may delete the objects of any file it names. |
+| `generate.fixtures` | none | It maps a file, written as `fixtures` lists it, to what generation may do to its objects. Generation may delete the objects of any file it names. |
 | `generate.fixtures[*].mutate` | none | It lists paths to strings that generation may set to a short word of letters and digits, written as `equalIgnore` writes a path. Every object in the file holds a string there. |
 | `launch.binary` | required | It names your controller's executable, relative to the directory botbox runs in, or a name on `PATH`. |
 | `launch.args` | none | It lists your controller's arguments. botbox replaces `$KUBECONFIG` with the path of the kubeconfig it writes, and `$NAMESPACE` with the run's namespace. `--launch-arg` appends more. |
@@ -111,9 +111,10 @@ DESIGN.md writes `settle`, `stable`, `delete`, `errloop` and `quiet` as `T_settl
 `ready` binds `metadata`, `spec` and `status` of one CR, and an empty map to one the CR
 lacks. Reading a key a map lacks is an error, so guard an optional field with `has()`. An
 error while evaluating `ready` means not ready. A property also binds `managed`: the managed
-objects whose ownerReferences name that CR or no CR. The string extensions are available. An
-expression that yields no bool, and an error while evaluating a property, end the run as a
-configuration error.
+objects whose ownerReferences name that CR or no CR. Where no CR exists, a property runs once,
+with empty `metadata`, `spec` and `status`, over every managed object. The string extensions
+are available. An expression that yields no bool, and an error while evaluating a property,
+end the run as a configuration error.
 
 `go:<name>` names a function registered with `target.RegisterReady` or `target.RegisterEqual`.
 Only a botbox built with that function can load the target.
@@ -177,7 +178,7 @@ time to recover.
 
 | Field | Meaning |
 |---|---|
-| `seed` | It seeds the draws `match.fraction` makes, so a replay repeats them. |
+| `seed` | It seeds the draws `match.fraction` makes. A replay repeats them where your controller repeats its requests in order. |
 | `target` | It gives the target's `name`. botbox refuses a sequence for another target. |
 | `ops` | It lists the ops in order. The last one settles. |
 
@@ -225,23 +226,24 @@ Every op carries `i` and `t`. A settle wait follows each op that settles. It end
 
 ### Fault fields
 
-A fault sets exactly one action. It ends at the first of its `until` triggers, or at the end of
-the run where it sets none. The proxy tries faults in op order, and the first that applies to
-a request wins. The checks do not judge a window a fault applied in, and they give your
-controller as long as the faults lasted, plus `timeouts.settle`, to recover. botbox clears a
-fault still active at the end, and waits for your controller to recover. A fault that applies
-to no request tests nothing, and the run notes it.
+A fault sets exactly one action. A zero `delay`, `count` or `for` is unset. A fault ends at
+the first of its `until` triggers, or at the end of the run where it sets none. The proxy
+tries faults in op order, and the first that applies to a request wins. The checks do not
+judge a window a fault applied in, and they give your controller as long as the faults
+lasted, plus `timeouts.settle`, to recover. botbox clears a fault still active at the end,
+and waits for your controller to recover. A fault that applies to no request tests nothing,
+and the run notes it.
 
 | Field | Default | Meaning |
 |---|---|---|
 | `match.verb` | every verb | It is one of `get`, `list`, `watch`, `create`, `update`, `patch`, `delete` and `deletecollection`. |
 | `match.resource` | every resource | It names the plural the API server serves, such as `configmaps`, in any group. It matches subresource requests too, such as those to `widgets/status`. botbox refuses one that holds a slash or that the API server does not serve. |
-| `match.name` | every name | It is a glob over the object name in the request path, as Go's `path.Match` reads it. A list, a watch and a create of an object carry no name there. |
+| `match.name` | every name | It is a glob over the object name in the request path, as Go's `path.Match` reads it. A list, a watch, a `deletecollection` and a create of an object carry an empty name there, which `*` matches. |
 | `match.fraction` | every request | It gives the share of matching requests the fault applies to, above 0 and up to 1. The sequence's `seed` draws which. |
 | `action.error` | none | The proxy answers with this status, from 400 to 599, and forwards nothing. |
 | `action.delay` | none | The proxy holds the request this long, such as `"500ms"`, then forwards it. |
 | `action.drop` | none | `true` has the proxy close the connection without an answer. It forwards nothing. |
-| `until.op` | none | The fault ends before this op acts. It names an op after the fault's. |
+| `until.op` | none | The fault ends before this op acts. It is above the fault's own `i`. Past the last op, the fault lasts to the end. |
 | `until.count` | none | The fault ends once it has applied to this many requests. |
 | `until.for` | none | The fault ends this long after its op, such as `"2s"`. |
 

@@ -682,8 +682,9 @@ Details the example does not show:
 - A fault's `match.name` is a glob as Go's `path.Match` reads it. `match.fraction` is a
   share above 0 and up to 1, and a fault without one applies to every request it
   matches. `action.error` is a status from 400 to 599. `action.delay`, `until.count` and
-  `until.for` are not negative. `until.op` names an op after the fault's. Any other value
-  is a configuration error.
+  `until.for` are not negative, and 0 leaves each unset. `until.op` is above the fault's
+  own index, and an index past the last op lets the fault outlast the sequence. Any other
+  value is a configuration error.
 - Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
   tries faults in op order, the first that applies to a request wins, and each runs out on
   its own `until`.
@@ -1263,12 +1264,13 @@ the proxy; the `Image` launcher. Separate design addendum.
   section whenever it edits this document.
 - **Reference.** `docs/reference.md` gives every target.yaml key, sequence field, op and
   fault field a row with its meaning, and each key its default. `make test` fails where one
-  lacks a row, a row names none, a row misstates whether a key is required or a default
-  botbox applies, an op's row misstates what it needs, what it may carry or whether it
-  settles, the rows of `generate.overlay` and `match.verb` name other keywords or verbs than
-  botbox reads, or the page's examples leave one unset. The target.yaml example sets every
-  key but `equal`, which takes no `equalIgnore`. The envtest tier runs the example sequence
-  against the toy, which must pass it with each fault applied to a request.
+  lacks a row, a row names none, a row misstates whether a key is required or the default
+  of `ready`, `properties[*].when`, `generate.maxCRs`, a timeout or a threshold, an op's row
+  misstates what it needs, what it may carry or whether it settles, the rows of
+  `generate.overlay` and `match.verb` name other keywords or verbs than botbox reads, or
+  the page's examples leave one unset. The target.yaml example sets every key but `equal`,
+  which takes no `equalIgnore`. The envtest tier runs the example sequence against the toy,
+  which must pass it with each fault applied to a request.
 - **No flaky-test retries in CI.** A flaky harness test is a P0 bug in the harness.
 - **Seeds are always printed.** Every failure is reproducible from its sequence, and from
   its seed with the same botbox build and target declaration (§5.4).

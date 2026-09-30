@@ -181,24 +181,26 @@ time to recover.
 
 ### Ops
 
-A settle wait follows each op that settles. It ends once `ready` holds on every CR and nothing
-has changed for `timeouts.stable`, or once `timeouts.settle` runs out. The checks run where it
-ends.
+Every op carries `i` and `t`. A settle wait follows each op that settles. It ends once
+`ready` holds on every CR and nothing has changed for `timeouts.stable`, or once
+`timeouts.settle` runs out. The checks run where it ends.
 
-| Op | Fields | Settles | What it does |
-|---|---|---|---|
-| `create` | `obj` | yes | Creates `obj`, whose name no live CR has. |
-| `update` | `patch`, `cr` | yes | Applies `patch` to the CR as a JSON merge patch. |
-| `delete` | `cr` | yes | Deletes the CR and waits up to `timeouts.delete` for it to go. |
-| `recreate` | `obj`, `cr` | yes | Deletes the CR, waits up to `timeouts.delete` for it to go, and creates `obj`, which has the CR's name. |
-| `settle` | none | yes | Waits for your controller to converge. |
-| `restart` | none | no | Kills your controller and starts it again. |
-| `fault` | `spec` | no | Adds a fault the proxy applies to your controller's requests. |
-| `deleteManaged` | `kind`, `index` | yes | Deletes a managed object behind your controller's back. G7 requires an object of its kind and name once the wait ends, unless `notRecreated` lists the kind. |
-| `updateFixture` | `kind`, `name`, `patch` | yes | Applies `patch` to a fixture as a JSON merge patch. |
-| `deleteFixture` | `kind`, `name`, `until.op` | no | Deletes a fixture, waits up to `timeouts.delete` for it to go, and creates it again before op `until.op` acts. |
+| Op | Needs | May carry | Settles | What it does |
+|---|---|---|---|---|
+| `create` | `obj` | `noSettle` | yes | Creates `obj`, whose name no live CR has. |
+| `update` | `patch` | `cr`, `noSettle` | yes | Applies `patch` to the CR as a JSON merge patch. |
+| `delete` | none | `cr`, `noSettle` | yes | Deletes the CR and waits up to `timeouts.delete` for it to go. |
+| `recreate` | `obj` | `cr`, `noSettle` | yes | Deletes the CR, waits up to `timeouts.delete` for it to go, and creates `obj`, which has the CR's name. |
+| `settle` | none | none | yes | Waits for your controller to converge. |
+| `restart` | none | none | no | Kills your controller and starts it again. |
+| `fault` | `spec` | none | no | Adds a fault the proxy applies to your controller's requests. |
+| `deleteManaged` | `kind`, `index` | none | yes | Deletes a managed object behind your controller's back. G7 requires an object of its kind and name once the wait ends, unless `notRecreated` lists the kind. |
+| `updateFixture` | `kind`, `name`, `patch` | none | yes | Applies `patch` to a fixture as a JSON merge patch. |
+| `deleteFixture` | `kind`, `name`, `until.op` | none | no | Deletes a fixture, waits up to `timeouts.delete` for it to go, and creates it again before op `until.op` acts. |
 
 - End a sequence with an op that settles.
+- An `update` or a `delete` acts on a live CR, and a `recreate` on a CR an op before it
+  created.
 - Put a `settle` after a `restart`, and one before it unless the op before it settles. G5
   compares the states those waits end in.
 - Put a `settle` between a `noSettle` op and a `deleteManaged`.

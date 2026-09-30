@@ -1160,7 +1160,8 @@ the proxy; the `Image` launcher. Separate design addendum.
 - **Layout.** `cmd/botbox/`, `pkg/cluster`, `pkg/proxy`, `pkg/observe`,
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`,
-  `examples/ci/`, `docs/`, and `bin/` for git-ignored build output.
+  `examples/ci/`, `docs/`, `internal/reference` for the tests that read
+  `docs/reference.md`, and `bin/` for git-ignored build output.
 - **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]`;
   `botbox replay --target <yaml> [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>`;
   `botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...`;
@@ -1260,11 +1261,13 @@ the proxy; the `Image` launcher. Separate design addendum.
   milestone and the invariant/property IDs it touches, and carries a "Design change"
   section whenever it edits this document.
 - **Reference.** `docs/reference.md` gives every target.yaml key, sequence field, op and
-  fault field a row with its meaning. `make test` fails where one lacks a row, a row names
-  none, the rows of `generate.overlay` and `match.verb` omit a keyword or a verb botbox
-  reads, or the page's examples leave one unset. The target.yaml example sets every key but
-  `equal`, which takes no `equalIgnore`. The envtest tier runs the example sequence against
-  the toy, which must pass it with each fault applied to a request.
+  fault field a row with its meaning, and each key its default. `make test` fails where one
+  lacks a row, a row names none, a default differs from the one botbox applies, an op's
+  row misstates what it needs, what it may carry or whether it settles, the rows of
+  `generate.overlay` and `match.verb` omit a keyword or a verb botbox reads, or the page's
+  examples leave one unset. The target.yaml example sets every key but `equal`, which takes
+  no `equalIgnore`. The envtest tier runs the example sequence against the toy, which must
+  pass it with each fault applied to a request.
 - **No flaky-test retries in CI.** A flaky harness test is a P0 bug in the harness.
 - **Seeds are always printed.** Every failure is reproducible from its sequence, and from
   its seed with the same botbox build and target declaration (§5.4).

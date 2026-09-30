@@ -4,32 +4,67 @@ import (
 	"os"
 	"reflect"
 	"slices"
-	"strings"
+	"strconv"
 	"testing"
+	"time"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/rosenhouse/botbox/internal/reference"
 )
 
 const (
-	reference        = "../../docs/reference.md"
+	keysHeading      = "## target.yaml"
 	referenceExample = "../../docs/reference/target.yaml"
 )
 
 func TestTheReferenceListsEveryKey(t *testing.T) {
 	keys := declaredKeys(reflect.TypeFor[declaration](), "")
 
-	documented := referenceRows(t, "## target.yaml")
+	documented := reference.Keys(t, keysHeading)
 
 	for _, key := range keys {
 		if !slices.Contains(documented, key) {
-			t.Errorf("%s has no row for the key %s.", reference, key)
+			t.Errorf("%s has no row for the key %s.", reference.Path, key)
 		}
 	}
 	for _, row := range documented {
 		if !slices.Contains(keys, row) {
-			t.Errorf("%s has a row for %s, which target.yaml does not take.", reference, row)
+			t.Errorf("%s has a row for %s, which target.yaml does not take.", reference.Path, row)
 		}
 	}
+}
+
+func TestTheReferenceGivesEachDefault(t *testing.T) {
+	for key, want := range map[string]time.Duration{
+		"timeouts.settle": DefaultTimeouts.Settle,
+		"timeouts.stable": DefaultTimeouts.Stable,
+		"timeouts.delete": DefaultTimeouts.Delete,
+	} {
+		if got, err := time.ParseDuration(documentedDefault(t, key)); err != nil || got != want {
+			t.Errorf("The reference gives %s the default %q, want %s.", key, documentedDefault(t, key), want)
+		}
+	}
+	for key, want := range map[string]string{
+		"ready":              DefaultReady,
+		"properties[*].when": string(Checkpoint),
+		"thresholds.errloop": strconv.Itoa(DefaultThresholds.ErrLoop),
+		"thresholds.quiet":   strconv.Itoa(DefaultThresholds.Quiet),
+	} {
+		if got := documentedDefault(t, key); got != want {
+			t.Errorf("The reference gives %s the default %q, want %q.", key, got, want)
+		}
+	}
+}
+
+// documentedDefault is the code span in the Default cell of key's row.
+func documentedDefault(t *testing.T, key string) string {
+	t.Helper()
+	spans := reference.Spans(reference.Row(t, keysHeading, key)[0])
+	if len(spans) != 1 {
+		t.Fatalf("The Default cell of %s holds %d code spans, want 1.", key, len(spans))
+	}
+	return spans[0]
 }
 
 // equal replaces what equalIgnore feeds, and the loader refuses the two
@@ -83,7 +118,7 @@ func unsetKeys(declared reflect.Value, prefix string) []string {
 		case value.IsZero() || (value.Kind() == reflect.Slice || value.Kind() == reflect.Map) && value.Len() == 0:
 			unset = append(unset, key)
 		case itemStruct(field.Type) != nil:
-			for _, item := range items(value) {
+			for _, item := range value.Seq2() {
 				unset = append(unset, unsetKeys(item, key+"[*].")...)
 			}
 		}
@@ -98,38 +133,4 @@ func itemStruct(declared reflect.Type) reflect.Type {
 		return declared.Elem()
 	}
 	return nil
-}
-
-// items are the values a list or a map holds.
-func items(value reflect.Value) []reflect.Value {
-	var items []reflect.Value
-	for _, item := range value.Seq2() {
-		items = append(items, item)
-	}
-	return items
-}
-
-// referenceRows lists the first code span of each table row in the section of
-// the reference that heading opens.
-func referenceRows(t *testing.T, heading string) []string {
-	t.Helper()
-	doc, err := os.ReadFile(reference)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, section, found := strings.Cut(string(doc), "\n"+heading+"\n")
-	if !found {
-		t.Fatalf("%s has no heading %q.", reference, heading)
-	}
-	var rows []string
-	for _, line := range strings.Split(section, "\n") {
-		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "### ") {
-			break
-		}
-		if cell, isRow := strings.CutPrefix(line, "| `"); isRow {
-			key, _, _ := strings.Cut(cell, "`")
-			rows = append(rows, key)
-		}
-	}
-	return rows
 }

@@ -2,17 +2,18 @@ package run
 
 import (
 	"encoding/json"
-	"os"
+	"maps"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/rosenhouse/botbox/internal/reference"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 )
 
 const (
-	reference         = "../../docs/reference.md"
+	opsHeading        = "### Ops"
 	referenceSequence = "../../docs/reference/sequence.json"
 )
 
@@ -26,16 +27,16 @@ func TestTheReferenceListsEveryField(t *testing.T) {
 		{"### Fault fields", fieldKeys(reflect.TypeFor[Fault](), "", nil)},
 	} {
 		t.Run(test.heading, func(t *testing.T) {
-			documented := referenceRows(t, test.heading)
+			documented := reference.Keys(t, test.heading)
 
 			for _, field := range test.fields {
 				if !slices.Contains(documented, field) {
-					t.Errorf("%s has no row for %s.", reference, field)
+					t.Errorf("%s has no row for %s.", reference.Path, field)
 				}
 			}
 			for _, row := range documented {
 				if !slices.Contains(test.fields, row) {
-					t.Errorf("%s has a row for %s, which is no such field.", reference, row)
+					t.Errorf("%s has a row for %s, which is no such field.", reference.Path, row)
 				}
 			}
 		})
@@ -48,18 +49,50 @@ func TestTheReferenceListsEveryOpType(t *testing.T) {
 		want = append(want, string(opType))
 	}
 
-	if documented := referenceRows(t, "### Ops"); !slices.Equal(documented, want) {
-		t.Errorf("%s lists the ops %v, want %v.", reference, documented, want)
+	if documented := reference.Keys(t, opsHeading); !slices.Equal(documented, want) {
+		t.Errorf("%s lists the ops %v, want %v.", reference.Path, documented, want)
 	}
 }
 
-func TestTheReferenceListsEveryVerb(t *testing.T) {
-	row := referenceRow(t, "match.verb")
-
-	for _, verb := range proxy.Verbs {
-		if !strings.Contains(row, "`"+verb+"`") {
-			t.Errorf("The row for match.verb does not name %s: %s", verb, row)
+func TestTheReferenceSaysWhatEachOpTakesAndWhetherItSettles(t *testing.T) {
+	for _, opType := range opTypes {
+		row := reference.Row(t, opsHeading, string(opType))
+		var needs, mayCarry []string
+		for field := range maps.Keys(fieldsOf(opType)) {
+			if field == "until" {
+				field = "until.op"
+			}
+			needs = append(needs, field)
 		}
+		if slices.Contains(namingOps, opType) {
+			mayCarry = append(mayCarry, "cr")
+		}
+		if opType.OnCR() {
+			mayCarry = append(mayCarry, "noSettle")
+		}
+		settles := map[bool]string{true: "yes", false: "no"}[Op{Type: opType}.Settles()]
+
+		if got := sorted(reference.Spans(row[0])); !slices.Equal(got, sorted(needs)) {
+			t.Errorf("The reference says %s needs %v, want %v.", opType, got, sorted(needs))
+		}
+		if got := sorted(reference.Spans(row[1])); !slices.Equal(got, sorted(mayCarry)) {
+			t.Errorf("The reference says %s may carry %v, want %v.", opType, got, sorted(mayCarry))
+		}
+		if row[2] != settles {
+			t.Errorf("The reference says whether %s settles: %s, want %s.", opType, row[2], settles)
+		}
+	}
+}
+
+func sorted(fields []string) []string {
+	return slices.Sorted(slices.Values(fields))
+}
+
+func TestTheReferenceListsEveryVerb(t *testing.T) {
+	documented := reference.Spans(reference.Row(t, "### Fault fields", "match.verb")[1])
+
+	if !slices.Equal(documented, proxy.Verbs) {
+		t.Errorf("The row for match.verb names %v, want %v.", documented, proxy.Verbs)
 	}
 }
 
@@ -146,46 +179,4 @@ func nestedObject(field, stop reflect.Type) reflect.Type {
 func jsonField(field reflect.StructField) string {
 	name, _, _ := strings.Cut(field.Tag.Get("json"), ",")
 	return name
-}
-
-// referenceRows lists the first code span of each table row in the section of
-// the reference that heading opens.
-func referenceRows(t *testing.T, heading string) []string {
-	t.Helper()
-	_, section, found := strings.Cut(readReference(t), "\n"+heading+"\n")
-	if !found {
-		t.Fatalf("%s has no heading %q.", reference, heading)
-	}
-	var rows []string
-	for _, line := range strings.Split(section, "\n") {
-		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "### ") {
-			break
-		}
-		if cell, isRow := strings.CutPrefix(line, "| `"); isRow {
-			key, _, _ := strings.Cut(cell, "`")
-			rows = append(rows, key)
-		}
-	}
-	return rows
-}
-
-// referenceRow is the table row whose first cell is key.
-func referenceRow(t *testing.T, key string) string {
-	t.Helper()
-	for _, line := range strings.Split(readReference(t), "\n") {
-		if strings.HasPrefix(line, "| `"+key+"` |") {
-			return line
-		}
-	}
-	t.Fatalf("%s has no row for %s.", reference, key)
-	return ""
-}
-
-func readReference(t *testing.T) string {
-	t.Helper()
-	doc, err := os.ReadFile(reference)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(doc)
 }

@@ -1,30 +1,27 @@
 package generate
 
 import (
-	"os"
-	"strings"
+	"slices"
+	"strconv"
 	"testing"
+
+	"github.com/rosenhouse/botbox/internal/reference"
 )
 
 func TestTheReferenceNamesEveryOverlayKeyword(t *testing.T) {
-	const reference = "../../docs/reference.md"
-	doc, err := os.ReadFile(reference)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var row string
-	for _, line := range strings.Split(string(doc), "\n") {
-		if strings.HasPrefix(line, "| `generate.overlay` |") {
-			row = line
-		}
-	}
-	if row == "" {
-		t.Fatalf("%s has no row for generate.overlay.", reference)
-	}
+	documented := reference.Spans(reference.Row(t, "## target.yaml", "generate.overlay")[1])
 
 	for _, keyword := range keywords {
-		if !strings.Contains(row, "`"+keyword+"`") {
+		if !slices.Contains(documented, keyword) {
 			t.Errorf("The row for generate.overlay does not name %s.", keyword)
 		}
+	}
+}
+
+func TestTheReferenceGivesTheDefaultMaxCRs(t *testing.T) {
+	documented := reference.Row(t, "## target.yaml", "generate.maxCRs")[0]
+
+	if want := "`" + strconv.Itoa(defaultMaxCRs) + "`"; documented != want {
+		t.Errorf("The reference gives generate.maxCRs the default %s, want %s.", documented, want)
 	}
 }

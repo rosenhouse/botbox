@@ -3,10 +3,12 @@
 package run_test
 
 import (
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/run"
@@ -146,6 +148,57 @@ func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
 			t.Errorf("The run reported %v, want the G4 of the wait after the last fault stopped.", result.Violation)
 		}
 	})
+}
+
+// leaseLostOverAndOver fails most of the toy's lease updates until the
+// teardown. Seed 23 has the proxy fail all of the toy's renewals for 2s twice,
+// and pass the election between them at its first try.
+const leaseLostOverAndOver = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "update", "resource": "leases", "fraction": 0.8}, "action": {"error": 500}}},
+    {"i": 2, "t": "update", "patch": {"spec": {"count": 2}}},
+    {"i": 3, "t": "update", "patch": {"spec": {"count": 3}}},
+    {"i": 4, "t": "settle"},
+    {"i": 5, "t": "settle"}
+  ]
+}`
+
+// The toy with no bug exits whenever it loses its lease. Under the fault it
+// keeps losing it, and botbox keeps restarting it. Once the teardown clears the
+// fault, it recovers.
+func TestAToyThatLosesItsLeaseOverAndOverUnderAFaultPasses(t *testing.T) {
+	t.Parallel()
+	toy := loadTarget(t, buildToy(t))
+	toy.Launch.Args = append(toy.Launch.Args, "--lease=3s")
+	testCluster := startCluster(t, toy.CRDs)
+	// A wait held open for each exit outlasts this.
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+
+	result, err := run.Run(ctx, toy, readSequence(t, leaseLostOverAndOver), run.Options{
+		Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+	})
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %v, and the toy with no bug recovers.", result.Violation)
+	}
+	if exits := result.Timeline.Exits; len(exits) < 2 {
+		t.Errorf("The toy exited %d times, want it to keep losing its lease.", len(exits))
+	}
+	for _, exit := range result.Timeline.Exits {
+		if !strings.Contains(exit.Said, "leader election lost") {
+			t.Errorf("The toy exited with %v, want it to have lost its lease.", exit)
+		}
+	}
+	if recovery := result.Timeline.Recovery; recovery == nil || !recovery.Converged {
+		t.Errorf("The teardown recorded the recovery %+v, want a wait that converged.", recovery)
+	}
 }
 
 // The fault names the toy's CRD, which the API server serves as widgets.

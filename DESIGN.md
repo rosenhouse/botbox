@@ -1010,7 +1010,9 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   which it declares as a fixture.
 - `--lease=<duration>` has the toy elect a leader through a Lease in `WATCH_NAMESPACE`
   that lasts that long, renew it within two thirds of that, and exit when it loses the
-  lease, as controller-runtime does.
+  lease, as controller-runtime does. The envtest tier runs it at 3 s under a fault that
+  fails most lease updates, so the toy keeps losing its lease and restarting until the
+  teardown clears the fault (§6, recovery from faults).
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 
@@ -2061,4 +2063,6 @@ built from source and run as a black-box binary.
   for. Owing the first exit since the target last converged was rejected: a target that
   converges between exits would be owed an exit per wait, which no count of fault ops
   bounds. The derived deadline allows an exit per fault op, so it now ends no run the
-  Runner would end on its own.
+  Runner would end on its own. The toy's `--lease` elects a leader, so a fault on leases
+  makes the correct toy exit as controller-runtime does. Under a fault that failed 80% of
+  lease updates until the teardown, it lost its lease twice and passed.

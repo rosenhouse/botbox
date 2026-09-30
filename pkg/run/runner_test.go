@@ -3212,32 +3212,46 @@ func TestAWaitUnderAFaultOwesTheFirstExitDuringItsOp(t *testing.T) {
 	}
 }
 
-// sleepEnds ends the run's context as a sleep begins, as a deadline would.
+// sleepEnds runs ends as a sleep begins.
 type sleepEnds struct {
 	*waitingHarness
-	cancel context.CancelFunc
+	ends func()
 }
 
 func (s sleepEnds) sleep(ctx context.Context, d time.Duration) error {
-	s.cancel()
+	s.ends()
 	return s.waitingHarness.sleep(ctx, d)
 }
 
-// A deadline that ends the wait for a restart ends the run before the op.
+// A run whose wait for a restart ends, at a deadline or where the restart
+// fails, ends before the op.
 func TestAnOpDoesNotLandOnceItsWaitForARestartEnds(t *testing.T) {
-	h := newWaitingHarness(testTimeouts)
-	h.settles, h.exitsLate, h.restartsIn = []bool{true, false}, []int{2, 2}, time.Minute
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
+	for _, test := range []struct {
+		name string
+		ends func(*waitingHarness, context.CancelFunc)
+		want error
+	}{
+		{name: "a deadline", ends: func(_ *waitingHarness, cancel context.CancelFunc) { cancel() }, want: context.Canceled},
+		{name: "a failed restart", want: ErrTargetStopped, ends: func(h *waitingHarness, _ context.CancelFunc) {
+			h.targetGone, h.targetExit = true, errors.New("exit status 1, and restarting it failed")
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newWaitingHarness(testTimeouts)
+			h.settles, h.exitsLate, h.restartsIn = []bool{true, false}, []int{2, 2}, time.Minute
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 
-	result, err := runSequence(ctx, toyTarget, sequenceOf(createOp, faultOp, updateOp, updateOp),
-		Options{Check: &fakeChecker{}}, sleepEnds{waitingHarness: h, cancel: cancel})
+			result, err := runSequence(ctx, toyTarget, sequenceOf(createOp, faultOp, updateOp, updateOp),
+				Options{Check: &fakeChecker{}}, sleepEnds{waitingHarness: h, ends: func() { test.ends(h, cancel) }})
 
-	if !errors.Is(err, context.Canceled) {
-		t.Errorf("The run ended with %v, want the context's end.", err)
-	}
-	if landed := len(result.Timeline.Ops); landed != 3 {
-		t.Errorf("%d ops landed, want the 3 before the wait for the restart.", landed)
+			if !errors.Is(err, test.want) {
+				t.Errorf("The run ended with %v, want %v.", err, test.want)
+			}
+			if landed := len(result.Timeline.Ops); landed != 3 {
+				t.Errorf("%d ops landed, want the 3 before the wait for the restart.", landed)
+			}
+		})
 	}
 }
 

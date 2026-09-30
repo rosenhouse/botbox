@@ -436,24 +436,26 @@ func (r *runner) applyOps(ctx context.Context) error {
 // has stopped ends the run here, because the op would otherwise be applied to
 // nothing (DESIGN.md §5.5).
 func (r *runner) applyOp(ctx context.Context, op Op) error {
-	if status := r.h.targetStatus(); !status.Running {
-		return r.targetStopped(ctx, status)
-	}
 	r.expireFaults(op.Index)
 	if err := r.awaitRestart(ctx); err != nil {
 		return err
 	}
-	// The op is on the timeline while it acts, so that an exit during it is
-	// the op's.
-	r.timeline.Ops = append(r.timeline.Ops, AppliedOp{Op: op, At: r.now()})
-	applied := &r.timeline.Ops[len(r.timeline.Ops)-1]
+	if status := r.h.targetStatus(); !status.Running {
+		return r.targetStopped(ctx, status)
+	}
+	applied := AppliedOp{Op: op, At: r.now()}
 	if op.Type.OnCR() {
 		applied.CR = op.crName(r.target.Sample.GetName())
 	}
+	// The op is on the timeline while it acts, so that an exit during it is
+	// the op's.
+	r.timeline.Ops = append(r.timeline.Ops, applied)
+	landed := len(r.timeline.Ops) - 1
 	var err error
 	if applied.Restored, err = r.restoreFixtures(ctx, op.Index); err == nil {
 		applied.Deleted, err = r.apply(ctx, op, applied.CR)
 	}
+	r.timeline.Ops[landed] = applied
 	if stayed := (*crStayed)(nil); errors.As(err, &stayed) {
 		return r.judgeStayed(ctx, op, stayed)
 	}

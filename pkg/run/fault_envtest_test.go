@@ -173,8 +173,10 @@ func TestAToyThatLosesItsLeaseUnderAFaultPasses(t *testing.T) {
 	toy.Launch.Args = append(toy.Launch.Args, "--lease=3s")
 	testCluster := startCluster(t, toy.CRDs)
 	dir := t.TempDir()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
 
-	result, err := run.Run(t.Context(), toy, readSequence(t, leaseFault), run.Options{
+	result, err := run.Run(ctx, toy, readSequence(t, leaseFault), run.Options{
 		Dir: dir, Config: testCluster.Config(), Check: run.Engine{},
 	})
 

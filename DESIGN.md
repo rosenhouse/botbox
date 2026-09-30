@@ -289,9 +289,9 @@ The Runner executes one sequence:
    active, only the first exit a fault excused during each op gets that time (§6). An exit
    is during the last op stamped before it. Before it stamps an op, the Runner waits for
    any restart that follows an exit a fault excused, so the op never lands while the
-   target waits for it. Any other restart gives it no more time, and its startup requests count toward G1 where
-   they land in a quiet window (§6). A target not back when a wait expires fails G4. A
-   restart that fails ends the run as the harness error above.
+   target waits for it. Any other restart gives it no more time, and its startup requests
+   count toward G1 where they land in a quiet window (§6). A target not back when a wait
+   expires fails G4. A restart that fails ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
@@ -482,12 +482,12 @@ leader election on does when it loses its lease, then waits out the restart's ba
 as after a `Restart` (§5.5), and does not judge a window the exit falls in, as it does not
 judge one a fault reaches into. While a fault is active, only the target's first such exit
 during each op is owed that time, because owing each later exit would hold a crash loop's
-wait open for as long as the fault lasts. A wait in which the target exits again can
-therefore end while it waits to restart, and the properties are checked there. No op
-lands while the target waits to restart after an exit a fault excused (§5.5). Once no
-fault is active, every exit a fault excused is owed its time. Only a fault excuses an exit,
-so a crash loop that a fault set off still fails G4, at the latest in the wait the teardown
-gives the target once it has cleared the faults.
+wait open for as long as the fault lasts. If the target exits again during the op, the
+wait can end before it restarts, and the properties are checked there. No op lands while
+the target waits to restart after an exit a fault excused (§5.5). Once no fault is active,
+every exit a fault excused is owed its time. Only a fault excuses an exit, so a crash loop
+that a fault set off still fails G4, at the latest in the wait the teardown gives the
+target once it has cleared the faults.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -2061,8 +2061,8 @@ built from source and run as a black-box binary.
   teardown's recovery wait, about a minute in. Owing only the first exit after each fault
   began was rejected. Under a fault that failed 80% of its lease updates, the correct toy
   then saw a `deleteManaged` land while it waited out a later backoff, and P1 failed. A
-  `recreate` in its place ended as a harness error. A fault excuses G4, not a property, so
-  the Runner waits for such a restart before each op whatever the faults. The derived
-  deadline allows an exit per op from the first fault op on and a backoff per op after it,
-  so it ends no run the Runner would end on its own. The toy's `--lease` elects a leader,
-  so a fault on leases makes the correct toy exit as controller-runtime does.
+  fault excuses G4, not a property, so the Runner waits for such a restart before each op
+  whatever the faults. The derived deadline allows an exit per op from the first fault op
+  on and a backoff per op after it, so it ends no run the Runner would end on its own. The
+  toy's `--lease` elects a leader, so a fault on leases makes the correct toy exit as
+  controller-runtime does.

@@ -660,8 +660,10 @@ Details the example does not show:
   names its CR in `obj`, and a `recreate` creates the CR it deletes. These are
   configuration errors: an `obj` with no `metadata.name`, an op on a CR that no earlier
   `create` or `recreate` creates, an `update` or `delete` of a CR deleted since it was last
-  created, a `recreate` whose `obj` names another CR, and a `create` of a CR that no
-  `delete` has removed since.
+  created, a `recreate` whose `obj` names another CR, a `create` of a CR that no
+  `delete` has removed since, and a `create` of a CR that a `noSettle` `delete` removed
+  with no op since that settles. A finalizer may still hold that CR, and the API server
+  refuses the create while one does. A `recreate` waits for its old CR to go.
 - A sequence ends with an op that settles, or nothing judges the state it leaves behind
   (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
 - G5 judges a `restart` only between two converged settle waits with no fault's window

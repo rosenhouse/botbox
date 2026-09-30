@@ -9,8 +9,8 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// A sequence the example tiers or a hunt run fails before its first op where
-// the Runner can tell, and at the op otherwise.
+// The Runner rejects a bad sequence before its first op where it can, and at
+// the op otherwise. This test catches both for every example sequence.
 func TestEveryExampleSequenceSuitsItsTarget(t *testing.T) {
 	targets, err := filepath.Glob("../../examples/*/target.yaml")
 	if err != nil || len(targets) == 0 {

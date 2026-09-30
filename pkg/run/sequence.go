@@ -94,10 +94,10 @@ type Fault struct {
 // Match selects the requests a fault applies to. An unset field matches every
 // request.
 type Match struct {
-	Verb     string  `json:"verb,omitempty"`
-	Resource string  `json:"resource,omitempty"`
-	Name     string  `json:"name,omitempty"`
-	Fraction float64 `json:"fraction,omitempty"`
+	Verb     string   `json:"verb,omitempty"`
+	Resource string   `json:"resource,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Fraction *float64 `json:"fraction,omitempty"`
 }
 
 // Action is what the proxy does to a matched request. Exactly one field is set.
@@ -392,8 +392,8 @@ func (f *Fault) validate() error {
 	if _, err := path.Match(f.Match.Name, ""); err != nil {
 		return fmt.Errorf("match.name %q is not a glob: %w", f.Match.Name, err)
 	}
-	if fraction := f.Match.Fraction; fraction < 0 || fraction > 1 {
-		return fmt.Errorf("match.fraction %v is not a share of requests from 0 to 1", fraction)
+	if fraction := f.Match.Fraction; fraction != nil && (*fraction <= 0 || *fraction > 1) {
+		return fmt.Errorf("match.fraction %v is not a share of requests above 0 and up to 1", *fraction)
 	}
 	if code := f.Action.Error; code != 0 && (code < 400 || code > 599) {
 		return fmt.Errorf("action.error %d is not an HTTP error status from 400 to 599", code)

@@ -233,7 +233,7 @@ to no request tests nothing, and the run notes it.
 | `match.verb` | every verb | One of `get`, `list`, `watch`, `create`, `update`, `patch`, `delete` and `deletecollection`. |
 | `match.resource` | every resource | The plural the API server serves, such as `configmaps`, in any group. It matches subresource requests too, such as those to `widgets/status`. botbox refuses one that holds a slash or that the API server does not serve. |
 | `match.name` | every name | A glob over the object name in the request path, as Go's `path.Match` reads it. A list, a watch and a create of an object carry no name there. |
-| `match.fraction` | every request | The share of matching requests the fault applies to, from 0 to 1. The sequence's `seed` draws which. |
+| `match.fraction` | every request | The share of matching requests the fault applies to, above 0 and up to 1. The sequence's `seed` draws which. |
 | `action.error` | none | The proxy answers with this status, from 400 to 599, and forwards nothing. |
 | `action.delay` | none | The proxy holds the request this long, such as `"500ms"`, then forwards it. |
 | `action.drop` | none | `true` has the proxy close the connection without an answer. It forwards nothing. |

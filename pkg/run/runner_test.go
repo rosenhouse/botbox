@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -3200,5 +3201,35 @@ func TestAnExitDuringTheTeardownIsNotedAsSuch(t *testing.T) {
 				t.Errorf("The teardown's checks read the exits %+v; want the exit read: %t.", check.inputs[1].Timeline.Exits, exit.judged)
 			}
 		})
+	}
+}
+
+func TestTheProxyGetsTheFaultAsWritten(t *testing.T) {
+	for _, test := range []struct {
+		spec string
+		want proxy.FaultSpec
+	}{
+		{
+			spec: `{"match": {"verb": "patch", "resource": "widgets", "name": "widget-*", "fraction": 0.25},
+				"action": {"delay": "500ms"}, "until": {"count": 2, "for": "3s"}}`,
+			want: proxy.FaultSpec{
+				Match:  proxy.RequestMatcher{Verb: "patch", Resource: "widgets", Name: "widget-*", Fraction: 0.25},
+				Action: proxy.Delay{For: 500 * time.Millisecond},
+				Until:  proxy.Trigger{Count: 2, For: 3 * time.Second},
+			},
+		},
+		{
+			spec: `{"action": {"error": 503}}`,
+			want: proxy.FaultSpec{Action: proxy.Error{Code: 503}},
+		},
+	} {
+		var fault Fault
+		if err := json.Unmarshal([]byte(test.spec), &fault); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := fault.spec(); !reflect.DeepEqual(got, test.want) {
+			t.Errorf("The fault %s reached the proxy as %+v, want %+v.", test.spec, got, test.want)
+		}
 	}
 }

@@ -1012,12 +1012,16 @@ func (r *runner) teardownBudget() time.Duration {
 
 // spec is the fault in the form the proxy injects (DESIGN.md §5.2).
 func (f Fault) spec() proxy.FaultSpec {
+	var fraction float64 // The proxy reads 0 as every request.
+	if f.Match.Fraction != nil {
+		fraction = *f.Match.Fraction
+	}
 	return proxy.FaultSpec{
 		Match: proxy.RequestMatcher{
 			Verb:     f.Match.Verb,
 			Resource: f.Match.Resource,
 			Name:     f.Match.Name,
-			Fraction: f.Match.Fraction,
+			Fraction: fraction,
 		},
 		Action: f.Action.action(),
 		Until:  proxy.Trigger{Count: f.Until.Count, For: time.Duration(f.Until.For)},

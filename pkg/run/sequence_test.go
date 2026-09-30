@@ -80,7 +80,7 @@ func TestSequenceReadsTheDesignExample(t *testing.T) {
 		t.Errorf("The create op carries %v, want a Widget of count 3.", create.Obj)
 	}
 	fault := decoded.Ops[1].Fault
-	if fault == nil || fault.Match.Fraction != 0.5 || fault.Action.Error != 500 || fault.Until.Op == nil || *fault.Until.Op != 3 {
+	if fault == nil || fault.Match.Fraction == nil || *fault.Match.Fraction != 0.5 || fault.Action.Error != 500 || fault.Until.Op == nil || *fault.Until.Op != 3 {
 		t.Errorf("The fault op decoded to %+v.", fault)
 	}
 	update := decoded.Ops[2]
@@ -215,12 +215,17 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 		{
 			name: "a fault on a percentage of requests",
 			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"fraction": 50}, "action": {"drop": true}}}`,
-			want: "match.fraction 50 is not a share of requests from 0 to 1",
+			want: "match.fraction 50 is not a share of requests above 0 and up to 1",
 		},
 		{
 			name: "a fault on a negative fraction of requests",
 			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"fraction": -0.5}, "action": {"drop": true}}}`,
-			want: "match.fraction -0.5 is not a share of requests from 0 to 1",
+			want: "match.fraction -0.5 is not a share of requests above 0 and up to 1",
+		},
+		{
+			name: "a fault on no share of requests",
+			ops:  `{"i": 0, "t": "fault", "spec": {"match": {"fraction": 0}, "action": {"drop": true}}}`,
+			want: "match.fraction 0 is not a share of requests above 0 and up to 1",
 		},
 		{
 			name: "a fault on a name that is not a glob",

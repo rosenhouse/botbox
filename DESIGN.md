@@ -680,8 +680,8 @@ Details the example does not show:
   configuration error. It holds no slash, so it names no group, version or subresource. A
   fault on `widgets` also matches the requests to `widgets/status`.
 - A fault's `match.name` is a glob as Go's `path.Match` reads it. `match.fraction` is a
-  share from 0 to 1, and 0, the default, applies the fault to every request it matches.
-  `action.error` is a status from 400 to 599. `action.delay`, `until.count` and
+  share above 0 and up to 1, and a fault without one applies to every request it
+  matches. `action.error` is a status from 400 to 599. `action.delay`, `until.count` and
   `until.for` are not negative. Any other value is a configuration error.
 - Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
   tries faults in op order, the first that applies to a request wins, and each runs out on

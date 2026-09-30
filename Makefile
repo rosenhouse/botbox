@@ -90,6 +90,7 @@ help:
 	@echo "  cert-manager-crds                      Refetch the pinned cert-manager CRD release asset."
 	@echo "  cert-manager-version                   Print CERT_MANAGER_VERSION and nothing else."
 	@echo "  verify-cert-manager-pin                Fail if the example drifted from the pin."
+	@echo "  verify-cert-manager-port               Fail if port 9403, where cert-manager listens, is bound."
 	@echo "  external-secrets                       Clone and build the pinned external-secrets controller."
 	@echo "  external-secrets-crds                  Refetch the pinned external-secrets CRD release asset."
 	@echo "  external-secrets-version               Print EXTERNAL_SECRETS_VERSION and nothing else."
@@ -388,10 +389,18 @@ HUNT = HUNT_MINUTES=$(HUNT_MINUTES) HUNT_RUNS=$(HUNT_RUNS) HUNT_SEED=$(HUNT_SEED
 	KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" examples/hunt.sh
 
 .PHONY: hunt-cert-manager
-hunt-cert-manager: verify-cert-manager-pin setup build cert-manager
-	@! lsof -nP -iTCP:9403 -sTCP:LISTEN >/dev/null 2>&1 \
-		|| { echo "port 9403 is bound. cert-manager listens there, so its runs cannot overlap."; exit 1; }
+hunt-cert-manager: verify-cert-manager-port verify-cert-manager-pin setup build cert-manager
 	$(HUNT) examples/cert-manager/target.yaml examples/cert-manager/sequences/hunt botbox-out/hunt-cert-manager
+
+# cert-manager's healthz port is fixed, so its runs cannot overlap.
+.PHONY: verify-cert-manager-port
+verify-cert-manager-port:
+	@if ! command -v lsof >/dev/null; then \
+		echo "lsof is missing, so nothing checked whether port 9403 is free." >&2; \
+	elif lsof -nP -iTCP:9403 -sTCP:LISTEN >/dev/null; then \
+		echo "port 9403 is bound. cert-manager listens there, so its runs cannot overlap." >&2; \
+		exit 1; \
+	fi
 
 .PHONY: hunt-external-secrets
 hunt-external-secrets: verify-external-secrets-pin setup build external-secrets

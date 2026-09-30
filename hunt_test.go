@@ -275,39 +275,43 @@ func dryRun(t *testing.T, targets ...string) string {
 	return string(output)
 }
 
-func TestEachHuntTargetHuntsItsExampleWithItsPinnedController(t *testing.T) {
-	for _, example := range []struct{ name, controller string }{
-		{"cert-manager", "bin/cert-manager-controller"},
-		{"external-secrets", "bin/external-secrets"},
+func TestEachHuntTargetPreparesItsExampleAndHuntsIt(t *testing.T) {
+	assetsPath := lastLine(dryRun(t, "assets-path"))
+	for _, example := range []struct {
+		name  string
+		needs []string
+	}{
+		{"cert-manager", []string{"verify-cert-manager-port", "verify-cert-manager-pin", "setup", "build", "cert-manager"}},
+		{"external-secrets", []string{"verify-external-secrets-pin", "setup", "build", "external-secrets"}},
 	} {
 		t.Run(example.name, func(t *testing.T) {
 			dry := dryRun(t, "hunt-"+example.name, "HUNT_MINUTES=5", "HUNT_RUNS=3", "HUNT_SEED=9")
 
 			hunt := regexp.MustCompile(`(?m)^.*examples/hunt\.sh .*$`).FindString(dry)
-			want := "examples/hunt.sh examples/" + example.name + "/target.yaml examples/" + example.name +
-				"/sequences/hunt botbox-out/hunt-" + example.name
-			if !strings.HasSuffix(hunt, want) {
-				t.Fatalf("make hunt-%s runs %q, not %q:\n%s", example.name, hunt, want, dry)
+			want := `HUNT_MINUTES=5 HUNT_RUNS=3 HUNT_SEED=9 KUBEBUILDER_ASSETS="$(` + assetsPath + `)" examples/hunt.sh examples/` +
+				example.name + "/target.yaml examples/" + example.name + "/sequences/hunt botbox-out/hunt-" + example.name
+			if hunt != want {
+				t.Fatalf("make hunt-%s runs\n%s\nnot\n%s", example.name, hunt, want)
 			}
-			for _, variable := range []string{"HUNT_MINUTES=5 ", "HUNT_RUNS=3 ", "HUNT_SEED=9 ", "KUBEBUILDER_ASSETS="} {
-				if !strings.Contains(hunt, variable) {
-					t.Errorf("make hunt-%s does not pass %s to the hunt: %q", example.name, variable, hunt)
+			before, _, _ := strings.Cut(dry, hunt)
+			for _, need := range example.needs {
+				if !strings.Contains(before, dryRun(t, need)) {
+					t.Errorf("make hunt-%s does not make %s before it hunts:\n%s", example.name, need, dry)
 				}
 			}
-			controller, err := filepath.Abs(example.controller)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if before, _, _ := strings.Cut(dry, hunt); !strings.Contains(before, "go build") || !strings.Contains(before, controller) {
-				t.Errorf("make hunt-%s does not build %s before it hunts:\n%s", example.name, controller, dry)
-			}
 
-			defaults := regexp.MustCompile(`HUNT_MINUTES=\d+ HUNT_RUNS=\d+ HUNT_SEED=\d+ `)
-			if defaulted := dryRun(t, "hunt-"+example.name); !defaults.MatchString(defaulted) {
-				t.Errorf("make hunt-%s passes the hunt no default for a variable it needs:\n%s", example.name, defaulted)
+			pins := makefilePins(t)
+			defaults := fmt.Sprintf("HUNT_MINUTES=%s HUNT_RUNS=%s HUNT_SEED=%s ", pins["HUNT_MINUTES"], pins["HUNT_RUNS"], pins["HUNT_SEED"])
+			if defaulted := dryRun(t, "hunt-"+example.name); !strings.Contains(defaulted, defaults) {
+				t.Errorf("make hunt-%s does not pass the hunt %q:\n%s", example.name, defaults, defaulted)
 			}
 		})
 	}
+}
+
+func lastLine(output string) string {
+	lines := strings.Split(strings.TrimSpace(output), "\n")
+	return lines[len(lines)-1]
 }
 
 func TestTheREADMEGivesTheHuntsDefaults(t *testing.T) {
@@ -319,13 +323,38 @@ func TestTheREADMEGivesTheHuntsDefaults(t *testing.T) {
 	}
 }
 
-// cert-manager's healthz port is fixed, so a hunt refuses to start beside
-// another cert-manager.
-func TestTheCertManagerHuntChecksPort9403First(t *testing.T) {
-	dry := dryRun(t, "hunt-cert-manager")
-	before, _, _ := strings.Cut(dry, "examples/hunt.sh")
-	if !regexp.MustCompile(`lsof .*-iTCP:9403 `).MatchString(before) {
-		t.Errorf("make hunt-cert-manager does not check port 9403 before it hunts:\n%s", dry)
+// cert-manager's healthz port is fixed, so its runs cannot overlap.
+func TestTheCertManagerPortCheckRefusesABoundPort(t *testing.T) {
+	makePath, err := exec.LookPath("make")
+	if err != nil {
+		t.Skipf("The Makefile needs make: %v", err)
+	}
+	for _, test := range []struct {
+		name string
+		lsof string // The stub's script; empty for no lsof.
+		code int
+		says string
+	}{
+		{"a free port", "exit 1", 0, ""},
+		{"a bound port", `[ "$*" = "-nP -iTCP:9403 -sTCP:LISTEN" ]`, 2, "port 9403 is bound. cert-manager listens there, so its runs cannot overlap.\n"},
+		{"no lsof", "", 0, "lsof is missing, so nothing checked whether port 9403 is free.\n"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			stubs := t.TempDir()
+			if test.lsof != "" {
+				writeStub(t, filepath.Join(stubs, "lsof"), test.lsof)
+			}
+			cmd := exec.Command(makePath, "--no-print-directory", "verify-cert-manager-port")
+			cmd.Env = append(slices.DeleteFunc(outsideMake(os.Environ()), func(variable string) bool {
+				return strings.HasPrefix(variable, "PATH=")
+			}), "PATH="+stubs)
+			output, _ := cmd.CombinedOutput()
+
+			if code := cmd.ProcessState.ExitCode(); code != test.code || !strings.HasPrefix(string(output), test.says) ||
+				test.code == 0 && string(output) != test.says {
+				t.Errorf("make verify-cert-manager-port exited %d and printed %q", code, output)
+			}
+		})
 	}
 }
 

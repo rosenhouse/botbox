@@ -1000,6 +1000,9 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 - `--label-from=<name>` has each child copy `data.label` of that ConfigMap in the Widget's
   namespace, and the toy watches that ConfigMap. The target sets it to `widget-config`,
   which it declares as a fixture.
+- `--lease=<duration>` has the toy elect a leader through a Lease in `WATCH_NAMESPACE`
+  that lasts that long, renew it within two thirds of that, and exit when it loses the
+  lease, as controller-runtime does.
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 

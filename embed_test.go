@@ -34,12 +34,17 @@ func TestMarkdownEmbedsMatchTheirFiles(t *testing.T) {
 	}
 }
 
-// The README shows the files an adopter copies, and so cannot drift from them.
-func TestREADMEEmbedsWhatAnAdopterCopies(t *testing.T) {
-	doc := readFile(t, "README.md")
-	for _, path := range []string{"examples/cert-manager/quickstart.sh", "examples/ci/github-actions.yml"} {
-		if marker := embedMarker + " " + path + " -->"; !strings.Contains(doc, marker) {
-			t.Errorf("README.md does not embed %s: no %q", path, marker)
+// A page shows the files it describes, and so cannot drift from them.
+func TestPagesEmbedTheFilesTheyShow(t *testing.T) {
+	for page, paths := range map[string][]string{
+		"README.md":         {"examples/cert-manager/quickstart.sh", "examples/ci/github-actions.yml"},
+		"docs/reference.md": {"docs/reference/target.yaml", "docs/reference/sequence.json"},
+	} {
+		doc := readFile(t, page)
+		for _, path := range paths {
+			if marker := embedMarker + " " + path + " -->"; !strings.Contains(doc, marker) {
+				t.Errorf("%s does not embed %s: no %q", page, path, marker)
+			}
 		}
 	}
 }

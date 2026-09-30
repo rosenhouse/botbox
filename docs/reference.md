@@ -226,13 +226,12 @@ Every op carries `i` and `t`. A settle wait follows each op that settles. It end
 
 ### Fault fields
 
-A fault sets exactly one action. A zero `delay`, `count` or `for` is unset. A fault ends at
-the first of its `until` triggers, or at the end of the run where it sets none. The proxy
-tries faults in op order, and the first that applies to a request wins. The checks do not
-judge a window a fault applied in, and they give your controller as long as the faults
-lasted, plus `timeouts.settle`, to recover. botbox clears a fault still active at the end,
-and waits for your controller to recover. A fault that applies to no request tests nothing,
-and the run notes it.
+A fault sets exactly one action. It ends at the first of its `until` triggers, or at the end
+of the run where it sets none. The proxy tries faults in op order, and the first that
+applies to a request wins. The checks do not judge a window a fault applied in, and they
+give your controller as long as the faults lasted, plus `timeouts.settle`, to recover.
+botbox clears a fault still active at the end, and waits for your controller to recover. A
+fault that applies to no request tests nothing, and the run notes it.
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -244,8 +243,8 @@ and the run notes it.
 | `action.delay` | none | The proxy holds the request this long, such as `"500ms"`, then forwards it. |
 | `action.drop` | none | `true` has the proxy close the connection without an answer. It forwards nothing. |
 | `until.op` | none | The fault ends before this op acts. It is above the fault's own `i`. Past the last op, the fault lasts to the end. |
-| `until.count` | none | The fault ends once it has applied to this many requests. |
-| `until.for` | none | The fault ends this long after its op, such as `"2s"`. |
+| `until.count` | none | The fault ends once it has applied to this many requests. It is above 0. |
+| `until.for` | none | The fault ends this long after its op, such as `"2s"`. It is above 0. |
 
 A fault names a resource, such as `configmaps`, because it matches the URL of a request.
 `manages`, `deleteManaged` and the fixture ops name a kind, such as `v1/ConfigMap`, as an

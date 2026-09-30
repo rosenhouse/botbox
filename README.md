@@ -343,7 +343,8 @@ that matches no request changes nothing and hides nothing ([DESIGN.md §5.2](DES
 `match.verb` is a Kubernetes verb such as `create` or `list`, and `match.resource` is the
 plural the API server serves, such as `configmaps`. botbox refuses any other value, because
 the fault would match nothing. It also refuses a value that would test something else, such
-as a `fraction` of 0 or 50. A run notes each fault the proxy applied to no request.
+as a `fraction` of 0 or 50, or an `until.count` of 0. A run notes each fault the proxy applied
+to no request.
 The deadline botbox derives allows for how long each fault can hold a run open, which for a
 few faults that stop one after another is hours. Give a sequence with faults `--deadline`.
 [docs/reference.md](docs/reference.md#sequences) lists every op and fault field, and its example

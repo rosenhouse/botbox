@@ -681,10 +681,10 @@ Details the example does not show:
   fault on `widgets` also matches the requests to `widgets/status`.
 - A fault's `match.name` is a glob as Go's `path.Match` reads it. `match.fraction` is a
   share above 0 and up to 1, and a fault without one applies to every request it
-  matches. `action.error` is a status from 400 to 599. `action.delay`, `until.count` and
-  `until.for` are not negative, and 0 leaves each unset. `until.op` is above the fault's
-  own index, and an index past the last op lets the fault outlast the sequence. Any other
-  value is a configuration error.
+  matches. `action.error` is a status from 400 to 599. `action.delay` is not negative, and
+  0 leaves it unset. `until.count` and `until.for` are above 0, because botbox would read 0
+  as no trigger. `until.op` is above the fault's own index, and an index past the last op
+  lets the fault outlast the sequence. Any other value is a configuration error.
 - Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
   tries faults in op order, the first that applies to a request wins, and each runs out on
   its own `until`.
@@ -2059,6 +2059,7 @@ built from source and run as a black-box binary.
 - **D@61 One page lists every key, op and fault field, and tests keep it whole.** Some
   keys and fault fields appeared only in the Go source. `docs/reference.md` gives each a
   row, and tests hold the rows to the code (§11). A fault field value that tests something
-  else is refused, such as a `fraction` of 0, which botbox read as every request, or an
-  `until.op` at or before the fault's own op. Keeping the reference in DESIGN.md was
-  rejected, because DESIGN.md mixes the contract with internals, milestones and decisions.
+  else is refused, such as a `fraction` of 0, which botbox read as every request, an
+  `until.count` or `until.for` of 0, which botbox read as no trigger, or an `until.op` at
+  or before the fault's own op. Keeping the reference in DESIGN.md was rejected, because
+  DESIGN.md mixes the contract with internals, milestones and decisions.

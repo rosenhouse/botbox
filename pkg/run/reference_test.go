@@ -1,9 +1,11 @@
 package run
 
 import (
+	"fmt"
 	"maps"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/rosenhouse/botbox/internal/reference"
@@ -87,6 +89,40 @@ func TestTheReferenceSaysWhatEachOpTakesAndWhetherItSettles(t *testing.T) {
 
 func sorted(fields []string) []string {
 	return slices.Sorted(slices.Values(fields))
+}
+
+func TestTheReferenceGivesTheBoundsOfEachFaultValue(t *testing.T) {
+	for _, bounded := range []struct {
+		field, says, spec string
+		in, out           []string
+	}{
+		{"match.fraction", "above 0 and up to 1", `{"match": {"fraction": %s}, "action": {"drop": true}}`, []string{"0.001", "1"}, []string{"0", "1.001"}},
+		{"action.error", "from 400 to 599", `{"action": {"error": %s}}`, []string{"400", "599"}, []string{"399", "600"}},
+		{"until.count", "It is above 0.", `{"action": {"drop": true}, "until": {"count": %s}}`, []string{"1"}, []string{"0", "-1"}},
+		{"until.for", "It is above 0.", `{"action": {"drop": true}, "until": {"for": "%s"}}`, []string{"1ns"}, []string{"0s", "-1ns"}},
+	} {
+		t.Run(bounded.field, func(t *testing.T) {
+			if row := reference.Row(t, "### Fault fields", bounded.field)[1]; !strings.Contains(row, bounded.says) {
+				t.Errorf("The row for %s does not say %q: %s", bounded.field, bounded.says, row)
+			}
+			for _, value := range bounded.in {
+				if err := readFault(fmt.Sprintf(bounded.spec, value)); err != nil {
+					t.Errorf("A fault of %s %s was refused: %v", bounded.field, value, err)
+				}
+			}
+			for _, value := range bounded.out {
+				if err := readFault(fmt.Sprintf(bounded.spec, value)); err == nil {
+					t.Errorf("A fault of %s %s was accepted.", bounded.field, value)
+				}
+			}
+		})
+	}
+}
+
+func readFault(spec string) error {
+	_, err := UnmarshalSequence([]byte(`{"seed": 1, "target": "t", "ops": [{"i": 0, "t": "fault", "spec": ` + spec +
+		`}, {"i": 1, "t": "settle"}]}`))
+	return err
 }
 
 func TestTheReferenceListsEveryVerb(t *testing.T) {

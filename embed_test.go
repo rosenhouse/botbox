@@ -155,6 +155,32 @@ func fencedBlock(lines []string) (string, bool) {
 	return "", false
 }
 
+func TestFencedBlocksReturnsEachBlockInOrder(t *testing.T) {
+	doc := "text\n\n```sh\nmake\n```\n\nmore\n\n````\n```\nnested\n````\n"
+	if got, want := fencedBlocks(doc), []string{"make\n", "```\nnested\n"}; !slices.Equal(got, want) {
+		t.Errorf("fencedBlocks returned %q, not %q", got, want)
+	}
+}
+
+// fencedBlocks returns the content of each fenced block in doc.
+func fencedBlocks(doc string) []string {
+	var blocks []string
+	lines := strings.SplitAfter(doc, "\n")
+	for i := 0; i < len(lines); i++ {
+		fence := openingFence(lines[i])
+		if fence == "" {
+			continue
+		}
+		end := slices.IndexFunc(lines[i+1:], func(line string) bool { return closesFence(line, fence) })
+		if end < 0 {
+			break
+		}
+		blocks = append(blocks, strings.Join(lines[i+1:i+1+end], ""))
+		i += end + 1
+	}
+	return blocks
+}
+
 // openingFence returns the run of backticks a fenced block opens with, or the
 // empty string when the line does not open one.
 func openingFence(line string) string {

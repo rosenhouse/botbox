@@ -54,6 +54,30 @@ kind delete cluster --kubeconfig kind.kubeconfig
 
 `make test-kind` runs the toy controller this way ([DESIGN.md §5.8](DESIGN.md#58-test-cluster)).
 
+## A find in half a minute
+
+Every find this README shows is planted: a bug seeded into the toy controller, or a negative
+control that sets up a real controller to fail. In a clone of this repository, this replays a
+sequence against the toy's seeded bug B3, which leaves a ConfigMap without an ownerReference:
+
+```sh
+make build
+KUBEBUILDER_ASSETS="$(make --no-print-directory assets-path)" ./bin/botbox replay \
+  --target targets/toy-widget/target.yaml --launch-arg --bug=3 targets/toy-widget/sequences/b3.json
+```
+
+```
+the deadline is 2m12s: this run can take that long at the target's timeouts. --deadline sets another.
+run 1: seed 20260920, sequence targets/toy-widget/sequences/b3.json
+run 1: G3 the v1/ConfigMap widget-0 was still there 10s after widget, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
+  at 2026-09-30T19:50:43.395112151Z; 1 version, the first v1/ConfigMap widget-0
+  the evidence is in botbox-out/20260930T195026Z-20260920/run-1
+```
+
+The toy converges, so nothing looks wrong until the sequence deletes the Widget and the
+ConfigMap stays. Once built, the replay takes about 25 seconds.
+[docs/bug-matrix.md](docs/bug-matrix.md) lists each seeded bug and the check that catches it.
+
 ## Quickstart: cert-manager
 
 `examples/cert-manager/` drives [cert-manager](https://github.com/cert-manager/cert-manager)

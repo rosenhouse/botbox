@@ -1246,9 +1246,11 @@ the proxy; the `Image` launcher. Separate design addendum.
   as a GitHub release asset, and are pinned.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
-  (five lines); install; quickstart against cert-manager, then what the second example
-  adds; writing `target.yaml` for your own controller; reading a report; what to change
-  when botbox exits 2; a CI recipe for adopters, embedded from `examples/ci/github-actions.yml`;
+  (five lines); install; a find in half a minute, a replay of a bug seeded into the toy,
+  which says that every find the README shows is seeded or a negative control and whose
+  command an envtest test runs as written; quickstart against cert-manager, then what the
+  second example adds; writing `target.yaml` for your own controller; reading a report;
+  what to change when botbox exits 2; a CI recipe for adopters, embedded from `examples/ci/github-actions.yml`;
   a one-line-per-invariant table linking to §6; a closing "Design and
   internals" link to this document and to
   `docs/bug-matrix.md`. A fenced block preceded by `<!-- embed: <path> -->` has content,
@@ -1344,6 +1346,8 @@ the proxy; the `Image` launcher. Separate design addendum.
 6. G5 takes an op on one CR to change only that CR and what it owns (§6). Should it judge
    less for a controller whose CRs refer to one another, such as one CR delegating to
    another of its kind?
+7. What lets the README show a find in a real controller as a bug botbox found: upstream
+   acknowledging it, or a deterministic replay that a reading of upstream's code confirms?
 
 ## 15. Decision log
 
@@ -2043,3 +2047,22 @@ built from source and run as a black-box binary.
   `sequence.json`, `kubeconfig` and `target.log`, under a summary that said the directory
   held a partial run of the minimized sequence. Naming the run each file came from was
   rejected, because a run that ends replaces the drawn run's recordings anyway.
+- **D@63 The README's first find is a seeded bug, and a hunt looks for real ones.** Every
+  find the README showed was planted, and the first it gave a command for needed a
+  cert-manager build of minutes. The README now says so and opens with a replay of the
+  toy's B3, which takes about 25 s once built. An envtest test runs its command as
+  written. A mature controller breaks under API faults and restarts mid-reconcile, changed
+  or missing fixtures and several CRs, and generation draws no fault. So each adopted
+  example carries hand-written families under `sequences/hunt/`, and `make hunt-<example>`
+  runs them and then drawn seeds until a time box runs out. Each family and seed runs in
+  an invocation of its own, because an invocation stops at its first failing run and a
+  hunt keeps every failure. A run the time box cut is no failure. A family is checked in
+  only once it passes the pinned controller. All 19 of cert-manager's and 19 of
+  external-secrets' passed. One more for external-secrets deleted an ExternalSecret
+  without waiting and created it again. It ended as a harness error, because the API
+  server refuses that create while the old CR's finalizer holds it, so it is not checked
+  in. A family that fails is triaged as a false positive of botbox's, which becomes a
+  botbox issue, or as a candidate upstream bug, which becomes a draft under
+  `docs/findings/` with its sequence. No agent files a candidate upstream, because an
+  issue there speaks for the maintainer. No pull request runs a hunt, because one takes
+  hours.

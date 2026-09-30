@@ -2056,21 +2056,20 @@ built from source and run as a black-box binary.
   held a partial run of the minimized sequence. Naming the run each file came from was
   rejected, because a run that ends replaces the drawn run's recordings anyway.
 - **D@63 The README's first find is a seeded bug, and a hunt looks for real ones.** Every
-  find the README showed was planted, and the first it gave a command for needed a
-  cert-manager build of minutes. The README now says so and opens with a replay of the
-  toy's B3, which takes about 25 s once built. An envtest test runs its command as
-  written. A mature controller breaks under API faults and restarts mid-reconcile, changed
-  or missing fixtures and several CRs, and generation draws no fault. So each adopted
-  example carries hand-written families under `sequences/hunt/`, and `make hunt-<example>`
-  runs them and then drawn seeds until a time box runs out. Each family and seed runs in
-  an invocation of its own, because an invocation stops at its first failing run and a
-  hunt keeps every failure. A run the time box cut is no failure. A family is checked in
-  only once it passes the pinned controller. All 19 of cert-manager's and 19 of
-  external-secrets' passed. One more for external-secrets deleted an ExternalSecret
-  without waiting and created it again. It ended as a harness error, because the API
-  server refuses that create while the old CR's finalizer holds it, so it is not checked
-  in. A family that fails is triaged as a false positive of botbox's, which becomes a
-  botbox issue, or as a candidate upstream bug, which becomes a draft under
-  `docs/findings/` with its sequence. No agent files a candidate upstream, because an
+  find the README shows is planted, and a real controller's needs a build of minutes. So
+  the README says so, and its first find, after Install, replays the toy's B3. An envtest
+  test runs that command as written and matches what it prints. A real controller may
+  break under API faults, restarts mid-reconcile, changed or missing fixtures and several
+  CRs, and generation draws no fault. So each adopted example carries hand-written
+  families under `sequences/hunt/`, and `make hunt-<example>` runs them and then drawn
+  seeds until a time box runs out. Each family and seed runs in an invocation of its own,
+  because an invocation stops at its first failing run and a hunt keeps every failure. A
+  run the time box cut is no failure, but a find reported after the box's end is one. The
+  hunt runs a copy of `bin/botbox`, so a rebuild during a hunt changes nothing. A family
+  is checked in only once it passes the pinned controller. A run that fails is a
+  candidate until triage keeps it (§11). No agent files a candidate upstream, because an
   issue there speaks for the maintainer. No pull request runs a hunt, because one takes
-  hours.
+  hours. A `create` of a CR that a `noSettle` `delete` removed, with no op since that
+  settles, is a configuration error (§7), because a finalizer may still hold the old CR.
+  Letting that create wait for the old CR was rejected, because a `recreate` already
+  does.

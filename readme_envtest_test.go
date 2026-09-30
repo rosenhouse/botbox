@@ -43,9 +43,17 @@ func TestTheREADMEsFirstFindRunsAsShown(t *testing.T) {
 	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
 		t.Errorf("The command returned %v, and a find exits 1:\n%s", err, output)
 	}
-	if !strings.HasSuffix(unstamped(string(output)), unstamped(shown)) {
-		t.Errorf("The command printed\n%s\nand the README shows it ending\n%s", output, shown)
+	if printed := fromLine(unstamped(string(output)), "the deadline is "); printed != unstamped(shown) {
+		t.Errorf("botbox printed\n%s\nand the README shows\n%s", printed, shown)
 	}
+}
+
+// fromLine is output from its first line that starts with prefix, or empty.
+func fromLine(output, prefix string) string {
+	if _, after, found := strings.Cut("\n"+output, "\n"+prefix); found {
+		return prefix + after
+	}
+	return ""
 }
 
 var (

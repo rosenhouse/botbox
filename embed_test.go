@@ -162,6 +162,13 @@ func TestFencedBlocksReturnsEachBlockInOrder(t *testing.T) {
 	}
 }
 
+// A fence that never closes runs to the end of the document.
+func TestFencedBlocksFindsNoBlockInsideAnUnclosedOne(t *testing.T) {
+	if got := fencedBlocks("````\n```\ninside\n```\n"); len(got) != 0 {
+		t.Errorf("fencedBlocks returned %q from inside a block that never closes", got)
+	}
+}
+
 // fencedBlocks returns the content of each fenced block in doc.
 func fencedBlocks(doc string) []string {
 	var blocks []string

@@ -75,8 +75,14 @@ run 1: G3 the v1/ConfigMap widget-0 was still there 10s after widget, the last C
 ```
 
 The toy converges, so nothing looks wrong until the sequence deletes the Widget and the
-ConfigMap stays. Once built, the replay takes about 25 seconds.
-[docs/bug-matrix.md](docs/bug-matrix.md) lists each seeded bug and the check that catches it.
+ConfigMap stays. An envtest suite would not see this: envtest runs no garbage collector, so the
+ConfigMap stays whether or not it carries an ownerReference. botbox emulates the collector, and
+G3 fails. [docs/bug-matrix.md](docs/bug-matrix.md) lists each seeded bug and the check that
+catches it.
+
+In a fresh clone, the first `make assets-path` also installs setup-envtest and downloads the
+control plane, and the first `make build` compiles every dependency. After that, the replay
+takes about 25 seconds.
 
 ## Quickstart: cert-manager
 

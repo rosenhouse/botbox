@@ -1232,7 +1232,12 @@ the proxy; the `Image` launcher. Separate design addendum.
   through `--kubeconfig` against a kind cluster it creates and deletes, on demand. It
   passes `b0.json` and fixed seeds, and fails B3 on G3 and B8 on G7 as its negative
   controls. It installs the pinned kind into `bin/` and needs Docker. The nightly workflow
-  runs the same runs with `make test-kind-runs`.
+  runs the same runs with `make test-kind-runs`. `make hunt-cert-manager` and
+  `make hunt-external-secrets` hunt for bugs in the adopted examples, on demand and on no
+  pull request. Each runs every family in `examples/<example>/sequences/hunt/`, then seeds
+  drawn from `HUNT_SEED`, each in an invocation of its own, until `HUNT_MINUTES` runs out.
+  Each invocation writes under `botbox-out/hunt-<example>/`. A family is checked in only
+  once it passes the pinned controller.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code

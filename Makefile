@@ -39,6 +39,11 @@ NIGHTLY_DEADLINE ?= 30m
 KIND_SEED ?= 1
 KIND_RUNS ?= 3
 KIND_DEADLINE ?= 5m
+# A hunt runs an example's families and then its drawn seeds until the time
+# box, in minutes, runs out. Move HUNT_SEED on between hunts.
+HUNT_MINUTES ?= 120
+HUNT_RUNS ?= 1000
+HUNT_SEED ?= 1000
 
 # Project-local tool and asset directories. Both are git-ignored.
 LOCALBIN := $(CURDIR)/bin
@@ -95,6 +100,8 @@ help:
 	@echo "  test-example-external-secrets          Run the external-secrets example and its negative control."
 	@echo "  test-example-nightly                   Run the cert-manager example on seeds botbox draws."
 	@echo "  test-example-external-secrets-nightly  Run the external-secrets example on seeds botbox draws."
+	@echo "  hunt-cert-manager                      Hunt for bugs in cert-manager for HUNT_MINUTES."
+	@echo "  hunt-external-secrets                  Hunt for bugs in external-secrets for HUNT_MINUTES."
 	@echo "  test-kind                              Run the toy through --kubeconfig against a throwaway kind cluster."
 	@echo "  kind-cluster                           Create the kind cluster test-kind runs against."
 	@echo "  test-kind-runs                         Run the toy against the cluster kind-cluster created."
@@ -374,6 +381,21 @@ test-example-external-secrets-nightly: verify-external-secrets-pin setup build
 	@examples/external-secrets/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE) \
 		|| { echo "test-example-external-secrets-nightly: a drawn seed failed."; exit 1; }
 	$(call external-secrets-control,test-example-external-secrets-nightly)
+
+# A hunt takes hours, so no pull request runs one. Each invocation writes under
+# botbox-out/hunt-<example>/, which keeps every failing run's evidence.
+HUNT = HUNT_MINUTES=$(HUNT_MINUTES) HUNT_RUNS=$(HUNT_RUNS) HUNT_SEED=$(HUNT_SEED) \
+	KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" examples/hunt.sh
+
+.PHONY: hunt-cert-manager
+hunt-cert-manager: verify-cert-manager-pin setup build cert-manager
+	@! lsof -nP -iTCP:9403 -sTCP:LISTEN >/dev/null 2>&1 \
+		|| { echo "port 9403 is bound. cert-manager listens there, so its runs cannot overlap."; exit 1; }
+	$(HUNT) examples/cert-manager/target.yaml examples/cert-manager/sequences/hunt botbox-out/hunt-cert-manager
+
+.PHONY: hunt-external-secrets
+hunt-external-secrets: verify-external-secrets-pin setup build external-secrets
+	$(HUNT) examples/external-secrets/target.yaml examples/external-secrets/sequences/hunt botbox-out/hunt-external-secrets
 
 $(KIND):
 	GOBIN=$(dir $@) go install sigs.k8s.io/kind@$(KIND_VERSION)

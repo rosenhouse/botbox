@@ -2058,11 +2058,13 @@ built from source and run as a black-box binary.
   correct controller that loses its lease once during an op still gets `T_settle` past its
   return before the next op. Once no fault is active, every exit a fault excused is owed,
   and nothing excuses an exit past the faults' recovery. B12 therefore fails G4 in the
-  teardown's recovery wait, about a minute in. Owing only the first exit after each fault
-  began was rejected. Under a fault that failed 80% of its lease updates, the correct toy
-  then saw a `deleteManaged` land while it waited out a later backoff, and P1 failed. A
-  fault excuses G4, not a property, so the Runner waits for such a restart before each op
-  whatever the faults. The derived deadline allows an exit per op from the first fault op
-  on and a backoff per op after it, so it ends no run the Runner would end on its own. The
-  toy's `--lease` elects a leader, so a fault on leases makes the correct toy exit as
-  controller-runtime does.
+  teardown's recovery wait: a minute into `b12-fault.json`, and 5.5 min into the issue's
+  sequence, whose fault lasts longer. Owing only the first exit after each fault began was
+  rejected. Under a fault that failed 80% of its lease updates, the correct toy then saw a
+  `deleteManaged` land while it waited out a later backoff, and P1 failed. A fault excuses
+  G4, not a property, so the Runner waits for such a restart before each op whatever the
+  faults. With that wait alone, the op lands as the toy restarts, before it has won its
+  lease back, and one of two runs still failed P1. The derived deadline allows an exit per
+  op from the first fault op on and a backoff per op after it, so it ends no run the
+  Runner would end on its own. The toy's `--lease` elects a leader, so a fault on leases
+  makes the correct toy exit as controller-runtime does.

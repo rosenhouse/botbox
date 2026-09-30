@@ -88,7 +88,7 @@ thresholds:
 | `properties[*].description` | none | It says what the property means. Reports print it. |
 | `properties[*].cel` | required | It is CEL that says whether the property holds. |
 | `properties[*].when` | `checkpoint` | It says where botbox evaluates the property: `always` at every change botbox observes, `checkpoint` wherever the checks run, and `end` at the last checkpoint. |
-| `generate.mutate` | every spec path the schema describes | It lists the dotted spec paths generation may change. Generation changes no others. |
+| `generate.mutate` | each spec path generation can draw a value for | It lists the dotted spec paths generation may change. Generation changes no others. Without it, `botbox run` prints each spec path it leaves alone, and why. |
 | `generate.overlay` | none | It maps a dotted path to schema keywords. For generation, they win over the CRD's keywords there, and the CRD keeps those they do not name. botbox reads `additionalProperties`, `enum`, `exclusiveMaximum`, `exclusiveMinimum`, `format`, `items`, `maxItems`, `maxLength`, `maxProperties`, `maximum`, `minItems`, `minLength`, `minProperties`, `minimum`, `pattern`, `properties`, `required`, `type`, `x-kubernetes-int-or-string` and `x-kubernetes-list-type`, and refuses any other. |
 | `generate.maxCRs` | `3` | It bounds the CRs a sequence creates, the sample included. `1` keeps every sequence to the sample. |
 | `generate.distinct` | none | It lists dotted paths at which the sample holds a string, such as a field that names a child. Each CR after the first appends its `-2` or `-3` there, so no two CRs share a value. |
@@ -186,7 +186,8 @@ time to recover.
 
 Every op carries `i` and `t`. A settle wait follows each op that settles. It ends once
 `ready` holds on every CR and nothing has changed for `timeouts.stable`, or once
-`timeouts.settle` runs out. The checks run where it ends.
+`timeouts.settle` runs out. After a fault, a restart or a CR's deletion, it can run longer,
+while the checks still give your controller time. The checks run where it ends.
 
 | Op | Needs | May carry | Settles | What it does |
 |---|---|---|---|---|

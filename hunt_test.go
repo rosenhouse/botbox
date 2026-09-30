@@ -24,8 +24,14 @@ type huntRun struct {
 
 // runHunt runs examples/hunt.sh over the named families with a bin/botbox that
 // exits with each code in turn, then 0, and a clock that moves on a minute each
-// time it is read.
+// time it is read. TICK in env sets another step in seconds. AFTER_<n> in env
+// is a command the n-th invocation runs.
 func runHunt(t *testing.T, families []string, codes []int, env ...string) huntRun {
+	t.Helper()
+	return runHuntWithArgs(t, []string{"target.yaml", "families", "out"}, families, codes, env...)
+}
+
+func runHuntWithArgs(t *testing.T, args, families []string, codes []int, env ...string) huntRun {
 	t.Helper()
 	script, err := filepath.Abs("examples/hunt.sh")
 	if err != nil {
@@ -49,12 +55,14 @@ func runHunt(t *testing.T, families []string, codes []int, env ...string) huntRu
 	}
 	writeStub(t, filepath.Join(workspace, "bin", "botbox"), `printf '%s\n' "$*" >>"$STUBS/invocations"
 n=$(wc -l <"$STUBS/invocations")
+after=$(printenv "AFTER_$n" || true)
+[ -z "$after" ] || sh -c "$after"
 exit "$(sed -n "${n}p" "$STUBS/codes" | grep . || echo 0)"`)
 	writeStub(t, filepath.Join(stubs, "date"), `now=$(cat "$STUBS/clock")
-echo $((now + 60)) >"$STUBS/clock"
+echo $((now + ${TICK:-60})) >"$STUBS/clock"
 echo "$now"`)
 
-	cmd := exec.Command(script, "target.yaml", "families", "out")
+	cmd := exec.Command(script, args...)
 	cmd.Dir = workspace
 	cmd.Env = append([]string{
 		"PATH=" + stubs + string(os.PathListSeparator) + os.Getenv("PATH"),
@@ -105,6 +113,24 @@ func TestTheHuntRunsEachFamilyAndThenEachSeedInAnInvocationOfItsOwn(t *testing.T
 	if h.code != 0 || !strings.Contains(h.output, "4 passed.") {
 		t.Errorf("The hunt exited %d when every invocation passed, and printed\n%s", h.code, h.output)
 	}
+	for _, name := range []string{"a", "b", "seed-7", "seed-8"} {
+		if !strings.Contains(h.output, "==> out/"+name+"\n") {
+			t.Errorf("The hunt did not announce out/%s:\n%s", name, h.output)
+		}
+	}
+}
+
+func TestTheHuntSkipsAFamilyGoneByItsTurn(t *testing.T) {
+	h := runHunt(t, []string{"a", "b", "c"}, nil, "HUNT_MINUTES=1000", "HUNT_RUNS=1", "HUNT_SEED=7", "AFTER_1=rm families/b.json")
+
+	want := []string{
+		"run --target target.yaml --deadline D --out out/a families/a.json",
+		"run --target target.yaml --deadline D --out out/c families/c.json",
+		"run --target target.yaml --deadline D --out out/seed-7 --seed 7 --runs 1",
+	}
+	if got := withoutDeadlines(h.invocations); !slices.Equal(got, want) {
+		t.Errorf("The hunt ran botbox as\n%s\nnot as\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
 }
 
 func TestTheHuntWithNoFamiliesDrawsSeeds(t *testing.T) {
@@ -151,6 +177,14 @@ func TestTheHuntGivesEachInvocationWhatTheTimeBoxHasLeftAndStopsWhenItRunsOut(t 
 	}
 }
 
+func TestTheHuntRunsAnInvocationInTheBoxsLastSecond(t *testing.T) {
+	h := runHunt(t, []string{"a"}, nil, "HUNT_MINUTES=1", "HUNT_RUNS=1", "HUNT_SEED=7", "TICK=59")
+
+	if want := "run --target target.yaml --deadline 1s --out out/a families/a.json"; len(h.invocations) != 1 || h.invocations[0] != want {
+		t.Errorf("The hunt ran botbox as %q, not as %q:\n%s", h.invocations, want, h.output)
+	}
+}
+
 func TestTheHuntDrawsNoSeedOnceItsTimeBoxRunsOutAmongTheFamilies(t *testing.T) {
 	h := runHunt(t, []string{"a", "b", "c"}, nil, "HUNT_MINUTES=2", "HUNT_RUNS=2", "HUNT_SEED=7")
 
@@ -164,8 +198,18 @@ func TestTheHuntBlamesNothingForARunItsTimeBoxCut(t *testing.T) {
 	h := runHunt(t, []string{"a", "b"}, []int{2}, "HUNT_MINUTES=2", "HUNT_RUNS=2", "HUNT_SEED=7")
 
 	if len(h.invocations) != 1 || h.code != 0 || !strings.Contains(h.output, "the time box ran out during a.") ||
-		strings.Contains(h.output, "exited 2") {
+		strings.Count(h.output, "the time box ran out") != 1 || strings.Contains(h.output, "exited 2") {
 		t.Errorf("The hunt ran %d invocations, exited %d and printed\n%s", len(h.invocations), h.code, h.output)
+	}
+}
+
+// botbox can report a find after its deadline, since it finishes the run it is
+// in.
+func TestTheHuntKeepsAFindThatEndsAfterItsTimeBox(t *testing.T) {
+	h := runHunt(t, []string{"a", "b"}, []int{1}, "HUNT_MINUTES=2", "HUNT_RUNS=2", "HUNT_SEED=7")
+
+	if h.code != 1 || !strings.Contains(h.output, "out/a exited 1") || strings.Contains(h.output, "ran out during") {
+		t.Errorf("The hunt exited %d and printed\n%s", h.code, h.output)
 	}
 }
 

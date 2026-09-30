@@ -167,6 +167,9 @@ func TestTheReferenceSequencePassesTheToy(t *testing.T) {
 	if result.Violation != nil {
 		t.Errorf("The run reported %s: %s", result.Violation.ID, result.Violation.Statement)
 	}
+	if got := len(result.Timeline.Faults); got != 3 {
+		t.Errorf("The run injected %d faults, want 3.", got)
+	}
 	for i, window := range result.Timeline.Faults {
 		if window.Start.IsZero() {
 			t.Errorf("The proxy applied fault %d to no request.", i)

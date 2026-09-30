@@ -5,7 +5,7 @@
     "action": {"error": 500}, "until": {"count": 2}}},
   {"i": 2, "t": "update", "patch": {"spec": {"count": 3}}},
   {"i": 3, "t": "fault", "spec": {"match": {"verb": "patch", "resource": "widgets", "name": "widget-*"},
-    "action": {"delay": "500ms"}, "until": {"for": "2s"}}},
+    "action": {"delay": "500ms"}, "until": {"for": "10s"}}},
   {"i": 4, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
     "metadata": {"name": "widget-2"}, "spec": {"count": 1}}},
   {"i": 5, "t": "update", "cr": "widget-2", "patch": {"spec": {"count": 2}}, "noSettle": true},

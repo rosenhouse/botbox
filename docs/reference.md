@@ -149,7 +149,7 @@ toy controller of `targets/toy-widget/target.yaml`, which passes it:
     "action": {"error": 500}, "until": {"count": 2}}},
   {"i": 2, "t": "update", "patch": {"spec": {"count": 3}}},
   {"i": 3, "t": "fault", "spec": {"match": {"verb": "patch", "resource": "widgets", "name": "widget-*"},
-    "action": {"delay": "500ms"}, "until": {"for": "2s"}}},
+    "action": {"delay": "500ms"}, "until": {"for": "10s"}}},
   {"i": 4, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
     "metadata": {"name": "widget-2"}, "spec": {"count": 1}}},
   {"i": 5, "t": "update", "cr": "widget-2", "patch": {"spec": {"count": 2}}, "noSettle": true},
@@ -169,7 +169,7 @@ toy controller of `targets/toy-widget/target.yaml`, which passes it:
 ```
 
 Op 1 refuses about half the ConfigMap creates until it has refused two. Op 3 delays each
-patch of a Widget whose name matches `widget-*` by 500ms, for 2s. Op 6 drops every ConfigMap
+patch of a Widget whose name matches `widget-*` by 500ms, for 10s. Op 6 drops every ConfigMap
 delete until op 8, so op 7's wait runs out, which the fault excuses. Op 8's wait gives the toy
 time to recover.
 

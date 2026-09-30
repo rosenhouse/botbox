@@ -91,7 +91,7 @@ func sorted(fields []string) []string {
 	return slices.Sorted(slices.Values(fields))
 }
 
-func TestTheReferenceGivesTheBoundsOfEachFaultValue(t *testing.T) {
+func TestTheReferenceGivesTheBoundsOfFaultValues(t *testing.T) {
 	for _, bounded := range []struct {
 		field, says, spec string
 		in, out           []string

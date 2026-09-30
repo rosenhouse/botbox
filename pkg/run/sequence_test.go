@@ -273,6 +273,11 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 			want: "until.op names op -1; want an op after the fault",
 		},
 		{
+			name: "a later fault that runs out at its own op",
+			ops:  `{"i": 0, "t": "settle"}, {"i": 1, "t": "fault", "spec": {"action": {"drop": true}, "until": {"op": 1}}}`,
+			want: "op 1: until.op names op 1; want an op after the fault",
+		},
+		{
 			name: "a restart that skips its settle",
 			ops:  `{"i": 0, "t": "restart", "noSettle": true}`,
 			want: "noSettle",

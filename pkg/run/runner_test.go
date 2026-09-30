@@ -3145,6 +3145,36 @@ func TestTheWaitAfterARestartIsOwedTSettlePastTheTargetsReturn(t *testing.T) {
 	}
 }
 
+// An op lands no sooner than a restart a fault excused, unless a fault active
+// then excuses the op. While the fault is active, the wait after op 2 is owed
+// only the first exit.
+func TestAnOpWaitsForARestartAFaultExcusedWhereNoFaultIsActive(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		fault Op
+		waits bool
+	}{
+		{name: "a fault that stops at the op", fault: faultUntil(3), waits: true},
+		{name: "a fault still active", fault: faultOp},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newWaitingHarness(testTimeouts)
+			h.settles, h.exitsLate, h.restartsIn = []bool{true, false}, []int{2, 2}, time.Minute
+
+			result, err := runSequence(t.Context(), toyTarget, sequenceOf(createOp, test.fault, updateOp, Op{Type: OpDelete}),
+				Options{Check: &fakeChecker{}}, h)
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			restart := h.exited[1].Restart
+			if landed := result.Timeline.Ops[3].At; landed.Equal(restart) != test.waits || landed.After(restart) {
+				t.Errorf("Op 3 landed %v before the restart; want it to wait for the restart: %t.", restart.Sub(landed), test.waits)
+			}
+		})
+	}
+}
+
 // The wait for recovery from a fault is the teardown's too.
 func TestAnExitWhileTheTeardownAwaitsRecoveryIsTheTeardowns(t *testing.T) {
 	h := crashLoop()

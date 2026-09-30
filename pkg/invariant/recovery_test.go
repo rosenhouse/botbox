@@ -94,6 +94,87 @@ func TestOwedRunsPastTheReturnFromAnExitAFaultExcused(t *testing.T) {
 	}
 }
 
+// A crash loop under a fault that never stops would otherwise be owed time for
+// good. Once no fault is active, every exit a fault excused is owed.
+func TestWhileAFaultIsActiveOnlyTheFirstExitAfterEachFaultBeganIsOwed(t *testing.T) {
+	crashLoop := func(faultEnd time.Duration) *run {
+		return newRun().fault(time.Second, faultEnd).exit(3*time.Second, 3*time.Second).running(3500*time.Millisecond).
+			exit(4*time.Second, 14*time.Second).exit(14500*time.Millisecond, 34500*time.Millisecond)
+	}
+	for _, test := range []struct {
+		name string
+		run  *run
+		at   time.Duration
+		// want is zero where the target owes nothing.
+		want time.Duration
+	}{
+		{name: "a crash loop under an active fault", run: crashLoop(time.Minute), at: 20 * time.Second, want: 8500 * time.Millisecond},
+		{name: "a crash loop once the fault stopped", run: crashLoop(16 * time.Second), at: 20 * time.Second, want: 39500 * time.Millisecond},
+		{name: "the first exits after each of two faults",
+			run: newRun().fault(time.Second, time.Minute).fault(10*time.Second, time.Minute).exit(3*time.Second, 3*time.Second).
+				exit(4*time.Second, 14*time.Second).exit(12*time.Second, 22*time.Second).exit(23*time.Second, 43*time.Second),
+			at: 30 * time.Second, want: 27 * time.Second},
+		{name: "an exit no fault excused before one a fault did",
+			run: newRun().fault(time.Second, time.Minute).exit(500*time.Millisecond, 500*time.Millisecond).
+				exit(2*time.Second, 12*time.Second).exit(12500*time.Millisecond, 32500*time.Millisecond),
+			at: 20 * time.Second, want: 17 * time.Second},
+		{name: "an exit before a later fault began",
+			run: newRun().fault(time.Second, time.Minute).fault(25*time.Second, time.Minute).exit(3*time.Second, 3*time.Second).
+				exit(4*time.Second, 14*time.Second),
+			at: 20 * time.Second, want: 8 * time.Second},
+		{name: "an exit after the target converged under the same fault",
+			run: newRun().op(invariant.OpCreate, 0).fault(time.Second, time.Minute).exit(3*time.Second, 3*time.Second).
+				checkpoint(10*time.Second, invariant.Converged).exit(12*time.Second, 22*time.Second),
+			at: 20 * time.Second},
+		{name: "the first exit after a fault that stopped, while another is active",
+			run: newRun().fault(time.Second, 2*time.Second).exit(4*time.Second, 14*time.Second).fault(6*time.Second, time.Minute),
+			at:  10 * time.Second, want: 19 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			owes(t, test.run.through(time.Minute), test.at, test.want)
+		})
+	}
+}
+
+// An op must not land while the target waits out a restart a fault excused,
+// unless a fault active then excuses the op.
+func TestPendingRestartIsARestartAFaultExcusedWithNoFaultActive(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		run  *run
+		at   time.Duration
+		// want is zero where nothing is pending.
+		want time.Duration
+	}{
+		{name: "a restart after the fault stopped", run: newRun().fault(time.Second, 10*time.Second).exit(8*time.Second, 30*time.Second),
+			at: 12 * time.Second, want: 30 * time.Second},
+		{name: "a restart while the fault is active", run: newRun().fault(time.Second, 10*time.Second).exit(8*time.Second, 30*time.Second),
+			at: 9 * time.Second},
+		{name: "a restart that came", run: newRun().fault(time.Second, 10*time.Second).exit(8*time.Second, 11*time.Second),
+			at: 12 * time.Second},
+		{name: "a restart at the instant asked about", run: newRun().fault(time.Second, 10*time.Second).exit(8*time.Second, 12*time.Second),
+			at: 12 * time.Second},
+		{name: "a restart after an exit no fault excused", run: newRun().exit(8*time.Second, 30*time.Second),
+			at: 12 * time.Second},
+		{name: "a restart after an exit while recovery was owed", run: newRun().fault(time.Second, 2*time.Second).exit(7*time.Second, 30*time.Second),
+			at: 12 * time.Second, want: 30 * time.Second},
+		{name: "a restart after an exit once recovery was not owed", run: newRun().fault(time.Second, 2*time.Second).exit(9*time.Second, 30*time.Second),
+			at: 12 * time.Second},
+		{name: "an exit after the instant asked about", run: newRun().fault(time.Second, 10*time.Second).exit(13*time.Second, 30*time.Second),
+			at: 12 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := test.run.through(time.Minute).PendingRestart(at(test.at))
+			if test.want == 0 && !got.IsZero() {
+				t.Errorf("The target waits to restart until %v, want nothing pending.", got.Sub(epoch))
+			}
+			if test.want != 0 && !got.Equal(at(test.want)) {
+				t.Errorf("The target waits to restart until %v, want %v.", got.Sub(epoch), test.want)
+			}
+		})
+	}
+}
+
 // owes fails the test unless the target owes recovery until want, where a
 // zero want owes nothing.
 func owes(t *testing.T, in invariant.Input, asked, want time.Duration) {

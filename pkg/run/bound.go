@@ -13,9 +13,8 @@ import (
 const stopBudget = launch.StopWithin + namespaceDeletionBudget
 
 // Bound is the longest the Runner's waits can make the runs of the sequences
-// take, one after another. A target that exits more than once per fault op
-// while faults are active can outlast it. A bound too long for a Duration is
-// the longest Duration.
+// take, one after another. A bound too long for a Duration is the longest
+// Duration.
 func Bound(t *target.Target, sequences ...Sequence) time.Duration {
 	// Faults double the bound, so it is added up in float64, which does not
 	// overflow.

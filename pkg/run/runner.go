@@ -440,6 +440,9 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 		return r.targetStopped(ctx, status)
 	}
 	r.expireFaults(op.Index)
+	if err := r.awaitRestart(ctx); err != nil {
+		return err
+	}
 	applied := AppliedOp{Op: op, At: r.now()}
 	if op.Type.OnCR() {
 		applied.CR = op.crName(r.target.Sample.GetName())
@@ -457,6 +460,16 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 	}
 	if op.Settles() {
 		return r.settle(ctx, op)
+	}
+	return nil
+}
+
+// awaitRestart waits for the target to restart after an exit a fault excused,
+// where no fault is active to excuse the op.
+func (r *runner) awaitRestart(ctx context.Context) error {
+	now := r.now()
+	if restart := r.asOf(now).PendingRestart(now); !restart.IsZero() {
+		return r.h.sleep(ctx, restart.Sub(now))
 	}
 	return nil
 }

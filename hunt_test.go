@@ -213,6 +213,16 @@ func TestTheHuntKeepsAFindThatEndsAfterItsTimeBox(t *testing.T) {
 	}
 }
 
+func TestTheHuntNeedsItsThreeArguments(t *testing.T) {
+	for _, args := range [][]string{nil, {"target.yaml", "families"}, {"target.yaml", "families", "out", "more"}} {
+		h := runHuntWithArgs(t, args, []string{"a"}, nil, "HUNT_MINUTES=1000", "HUNT_RUNS=2", "HUNT_SEED=7")
+		if h.code != 2 || !strings.Contains(h.output, "Usage: examples/hunt.sh <target.yaml> <families directory> <output directory>") ||
+			h.invocations[0] != "" {
+			t.Errorf("Given %q, the hunt exited %d after running %q, and printed\n%s", args, h.code, h.invocations, h.output)
+		}
+	}
+}
+
 // The Makefile holds the defaults.
 func TestTheHuntNeedsItsTimeBoxRunsAndSeed(t *testing.T) {
 	all := []string{"HUNT_MINUTES=1000", "HUNT_RUNS=2", "HUNT_SEED=7"}

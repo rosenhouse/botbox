@@ -3,10 +3,12 @@
 # directory, then drawn seeds, each in an invocation of its own, until the time
 # box runs out. Every invocation writes under the output directory, where a
 # failing run keeps its evidence.
-#
-# Usage: examples/hunt.sh <target.yaml> <families directory> <output directory>
 # HUNT_MINUTES is the time box. HUNT_RUNS seeds are drawn from HUNT_SEED on.
 set -eu
+[ "$#" -eq 3 ] || {
+  echo "Usage: examples/hunt.sh <target.yaml> <families directory> <output directory>" >&2
+  exit 2
+}
 : "${HUNT_MINUTES:?sets the time box}" "${HUNT_RUNS:?sets how many seeds to draw}" "${HUNT_SEED:?sets the first seed}"
 
 target=$1

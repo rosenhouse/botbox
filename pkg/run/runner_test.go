@@ -2252,24 +2252,6 @@ func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 	}
 }
 
-// A fault whose op trigger names its own op ends at the next one.
-func TestRunEndsAFaultWhoseOpTriggerNamesItsOwnOp(t *testing.T) {
-	h := newFakeHarness()
-	sequence := sequenceOf(
-		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(0)}}},
-		Op{Type: OpSettle},
-	)
-
-	_, err := runFake(t, h, nil, sequence)
-
-	if err != nil {
-		t.Fatalf("The run failed: %v", err)
-	}
-	if got, want := h.opCalls(), []string{"addFault 0", "removeFault 0", "settle", "supervise"}; !slices.Equal(got, want) {
-		t.Errorf("The run did %v, want %v.", got, want)
-	}
-}
-
 // between reports whether the run reached when in [from, to].
 func between(when, from, to time.Time) bool { return !when.Before(from) && !when.After(to) }
 

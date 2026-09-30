@@ -1244,8 +1244,9 @@ the proxy; the `Image` launcher. Separate design addendum.
 - **Triage.** A hunt run that fails is a candidate, not a bug. Triage replays it three
   times, reproduces it by hand against envtest, reads upstream's code path and searches
   upstream's tracker. A candidate that breaks a botbox rule and no upstream contract is a
-  botbox false positive and becomes a botbox issue. Any other becomes a draft under
-  `docs/findings/`, with its sequence, for the maintainer to file upstream.
+  botbox false positive, and becomes a botbox issue. A candidate that fails on every replay
+  and breaks an upstream contract becomes a draft under `docs/findings/`, with its
+  sequence, for the maintainer to file upstream.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code

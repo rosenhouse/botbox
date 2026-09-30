@@ -5,19 +5,15 @@ package reference
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"reflect"
-	"runtime"
 	"slices"
 	"strings"
 	"testing"
 )
 
-// Path is docs/reference.md.
-var Path = func() string {
-	_, file, _, _ := runtime.Caller(0)
-	return filepath.Join(filepath.Dir(file), "..", "..", "docs", "reference.md")
-}()
+// Path is docs/reference.md, as seen from a package two directories below the
+// repository root, where go test runs.
+const Path = "../../docs/reference.md"
 
 // Listed lists the key in the first cell of each row of the table under
 // heading.

@@ -14,6 +14,10 @@ set -eu
 target=$1
 families=$2
 out=$3
+# The evidence keeps the botbox that found it, whatever rebuilds bin/botbox.
+botbox=$out/botbox
+mkdir -p "$out"
+cp bin/botbox "$botbox"
 end=$(($(date +%s) + HUNT_MINUTES * 60))
 passed=0
 failed=
@@ -30,7 +34,7 @@ hunt() {
   fi
   echo "==> $out/$name"
   status=0
-  ./bin/botbox run --target "$target" --deadline "${left}s" --out "$out/$name" "$@" || status=$?
+  "$botbox" run --target "$target" --deadline "${left}s" --out "$out/$name" "$@" || status=$?
   # botbox exits 2 when its deadline, the box's end, stops it.
   if [ "$status" -eq 2 ] && [ "$(date +%s)" -ge "$end" ]; then
     echo "the time box ran out during $name."

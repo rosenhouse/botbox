@@ -213,6 +213,15 @@ func TestTheHuntKeepsAFindThatEndsAfterItsTimeBox(t *testing.T) {
 	}
 }
 
+func TestARebuildDuringAHuntChangesNothing(t *testing.T) {
+	rebuild := `printf '#!/bin/sh\nexit 3\n' >bin/new && chmod +x bin/new && mv bin/new bin/botbox`
+	h := runHunt(t, []string{"a"}, nil, "HUNT_MINUTES=1000", "HUNT_RUNS=2", "HUNT_SEED=7", "AFTER_1="+rebuild)
+
+	if len(h.invocations) != 3 || h.code != 0 {
+		t.Errorf("The hunt ran %d invocations and exited %d:\n%s", len(h.invocations), h.code, h.output)
+	}
+}
+
 func TestTheHuntNeedsItsThreeArguments(t *testing.T) {
 	for _, args := range [][]string{nil, {"target.yaml", "families"}, {"target.yaml", "families", "out", "more"}} {
 		h := runHuntWithArgs(t, args, []string{"a"}, nil, "HUNT_MINUTES=1000", "HUNT_RUNS=2", "HUNT_SEED=7")

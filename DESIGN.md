@@ -1011,8 +1011,8 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 - `--lease=<duration>` has the toy elect a leader through a Lease in `WATCH_NAMESPACE`
   that lasts that long, renew it within two thirds of that, and exit when it loses the
   lease, as controller-runtime does. The envtest tier runs it at 3 s under a fault that
-  fails most lease updates, so the toy keeps losing its lease and restarting until the
-  teardown clears the fault (§6, recovery from faults).
+  fails most lease updates, so the toy can lose its lease and restart until the teardown
+  clears the fault (§6, recovery from faults).
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 

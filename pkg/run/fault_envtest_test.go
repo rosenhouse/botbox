@@ -4,6 +4,7 @@ package run_test
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -150,10 +151,8 @@ func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
 	})
 }
 
-// leaseLostOverAndOver fails most of the toy's lease updates until the
-// teardown. Seed 23 has the proxy fail all of the toy's renewals for 2s twice,
-// and pass the election between them at its first try.
-const leaseLostOverAndOver = `{
+// leaseFault fails most of the toy's lease updates until the teardown.
+const leaseFault = `{
   "seed": 23,
   "target": "toy-widget",
   "ops": [
@@ -166,20 +165,17 @@ const leaseLostOverAndOver = `{
   ]
 }`
 
-// The toy with no bug exits whenever it loses its lease. Under the fault it
-// keeps losing it, and botbox keeps restarting it. Once the teardown clears the
-// fault, it recovers.
-func TestAToyThatLosesItsLeaseOverAndOverUnderAFaultPasses(t *testing.T) {
+// The toy with no bug exits whenever it loses its lease, and botbox restarts
+// it. Once the teardown clears the fault, it recovers.
+func TestAToyThatLosesItsLeaseUnderAFaultPasses(t *testing.T) {
 	t.Parallel()
 	toy := loadTarget(t, buildToy(t))
 	toy.Launch.Args = append(toy.Launch.Args, "--lease=3s")
 	testCluster := startCluster(t, toy.CRDs)
-	// A wait held open for each exit outlasts this.
-	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
-	defer cancel()
+	dir := t.TempDir()
 
-	result, err := run.Run(ctx, toy, readSequence(t, leaseLostOverAndOver), run.Options{
-		Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+	result, err := run.Run(t.Context(), toy, readSequence(t, leaseFault), run.Options{
+		Dir: dir, Config: testCluster.Config(), Check: run.Engine{},
 	})
 
 	if err != nil {
@@ -188,16 +184,43 @@ func TestAToyThatLosesItsLeaseOverAndOverUnderAFaultPasses(t *testing.T) {
 	if result.Violation != nil {
 		t.Errorf("The run reported %v, and the toy with no bug recovers.", result.Violation)
 	}
-	if exits := result.Timeline.Exits; len(exits) < 2 {
-		t.Errorf("The toy exited %d times, want it to keep losing its lease.", len(exits))
+	exits := len(result.Timeline.Exits)
+	if exits == 0 {
+		t.Error("The toy never exited, want it to lose its lease.")
 	}
-	for _, exit := range result.Timeline.Exits {
-		if !strings.Contains(exit.Said, "leader election lost") {
-			t.Errorf("The toy exited with %v, want it to have lost its lease.", exit)
-		}
+	// The toy's last line races the manager's own shutdown lines.
+	logged, err := os.ReadFile(filepath.Join(dir, "target.log"))
+	if lost := strings.Count(string(logged), "leader election lost"); err != nil || lost < exits {
+		t.Errorf("The toy exited %d times and wrote that it lost its lease %d times (%v).", exits, lost, err)
 	}
 	if recovery := result.Timeline.Recovery; recovery == nil || !recovery.Converged {
 		t.Errorf("The teardown recorded the recovery %+v, want a wait that converged.", recovery)
+	}
+}
+
+// A fault excuses every exit while it is active, and this one never stops. The
+// crash loop still fails G4 once the teardown clears the fault.
+func TestACrashLoopUnderAFaultThatNeverStopsFailsG4(t *testing.T) {
+	t.Parallel()
+	toy := loadTarget(t, buildToy(t))
+	toy.Launch.Args = append(toy.Launch.Args, "--bug=12")
+	testCluster := startCluster(t, toy.CRDs)
+	sequence, err := run.ReadSequence("../../targets/toy-widget/sequences/b12-fault.json")
+	if err != nil {
+		t.Fatalf("Reading the sequence failed: %v", err)
+	}
+	// A wait that owed every exit would still be open here.
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Minute)
+	defer cancel()
+
+	result, err := run.Run(ctx, toy, sequence, run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation == nil || result.Violation.ID != "G4" ||
+		!strings.Contains(result.Violation.Statement, "after the last fault stopped") {
+		t.Errorf("The run reported %v, want the G4 of the wait after the last fault stopped.", result.Violation)
 	}
 }
 

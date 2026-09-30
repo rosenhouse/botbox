@@ -21,7 +21,7 @@
       "t": "fault",
       "spec": {
         "match": {
-          "verb": "watch",
+          "verb": "patch",
           "resource": "widgets"
         },
         "action": {
@@ -37,10 +37,6 @@
           "count": 0
         }
       }
-    },
-    {
-      "i": 3,
-      "t": "settle"
     }
   ]
 }

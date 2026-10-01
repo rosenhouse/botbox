@@ -6,6 +6,7 @@ import (
 	"flag"
 	"maps"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"testing"
@@ -22,18 +23,40 @@ const (
 	goldenDraws           = "testdata/draws.golden.json"
 )
 
-// goldenSeeds are the seeds the repository runs by number: the Makefile's
-// EXAMPLE_SEED runs, the README's quickstarts and the envtest tier's B2 and
-// fixture runs.
-var goldenSeeds = []struct {
+type goldenTarget struct {
 	name    string
 	declare declaration
 	seeds   []int64
-}{
-	{"toy-widget", file(toyTarget), seedRange(1, 10)},
-	{"cert-manager", file(certManagerTarget), append(seedRange(1, 10), seedRange(23, 27)...)},
-	{"external-secrets", file(externalSecretsTarget), seedRange(23, 27)},
-	{"toy-widget with a label fixture", toyWithALabelFixture, seedRange(1, 60)},
+}
+
+// goldenSeeds are the seeds the Makefile and the envtest tier run by number.
+func goldenSeeds(t *testing.T) []goldenTarget {
+	example := makefileSeeds(t, "EXAMPLE")
+	return []goldenTarget{
+		{"toy-widget", file(toyTarget), append(seedRange(1, 10), makefileSeeds(t, "KIND")...)},
+		{"cert-manager", file(certManagerTarget), append(seedRange(1, 10), example...)},
+		{"external-secrets", file(externalSecretsTarget), example},
+		{"toy-widget with a label fixture", toyWithALabelFixture, seedRange(1, 60)},
+	}
+}
+
+// makefileSeeds are the seeds the Makefile's <tier>_SEED and <tier>_RUNS draw.
+func makefileSeeds(t *testing.T, tier string) []int64 {
+	t.Helper()
+	makefile, err := os.ReadFile("../../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := func(name string) int64 {
+		m := regexp.MustCompile(`(?m)^` + name + ` \?= (\d+)$`).FindSubmatch(makefile)
+		if m == nil {
+			t.Fatalf("The Makefile sets no %s.", name)
+		}
+		value, _ := strconv.ParseInt(string(m[1]), 10, 64)
+		return value
+	}
+	first := pin(tier + "_SEED")
+	return seedRange(first, first+pin(tier+"_RUNS")-1)
 }
 
 type declaration func(*testing.T) *target.Target
@@ -66,11 +89,11 @@ func seedRange(first, last int64) []int64 {
 // seed draws has to be deliberate: rerun with -update and say why.
 func TestSeedsDrawTheGoldenSequences(t *testing.T) {
 	drawn := map[string]map[string]json.RawMessage{}
-	for _, golden := range goldenSeeds {
-		g := newGenerator(t, golden.declare(t), Options{})
-		drawn[golden.name] = map[string]json.RawMessage{}
-		for _, seed := range golden.seeds {
-			drawn[golden.name][strconv.FormatInt(seed, 10)] = draw(t, g, seed)
+	for _, declared := range goldenSeeds(t) {
+		g := newGenerator(t, declared.declare(t), Options{})
+		drawn[declared.name] = map[string]json.RawMessage{}
+		for _, seed := range declared.seeds {
+			drawn[declared.name][strconv.FormatInt(seed, 10)] = draw(t, g, seed)
 		}
 	}
 	encoded, err := json.MarshalIndent(drawn, "", "  ")
@@ -107,18 +130,20 @@ func TestSeedsDrawTheGoldenSequences(t *testing.T) {
 		goldenDraws)
 }
 
-func TestCertManagersSeed23DrawsOneCreate(t *testing.T) {
+func TestCertManagersFirstExampleSeedDrawsOneCreate(t *testing.T) {
 	// The Makefile's negative control runs it alone, since one op costs no
 	// replay to minimize.
-	ops := drawOps(t, file(certManagerTarget), 23)
+	seed := makefileSeeds(t, "EXAMPLE")[0]
+	ops := drawOps(t, file(certManagerTarget), seed)
 	if len(ops) != 1 || ops[0].Type != run.OpCreate {
-		t.Errorf("Seed 23 draws %v, want a single create.", opTypes(ops))
+		t.Errorf("Seed %d draws %v, want a single create.", seed, opTypes(ops))
 	}
 }
 
-func TestCertManagersSeeds23To27DrawWhatTheMakefileSays(t *testing.T) {
+func TestCertManagersExampleSeedsDrawWhatTheMakefileSays(t *testing.T) {
+	seeds := makefileSeeds(t, "EXAMPLE")
 	drawn := map[string]bool{}
-	for seed := int64(23); seed <= 27; seed++ {
+	for _, seed := range seeds {
 		for _, op := range drawOps(t, file(certManagerTarget), seed) {
 			drawn[string(op.Type)] = true
 			if op.Type == run.OpCreate && op.Obj.GetName() != "example" {
@@ -128,7 +153,7 @@ func TestCertManagersSeeds23To27DrawWhatTheMakefileSays(t *testing.T) {
 	}
 	for _, want := range []string{"a second Certificate", string(run.OpRecreate), string(run.OpRestart)} {
 		if !drawn[want] {
-			t.Errorf("Seeds 23 to 27 draw no %s, and the Makefile says they do.", want)
+			t.Errorf("Seeds %v draw no %s, and the Makefile says they do.", seeds, want)
 		}
 	}
 }

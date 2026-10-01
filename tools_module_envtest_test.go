@@ -20,7 +20,8 @@ const toolsRecipe = "examples/tools-module.sh"
 // fresh operator module, on the oldest go that the README says fetches a newer
 // one, and on the go before it.
 func TestTheToolsModuleRecipe(t *testing.T) {
-	install := section(t, readFile(t, "README.md"), "## Install")
+	readme := readFile(t, "README.md")
+	install := section(t, readme, "## Install")
 	oldest := regexp.MustCompile(`from Go (1\.\d+) on`).FindStringSubmatch(install)
 	remedy := regexp.MustCompile("run the commands with\\s+`GOTOOLCHAIN=(\\w+)`").FindStringSubmatch(install)
 	stopped := regexp.MustCompile("tools module below with\\s+`([^`]+)`").FindStringSubmatch(install)
@@ -38,24 +39,38 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "bin/botbox ") {
 		t.Errorf("%s ends with %q, and README.md says its last line runs bin/botbox.", toolsRecipe, last)
 	}
+	toolsDir := regexp.MustCompile(`(?m)^go -C (\S+) build `).FindStringSubmatch(script)
+	if toolsDir == nil {
+		t.Fatalf("%s builds bin/botbox with no go -C <dir> build.", toolsRecipe)
+	}
+	keep := strings.Join(strings.Fields(section(t, readme, "### Keep botbox out of your go.mod")), " ")
+	for _, says := range []string{"`" + toolsDir[1] + "/go.mod` then pins botbox", "not `go -C " + toolsDir[1] + " tool botbox`", "runs botbox in `" + toolsDir[1] + "/`"} {
+		if !strings.Contains(keep, says) {
+			t.Errorf("README.md does not say %q, and %s pins botbox in %s.", says, toolsRecipe, toolsDir[1])
+		}
+	}
 	recipe := replacingBotbox(t, script, checkout)
 	operatorGoMod := "module example.com/operator\n\ngo " + oldGo + "\n"
 
-	// The operator pins its own tools in tools/tools.go, a common place for them.
-	run := func(t *testing.T, goroot, gotoolchain string) (operator string, env []string, output string, err error) {
-		operator = t.TempDir()
+	newOperator := func(t *testing.T) string {
+		operator := t.TempDir()
 		writeFile(t, filepath.Join(operator, "go.mod"), operatorGoMod)
 		writeFile(t, filepath.Join(operator, "go.sum"), "")
-		writeFile(t, filepath.Join(operator, "tools", "tools.go"), "//go:build tools\n\npackage tools\n")
+		return operator
+	}
+	run := func(operator, goroot, gotoolchain string) (env []string, output string, err error) {
 		cmd := exec.Command("sh", "-e", "-c", recipe)
 		cmd.Dir = operator
 		cmd.Env = goEnv(goroot, gotoolchain)
 		out, err := cmd.CombinedOutput()
-		return operator, cmd.Env, string(out), err
+		return cmd.Env, string(out), err
 	}
 
 	t.Run("builds bin/botbox and leaves the operator's module alone", func(t *testing.T) {
-		operator, env, out, err := run(t, goroot, remedy[1])
+		operator := newOperator(t)
+		// The operator pins its own tools in tools/tools.go, a common place for them.
+		writeFile(t, filepath.Join(operator, "tools", "tools.go"), "//go:build tools\n\npackage tools\n")
+		env, out, err := run(operator, goroot, remedy[1])
 		if err != nil {
 			t.Fatalf("The recipe returned %v:\n%s", err, out)
 		}
@@ -75,15 +90,15 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 		} else if !slices.Contains(strings.Split(out, "\n"), strings.TrimSuffix(string(version), "\n")) {
 			t.Errorf("The recipe does not run bin/botbox, which prints %q:\n%s", version, out)
 		}
-		tool := exec.Command("go", "-C", "tools/botbox", "tool", "botbox", "version")
+		tool := exec.Command("go", "-C", toolsDir[1], "tool", "botbox", "version")
 		tool.Dir, tool.Env = operator, env
 		if out, err := tool.CombinedOutput(); err != nil {
-			t.Errorf("tools/botbox/go.mod does not pin botbox as a tool: %v\n%s", err, out)
+			t.Errorf("%s/go.mod does not pin botbox as a tool: %v\n%s", toolsDir[1], err, out)
 		}
 	})
 
 	t.Run("fails under GOTOOLCHAIN=local as the README says", func(t *testing.T) {
-		_, _, out, err := run(t, goroot, "local")
+		_, out, err := run(newOperator(t), goroot, "local")
 		if err == nil || !strings.Contains(out, stopped[1]) {
 			t.Errorf("The recipe returned %v, and must fail with %q:\n%s", err, stopped[1], out)
 		}
@@ -98,7 +113,7 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 		if minor-1 >= 21 {
 			before += ".0" // From Go 1.21 on, a minor's first release ends in .0.
 		}
-		_, _, out, err := run(t, gorootOf(t, before), remedy[1])
+		_, out, err := run(newOperator(t), gorootOf(t, before), remedy[1])
 		if err == nil {
 			t.Errorf("The recipe ran on %s, which README.md must then name as the oldest go:\n%s", before, out)
 		}

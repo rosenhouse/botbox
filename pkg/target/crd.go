@@ -82,16 +82,15 @@ func readDocuments(path string) ([]map[string]any, error) {
 	}
 }
 
-// clusterScopedByCRD reports the kinds the CRDs define as cluster-scoped.
-func clusterScopedByCRD(documents []map[string]any) func(schema.GroupVersionKind) bool {
-	return func(gvk schema.GroupVersionKind) bool {
-		for _, document := range documents {
-			spec, _ := document["spec"].(map[string]any)
-			names, _ := spec["names"].(map[string]any)
-			if spec["group"] == gvk.Group && names["kind"] == gvk.Kind && spec["scope"] == "Cluster" {
-				return true
-			}
+// scopeByCRD reports whether the CRDs define a kind as namespaced, and whether
+// they define it at all.
+func scopeByCRD(documents []map[string]any, gvk schema.GroupVersionKind) (namespaced, known bool) {
+	for _, document := range documents {
+		spec, _ := document["spec"].(map[string]any)
+		names, _ := spec["names"].(map[string]any)
+		if spec["group"] == gvk.Group && names["kind"] == gvk.Kind {
+			return spec["scope"] != "Cluster", true
 		}
-		return false
 	}
+	return false, false
 }

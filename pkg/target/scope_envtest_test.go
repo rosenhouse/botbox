@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
@@ -20,20 +19,34 @@ func TestLoadKnowsTheScopeOfEveryKindABareAPIServerServes(t *testing.T) {
 	}
 
 	for _, kind := range clusterScoped {
-		path := writeTarget(t, minimalTarget+"manages: ["+kind+"]\n", map[string]string{"widget.yaml": sampleWidget})
-		if _, err := target.Load(path); err == nil || !strings.HasSuffix(err.Error(), "the managed "+kind) {
-			t.Errorf("Load returned %v for a target that manages the cluster-scoped %s.", err, kind)
+		if err := loadFixtureInDefault(t, kind); err == nil || !strings.HasSuffix(err.Error(), "the fixture "+kind.String()+" x") {
+			t.Errorf("Load returned %v for a fixture of the cluster-scoped %s.", err, kind)
 		}
 	}
-	path := writeTarget(t, minimalTarget+"manages: ["+strings.Join(namespaced, ", ")+"]\n", map[string]string{"widget.yaml": sampleWidget})
-	if _, err := target.Load(path); err != nil {
-		t.Errorf("Load refused a target that manages only namespaced kinds: %v", err)
+	for _, kind := range namespaced {
+		if err := loadFixtureInDefault(t, kind); err == nil || !strings.Contains(err.Error(), "the fixture "+kind.String()+" x sets metadata.namespace") {
+			t.Errorf("Load returned %v for a fixture of the namespaced %s.", err, kind)
+		}
 	}
 }
 
+type servedKind struct{ apiVersion, kind string }
+
+func (k servedKind) String() string { return k.apiVersion + "/" + k.kind }
+
+func loadFixtureInDefault(t *testing.T, kind servedKind) error {
+	t.Helper()
+	path := writeTarget(t, minimalTarget+"fixtures: [x.yaml]\n", map[string]string{
+		"widget.yaml": sampleWidget,
+		"x.yaml":      "apiVersion: " + kind.apiVersion + "\nkind: " + kind.kind + "\nmetadata:\n  name: x\n  namespace: default\n",
+	})
+	_, err := target.Load(path)
+	return err
+}
+
 // servedKinds starts a control plane with no CRDs and lists the kinds it
-// serves, at every version, as target.yaml names them.
-func servedKinds(t *testing.T) (clusterScoped, namespaced []string) {
+// serves, at every version.
+func servedKinds(t *testing.T) (clusterScoped, namespaced []servedKind) {
 	t.Helper()
 	c, err := cluster.Start(cluster.Options{})
 	if err != nil {
@@ -53,15 +66,11 @@ func servedKinds(t *testing.T) (clusterScoped, namespaced []string) {
 		t.Fatalf("Discovery failed: %v", err)
 	}
 	for _, list := range lists {
-		groupVersion, err := schema.ParseGroupVersion(list.GroupVersion)
-		if err != nil {
-			t.Fatal(err)
-		}
 		for _, resource := range list.APIResources {
 			if strings.Contains(resource.Name, "/") {
 				continue
 			}
-			kind := groupVersion.String() + "/" + resource.Kind
+			kind := servedKind{apiVersion: list.GroupVersion, kind: resource.Kind}
 			if resource.Namespaced {
 				namespaced = append(namespaced, kind)
 			} else {

@@ -588,21 +588,35 @@ func TestLoadRejectsACRDFileThatIsNotYAML(t *testing.T) {
 	}
 }
 
-func TestLoadRefusesAFixtureThatNamesANamespace(t *testing.T) {
-	path := writeTarget(t, minimalTarget+"fixtures: [issuer.yaml]\n", map[string]string{
+func TestLoadRefusesAFixtureOfANamespacedKindThatNamesANamespace(t *testing.T) {
+	for _, kind := range []struct{ apiVersion, kind string }{{"v1", "Secret"}, {"toy.botbox/v1", "Thing"}} {
+		path := writeTarget(t, minimalTarget+"crds: [crds/]\nfixtures: [config.yaml, issuer.yaml]\n", map[string]string{
+			"widget.yaml": sampleWidget,
+			"crds/thing.yaml": "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n" +
+				"spec:\n  group: toy.botbox\n  names: {kind: Thing, plural: things}\n  scope: Namespaced\n",
+			"config.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\n",
+			"issuer.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: other\n---\n" +
+				"apiVersion: " + kind.apiVersion + "\nkind: " + kind.kind + "\nmetadata:\n  name: ca\n  namespace: default\n",
+		})
+
+		_, err := target.Load(path)
+
+		want := "the fixture " + kind.apiVersion + "/" + kind.kind + " ca sets metadata.namespace default; drop it," +
+			" because botbox creates fixtures in each run's own namespace, and the target may look for this one in default"
+		if err == nil || !strings.HasSuffix(err.Error(), want) {
+			t.Errorf("Load returned %v, want it to end %q.", err, want)
+		}
+	}
+}
+
+func TestLoadLeavesAFixtureOfAKindItDoesNotKnowToTheCluster(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"fixtures: [gadget.yaml]\n", map[string]string{
 		"widget.yaml": sampleWidget,
-		"issuer.yaml": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: ca\n  namespace: default\n",
+		"gadget.yaml": "apiVersion: toy.botbox/v1\nkind: Gadget\nmetadata:\n  name: shared\n  namespace: default\n",
 	})
 
-	_, err := target.Load(path)
-
-	if err == nil {
-		t.Fatal("Load accepted a fixture that names a namespace.")
-	}
-	for _, want := range []string{"issuer.yaml", "ca", "metadata.namespace", "drop it", "the target may look for this one in default"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("Load returned %q, which does not say %q.", err, want)
-		}
+	if _, err := target.Load(path); err != nil {
+		t.Errorf("Load refused a fixture whose scope only the cluster knows: %v", err)
 	}
 }
 

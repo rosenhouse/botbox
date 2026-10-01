@@ -143,17 +143,25 @@ type Target struct {
 	Thresholds  Thresholds
 }
 
-// CheckScopes refuses every kind of the target's that the mapper serves at
-// cluster scope. It leaves a kind the mapper does not know to the run.
+// CheckScopes judges each kind of the target's by the scope the mapper serves
+// it at. It leaves a kind the mapper does not know to the run.
 func (t *Target) CheckScopes(mapper meta.RESTMapper) error {
-	return t.refuseClusterScoped(func(gvk schema.GroupVersionKind) bool {
+	return t.checkScopes(func(gvk schema.GroupVersionKind) (bool, bool) {
 		mapping, err := mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
-		return err == nil && mapping.Scope.Name() == meta.RESTScopeNameRoot
+		if err != nil {
+			return false, false
+		}
+		return mapping.Scope.Name() == meta.RESTScopeNameNamespace, true
 	})
 }
 
-// refuseClusterScoped names every cluster-scoped kind the target declares.
-func (t *Target) refuseClusterScoped(clusterScoped func(schema.GroupVersionKind) bool) error {
+// checkScopes names every cluster-scoped kind the target declares. Only then
+// does it refuse a fixture of a namespaced kind that sets a namespace.
+func (t *Target) checkScopes(scope scope) error {
+	clusterScoped := func(gvk schema.GroupVersionKind) bool {
+		namespaced, known := scope(gvk)
+		return known && !namespaced
+	}
 	var found []string
 	if clusterScoped(t.Primary) {
 		found = append(found, "the primary "+kindName(t.Primary))
@@ -168,10 +176,17 @@ func (t *Target) refuseClusterScoped(clusterScoped func(schema.GroupVersionKind)
 			found = append(found, fmt.Sprintf("the fixture %s %s", kindName(gvk), fixture.GetName()))
 		}
 	}
-	if len(found) == 0 {
-		return nil
+	if len(found) > 0 {
+		return fmt.Errorf("a run owns one namespace, so botbox cannot test these cluster-scoped kinds: %s", strings.Join(found, ", "))
 	}
-	return fmt.Errorf("a run owns one namespace, so botbox cannot test these cluster-scoped kinds: %s", strings.Join(found, ", "))
+	for _, fixture := range t.Fixtures {
+		gvk, namespace := fixture.GroupVersionKind(), fixture.GetNamespace()
+		if namespaced, _ := scope(gvk); namespaced && namespace != "" {
+			return fmt.Errorf("the fixture %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace, and the target may look for this one in %s",
+				kindName(gvk), fixture.GetName(), namespace, namespace)
+		}
+	}
+	return nil
 }
 
 // kindName writes a kind as target.yaml declares it.

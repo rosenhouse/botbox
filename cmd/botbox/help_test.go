@@ -232,7 +232,7 @@ func TestTheUsageOfACommandIsItsSynopsis(t *testing.T) {
 }
 
 // DESIGN.md lists every command's synopsis in a fenced block under its CLI
-// convention, which adding a flag or a command without it fails.
+// convention. A flag or a command missing there fails this test.
 func TestTheDesignGivesEachCommandsSynopsis(t *testing.T) {
 	design, err := os.ReadFile("../../DESIGN.md")
 	if err != nil {

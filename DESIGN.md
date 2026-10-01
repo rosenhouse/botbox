@@ -1160,15 +1160,17 @@ the proxy; the `Image` launcher. Separate design addendum.
 
   `botbox matrix` generates the toy's bug matrix for `make bug-matrix`, so the top-level
   help leaves it out. `botbox help` and `botbox --help` print what botbox does, its
-  commands, the exit codes, `KUBEBUILDER_ASSETS` and the README's URL, because `go install`
-  ships no documentation. `botbox <command> --help` and `botbox help <command>` print the
-  command's synopsis and each flag with its meaning and default. Help goes to stdout and
-  exits 0. A bare `botbox` prints botbox's help to stderr and exits 2. A usage error, such
-  as an unknown flag, a missing required flag, a flag other than `--help` after a sequence
-  file or a wrong count of sequence files, exits 2 and prints the error and the command's synopsis to
-  stderr. No message botbox prints cites this document or uses its symbols, such as
-  `T_settle`. A message names the target.yaml key and its value instead, as in
-  `2s (timeouts.stable)`. A test scans the code's string literals for them.
+  commands, the exit codes, `KUBEBUILDER_ASSETS` and the README's URL, because
+  `go install` ships no documentation. `botbox <command> --help` and
+  `botbox help <command>` print the command's synopsis and each flag with its meaning and
+  default. `-h`, `-help` or `--help` after a sequence file asks for help too. Help goes to
+  stdout and exits 0. A bare `botbox` prints botbox's help to stderr and exits 2. A usage
+  error, such as an unknown flag, a missing required flag, another flag or `--` after a
+  sequence file or a wrong count of sequence files, exits 2 and prints the error and the
+  command's synopsis to stderr. It spells a flag with two dashes, as the help does. No
+  message botbox prints cites this document or uses its symbols, such as `T_settle`. A
+  message names the target.yaml key and its value instead, as in `2s (timeouts.stable)`.
+  A test scans the code's string literals for them.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. The deadline abandons the run under way (§5.5), and the
   shrinker stops there and reports the smallest failing sequence it found. Without
@@ -2067,9 +2069,10 @@ built from source and run as a black-box binary.
   DESIGN.md. Each command's help is generated from its flags and gives each flag's
   default, and botbox's help gives the exit codes and `KUBEBUILDER_ASSETS`. A usage error
   prints the command's synopsis. A message names the target.yaml key and its value rather
-  than a symbol of this document. A G3 note names what deleted the CR where botbox can
-  tell, because a run may delete one CR twice. It names the first op that found the CR,
-  because a lagging Observer shows the CR to the op after the one that deleted it.
+  than a symbol of this document. G4 gives `timeouts.settle` beside how long an expired
+  wait ran, since a wait can run longer. A G3 note names what deleted the CR where botbox
+  can tell, because a run may delete one CR twice. It names the first op that found the
+  CR, because a lagging Observer shows the CR to the op after the one that deleted it.
   Splitting this document was rejected, because the hourly Routine reads it whole.
 - **D@65 This document gives intent where a listing would drift.** §8.2 names `go doc`
   rather than listing `Target`'s fields, and a test holds §11's synopsis to each

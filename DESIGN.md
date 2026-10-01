@@ -860,15 +860,19 @@ cert-manager lists CertificateRequest: a request records one issuance, and a Rea
 Certificate whose request is deleted issues no new one.
 
 The primary, every managed kind and every fixture must be namespaced, because a run owns
-one namespace (§5.5, D13). botbox refuses the cluster-scoped ones in one error when it
-loads the target, before it judges a fixture's namespace. It knows the scope of each kind
-the `crds` define and of each kind Kubernetes itself serves. Once the control plane is up,
-and before the first run, discovery refuses any other cluster-scoped kind, such as one
-whose CRD the cluster holds but `crds` does not list. botbox observes only the run
-namespace, so it does not see a child the target creates in another.
+one namespace (§5.5, D13). botbox judges scopes in two checks, and each refuses every
+cluster-scoped kind it knows in one error. The first runs when botbox loads the target.
+It knows the kinds a Kubernetes 1.37 API server serves by default and the kinds the
+`crds` define. The second runs through discovery once the control plane is up, before
+the first run. It knows the rest, such as a kind whose CRD the cluster holds but `crds`
+does not list. On `--kubeconfig`, a target with kinds of both sorts therefore hears of
+them in two errors. botbox observes only the run namespace, so it does not see a child
+the target creates in another.
 botbox creates the CR and each fixture in the run namespace. A fixture sets no
-`metadata.namespace`, because the target may look for it in the namespace it names. The
-CR may set one, which botbox replaces, because the target finds a CR by watching.
+`metadata.namespace`, because the target may look for it in the namespace it names. A
+check refuses such a fixture only if it found no cluster-scoped kind and knows the
+fixture's kind is namespaced. The CR may set one, which botbox replaces, because the
+target finds a CR by watching.
 
 `equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
 holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
@@ -1728,7 +1732,7 @@ built from source and run as a black-box binary.
   for it there, while the target finds a moved CR by watching. `launch.binary` keeps the
   working directory as its base, because `launch.args` and the target's own relative paths
   resolve from there. The Runner checks a fault's resource when it applies the fault op,
-  not when the run starts, because a target may install its CRDs itself.
+  not when the run starts, because a target may install its CRDs itself. Amended by D@38.
 - **D53 botbox restarts a target that exits once it has converged, and a crash loop is a
   G4.** Controllers are deployed to be restarted, and controller-runtime with leader
   election on exits on purpose when it loses its lease, which a fault can cause. A new
@@ -2085,13 +2089,17 @@ built from source and run as a black-box binary.
   `T_settle` per op after it, so it ends no run the Runner would end on its own. The toy's
   `--lease` elects a leader, so a fault on leases makes the correct toy exit as
   controller-runtime does.
-- **D@38 botbox knows which built-in kinds are cluster-scoped.** Under D52, a built-in
+- **D@38 botbox knows the scope of every built-in kind.** Under D52, a built-in
   cluster-scoped kind was refused only after envtest had started, or after the CRDs were
   installed on a `--kubeconfig` cluster. A target with a cluster-scoped CRD and a
   ClusterRole under `manages` heard only of the CRD. A cluster-scoped fixture that set a
-  namespace was told to drop the namespace. botbox now lists the kinds Kubernetes serves
-  at cluster scope, and an envtest test compares that list with discovery on the pinned
-  API server. Loading the target refuses those kinds and the cluster-scoped kinds of
-  `crds` in one error, before it judges a fixture's namespace. Discovery still checks
-  every kind before the first run, for a CRD that `crds` does not list, an aggregated API,
-  or a kind newer than the list.
+  namespace was told to drop the namespace. botbox now lists the scope of each kind a
+  Kubernetes 1.37 API server serves by default. An envtest test compares that list with
+  discovery on the pinned API server, so bumping that version means updating the list.
+  Loading the target judges those kinds and the kinds of `crds`. Discovery, before the
+  first run, judges the rest: a CRD that `crds` does not list, an aggregated API, or a
+  kind newer than the list. Each check refuses every cluster-scoped kind it knows in one
+  error. Only then does it refuse a fixture of a kind it knows to be namespaced that sets
+  a namespace. A target with kinds of both sorts hears of them in two errors. Merging
+  them into one was rejected, because the first check refuses before botbox installs CRDs
+  on a `--kubeconfig` cluster.

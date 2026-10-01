@@ -44,9 +44,9 @@ func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
 		t.Errorf("README.md does not say what botbox cannot test right after what it does")
 	}
 	section, _, _ := strings.Cut(rest, "\n## ")
-	opening, bullets, after := limitParts(section)
-	if after != "" {
-		t.Errorf("README.md goes on after its list of limits, and a limit belongs in the opening or a bullet: %s", after)
+	opening, bullets, err := limitParts(section)
+	if err != nil {
+		t.Fatalf("README.md: %v", err)
 	}
 	for _, bullet := range bullets {
 		if !slices.ContainsFunc(limits, func(l limit) bool { return l.isIn(bullet) }) {
@@ -69,92 +69,53 @@ func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
 	}
 }
 
-var listItem = regexp.MustCompile(`\n *(?:[-*+]|[0-9]+[.)]) +`)
+// listItem starts a list item of any kind at the margin.
+var listItem = regexp.MustCompile(`^(?:[-*+]|[0-9]+[.)])(?:\s|$)`)
 
-// opensBlock starts a heading, a fence, a block quote, a thematic break or HTML.
-const opensBlock = `(?:#{1,6}(?: |$)|` + "```|~~~" + `|>|(?:(?:\* *){3,}|(?:- *){3,}|(?:_ *){3,})$|` +
-	`<[!?]|</?[A-Za-z][A-Za-z0-9]*(?:[ />]|$))`
-
-// limitParts splits the limits section into its opening, its bullets and what
-// follows them. A line indented less than an item's text ends the item after a
-// blank line, or where it opens a block. CommonMark keeps any other such line
-// in the item as a lazy continuation line, and some HTML too.
-func limitParts(section string) (opening string, bullets []string, after string) {
-	section = expandTabs(section)
-	items := listItem.Split(section, -1)
-	for i, marker := range listItem.FindAllString(section, -1) {
-		column := len(marker) - len("\n") // where the item's text starts
-		end := regexp.MustCompile(fmt.Sprintf(`(?m)\n\s*\n {0,%d}\S|\n {0,%d}%s`, column-1, min(column-1, 3), opensBlock))
-		item := items[i+1]
-		if at := end.FindStringIndex(item); at != nil {
-			item, after = item[:at[0]], after+item[at[0]:]
+// limitParts splits the limits section into its opening paragraphs and its
+// "- " bullets. It refuses any other shape, such as a lazy line or a paragraph
+// after the list, because Markdown could then hold a limit this test misses.
+func limitParts(section string) (opening string, bullets []string, err error) {
+	for _, line := range strings.Split(section, "\n") {
+		switch {
+		case strings.HasPrefix(line, "- "):
+			bullets = append(bullets, line)
+		case strings.TrimSpace(line) == "":
+		case bullets == nil && !listItem.MatchString(line) && strings.TrimLeft(line, " \t") == line:
+			opening += " " + line
+		case bullets != nil && strings.HasPrefix(line, "  "):
+			bullets[len(bullets)-1] += " " + line
+		default:
+			return "", nil, fmt.Errorf("the limits section is paragraphs, then \"- \" bullets whose other lines are indented two spaces, and this line is neither: %q", line)
 		}
-		bullets = append(bullets, oneLine(item))
 	}
-	return oneLine(items[0]), bullets, oneLine(after)
+	for i, bullet := range bullets {
+		bullets[i] = oneLine(strings.TrimPrefix(bullet, "- "))
+	}
+	return oneLine(opening), bullets, nil
 }
 
-// expandTabs replaces each tab with spaces to the next tab stop of 4.
-func expandTabs(text string) string {
-	lines := strings.Split(text, "\n")
-	for i, line := range lines {
-		var expanded []rune
-		for _, r := range line {
-			if r == '\t' {
-				expanded = append(expanded, []rune(strings.Repeat(" ", 4-len(expanded)%4))...)
-			} else {
-				expanded = append(expanded, r)
-			}
-		}
-		lines[i] = string(expanded)
+func TestLimitPartsSplitsTheOpeningAndTheBullets(t *testing.T) {
+	opening, bullets, err := limitParts("\nOpening one.\n\nOpening two.\n\n- First\n  bullet.\n\n  First's paragraph.\n      Its code.\n- Second.\n  \n")
+	if err != nil {
+		t.Fatal(err)
 	}
-	return strings.Join(lines, "\n")
-}
-
-func TestLimitPartsSplitsTheOpeningTheBulletsAndWhatFollowsThem(t *testing.T) {
-	opening, bullets, after := limitParts("\nOpening one.\n\nOpening two.\n\n- First\n  bullet.\n\n  First's paragraph.\n\n After the first list.\n" +
-		"-\tSecond.\n\n    Second's paragraph.\n\n  After the second list.\n1.  Third.\n\n   Also after the list.\n\nAfter the list.\n" +
-		"- Fourth.\n- Fifth.\n")
-
 	if want := "Opening one. Opening two."; opening != want {
 		t.Errorf("limitParts gave the opening %q, want %q.", opening, want)
 	}
-	if want := []string{"First bullet. First's paragraph.", "Second. Second's paragraph.", "Third.", "Fourth.", "Fifth."}; !slices.Equal(bullets, want) {
+	if want := []string{"First bullet. First's paragraph. Its code.", "Second."}; !slices.Equal(bullets, want) {
 		t.Errorf("limitParts gave the bullets %q, want %q.", bullets, want)
 	}
-	if want := "After the first list. After the second list. Also after the list. After the list."; after != want {
-		t.Errorf("limitParts gave %q after the bullets, want %q.", after, want)
-	}
 }
 
-func TestLimitPartsEndsAnItemWhereCommonMarkDoes(t *testing.T) {
-	for _, test := range []struct {
-		next string
-		ends bool
-	}{
-		{"lazy.", false}, {" lazy.", false}, {"#lazy.", false}, {"\n  Inside.", false}, {"\n\tInside.", false}, {"\t# Inside.", false}, {"  > Inside.", false},
-		{"\n After.", true}, {" \nAfter.", true}, {"# Heading", true}, {"#", true}, {"####### Seven.", false},
-		{"```", true}, {"~~~", true}, {"``Code`` lazy.", false}, {"~~Struck~~ lazy.", false}, {" > Quote", true},
-		{"** *", true}, {"-- -", true}, {"_ _ _", true}, {"**", false}, {"--", false}, {"__", false}, {"***Bold***", false},
-		{"<p>HTML</p>", true}, {"</div>", true}, {`<TD id="x">`, true}, {"<h1>Heading</h1>", true}, {"<hr/>", true}, {"<pre", true},
-		{"<!-- Comment -->", true}, {"<?php ?>", true}, {"<https://example.com> lazy.", false},
+func TestLimitPartsRefusesAnyOtherShape(t *testing.T) {
+	for _, section := range []string{
+		"\n- Item.\nLazy.\n", "\n- Item.\n Inside.\n", "\n- Item.\n\tInside.\n", "\n- Item.\n\nAfter.\n", "\n- Item.\n<p>HTML</p>\n",
+		"\n- Item.\n* Other.\n", "\n-\n", "\n* Other.\n", "\n+ Other.\n", "\n1. Other.\n", "\n2) Other.\n", "\n - Indented.\n", "\n\tIndented.\n",
 	} {
-		want, wantAfter := "Item. "+oneLine(test.next), ""
-		if test.ends {
-			want, wantAfter = "Item.", oneLine(test.next)
+		if _, _, err := limitParts(section); err == nil {
+			t.Errorf("limitParts accepted %q.", section)
 		}
-		if _, bullets, after := limitParts("\n- Item.\n" + test.next + "\n"); !slices.Equal(bullets, []string{want}) || after != wantAfter {
-			t.Errorf("limitParts gave the bullets %q and then %q where %q follows an item, want %q and then %q.", bullets, after, test.next, want, wantAfter)
-		}
-	}
-}
-
-// "10.  " starts an item's text at column 5. A tab indents a line to 4, and 4
-// spaces open no block.
-func TestLimitPartsEndsAWideItemWhereCommonMarkDoes(t *testing.T) {
-	_, bullets, after := limitParts("\n10.  Item.\n    # Lazy.\n\n\tAfter.\n")
-	if want := []string{"Item. # Lazy."}; !slices.Equal(bullets, want) || after != "After." {
-		t.Errorf("limitParts gave the bullets %q and then %q, want %q and then %q.", bullets, after, want, "After.")
 	}
 }
 

@@ -568,7 +568,9 @@ not come back, where the op followed such a change before the run converged or f
 `Restart` the target had not yet answered, or where a fault reached into the op or its
 wait or the target was still owed time to recover from one where the wait ended. The
 Runner carries the last checkpoint's notes out and `botbox` prints them at the end of the
-run, because a check that was skipped otherwise reads like one that passed. G5 also notes
+run, because a check that was skipped otherwise reads like one that passed. A G3 note
+names the op or the teardown that deleted the CR, since a run may delete one CR more than
+once. G5 also notes
 an `equalIgnore` path it could not follow (§8.1), since it then compares a field the
 target meant it to skip. The Runner also notes each ownerReference the collector could not
 resolve (§5.8), since the object that carries it stays, and G3 would report it without
@@ -1181,7 +1183,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   <command>` print the command's synopsis and each flag with its meaning and default. Help
   goes to stdout and exits 0. A usage error, such as an unknown flag, a missing required
   flag, a wrong count of sequence files or a bare `botbox`, prints the error and the
-  command's synopsis to stderr and exits 2.
+  command's synopsis to stderr and exits 2. No message botbox prints cites this document
+  or uses its symbols, such as `T_settle`. A message names the target.yaml key and its
+  value instead, as in `2s (timeouts.stable)`. A test scans the code's string literals
+  for them.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. The deadline abandons the run under way (§5.5), and the
   shrinker stops there and reports the smallest failing sequence it found. Without
@@ -2073,3 +2078,12 @@ built from source and run as a black-box binary.
   `until.count` or `until.for` of 0, which botbox read as no trigger, or an `until.op` at
   or before the fault's own op. Keeping the reference in DESIGN.md was rejected, because
   DESIGN.md mixes the contract with internals, milestones and decisions.
+- **D@62 botbox's help and messages need no design document.** `go install` ships no
+  DESIGN.md, and the help opened with "the generic invariants of DESIGN.md §6". Every help
+  form printed the same five lines, which hid each flag's meaning and default, the exit
+  codes and `KUBEBUILDER_ASSETS`. An unknown flag printed only Go's error. G2 said "where
+  §6 requires none". Each command's help is now generated from its flags, a usage error
+  prints the command's synopsis, and a message names the target.yaml key and its value. A
+  run that deleted one CR twice printed two identical G3 notes, so a note names what
+  deleted the CR. Splitting DESIGN.md was rejected, because the hourly Routine reads it
+  whole.

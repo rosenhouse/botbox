@@ -596,7 +596,7 @@ func TestRunner(t *testing.T) {
 			if result.Violation == nil || result.Violation.ID != "G3" {
 				t.Fatalf("The run reported %v, want G3.", result.Violation)
 			}
-			if want := "the CR widget still carried the finalizers [widget.botbox/cleanup] 4s after its deletion"; result.Violation.Statement != want {
+			if want := "the CR widget still carried the finalizers [widget.botbox/cleanup] 4s (timeouts.delete) after its deletion"; result.Violation.Statement != want {
 				t.Errorf("G3 says %q, want %q.", result.Violation.Statement, want)
 			}
 			if want := "toy.botbox/v1/Widget widget"; result.Violation.VersionsOf != want || len(result.Violation.Versions) == 0 {

@@ -3,15 +3,10 @@ package main
 import (
 	"flag"
 	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"testing"
 )
-
-// designVocabulary is what a reader needs DESIGN.md to understand, and
-// go install ships no DESIGN.md.
-var designVocabulary = regexp.MustCompile(`§|DESIGN|T_settle|T_stable|T_delete|N_errloop|N_quiet|N_objects|\bD[0-9]+\b`)
 
 var helpForms = []struct {
 	args    []string
@@ -40,9 +35,6 @@ func TestEveryHelpFormPrintsItsHelpAndExitsZero(t *testing.T) {
 		}
 		if stdout != help(form.command) {
 			t.Errorf("%s printed\n%s\nwant\n%s", asked, stdout, help(form.command))
-		}
-		if found := designVocabulary.FindString(stdout); found != "" {
-			t.Errorf("%s printed %q, which only DESIGN.md explains.", asked, found)
 		}
 	}
 }

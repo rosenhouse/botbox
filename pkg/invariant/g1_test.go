@@ -66,8 +66,9 @@ func TestG1FiresOnARequestInTheQuietWindow(t *testing.T) {
 	if len(violation.Requests) != 1 || violation.Requests[0].Name != "w-0" {
 		t.Fatalf("The evidence holds %v, want the get of w-0.", violation.Requests)
 	}
-	if !strings.Contains(violation.Statement, "op 0") {
-		t.Errorf("The statement is %q, want it to name the op the window follows.", violation.Statement)
+	if want := "the target made 1 API request in the 2s (timeouts.stable) after op 0 (create) settled, " +
+		"where thresholds.quiet allows 0"; violation.Statement != want {
+		t.Errorf("The statement is %q, want %q.", violation.Statement, want)
 	}
 }
 
@@ -231,8 +232,9 @@ func TestG1JudgesTheTeardownWindow(t *testing.T) {
 
 	violation := fired(t, invariant.BoundedReconciliation, in)
 
-	if !strings.Contains(violation.Statement, "teardown") {
-		t.Errorf("The statement is %q, want it to name the teardown's window.", violation.Statement)
+	if want := "the target made 1 API request in the 2s (timeouts.stable) the teardown waited before deleting, " +
+		"where thresholds.quiet allows 0"; violation.Statement != want {
+		t.Errorf("The statement is %q, want %q.", violation.Statement, want)
 	}
 }
 

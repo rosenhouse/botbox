@@ -23,9 +23,9 @@ func CleanDeletion(in Input) (Result, error) {
 		switch {
 		case in.cleanedBy(deadline): // The namespace emptied, so nothing was left.
 		case in.faulted(deleted.at, deadline):
-			out.note("for the deletion of %s: a fault was active before its deadline", deleted.key.Name)
+			out.note("for %s: a fault was active before its deadline", in.describeDeletion(deleted))
 		case !in.observed(deadline):
-			out.note("for the deletion of %s: the run ended before its %s deadline", deleted.key.Name, in.timeouts().Delete)
+			out.note("for %s: the run ended less than %s (timeouts.delete) after it", in.describeDeletion(deleted), in.timeouts().Delete)
 		default:
 			out.reportLeftovers(in, deleted, deadline)
 		}
@@ -56,8 +56,8 @@ func (out *Result) noteWhatBotboxTook(in Input, deleted deletion, deadline time.
 			!in.leftBy(deleted, took, had, since) {
 			continue
 		}
-		out.note("for the deletion of %s: %s deleted %s %s inside its %s window, so the target never got the chance to clean it up",
-			deleted.key.Name, describe(op), kindName(op.Deleted.GVK), op.Deleted.Name, in.timeouts().Delete)
+		out.note("for %s: %s deleted %s %s within %s (timeouts.delete) of it, so the target never got the chance to clean it up",
+			in.describeDeletion(deleted), describe(op), kindName(op.Deleted.GVK), op.Deleted.Name, in.timeouts().Delete)
 	}
 }
 
@@ -120,7 +120,7 @@ func (out *Result) reportLeftovers(in Input, deleted deletion, deadline time.Tim
 	when, since := states[0], states[1]
 	if cr, held := since.held(deleted); held {
 		out.violate(Violation{
-			Statement: fmt.Sprintf("the CR %s still carried the finalizers %v %s after its deletion",
+			Statement: fmt.Sprintf("the CR %s still carried the finalizers %v %s (timeouts.delete) after its deletion",
 				cr.Name, cr.Finalizers, in.timeouts().Delete),
 			At: deadline,
 		}.quotingVersions(RecentHistory(cr.Key, in.History.History(cr.Key))))
@@ -134,11 +134,26 @@ func (out *Result) reportLeftovers(in Input, deleted deletion, deadline time.Tim
 			continue
 		}
 		out.violate(Violation{
-			Statement: fmt.Sprintf("the %s %s was still there %s after %s was deleted%s",
+			Statement: fmt.Sprintf("the %s %s was still there %s (timeouts.delete) after %s was deleted%s",
 				kindName(left.GVK), left.Name, in.timeouts().Delete, in.answering(deleted, left), orphaned(left, deleted.uid)),
 			At: deadline,
 		}.quotingVersions(RecentHistory(left.Key, in.History.History(left.Key))))
 	}
+}
+
+// describeDeletion names the CR and what deleted it: the last op that deleted
+// it by then, or the teardown.
+func (in Input) describeDeletion(deleted deletion) string {
+	var by string
+	for _, op := range in.Ops {
+		if (op.Type == OpDelete || op.Type == OpRecreate) && op.CR == deleted.key && !op.Time.After(deleted.at) {
+			by = " by " + describe(op)
+		}
+	}
+	if !in.Teardown.IsZero() && !in.Teardown.After(deleted.at) {
+		by = " by the teardown"
+	}
+	return "the deletion of " + deleted.key.Name + by
 }
 
 // answering names the deleted CR as the one that answers for the object.

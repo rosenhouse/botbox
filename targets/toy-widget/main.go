@@ -36,7 +36,7 @@ func run(args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("toy-widget", flag.ContinueOnError)
 	flags.SetOutput(io.Discard) // main reports what Parse rejects; --help prints below.
 	kubeconfig := flags.String("kubeconfig", "", "path to a kubeconfig file; defaults to $KUBECONFIG, then to the in-cluster configuration")
-	bugID := flags.Int("bug", 0, fmt.Sprintf("seeded bug to run, 0 to %d; 0 is the correct controller (DESIGN.md §9.1)", controller.MaxBug))
+	bugID := flags.Int("bug", 0, fmt.Sprintf("seeded bug to run, 0 to %d; 0 is the correct controller", controller.MaxBug))
 	metricsAddress := flags.String("metrics-bind-address", "0", "address the metrics server binds to; 0 disables it")
 	resync := flags.Duration("resync", 0, "requeue every Widget this often and write its status each time; 0 disables it")
 	cleanupDelay := flags.Duration("cleanup-delay", 0, "how long a deleted Widget keeps its finalizer before the controller cleans up")

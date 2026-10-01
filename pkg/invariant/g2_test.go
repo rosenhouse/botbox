@@ -37,6 +37,10 @@ func TestG2FiresOnAResourceVersionThatMoves(t *testing.T) {
 	if len(violation.Versions) != 1 || violation.Versions[0].ResourceVersion != "11" {
 		t.Fatalf("The evidence holds %v, want the Widget at resourceVersion 11.", violation.Versions)
 	}
+	if want := "the target changed 1 object in the 2s (timeouts.stable) after op 0 (create) settled, " +
+		"where a converged target changes nothing"; violation.Statement != want {
+		t.Errorf("The statement is %q, want %q.", violation.Statement, want)
+	}
 }
 
 func TestG2FiresOnAManagedObjectThatAppears(t *testing.T) {
@@ -118,8 +122,9 @@ func TestG2ReadsANegativeQuietAsZero(t *testing.T) {
 
 	violation := fired(t, invariant.NoChurn, in)
 
-	if want := "thresholds.quiet allows 0"; !strings.Contains(violation.Statement, want) {
-		t.Errorf("The statement is %q, want it to name the threshold: %q.", violation.Statement, want)
+	if want := "the target made 1 status write in the 2s (timeouts.stable) after op 0 (create) settled, " +
+		"where thresholds.quiet allows 0"; violation.Statement != want {
+		t.Errorf("The statement is %q, want %q.", violation.Statement, want)
 	}
 }
 

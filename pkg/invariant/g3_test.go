@@ -41,7 +41,7 @@ func TestG3FiresOnAnOrphanTheCollectorCannotReach(t *testing.T) {
 	if violation.ID != "G3" {
 		t.Errorf("The violation is %q, want G3.", violation.ID)
 	}
-	if want := "the v1/ConfigMap w-0 was still there 10s after w, the last CR it may belong to, was deleted, " +
+	if want := "the v1/ConfigMap w-0 was still there 10s (timeouts.delete) after w, the last CR it may belong to, was deleted, " +
 		"orphaned: it carries no ownerReference to the CR"; violation.Statement != want {
 		t.Errorf("The statement is %q, want %q.", violation.Statement, want)
 	}
@@ -89,8 +89,8 @@ func TestG3FiresOnAFinalizerThatNeverClears(t *testing.T) {
 
 	violation := fired(t, invariant.CleanDeletion, in)
 
-	if !strings.Contains(violation.Statement, cleanup) {
-		t.Errorf("The statement is %q, want it to name the finalizer.", violation.Statement)
+	if want := "the CR w still carried the finalizers [" + cleanup + "] 10s (timeouts.delete) after its deletion"; violation.Statement != want {
+		t.Errorf("The statement is %q, want %q.", violation.Statement, want)
 	}
 	if want := timelineOf(widgetGVK, widgetName); violation.VersionsOf != want {
 		t.Errorf("The timeline is of %q, want %q.", violation.VersionsOf, want)
@@ -103,7 +103,8 @@ func TestG3FiresOnAFinalizerThatNeverClears(t *testing.T) {
 func TestG3WaitsForTheWholeDeleteTimeout(t *testing.T) {
 	in := deletedRun().through(19 * time.Second)
 
-	noted(t, invariant.CleanDeletion, in, "the run ended")
+	noted(t, invariant.CleanDeletion, in,
+		"G3 is not evaluated for the deletion of w by op 0 (delete): the run ended less than 10s (timeouts.delete) after it")
 }
 
 // A namespace that came clean settles the deletion before T_delete is up, so
@@ -140,7 +141,32 @@ func TestG3NotesADeletionAFaultReachedInto(t *testing.T) {
 		fault(11*time.Second, 12*time.Second).
 		through(21 * time.Second)
 
-	noted(t, invariant.CleanDeletion, in, "a fault was active")
+	noted(t, invariant.CleanDeletion, in, "G3 is not evaluated for the deletion of w by op 0 (delete): a fault was active before its deadline")
+}
+
+// A CR can be deleted more than once in a run, so each note names what
+// deleted it.
+func TestG3NamesWhatDeletedTheCRInEachNote(t *testing.T) {
+	in := newRun().
+		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup))).
+		op(invariant.OpRecreate, 10*time.Second).
+		record(10*time.Second, widget("11", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
+		remove(11*time.Second, widget("12", spec(1), status(1, 1), deleting(10*time.Second))).
+		record(11*time.Second, widget("20", spec(1), status(1, 1), uid("uid-w2"), finalizers(cleanup))).
+		fault(10500*time.Millisecond, 40*time.Second).
+		teardown(30*time.Second).
+		record(30*time.Second, widget("21", spec(1), status(1, 1), uid("uid-w2"), finalizers(cleanup), deleting(30*time.Second))).
+		through(45 * time.Second)
+
+	result := silent(t, invariant.CleanDeletion, in)
+
+	want := []string{
+		"G3 is not evaluated for the deletion of w by op 0 (recreate): a fault was active before its deadline",
+		"G3 is not evaluated for the deletion of w by the teardown: a fault was active before its deadline",
+	}
+	if !slices.Equal(result.Notes, want) {
+		t.Errorf("G3 noted %q, want %q.", result.Notes, want)
+	}
 }
 
 func TestG3IgnoresACRTheRunRecreated(t *testing.T) {
@@ -198,7 +224,7 @@ func TestG3DoesNotCreditACleanupBotboxPerformed(t *testing.T) {
 		t.Errorf("G3 reported %+v, and the target still had until its deadline.", result.Violations)
 	}
 	note := strings.Join(result.Notes, "\n")
-	want := "for the deletion of w: op 1 (deleteManaged) deleted v1/ConfigMap w-0 inside its 10s window"
+	want := "for the deletion of w by op 0 (delete): op 1 (deleteManaged) deleted v1/ConfigMap w-0 within 10s (timeouts.delete) of it"
 	if !strings.Contains(note, want) {
 		t.Errorf("G3 noted %q, want it to contain %q.", note, want)
 	}
@@ -305,7 +331,7 @@ func TestG3FiresOnTheLeftoversOfTheCRThatWent(t *testing.T) {
 
 	violation := fired(t, invariant.CleanDeletion, in)
 
-	if want := "the v1/ConfigMap w-0 was still there 10s after the CR w was deleted"; !strings.HasPrefix(violation.Statement, want) {
+	if want := "the v1/ConfigMap w-0 was still there 10s (timeouts.delete) after the CR w was deleted"; !strings.HasPrefix(violation.Statement, want) {
 		t.Errorf("The statement is %q, want it to begin %q.", violation.Statement, want)
 	}
 }
@@ -432,7 +458,7 @@ func TestG3HoldsTheLastCRDeletedToAnObjectThatNamesNone(t *testing.T) {
 
 	violation := fired(t, invariant.CleanDeletion, in)
 
-	if want := "the v1/ConfigMap kept was still there 10s after w2, the last CR it may belong to, was deleted"; !strings.HasPrefix(violation.Statement, want) ||
+	if want := "the v1/ConfigMap kept was still there 10s (timeouts.delete) after w2, the last CR it may belong to, was deleted"; !strings.HasPrefix(violation.Statement, want) ||
 		!violation.At.Equal(at(20100*time.Millisecond)) {
 		t.Errorf("G3 reported %q at %v, want it to begin %q, at w2's deadline.", violation.Statement, violation.At, want)
 	}
@@ -487,7 +513,7 @@ func TestG3NotesAnObjectBotboxTookFromTheLastOfItsCRs(t *testing.T) {
 
 	result := silent(t, invariant.CleanDeletion, in)
 
-	want := "for the deletion of w: op 2 (deleteManaged) deleted v1/ConfigMap kept"
+	want := "for the deletion of w by op 1 (delete): op 2 (deleteManaged) deleted v1/ConfigMap kept"
 	if len(result.Notes) != 1 || !strings.Contains(result.Notes[0], want) {
 		t.Errorf("G3 noted %v, want one note saying %q.", result.Notes, want)
 	}

@@ -1323,10 +1323,11 @@ the proxy; the `Image` launcher. Separate design addendum.
   section, a decision or a symbol of this document. The README names no milestone.
   `make test` enforces these rules. The limits section opens with each limit no issue
   tracks. Each other limit is a `- ` bullet that links its issue, with its other lines
-  indented two spaces, and nothing follows the list. A test refuses any other shape,
-  lists the limits, holds each bullet to one, and holds the README and this document to
-  each. A reviewer checks that the opening states no other limit and that each linked
-  issue is open (§12). A fenced block preceded by
+  indented two spaces, and nothing follows the list. Each line's text begins with a
+  letter, a link or a parenthesis, so no line opens a block that hides a limit. A test
+  refuses any other line, lists the limits, holds each bullet to a listed limit, and
+  holds the README and this document to each. A reviewer checks that the opening states
+  no other limit and that each linked issue is open (§12). A fenced block preceded by
   `<!-- embed: <path> -->` has content, excluding the two fence lines, byte-identical to
   that file including its trailing newline; `<path>` is relative to the repository root;
   `make test` enforces it. It also runs the cert-manager quickstart command against a

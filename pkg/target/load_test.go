@@ -575,6 +575,18 @@ func TestLoadReadsEveryManifestExtensionOfACRDDirectory(t *testing.T) {
 	}
 }
 
+func TestLoadLeavesACRDWithoutAScopeToTheCluster(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{
+		"widget.yaml": sampleWidget,
+		"crds/widget.yaml": "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n" +
+			"spec:\n  group: toy.botbox\n  names: {kind: Widget, plural: widgets}\n",
+	})
+
+	if _, err := target.Load(path); err != nil {
+		t.Errorf("Load refused a kind whose CRD sets no scope: %v", err)
+	}
+}
+
 func TestLoadRejectsACRDFileThatIsNotYAML(t *testing.T) {
 	path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{
 		"widget.yaml":   sampleWidget,

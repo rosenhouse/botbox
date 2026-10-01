@@ -181,6 +181,21 @@ func TestATargetWithoutGenerateFixturesDrawsNoFixtureOp(t *testing.T) {
 	})
 }
 
+func TestATargetThatMayOnlyDeleteItsFixturesDrawsNoUpdateFixture(t *testing.T) {
+	deleteOnly := loadTarget(t, fixturesTarget)
+	deleteOnly.Generate.Fixtures = slices.DeleteFunc(deleteOnly.Generate.Fixtures, func(fixture target.MutableFixture) bool {
+		return len(fixture.Mutate) > 0
+	})
+	g := newGenerator(t, deleteOnly, Options{})
+	rapid.Check(t, func(rt *rapid.T) {
+		for _, op := range g.sequence(rt).Ops {
+			if op.Type == run.OpUpdateFixture {
+				rt.Fatalf("Op %d is an updateFixture, and the target names no path generation may set.", op.Index)
+			}
+		}
+	})
+}
+
 func TestGeneratedCRsMatchTheirCRD(t *testing.T) {
 	for _, testCase := range targets {
 		t.Run(testCase.path, func(t *testing.T) {

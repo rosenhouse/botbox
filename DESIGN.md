@@ -450,7 +450,9 @@ Consequences:
   keeps its finalizer until no Pod uses it.
 - **No admission or conversion webhooks.** botbox installs no admission webhook (§8.3).
   envtest removes a CRD's conversion webhook, so the API server converts a CR between
-  versions by `apiVersion` alone.
+  versions by `apiVersion` alone. A kubeconfig cluster keeps the webhook. botbox deploys
+  no webhook Service, so a request that needs conversion fails unless the cluster serves
+  one.
 
 ## 6. Generic invariants
 

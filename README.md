@@ -10,7 +10,8 @@ checks if certain expectations hold, including custom properties you can specify
 botbox runs your controller on your machine, not in a Pod. Your controller cannot reach a Pod
 or a Service from there, and no admission or conversion webhook of yours runs. Write in your
 `sample` what your webhooks would add, and keep generated CRs inside what they accept with
-`generate.mutate` and `generate.overlay`.
+`generate.mutate` and `generate.overlay`. Keep `primary` and your controller on the
+version your CRD stores.
 
 - botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
   fixture before the first run, and exits 2. It watches only the namespace it creates for each

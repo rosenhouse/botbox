@@ -12,8 +12,10 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -211,6 +213,78 @@ func TestConnectInstallsCRDsAndLeavesThem(t *testing.T) {
 	}
 
 	requireThingServed(t, bare.Config())
+}
+
+const convertedCRD = `apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: converted.test.botbox
+spec:
+  group: test.botbox
+  conversion:
+    strategy: Webhook
+    webhook:
+      conversionReviewVersions: ["v1"]
+      clientConfig:
+        service: {name: converter, namespace: operator-system, path: /convert}
+  names:
+    kind: Converted
+    plural: converted
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: false
+      schema:
+        openAPIV3Schema:
+          type: object
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+`
+
+// envtest runs no webhook, so Start drops a CRD's conversion webhook. A
+// kubeconfig cluster may run one, so Connect keeps it.
+func TestOnlyStartDropsACRDsConversionWebhook(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "converted.yaml"), []byte(convertedCRD), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	crds := cluster.Options{CRDPaths: []string{dir}}
+	bare, err := cluster.Start(crds)
+	if err != nil {
+		t.Fatalf("Start returned an error: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := bare.Stop(); err != nil {
+			t.Errorf("Stop returned an error: %v", err)
+		}
+	})
+	if got := conversionStrategy(t, bare.Config()); got != "None" {
+		t.Errorf("Start installed the CRD with the conversion strategy %q, want None.", got)
+	}
+
+	if _, err := cluster.Connect(writeKubeconfig(t, bare.Config()), crds); err != nil {
+		t.Fatalf("Connect returned an error: %v", err)
+	}
+	if got := conversionStrategy(t, bare.Config()); got != "Webhook" {
+		t.Errorf("Connect installed the CRD with the conversion strategy %q, want Webhook.", got)
+	}
+}
+
+func conversionStrategy(t *testing.T, config *rest.Config) string {
+	t.Helper()
+	crds := dynamic.NewForConfigOrDie(config).Resource(schema.GroupVersionResource{
+		Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"})
+	crd, err := crds.Get(t.Context(), "converted.test.botbox", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Reading the CRD failed: %v", err)
+	}
+	strategy, _, _ := unstructured.NestedString(crd.Object, "spec", "conversion", "strategy")
+	return strategy
 }
 
 func requireThingServed(t *testing.T, config *rest.Config) {

@@ -24,7 +24,7 @@ such as Eventually Stable Reconciliation (ESR), but requires rewriting the contr
    configuration, plus optional per-controller **properties**.
 5. Shrinking any failing sequence to a minimal reproducer and emitting a report.
 
-The controller is a black box, which botbox sees only through the API server. The README
+The controller is a black box, which botbox drives through the API server. The README
 lists what botbox cannot test yet.
 
 ## 2. Non-goals

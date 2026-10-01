@@ -264,18 +264,23 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 		},
 		{
 			name: "a fault that runs out after a count of 0",
-			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 0}}}`,
-			want: "until.count is 0; give a count above 0, or leave it out",
+			ops:  `{"i": 0, "t": "settle"}, {"i": 1, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 0}}}`,
+			want: "op 1: until.count is 0; give a count above 0, or leave it out",
 		},
 		{
 			name: "a fault that runs out after no time",
-			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 2, "for": "0s"}}}`,
-			want: "until.for is 0s; give a duration above 0, or leave it out",
+			ops:  `{"i": 0, "t": "settle"}, {"i": 1, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 2, "for": "0s"}}}`,
+			want: "op 1: until.for is 0s; give a duration above 0, or leave it out",
 		},
 		{
 			name: "a fault that runs out on an unknown trigger",
 			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"after": "2s"}}}`,
 			want: `"after"`,
+		},
+		{
+			name: "a fault whose until is no object",
+			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": [1]}}`,
+			want: "of type run.Trigger",
 		},
 		{
 			name: "a fault that runs out at its own op",

@@ -3,7 +3,6 @@ package run
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -116,35 +115,6 @@ type Trigger struct {
 	For   Duration `json:"for,omitempty"`
 }
 
-// UnmarshalJSON refuses a count or for written as 0, which would leave it
-// unset.
-func (t *Trigger) UnmarshalJSON(data []byte) error {
-	var written struct {
-		Op    *int      `json:"op"`
-		Count *int      `json:"count"`
-		For   *Duration `json:"for"`
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&written); err != nil {
-		return err
-	}
-	switch {
-	case written.Count != nil && *written.Count == 0:
-		return errors.New("until.count is 0; give a count above 0, or leave it out")
-	case written.For != nil && *written.For == 0:
-		return errors.New("until.for is 0s; give a duration above 0, or leave it out")
-	}
-	*t = Trigger{Op: written.Op}
-	if written.Count != nil {
-		t.Count = *written.Count
-	}
-	if written.For != nil {
-		t.For = *written.For
-	}
-	return nil
-}
-
 // Duration marshals as a Go duration string, as the rest of the harness's
 // configuration does.
 type Duration time.Duration
@@ -211,10 +181,38 @@ func UnmarshalSequence(data []byte) (Sequence, error) {
 	if err := decoder.Decode(&sequence); err != nil {
 		return Sequence{}, fmt.Errorf("the sequence does not parse: %w", err)
 	}
+	if err := refuseZeroTriggers(data); err != nil {
+		return Sequence{}, err
+	}
 	if err := sequence.Validate(); err != nil {
 		return Sequence{}, err
 	}
 	return sequence, nil
+}
+
+// refuseZeroTriggers reports an until.count or until.for written as 0, which a
+// Trigger reads as no trigger.
+func refuseZeroTriggers(data []byte) error {
+	var written struct {
+		Ops []struct {
+			Spec struct {
+				Until struct {
+					Count *int      `json:"count"`
+					For   *Duration `json:"for"`
+				} `json:"until"`
+			} `json:"spec"`
+		} `json:"ops"`
+	}
+	_ = json.NewDecoder(bytes.NewReader(data)).Decode(&written) // It decoded as a Sequence.
+	for i, op := range written.Ops {
+		switch until := op.Spec.Until; {
+		case until.Count != nil && *until.Count == 0:
+			return fmt.Errorf("op %d: until.count is 0; give a count above 0, or leave it out", i)
+		case until.For != nil && *until.For == 0:
+			return fmt.Errorf("op %d: until.for is 0s; give a duration above 0, or leave it out", i)
+		}
+	}
+	return nil
 }
 
 // Marshal returns the sequence's canonical form: the JSON of DESIGN.md §7,

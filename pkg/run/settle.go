@@ -92,8 +92,8 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 
 // heldOpen is when a wait whose time runs out at deadline may end: T_settle
 // past the release of each request that reached the proxy before deadline.
-// While the proxy still holds one, that is past T_settle from now. Each hold
-// ends within its delay.
+// While the proxy still holds one, its release is yet to come, so heldOpen
+// answers T_settle from now. Each hold ends within its delay.
 func heldOpen(held func(before time.Time) (bool, time.Time), deadline, now time.Time, settle time.Duration) time.Time {
 	holding, released := held(deadline)
 	if holding {

@@ -69,19 +69,21 @@ func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
 	}
 }
 
-var listItem = regexp.MustCompile(`\n *(?:[-*+]|[0-9]+[.)])[ \t]+`)
+var listItem = regexp.MustCompile(`\n *(?:[-*+]|[0-9]+[.)]) +`)
 
 // opensBlock starts a heading, a fence, a block quote, a thematic break or HTML.
-const opensBlock = `(?:#{1,6}(?:[ \t]|$)|` + "```|~~~" + `|>|(?:\*[ \t]*){3,}$|(?:-[ \t]*){3,}$|(?:_[ \t]*){3,}$|<)`
+const opensBlock = `(?:#{1,6}(?: |$)|` + "```|~~~" + `|>|(?:\* *){3,}$|(?:- *){3,}$|(?:_ *){3,}$|<)`
 
 // limitParts splits the limits section into its opening, its bullets and what
 // follows them. A line indented less than an item's text ends the item after a
 // blank line, or where it opens a block. CommonMark keeps any other such line
 // in the item as a lazy continuation line, and some HTML too.
 func limitParts(section string) (opening string, bullets []string, after string) {
+	section = expandTabs(section)
 	items := listItem.Split(section, -1)
 	for i, marker := range listItem.FindAllString(section, -1) {
-		end := regexp.MustCompile(fmt.Sprintf(`(?m)\n\s*\n {0,%[1]d}\S|\n {0,%[1]d}%[2]s`, column(strings.TrimPrefix(marker, "\n"))-1, opensBlock))
+		column := len(marker) - len("\n") // where the item's text starts
+		end := regexp.MustCompile(fmt.Sprintf(`(?m)\n\s*\n {0,%[1]d}\S|\n {0,%[1]d}%[2]s`, column-1, opensBlock))
 		item := items[i+1]
 		if at := end.FindStringIndex(item); at != nil {
 			item, after = item[:at[0]], after+item[at[0]:]
@@ -91,17 +93,21 @@ func limitParts(section string) (opening string, bullets []string, after string)
 	return oneLine(items[0]), bullets, oneLine(after)
 }
 
-// column is the width of start, which begins a line, with tab stops of 4.
-func column(start string) int {
-	width := 0
-	for _, r := range start {
-		if r == '\t' {
-			width += 4 - width%4
-		} else {
-			width++
+// expandTabs replaces each tab with spaces to the next tab stop of 4.
+func expandTabs(text string) string {
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		var expanded []rune
+		for _, r := range line {
+			if r == '\t' {
+				expanded = append(expanded, []rune(strings.Repeat(" ", 4-len(expanded)%4))...)
+			} else {
+				expanded = append(expanded, r)
+			}
 		}
+		lines[i] = string(expanded)
 	}
-	return width
+	return strings.Join(lines, "\n")
 }
 
 func TestLimitPartsSplitsTheOpeningTheBulletsAndWhatFollowsThem(t *testing.T) {
@@ -136,6 +142,14 @@ func TestLimitPartsEndsAnItemWhereCommonMarkDoes(t *testing.T) {
 		if _, bullets, after := limitParts("\n- Item.\n" + test.next + "\n"); !slices.Equal(bullets, []string{want}) || after != wantAfter {
 			t.Errorf("limitParts gave the bullets %q and then %q where %q follows an item, want %q and then %q.", bullets, after, test.next, want, wantAfter)
 		}
+	}
+}
+
+// "10.  " starts an item's text at column 5, and a tab indents a line to 4.
+func TestLimitPartsEndsAWideItemWhereCommonMarkDoes(t *testing.T) {
+	_, bullets, after := limitParts("\n10.  Item.\n\n\tAfter.\n")
+	if want := []string{"Item."}; !slices.Equal(bullets, want) || after != "After." {
+		t.Errorf("limitParts gave the bullets %q and then %q, want %q and then %q.", bullets, after, want, "After.")
 	}
 }
 

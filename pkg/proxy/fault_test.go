@@ -176,18 +176,23 @@ func TestHeldReportsARequestUntilTheProxyForwardsIt(t *testing.T) {
 			}))
 			p.AddFault(proxy.FaultSpec{Action: proxy.Delay{For: delay}})
 
-			resp := make(chan *http.Response, 1)
+			answered := make(chan struct{})
 			go func() {
-				if r, err := http.Get(p.URL() + test.path); err == nil {
-					resp <- r
+				defer close(answered)
+				if resp, err := http.Get(p.URL() + test.path); err == nil {
+					resp.Body.Close()
 				}
 			}()
 			arrived := arrival(t, p)
 			whileHeld, _ := p.Held(time.Now())
-			<-forwarded
+			select {
+			case <-forwarded:
+			case <-time.After(5 * time.Second):
+				t.Fatal("The proxy never forwarded the request.")
+			}
 			afterward, released := p.Held(time.Now())
 			beforeIt, notYet := p.Held(arrived)
-			(<-resp).Body.Close()
+			<-answered
 
 			if !whileHeld {
 				t.Error("The proxy reports no request held during the delay.")

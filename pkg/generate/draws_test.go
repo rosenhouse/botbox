@@ -128,6 +128,9 @@ func TestSeedsDrawTheGoldenSequences(t *testing.T) {
 			}
 		}
 	}
+	if len(differ) == 0 {
+		t.Fatalf("%s records every draw, but not as -update writes it. Rerun with -update.", goldenDraws)
+	}
 	t.Errorf("%s differs for %s. If the change is deliberate, rerun with -update, read its diff and say why in the commit.",
 		goldenDraws, strings.Join(differ, ", "))
 }

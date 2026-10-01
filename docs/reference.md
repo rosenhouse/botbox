@@ -7,7 +7,8 @@ fault field. `make test` fails when one of them has no row here.
 
 botbox reads `crds`, `sample` and `fixtures` relative to target.yaml, and `launch.binary`
 relative to the directory it runs in. A key it does not take is an error. A duration is a Go
-duration, such as `30s` or `1m30s`.
+duration, such as `30s` or `1m30s`. botbox refuses a cluster-scoped `primary`, kind under
+`manages` or fixture, because a run [owns one namespace](../README.md#what-botbox-cannot-test-yet).
 
 This example sets every key but `equal`:
 

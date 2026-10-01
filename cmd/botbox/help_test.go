@@ -177,6 +177,17 @@ func TestTheTopLevelHelpListsTheCommandsUsersRun(t *testing.T) {
 	}
 }
 
+// A drawn sequence injects no fault, so the help promises none.
+func TestTheTopLevelHelpSaysBotboxRunsARealAPIServer(t *testing.T) {
+	got := strings.Join(strings.Fields(help("")), " ")
+	if want := "runs your controller against a real kube-apiserver and etcd"; !strings.Contains(got, want) {
+		t.Errorf("botbox --help does not say it %q:\n%s", want, help(""))
+	}
+	if says := "injects faults"; strings.Contains(got, says) {
+		t.Errorf("botbox --help says it %q:\n%s", says, help(""))
+	}
+}
+
 func TestAUsageErrorPrintsTheUsage(t *testing.T) {
 	for _, test := range []struct {
 		name        string

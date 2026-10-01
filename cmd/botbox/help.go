@@ -146,7 +146,7 @@ func help(name string) string {
 }
 
 const intro = `botbox finds bugs in a Kubernetes controller. It runs your controller against a
-test API server, acts on its custom resources, injects faults and restarts, and
+real kube-apiserver and etcd, acts on its custom resources, restarts it, and
 checks that it converges, goes quiet and cleans up.
 `
 

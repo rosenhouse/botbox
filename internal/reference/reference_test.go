@@ -62,3 +62,15 @@ func TestSpansListsTheCodeSpansInACell(t *testing.T) {
 		t.Errorf("Spans found %v, want %v.", got, want)
 	}
 }
+
+func TestSaysFindsASentenceAcrossLinesInItsSectionAlone(t *testing.T) {
+	const wrapped = "After a fault, a restart or a CR's deletion, it can run longer, while the checks still give your controller time."
+	const underFaultFields = "A fault sets exactly one action."
+
+	if !reference.Says(t, "### Ops", wrapped) {
+		t.Errorf("Says did not find under ### Ops: %s", wrapped)
+	}
+	if reference.Says(t, "### Ops", underFaultFields) {
+		t.Errorf("Says found under ### Ops a sentence of ### Fault fields: %s", underFaultFields)
+	}
+}

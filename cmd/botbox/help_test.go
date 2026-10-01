@@ -189,6 +189,8 @@ func TestAUsageErrorPrintsTheUsage(t *testing.T) {
 			error: "flag needs an argument: --target", says: usage("run")},
 		{name: "a flag with a bad value", args: []string{"run", "--runs", "-x"},
 			error: `invalid value "-x" for flag --runs: parse error`, says: usage("run")},
+		{name: "a bad value with a dash inside", args: []string{"run", "--runs", "1 -x"},
+			error: `invalid value "1 -x" for flag --runs: parse error`, says: usage("run")},
 		{name: "no target", args: []string{"run"}, error: "the --target flag is required", says: usage("run")},
 		{name: "replay without a sequence", args: []string{"replay", "--target", toyTargetYAML},
 			error: "replay takes one sequence file, and 0 were given", says: usage("replay")},

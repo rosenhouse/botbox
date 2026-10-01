@@ -1226,8 +1226,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   shrinker stops there and reports the smallest failing sequence it found. Without
   `--deadline`, botbox prints and uses the longest the planned runs' waits can take at the
   target's timeouts, plus 4m to minimize a failure where botbox drew the sequences
-  (D64). `--launch-arg` appends to `launch.args` (repeatable; a later flag wins), which
-  is how the bug matrix selects `--bug=N`.
+  (D64). A shrink pass can take minutes, so botbox prints the failed check's ID before it
+  minimizes a drawn sequence of more than one op. `--launch-arg` appends to `launch.args`
+  (repeatable; a later flag wins), which is how the bug matrix selects `--bug=N`.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
   CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
@@ -2295,4 +2296,7 @@ built from source and run as a black-box binary.
   first. The walks also changed three messages. A property's violation where no CR
   existed now says so. An op that carries a field it does not take names the fields it
   needs. A target that stops on a bad flag has the line above its usage text quoted,
-  since Go's flag package prints the error first.
+  since Go's flag package prints the error first. A walker also waited eight silent
+  minutes for a find, twice the 4m the derived deadline's line seemed to promise. That
+  line now says minimizing gets the rest of the deadline, and botbox prints the failed
+  check before it minimizes.

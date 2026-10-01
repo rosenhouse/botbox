@@ -44,7 +44,7 @@ examples/cert-manager/quickstart.sh --seed 23
 ```
 
 ```
-the deadline is 25m20s: these 5 runs can take 21m20s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.
+the deadline is 25m20s: these 5 runs can take 21m20s at the target's timeouts, and minimizing a failure gets the rest, at least 4m0s. --deadline sets another.
 run 1: seed 23, generated
 run 2: seed 24, generated
 run 3: seed 25, generated
@@ -54,8 +54,8 @@ every run passed.
 ```
 
 botbox derives the deadline from the `timeouts` your target declares, or their defaults. It
-allows the longest the runs' waits can take, and 4 minutes to minimize a failure. A correct
-controller finishes well inside it.
+allows the longest the runs' waits can take, and at least 4 minutes to minimize a failure. A
+correct controller finishes well inside it.
 
 ### The negative control
 

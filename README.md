@@ -68,7 +68,7 @@ botbox run --target targets/toy-widget/target.yaml --seed 1 --runs 3
 ```
 
 ```
-the deadline is 11m16s: these 3 runs can take 7m16s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.
+the deadline is 11m16s: these 3 runs can take 7m16s at the target's timeouts, and minimizing a failure gets the rest, at least 4m0s. --deadline sets another.
 run 1: seed 1, generated
 run 2: seed 2, generated
 run 3: seed 3, generated

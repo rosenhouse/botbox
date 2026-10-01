@@ -991,7 +991,7 @@ configuration error.
 
 A Go hook is a function registered under a name in `pkg/target` and referenced as
 `ready: go:<name>` or `equal: go:<name>`. Hooks exist for in-repo targets only. No Go
-function runs botbox end to end, and its packages make no compatibility promise (D@59).
+function runs botbox end to end, and its packages make no compatibility promise (D81).
 
 ## 9. Toy target: `Widget`
 
@@ -1177,7 +1177,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   block and the CI recipe repeat the envtest pins for adopters to copy. The recipe also
   repeats go.mod's module and Go version, and the runner and action releases of
   `.github/workflows/`. The Install section quotes go.mod's Go version and the k8s.io/api
-  and controller-runtime versions that requiring botbox forces on a module (D@58).
+  and controller-runtime versions that requiring botbox forces on a module (D80).
   `make test` holds each copy to its source. Each `--deadline` in the
   recipe gives a run at least the time that the Makefile's example tiers give one. Bumps
   are their own PRs, never mixed with features.
@@ -1310,13 +1310,13 @@ the proxy; the `Image` launcher. Separate design addendum.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
   (five lines); what it cannot test yet; install, and a tools module that keeps botbox
   out of an operator's go.mod, embedded from `examples/tools-module.sh`, which the envtest
-  tier runs (D@58); a find in half a minute, a replay of a bug seeded into the toy, which
+  tier runs (D80); a find in half a minute, a replay of a bug seeded into the toy, which
   says that every find the README shows is seeded or a negative control and whose command
   an envtest test runs as written; quickstart against cert-manager, then what the second
   example adds; writing `target.yaml` for your own controller; reading a report; what to
   change when botbox exits 2; a CI recipe for adopters, embedded from
   `examples/ci/github-actions.yml`, and a test that runs botbox from `go test`, embedded
-  from `targets/toy-widget/botbox_test.go`, which the envtest tier runs (D@59); a
+  from `targets/toy-widget/botbox_test.go`, which the envtest tier runs (D81); a
   one-line-per-invariant table linking to §6; a closing "Development and internals"
   section that links to this document and to `docs/bug-matrix.md`. Only the Invariants
   section and that closing section link here, and only the closing section cites a
@@ -1799,7 +1799,7 @@ built from source and run as a black-box binary.
   for it there, while the target finds a moved CR by watching. `launch.binary` keeps the
   working directory as its base, because `launch.args` and the target's own relative paths
   resolve from there. The Runner checks a fault's resource when it applies the fault op,
-  not when the run starts, because a target may install its CRDs itself. Amended by D@38.
+  not when the run starts, because a target may install its CRDs itself. Amended by D78.
 - **D53 botbox restarts a target that exits once it has converged, and a crash loop is a
   G4.** Controllers are deployed to be restarted, and controller-runtime with leader
   election on exits on purpose when it loses its lease, which a fault can cause. A new
@@ -2136,14 +2136,14 @@ built from source and run as a black-box binary.
   `sequence.json`, `kubeconfig` and `target.log`, under a summary that said the directory
   held a partial run of the minimized sequence. Naming the run each file came from was
   rejected, because a run that ends replaces the drawn run's recordings anyway.
-- **D@61 One page lists every key, op and fault field, and tests keep it whole.** Some
+- **D73 One page lists every key, op and fault field, and tests keep it whole.** Some
   keys and fault fields appeared only in the Go source. `docs/reference.md` gives each a
   row, and tests hold the rows to the code (§11). A fault field value that tests something
   else is refused, such as a `fraction` of 0, which botbox read as every request, an
   `until.count` or `until.for` of 0, which botbox read as no trigger, or an `until.op` at
   or before the fault's own op. Keeping the reference in DESIGN.md was rejected, because
   DESIGN.md mixes the contract with internals, milestones and decisions.
-- **D@62 botbox's help and messages need no design document.** `go install` ships no
+- **D74 botbox's help and messages need no design document.** `go install` ships no
   DESIGN.md. Each command's help is generated from its flags and gives each flag's
   default, and botbox's help gives the exit codes and `KUBEBUILDER_ASSETS`. A usage error
   prints the command's synopsis. A message names the target.yaml key and its value rather
@@ -2153,19 +2153,19 @@ built from source and run as a black-box binary.
   botbox can tell, because a run may delete one CR twice. It names the first op that found
   the CR, because a lagging Observer shows the CR to the op after the one that deleted it.
   Splitting this document was rejected, because the hourly Routine reads it whole.
-- **D@65 This document gives intent where a listing would drift.** §8.2 names `go doc`
+- **D75 This document gives intent where a listing would drift.** §8.2 names `go doc`
   rather than listing `Target`'s fields, and a test holds §11's synopsis to each
   command's flags. botbox shrinks with its own pass, because rapid shrinks only inside
   `rapid.Check` and shrinks the choices a sequence is drawn from rather than its ops.
   Hand-written generators wait for a target that needs one.
-- **D@60 The README says what botbox cannot test yet.** An adopter found each limit only
+- **D76 The README says what botbox cannot test yet.** An adopter found each limit only
   by trying, after the control plane had started. A section right after the intro states
   them. Each limit an open issue tracks is a bullet that links it. The opening states those
   no issue tracks: a target on the host, webhooks, and generation for a built-in primary
   kind. A test lists each limit with words the README and this document say of it, so a
   change that lifts one edits all three (§12). A fixed port is not listed, because the
   message botbox exits 2 with names the fix in `launch.args`.
-- **D@79 While a fault is active, each op owes only its first exit and the exits it lands
+- **D77 While a fault is active, each op owes only its first exit and the exits it lands
   soon after, and no op lands while the target waits to restart.** B12, under a fault that
   never stopped, crashed six times and ran until a 3m deadline. Each exit the fault excused
   owed `T_settle` past a restart whose backoff doubled, so the wait after the update never
@@ -2190,7 +2190,7 @@ built from source and run as a black-box binary.
   `T_settle` per op after it, so it ends no run the Runner would end on its own. The toy's
   `--lease` elects a leader, so a fault on leases makes the correct toy exit as
   controller-runtime does.
-- **D@38 botbox knows the scope of every built-in kind.** Under D52, a built-in
+- **D78 botbox knows the scope of every built-in kind.** Under D52, a built-in
   cluster-scoped kind was refused only after envtest had started, or after the CRDs were
   installed on a `--kubeconfig` cluster. A target with a cluster-scoped CRD and a
   ClusterRole under `manages` heard only of the CRD. A cluster-scoped fixture that set a
@@ -2205,7 +2205,7 @@ built from source and run as a black-box binary.
   target with kinds of both sorts hears of them in two errors. Merging them into one was
   rejected, because the first check refuses before botbox installs CRDs on a
   `--kubeconfig` cluster.
-- **D@63 The README's first find is a seeded bug, and a hunt looks for real ones.** Every
+- **D79 The README's first find is a seeded bug, and a hunt looks for real ones.** Every
   find the README shows is planted, and a real controller's needs a build of minutes. So
   the README says so, and its first find, after Install, replays the toy's B3. An envtest
   test runs that command as written and matches what it prints. A real controller may
@@ -2223,7 +2223,7 @@ built from source and run as a black-box binary.
   settles, is a configuration error (§7), because a finalizer may still hold the old CR.
   Letting that create wait for the old CR was rejected, because a `recreate` already
   does.
-- **D@58 The README keeps botbox out of an operator's go.mod.** Minimal version selection
+- **D80 The README keeps botbox out of an operator's go.mod.** Minimal version selection
   works on the whole module graph, so requiring botbox, or importing any of its packages,
   raises a module to botbox's Go, Kubernetes and controller-runtime versions (D11). The
   README installs botbox with `go install`, or with `examples/tools-module.sh`, which
@@ -2235,8 +2235,8 @@ built from source and run as a black-box binary.
   does not resolve. The envtest tier runs the script in a fresh operator module with a
   `tools/` package, as the oldest `go` the README names, with botbox replaced by the
   checkout. It also checks that the `go` before that one fails.
-- **D@59 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
-  the README's `go test` recipe runs `bin/botbox`, which the tools module of D@58 builds,
+- **D81 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
+  the README's `go test` recipe runs `bin/botbox`, which the tools module of D80 builds,
   and fails the test on a non-zero exit. A build tag keeps it out of a plain
   `go test ./...`. The README runs it with `-count=1`, because go test caches a pass and
   cannot see a change to the controller or `target.yaml`. The recipe sets `--deadline`

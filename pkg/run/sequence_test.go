@@ -391,6 +391,19 @@ func TestSequenceRefusesATriggerOf0AtItsOp(t *testing.T) {
 	}
 }
 
+func TestSequenceRefusesATriggerOf0OnlyOnAFaultOpAfterTheOpsBeforeIt(t *testing.T) {
+	for ops, want := range map[string]string{
+		`{"i": 0, "t": "craete"}, {"i": 1, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 0}}}`: `op 0: "craete" is not an op type`,
+		`{"i": 0, "t": "settle", "spec": {"action": {"drop": true}, "until": {"for": "0s"}}}`:                        "op 0: a settle op takes no spec",
+	} {
+		_, err := UnmarshalSequence([]byte(`{"seed": 1, "target": "toy-widget", "ops": [` + ops + `]}`))
+
+		if err == nil || !strings.HasPrefix(err.Error(), want) {
+			t.Errorf("The ops %s were refused with %v, want %q.", ops, err, want)
+		}
+	}
+}
+
 func TestSequenceAcceptsTheOpsTheRunnerExecutes(t *testing.T) {
 	for _, ops := range []string{
 		`{"i": 0, "t": "create", "obj": {"kind": "Widget"}, "noSettle": true}`,

@@ -3,6 +3,7 @@ package run
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -181,18 +182,15 @@ func UnmarshalSequence(data []byte) (Sequence, error) {
 	if err := decoder.Decode(&sequence); err != nil {
 		return Sequence{}, fmt.Errorf("the sequence does not parse: %w", err)
 	}
-	if err := refuseZeroTriggers(data); err != nil {
-		return Sequence{}, err
-	}
-	if err := sequence.Validate(); err != nil {
+	if err := sequence.validate(zeroTriggers(data)); err != nil {
 		return Sequence{}, err
 	}
 	return sequence, nil
 }
 
-// refuseZeroTriggers reports an until.count or until.for written as 0, which a
-// Trigger reads as no trigger.
-func refuseZeroTriggers(data []byte) error {
+// zeroTriggers refuses each op whose until.count or until.for is written as 0,
+// which a Trigger reads as no trigger.
+func zeroTriggers(data []byte) map[int]error {
 	var written struct {
 		Ops []struct {
 			Spec struct {
@@ -205,15 +203,16 @@ func refuseZeroTriggers(data []byte) error {
 	}
 	// data decoded as a Sequence, so it decodes here too.
 	_ = json.NewDecoder(bytes.NewReader(data)).Decode(&written)
+	refused := map[int]error{}
 	for i, op := range written.Ops {
 		switch until := op.Spec.Until; {
 		case until.Count != nil && *until.Count == 0:
-			return fmt.Errorf("op %d: until.count is 0; give a count above 0, or leave it out", i)
+			refused[i] = errors.New("until.count is 0; give a count above 0, or leave it out")
 		case until.For != nil && *until.For == 0:
-			return fmt.Errorf("op %d: until.for is 0s; give a duration above 0, or leave it out", i)
+			refused[i] = errors.New("until.for is 0s; give a duration above 0, or leave it out")
 		}
 	}
-	return nil
+	return refused
 }
 
 // Marshal returns the sequence's canonical form: the JSON of DESIGN.md §7,
@@ -228,9 +227,17 @@ func (s Sequence) Marshal() ([]byte, error) {
 
 // Validate reports the first malformed op, or a sequence that ends while the
 // target is still working.
-func (s Sequence) Validate() error {
+func (s Sequence) Validate() error { return s.validate(nil) }
+
+// validate is Validate that also refuses each well-formed op refused holds an
+// error for.
+func (s Sequence) validate(refused map[int]error) error {
 	for i, op := range s.Ops {
-		if err := op.validate(i); err != nil {
+		err := op.validate(i)
+		if err == nil {
+			err = refused[i]
+		}
+		if err != nil {
 			return fmt.Errorf("op %d: %w", i, err)
 		}
 	}

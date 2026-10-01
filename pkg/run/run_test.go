@@ -370,6 +370,35 @@ func TestApplyFixturesResolvesThroughTheHarnessMapper(t *testing.T) {
 	}
 }
 
+func TestApplyFixturesRefusesAClusterScopedFixtureAndThenOneThatSetsANamespace(t *testing.T) {
+	clusterRoleKind := schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"}
+	mapper := meta.NewDefaultRESTMapper(nil)
+	mapper.Add(widgetKind, meta.RESTScopeNamespace)
+	mapper.Add(configMapKind, meta.RESTScopeNamespace)
+	mapper.Add(clusterRoleKind, meta.RESTScopeRoot)
+	for kind, want := range map[schema.GroupVersionKind]string{
+		configMapKind:   "the fixture ConfigMap shared sets metadata.namespace elsewhere",
+		clusterRoleKind: "the fixture ClusterRole shared is cluster-scoped",
+	} {
+		fixture := &unstructured.Unstructured{}
+		fixture.SetGroupVersionKind(kind)
+		fixture.SetName("shared")
+		fixture.SetNamespace("elsewhere")
+		h := &Harness{
+			Namespace: "botbox-run-1",
+			Config:    unreachable(),
+			mapper:    mapper,
+			target:    &target.Target{Primary: widgetKind, Fixtures: []*unstructured.Unstructured{fixture}},
+		}
+
+		err := h.applyFixtures(t.Context())
+
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("applyFixtures returned %v, want it to say %q.", err, want)
+		}
+	}
+}
+
 // A settle wait ends at the first reading of a ready that yields no bool,
 // rather than waiting out settle on it.
 func TestTheHarnessReadsAReadyThatYieldsNoBoolAsAnError(t *testing.T) {

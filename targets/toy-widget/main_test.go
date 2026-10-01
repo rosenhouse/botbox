@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/runtime"
 
@@ -67,7 +68,7 @@ func TestRestConfigFallsBackToTheEnvironment(t *testing.T) {
 func TestManagerOptionsWatchOnlyWatchNamespace(t *testing.T) {
 	t.Setenv("WATCH_NAMESPACE", "botbox-run-x")
 
-	watched := managerOptions(nil, "0").Cache.DefaultNamespaces
+	watched := managerOptions(nil, "0", 0).Cache.DefaultNamespaces
 
 	if namespaces := slices.Collect(maps.Keys(watched)); !slices.Equal(namespaces, []string{"botbox-run-x"}) {
 		t.Errorf("The manager watches %v, want only botbox-run-x.", namespaces)
@@ -77,7 +78,7 @@ func TestManagerOptionsWatchOnlyWatchNamespace(t *testing.T) {
 func TestManagerOptionsKeepTheSchemeAndMetricsAddress(t *testing.T) {
 	scheme := runtime.NewScheme()
 
-	options := managerOptions(scheme, "127.0.0.1:0")
+	options := managerOptions(scheme, "127.0.0.1:0", 0)
 
 	if options.Scheme != scheme {
 		t.Error("The manager does not use the scheme it was given.")
@@ -88,15 +89,48 @@ func TestManagerOptionsKeepTheSchemeAndMetricsAddress(t *testing.T) {
 }
 
 func TestManagerOptionsElectNoLeader(t *testing.T) {
-	if managerOptions(nil, "0").LeaderElection {
+	if managerOptions(nil, "0", 0).LeaderElection {
 		t.Error("The manager runs leader election, which a single replica does not need.")
 	}
+}
+
+// A lease lets a fault on leases make the toy lose it and exit, as a replica
+// of a real controller does.
+func TestManagerOptionsElectALeaderInWatchNamespaceWithALease(t *testing.T) {
+	t.Setenv("WATCH_NAMESPACE", "botbox-run-x")
+
+	options := managerOptions(nil, "0", 3*time.Second)
+
+	if !options.LeaderElection || options.LeaderElectionID == "" || options.LeaderElectionNamespace != "botbox-run-x" {
+		t.Errorf("The manager elects a leader %t, by the lease %q in %q; want a lease in botbox-run-x.",
+			options.LeaderElection, options.LeaderElectionID, options.LeaderElectionNamespace)
+	}
+	for _, lease := range []struct {
+		name string
+		got  *time.Duration
+		want time.Duration
+	}{
+		{"lasts", options.LeaseDuration, 3 * time.Second},
+		{"is renewed within", options.RenewDeadline, 2 * time.Second},
+		{"is tried every", options.RetryPeriod, 600 * time.Millisecond},
+	} {
+		if lease.got == nil || *lease.got != lease.want {
+			t.Errorf("The lease %s %s, want %v.", lease.name, durationOrNil(lease.got), lease.want)
+		}
+	}
+}
+
+func durationOrNil(d *time.Duration) string {
+	if d == nil {
+		return "nil"
+	}
+	return d.String()
 }
 
 func TestManagerOptionsWatchEveryNamespaceWithoutWatchNamespace(t *testing.T) {
 	t.Setenv("WATCH_NAMESPACE", "")
 
-	if watched := managerOptions(nil, "0").Cache.DefaultNamespaces; watched != nil {
+	if watched := managerOptions(nil, "0", 0).Cache.DefaultNamespaces; watched != nil {
 		t.Errorf("The manager watches %v, want every namespace.", watched)
 	}
 }
@@ -137,7 +171,7 @@ func TestRunRejectsABugOutsideTheCatalog(t *testing.T) {
 func TestRunRejectsOnlyANegativeDuration(t *testing.T) {
 	t.Setenv("KUBECONFIG", filepath.Join(t.TempDir(), "no-such-kubeconfig"))
 
-	for _, flag := range []string{"--resync", "--cleanup-delay"} {
+	for _, flag := range []string{"--resync", "--cleanup-delay", "--lease"} {
 		for value, rejected := range map[string]bool{"-1s": true, "0s": false} {
 			arg := flag + "=" + value
 

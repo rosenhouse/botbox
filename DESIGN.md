@@ -177,7 +177,9 @@ The Observer runs independent informers on the real API server, not through the 
 for the target's CRD(s) and the resource kinds the target declares it manages. It records,
 per object: resourceVersion history with timestamps, generation vs observedGeneration
 where present, finalizers, ownerReferences, deletion timestamps, and the UID, on which
-attribution (§6) and the garbage-collector emulation (§5.8) rely.
+attribution (§6) and the garbage-collector emulation (§5.8) rely. It watches the run
+namespace alone, so the primary and every managed kind must be namespaced (§8.1), and it
+does not see a child the target creates in another namespace.
 
 The Observer must never affect the target. It has its own credentials and never writes.
 Deleting a managed object behind the target's back is a Runner control op
@@ -293,10 +295,14 @@ The Runner executes one sequence:
    outlasts a wait. A target that converges after an exit passes. botbox chose when to
    restart the target after a `Restart` op and after an exit a fault excuses (§6), so a
    wait gives it `T_settle` past its return from either, where it returns within `T_settle`
-   of the restart, and `T_settle` past the restart where it does not. Any other restart
-   gives it no more time, and its startup requests count toward G1 where they land in a
-   quiet window (§6). A target not back when a wait expires fails G4. A restart that fails
-   ends the run as the harness error above.
+   of the restart, and `T_settle` past the restart where it does not. While a fault is
+   active, only the first exit a fault excused during each op gets that time (§6). An exit
+   is during the last op stamped before it. An op stamped before the target has had that
+   time after an earlier exit gives it that time too. Before it stamps an op, the Runner
+   waits for any restart that follows an exit a fault excused, so the op never lands while
+   the target waits for it. Any other restart gives it no more time, and its startup
+   requests count toward G1 where they land in a quiet window (§6). A target not back when
+   a wait expires fails G4. A restart that fails ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
@@ -497,8 +503,16 @@ time early. A target that exits while a fault excuses it, as controller-runtime 
 leader election on does when it loses its lease, then waits out the restart's backoff
 (§5.1), which botbox chose. G4 gives it `T_settle` past its return from that restart too,
 as after a `Restart` (§5.5), and does not judge a window the exit falls in, as it does not
-judge one a fault reaches into. Only a fault excuses an exit, so a crash loop that a fault
-set off still fails G4.
+judge one a fault reaches into. While a fault is active, only the target's first such exit
+during each op is owed that time, because owing each later exit would hold a crash loop's
+wait open for as long as the fault lasts. If the target exits again during the op, the
+wait can end before it restarts, and the properties are checked there. No op lands while
+the target waits to restart after an exit a fault excused, and an op that lands before
+the target has had its time after such an exit owes it that time too (§5.5). That time
+ends within `2 × T_settle` of the op, so it bounds the op's wait. Once no fault is active,
+every exit a fault excused is owed its time. Only a fault excuses an exit, so a crash loop
+that a fault set off still fails G4, at the latest in the wait the teardown gives the
+target once it has cleared the faults.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -878,13 +892,19 @@ cert-manager lists CertificateRequest: a request records one issuance, and a Rea
 Certificate whose request is deleted issues no new one.
 
 The primary, every managed kind and every fixture must be namespaced, because a run owns
-one namespace (§5.5, D13). botbox refuses the cluster-scoped ones before the first run, in
-two checks that each name every kind they refuse: one when it loads the target, for the
-kinds its `crds` define, and one once the control plane is up, for the rest. botbox
-observes only the run namespace, so it does not see a child the target creates in another.
+one namespace (§5.5, D13). botbox judges scopes in two checks, and each refuses every
+cluster-scoped kind it knows in one error. The first runs when botbox loads the target.
+It knows the kinds a Kubernetes 1.37 API server serves by default and the kinds the
+`crds` define. The second runs through discovery once the control plane is up, before
+the first run. It knows the rest, such as a kind whose CRD the cluster holds but `crds`
+does not list. On `--kubeconfig`, a target with kinds of both sorts therefore hears of
+them in two errors. botbox observes only the run namespace, so it does not see a child
+the target creates in another.
 botbox creates the CR and each fixture in the run namespace. A fixture sets no
-`metadata.namespace`, because the target may look for it in the namespace it names. The
-CR may set one, which botbox replaces, because the target finds a CR by watching.
+`metadata.namespace`, because the target may look for it in the namespace it names. A
+check refuses such a fixture only if it found no cluster-scoped kind and knows the
+fixture's kind is namespaced. The run refuses the rest. The CR may set one, which botbox
+replaces, because the target finds a CR by watching.
 
 `equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
 holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
@@ -1003,6 +1023,11 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 - `--label-from=<name>` has each child copy `data.label` of that ConfigMap in the Widget's
   namespace, and the toy watches that ConfigMap. The target sets it to `widget-config`,
   which it declares as a fixture.
+- `--lease=<duration>` has the toy elect a leader through a Lease in `WATCH_NAMESPACE`
+  that lasts that long, renew it within two thirds of that, and exit when it loses the
+  lease, as controller-runtime does. The envtest tier runs it at 3 s under a fault that
+  fails most lease updates, so the toy can lose its lease and restart until the teardown
+  clears the fault (§6, recovery from faults).
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 
@@ -1365,7 +1390,9 @@ the proxy; the `Image` launcher. Separate design addendum.
    under `refreshPolicy: Periodic` writes such a field, and D40 answered it with a
    target-side setting. The question stands for a controller that offers no such
    setting.
-2. How is a cluster-scoped primary CR (ClusterIssuer-like) isolated per run?
+2. How is a cluster-scoped primary CR (ClusterIssuer-like), managed kind or fixture
+   isolated per run? Should botbox observe a child the target creates in another
+   namespace?
 3. Should a later phase run the target's admission webhook in envtest, so that generation
    can widen beyond `generate.mutate`?
 4. Is `InProcess` worth reviving for speed once envtest run time is measured?
@@ -1746,7 +1773,7 @@ built from source and run as a black-box binary.
   for it there, while the target finds a moved CR by watching. `launch.binary` keeps the
   working directory as its base, because `launch.args` and the target's own relative paths
   resolve from there. The Runner checks a fault's resource when it applies the fault op,
-  not when the run starts, because a target may install its CRDs itself.
+  not when the run starts, because a target may install its CRDs itself. Amended by D@38.
 - **D53 botbox restarts a target that exits once it has converged, and a crash loop is a
   G4.** Controllers are deployed to be restarted, and controller-runtime with leader
   election on exits on purpose when it loses its lease, which a fault can cause. A new
@@ -1941,19 +1968,18 @@ built from source and run as a black-box binary.
   for the target's return (D69), the teardown, stopping the target and deleting the
   namespace. A target that exits while a fault excuses it is owed `T_settle` past its
   return, which can come `T_settle` after a restart whose backoff can reach 5 min (§5.1),
-  so each fault op allows one such exit. Faults that stopped are owed as long as they
-  lasted plus `T_settle` (§6), so each time faults stop, the deadline doubles what the run
-  had and allows another exit. Faults with no trigger stop together, at the teardown.
+  so from the first fault op on, each op allows one such exit (§6). Each op after it may
+  first wait up to 5 min for a restart, and then owe `T_settle` past a return that can
+  come `T_settle` after the op (§5.5). Faults that stopped are owed as long as they lasted
+  plus `T_settle` (§6), so each time faults stop, the deadline doubles what the run had
+  and allows another exit. Faults with no trigger stop together, at the teardown.
   Minimizing gets what the runs left plus 4m, so it may still stop early. At §6's
   timeouts, a create and an update get 3m50s, and ten drawn runs tens of minutes. A fault
-  that stops before the update raises the 3m50s to 24 min. Four such faults, each before
-  an update of its own, give 9 h, past GitHub Actions' 6 h job limit. botbox prints the
-  deadline, and a sequence with faults should set `--deadline`. An explicit `--deadline`
-  must be positive and is used as given. The derived deadline ends no run the Runner would
-  end on its own, unless a request hangs or a target exits more than once per fault op
-  while faults are active. The Runner owes each such exit `T_settle` past its return, so a
-  crash loop under an active fault runs until the deadline and exits 2 rather than failing
-  G4 (#79).
+  that stops before the update raises the 3m50s to 47 min. Four such faults, each before
+  an update of its own, give 26 h, past GitHub Actions' 6 h job limit. botbox
+  prints the deadline, and a sequence with faults should set `--deadline`. An explicit
+  `--deadline` must be positive and is used as given. The derived deadline ends no run the
+  Runner would end on its own, unless a request hangs.
 - **D65 G6 counts each namespace's requests apart.** Ten runs of external-secrets with
   no flags failed G6 at run 8: the controller repeated `create events` 34 times in 30 s.
   None went to the run namespace. envtest never finishes deleting a namespace, so each
@@ -2108,3 +2134,43 @@ built from source and run as a black-box binary.
   kind. A test lists each limit with words the README and this document say of it, so a
   change that lifts one edits all three (§12). A fixed port is not listed, because the
   message botbox exits 2 with names the fix in `launch.args`.
+- **D@79 While a fault is active, each op owes only its first exit and the exits it lands
+  soon after, and no op lands while the target waits to restart.** B12, under a fault that
+  never stopped, crashed six times and ran until a 3m deadline. Each exit the fault excused
+  owed `T_settle` past a restart whose backoff doubled, so the wait after the update never
+  ended, and the derived deadline was 2h45m. Owing one exit during each op bounds each
+  wait, and a correct controller that loses its lease once during an op still gets
+  `T_settle` past its return before the next op. Once no fault is active, every exit a
+  fault excused is owed, and nothing excuses an exit past the faults' recovery. B12
+  therefore fails G4 in the teardown's recovery wait: a minute into `b12-fault.json`, and
+  5.5 min into the issue's sequence, whose fault lasts longer. Owing only the first exit
+  after each fault began was rejected. Under a fault that failed 80% of its lease updates,
+  the correct toy then saw a `deleteManaged` land while it waited out a later backoff, and
+  P1 failed. A fault excuses G4, not a property, so the Runner waits for such a restart
+  before each op whatever the faults. With that wait alone, the op lands as the toy
+  restarts, before it has won its lease back, and one of two runs still failed P1. Owing
+  the first exit during each op passed both. Where the toy exited twice during an op, the
+  next op still landed at the second restart and owed nothing past it, in 8 of 11 replays
+  that also delayed the toy's Widget patches. So an op that lands before the target has
+  had its time after an exit owes that exit too. That time ends within `2 × T_settle` of
+  the op, so the wait stays bounded. Counting that exit as the op's first was rejected,
+  because the op's own first exit, common under such a fault, would then owe nothing. The
+  derived deadline allows an exit per op from the first fault op on, and a backoff and
+  `T_settle` per op after it, so it ends no run the Runner would end on its own. The toy's
+  `--lease` elects a leader, so a fault on leases makes the correct toy exit as
+  controller-runtime does.
+- **D@38 botbox knows the scope of every built-in kind.** Under D52, a built-in
+  cluster-scoped kind was refused only after envtest had started, or after the CRDs were
+  installed on a `--kubeconfig` cluster. A target with a cluster-scoped CRD and a
+  ClusterRole under `manages` heard only of the CRD. A cluster-scoped fixture that set a
+  namespace was told to drop the namespace. botbox now lists the scope of each kind a
+  Kubernetes 1.37 API server serves by default. An envtest test compares that list with
+  discovery on the pinned API server, so bumping that version means updating the list.
+  Loading the target judges those kinds and the kinds of `crds`. Discovery, before the
+  first run, judges the rest: a CRD that `crds` does not list, an aggregated API, or a
+  kind newer than the list. Each check refuses every cluster-scoped kind it knows in one
+  error. Only then does it refuse a fixture of a kind it knows to be namespaced that sets
+  a namespace. The run refuses such a fixture of any other kind rather than move it. A
+  target with kinds of both sorts hears of them in two errors. Merging them into one was
+  rejected, because the first check refuses before botbox installs CRDs on a
+  `--kubeconfig` cluster.

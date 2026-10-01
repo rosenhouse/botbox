@@ -910,8 +910,8 @@ func openSession(opts options, t *target.Target) (session, error) {
 	return &clusterSession{Cluster: started}, nil
 }
 
-// vet refuses the kinds the cluster serves at cluster scope, which the target's
-// CRDs cannot show for a built-in kind.
+// vet judges the scopes that loading the target could not, such as that of a
+// kind whose CRD the target does not list.
 func (s *clusterSession) vet(t *target.Target) error {
 	mapper, err := cluster.NewRESTMapper(s.Config())
 	if err != nil {

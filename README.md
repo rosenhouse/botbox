@@ -17,8 +17,9 @@ botbox generates sequences only for a primary kind your `crds` define. For a bui
 such as a Service, it runs only the [sequences you write](docs/reference.md#sequences).
 
 - botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
-  fixture before the first run, and [exits 2](#when-botbox-exits-2). It watches only the
-  namespace it creates for each run. So it passes a controller that leaks a child in another
+  fixture when it loads the target, or before the first run where only the cluster knows a
+  kind's scope, and [exits 2](#when-botbox-exits-2). It watches only the namespace it
+  creates for each run. So it passes a controller that leaks a child in another
   namespace, and it cannot supply an object your controller reads from another namespace
   ([#38](https://github.com/rosenhouse/botbox/issues/38)).
 - botbox does not test your controller's RBAC. Its proxy sends your controller's requests with
@@ -486,9 +487,15 @@ controller has `settle` to come back, and `settle` past its return to converge. 
 controller that crashes again within `stable` of each return never converges, even where
 it wrote its converged state first, so G4 reports it and quotes the last exit.
 A controller that exits during a fault, or while it recovers from one, has the same once
-botbox restarts it. G7 notes a `deleteManaged` after a restart that follows an exit as
-it does one after a `restart`, and notes one where your controller exited, or waited to
-restart, during the op or its settle wait.
+botbox restarts it. While a fault is active, only your controller's first such exit during
+each op gets that time. If it exits again during the op, the wait can end before it
+restarts, and botbox checks your properties there. botbox applies no op while your
+controller waits to restart after such an exit. An op that botbox applies before your
+controller has had that time after such an exit gives it that time too. A controller that
+keeps crashing under a fault therefore fails G4 once the fault stops, or once the teardown
+clears it. G7 notes a `deleteManaged` after a restart that follows an exit as it does one
+after a `restart`, and notes one where your controller exited, or waited to restart,
+during the op or its settle wait.
 The toy controller converges a count of 0 and then crashes under `--launch-arg --bug=12`,
 and `targets/toy-widget/sequences/b12.json` sets one:
 

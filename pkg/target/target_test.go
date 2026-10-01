@@ -68,6 +68,48 @@ func TestCheckScopesNamesEveryClusterScopedKind(t *testing.T) {
 	}
 }
 
+func TestCheckScopesJudgesTheScopeOfEveryFixtureBeforeItsNamespace(t *testing.T) {
+	widget := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
+	secret := schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
+	gadget := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Gadget"}
+	unserved := schema.GroupVersionKind{Group: "example.com", Version: "v1", Kind: "Unserved"}
+	mapper := meta.NewDefaultRESTMapper(nil)
+	mapper.Add(widget, meta.RESTScopeNamespace)
+	mapper.Add(secret, meta.RESTScopeNamespace)
+	mapper.Add(gadget, meta.RESTScopeRoot)
+	fixture := func(gvk schema.GroupVersionKind, name, namespace string) *unstructured.Unstructured {
+		object := &unstructured.Unstructured{}
+		object.SetGroupVersionKind(gvk)
+		object.SetName(name)
+		object.SetNamespace(namespace)
+		return object
+	}
+
+	for _, test := range []struct {
+		fixtures []*unstructured.Unstructured
+		want     string
+	}{
+		{fixtures: []*unstructured.Unstructured{fixture(unserved, "elsewhere", "default")}},
+		{
+			fixtures: []*unstructured.Unstructured{fixture(secret, "ca", "default"), fixture(gadget, "shared", "default")},
+			want:     "cluster-scoped kinds: the fixture toy.botbox/v1/Gadget shared",
+		},
+		{
+			fixtures: []*unstructured.Unstructured{fixture(secret, "settings", ""), fixture(secret, "ca", "default"), fixture(secret, "token", "")},
+			want:     "the fixture v1/Secret ca sets metadata.namespace default; drop it",
+		},
+	} {
+		err := (&target.Target{Primary: widget, Fixtures: test.fixtures}).CheckScopes(mapper)
+
+		switch {
+		case test.want == "" && err != nil:
+			t.Errorf("CheckScopes refused a fixture whose kind the cluster does not serve: %v", err)
+		case test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)):
+			t.Errorf("CheckScopes returned %v, want %q.", err, test.want)
+		}
+	}
+}
+
 func TestLaunchCheckFindsTheBinaryWhereBotboxRuns(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)

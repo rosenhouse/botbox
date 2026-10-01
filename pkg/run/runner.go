@@ -444,19 +444,26 @@ func (r *runner) applyOps(ctx context.Context) error {
 // has stopped ends the run here, because the op would otherwise be applied to
 // nothing (DESIGN.md §5.5).
 func (r *runner) applyOp(ctx context.Context, op Op) error {
+	r.expireFaults(op.Index)
+	if err := r.awaitRestart(ctx); err != nil {
+		return err
+	}
 	if status := r.h.targetStatus(); !status.Running {
 		return r.targetStopped(ctx, status)
 	}
-	r.expireFaults(op.Index)
 	applied := AppliedOp{Op: op, At: r.now()}
 	if op.Type.OnCR() {
 		applied.CR = op.crName(r.target.Sample.GetName())
 	}
+	// The op is on the timeline while it acts, so that an exit during it is
+	// the op's.
+	r.timeline.Ops = append(r.timeline.Ops, applied)
+	landed := len(r.timeline.Ops) - 1
 	var err error
 	if applied.Restored, err = r.restoreFixtures(ctx, op.Index); err == nil {
 		applied.Deleted, err = r.apply(ctx, op, applied.CR)
 	}
-	r.timeline.Ops = append(r.timeline.Ops, applied)
+	r.timeline.Ops[landed] = applied
 	if stayed := (*crStayed)(nil); errors.As(err, &stayed) {
 		return r.judgeStayed(ctx, op, stayed)
 	}
@@ -465,6 +472,15 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 	}
 	if op.Settles() {
 		return r.settle(ctx, op)
+	}
+	return nil
+}
+
+// awaitRestart waits for the target to restart after an exit a fault excused.
+func (r *runner) awaitRestart(ctx context.Context) error {
+	now := r.now()
+	if restart := r.asOf(now).PendingRestart(now); !restart.IsZero() {
+		return r.h.sleep(ctx, restart.Sub(now))
 	}
 	return nil
 }

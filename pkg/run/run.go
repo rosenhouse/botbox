@@ -296,9 +296,7 @@ func (h *Harness) applyFixtures(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("building botbox's dynamic client: %w", err)
 	}
-	for _, declared := range h.target.Fixtures {
-		fixture := declared.DeepCopy()
-		fixture.SetNamespace(h.Namespace)
+	for _, fixture := range h.target.Fixtures {
 		gvk := fixture.GroupVersionKind()
 		mapping, err := h.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
@@ -306,6 +304,9 @@ func (h *Harness) applyFixtures(ctx context.Context) error {
 		}
 		if mapping.Scope.Name() != meta.RESTScopeNameNamespace {
 			return fmt.Errorf("the fixture %s %s is cluster-scoped, and a run owns one namespace", gvk.Kind, fixture.GetName())
+		}
+		if namespace := fixture.GetNamespace(); namespace != "" {
+			return fmt.Errorf("the fixture %s %s sets metadata.namespace %s, and a run creates fixtures in its own namespace", gvk.Kind, fixture.GetName(), namespace)
 		}
 		created, err := client.Resource(mapping.Resource).Namespace(h.Namespace).
 			Create(ctx, fixture, metav1.CreateOptions{})

@@ -56,7 +56,7 @@ func TestTheGoTestRecipe(t *testing.T) {
 
 	// The three runs take longer than the timeout leaves botbox.
 	t.Run("stops botbox before go test's timeout", func(t *testing.T) {
-		fails(t, "35s", "the --deadline of ", "botbox: exit status 2")
+		fails(t, "40s", "the --deadline of ", "botbox: exit status 2")
 	})
 
 	t.Run("fails B4 and shows what botbox found", func(t *testing.T) {

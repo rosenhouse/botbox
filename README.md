@@ -9,13 +9,17 @@ checks if certain expectations hold, including custom properties you can specify
 
 botbox runs your controller on your machine, not in a Pod. Your controller cannot reach a Pod
 or a Service from there, and no admission or conversion webhook of yours runs. Write in your
-`sample` what your webhooks would add, and keep generated CRs inside what they accept with
-`generate.mutate` and `generate.overlay`. Keep `primary` and your controller on the
-version your CRD stores.
+[`sample`](docs/reference.md#targetyaml) what your webhooks would add. Keep generated CRs
+inside what they accept with `generate.mutate` and `generate.overlay`. Keep `primary` and your
+controller on the version your CRD stores.
+
+botbox generates sequences only for a primary kind your `crds` define. For a built-in kind,
+such as a Service, it runs only the [sequences you write](docs/reference.md#sequences).
 
 - botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
-  fixture before the first run, and exits 2. It watches only the namespace it creates for each
-  run, so it passes a controller that leaks a child in another namespace
+  fixture before the first run, and [exits 2](#when-botbox-exits-2). It watches only the
+  namespace it creates for each run. So it passes a controller that leaks a child in another
+  namespace, and it cannot supply an object your controller reads from another namespace
   ([#38](https://github.com/rosenhouse/botbox/issues/38)).
 - botbox does not test your controller's RBAC. Its proxy sends your controller's requests with
   botbox's own credentials, which are admin on envtest, so a rule your Role lacks goes

@@ -210,7 +210,8 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   names no fixture draws no fixture op.
 - **Schema-driven mutation** from the CRD's OpenAPI v3 schema: numeric ranges, enums,
   string patterns, optional-field presence, list length, map size. Generic and works on
-  any CRD.
+  any CRD. botbox draws no sequence for a built-in primary kind, whose schema it does not
+  read, and runs only the sequences a user writes.
 - **Valid by the CRD's own rules.** Every create, recreate and update the generator draws
   passes the CRD as the API server judges the CR botbox wrote: defaults, value
   validations, list types and `x-kubernetes-validations` rules, transition rules included.
@@ -1265,17 +1266,20 @@ the proxy; the `Image` launcher. Separate design addendum.
   as a GitHub release asset, and are pinned.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
-  (five lines); what it cannot test yet, each limit a bullet that links the open issue
-  tracking it; install; quickstart against cert-manager, then what the second example
-  adds; writing `target.yaml` for your own controller; reading a report; what to change
-  when botbox exits 2; a CI recipe for adopters, embedded from `examples/ci/github-actions.yml`;
-  a one-line-per-invariant table linking to §6; a closing "Development and internals"
-  section that links to this document and to `docs/bug-matrix.md`. Only the Invariants
-  section and that closing section link here, and only the closing section cites a
-  section, a decision or a symbol of this document. The README names no milestone. `make
-  test` enforces these rules. A fenced block preceded by `<!-- embed: <path> -->` has content,
-  excluding the two fence lines, byte-identical to that file including its trailing
-  newline; `<path>` is relative to the repository root; `make test` enforces it.
+  (five lines); what it cannot test yet; install; quickstart against cert-manager, then
+  what the second example adds; writing `target.yaml` for your own controller; reading a
+  report; what to change when botbox exits 2; a CI recipe for adopters, embedded from
+  `examples/ci/github-actions.yml`; a one-line-per-invariant table linking to §6; a
+  closing "Development and internals" section that links to this document and to
+  `docs/bug-matrix.md`. Only the Invariants section and that closing section link here,
+  and only the closing section cites a section, a decision or a symbol of this document.
+  The README names no milestone. `make test` enforces these rules. The limits section
+  opens with each limit no issue tracks. Each other limit is a bullet that links its issue.
+  A test lists the limits and holds the README and this document to them, and a reviewer
+  checks that each linked issue is open (§12). A fenced block preceded by
+  `<!-- embed: <path> -->` has content, excluding the two fence lines, byte-identical to
+  that file including its trailing newline; `<path>` is relative to the repository root;
+  `make test` enforces it.
 - **PRs.** Every PR description, issue, review and comment a Claude session posts begins
   with the line `🤖 Created by Claude 🤖` (CLAUDE.md). The description then names the
   milestone and the invariant/property IDs it touches, and carries a "Design change"
@@ -1300,8 +1304,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   lists. A reviewer reads the diff against §6, §8 and §11, citing the section it applies,
   and it may run the code: start a cluster, drive the binary, mutate a function and check
   that a test dies. It flags any import of controller-runtime outside the two places §11
-  allows, a README embed block that differs from its file, a PR that lifts a limit the
-  README lists and keeps its bullet, a post whose first line is not
+  allows, a README embed block that differs from its file, a limit the README still states
+  though the PR lifts it or its issue is closed, a post whose first line is not
   `🤖 Created by Claude 🤖`, and a PR description that lacks the milestone, the IDs, or
   the "Design change" section when this document changed. Reviewers never merge.
 - **Journal:** `docs/journal.md`, one entry per milestone, recording what the agents
@@ -2097,9 +2101,10 @@ built from source and run as a black-box binary.
   command's flags. botbox shrinks with its own pass, because rapid shrinks only inside
   `rapid.Check` and shrinks the choices a sequence is drawn from rather than its ops.
   Hand-written generators wait for a target that needs one.
-- **D@60 The README lists what botbox cannot test yet.** An adopter found each limit only
-  by trying, after the control plane had started. A section before Install lists them. Each
-  bullet links the open issue that tracks it, so the PR that lifts a limit deletes its
-  bullet (§12). A test holds the section before Install and each bullet to a link. No open
-  issue tracks a target on the host or its webhooks, so the section's opening states them.
-  A fixed port stays with the message botbox prints, which names `launch.args`.
+- **D@60 The README says what botbox cannot test yet.** An adopter found each limit only
+  by trying, after the control plane had started. A section right after the intro states
+  them. Each limit an open issue tracks is a bullet that links it. The opening states those
+  no issue tracks: a target on the host, webhooks, and generation for a built-in primary
+  kind. A test lists each limit with words the README and this document say of it, so a
+  change that lifts one edits all three (§12). A fixed port is not listed, because the
+  message botbox exits 2 with names the fix in `launch.args`.

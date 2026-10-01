@@ -1,6 +1,7 @@
 package botbox_test
 
 import (
+	"fmt"
 	"regexp"
 	"slices"
 	"strings"
@@ -9,23 +10,67 @@ import (
 
 const limitsHeading = "## What botbox cannot test yet"
 
-// A team learns whether its controller fits before it installs anything. Each
-// limit links the issue that tracks it, whose fix deletes the bullet.
-func TestTheReadmeListsWhatBotboxCannotTestBeforeInstall(t *testing.T) {
-	readme := readFile(t, "README.md")
-	bullets := strings.Split(section(t, readme, limitsHeading), "\n- ")[1:]
-	if strings.Index(readme, "\n"+limitsHeading+"\n") > strings.Index(readme, "\n## Install\n") {
-		t.Errorf("README.md lists what botbox cannot test after Install")
+// limits are what botbox cannot test yet: words the README says of each, the
+// issue that tracks it, or 0, and words DESIGN.md says of it. A change that
+// lifts a limit deletes its rows and both statements.
+var limits = []struct {
+	says   string
+	issue  int
+	design string
+}{
+	{"Pod", 0, "It runs on botbox's host, which routes to no Pod"},
+	{"webhook", 0, "No admission or conversion webhooks."},
+	{"the version your CRD stores", 0, "A kubeconfig cluster keeps the webhook."},
+	{"built-in", 0, "botbox draws no sequence for a built-in primary kind"},
+	{"cluster-scoped", 38, "botbox refuses the cluster-scoped ones before the first run"},
+	{"reads from another namespace", 38, "A fixture sets no `metadata.namespace`"},
+	{"RBAC", 45, "the target's RBAC is never exercised"},
+	{"fault", 47, "The generator draws no `Fault`"},
+}
+
+// A team learns whether its controller fits before it installs anything.
+func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
+	design := oneLine(readFile(t, "DESIGN.md"))
+	intro, rest, found := strings.Cut(readFile(t, "README.md"), "\n"+limitsHeading+"\n")
+	if !found {
+		t.Fatalf("README.md has no %q heading", limitsHeading)
 	}
-	if len(bullets) == 0 {
-		t.Errorf("README.md lists no limit under %q", limitsHeading)
+	if strings.Contains(intro, "\n## ") || strings.TrimSpace(strings.TrimPrefix(intro, "# botbox\n")) == "" {
+		t.Errorf("README.md does not say what botbox cannot test right after what it does")
 	}
+	section, _, _ := strings.Cut(rest, "\n## ")
+	parts := strings.Split(section, "\n- ")
+	for i := range parts {
+		parts[i] = oneLine(parts[i])
+	}
+	opening, bullets := parts[0], parts[1:]
 	issue := regexp.MustCompile(`\]\(https://github\.com/rosenhouse/botbox/issues/[0-9]+\)`)
 	for _, bullet := range bullets {
 		if !issue.MatchString(bullet) {
 			t.Errorf("README.md lists a limit that links no botbox issue: - %s", bullet)
 		}
 	}
+	for _, limit := range limits {
+		if !strings.Contains(design, limit.design) {
+			t.Errorf("DESIGN.md does not say %q of the limit the README states with %q", limit.design, limit.says)
+		}
+		if limit.issue == 0 {
+			if !strings.Contains(opening, limit.says) {
+				t.Errorf("README.md does not open %q with %q", limitsHeading, limit.says)
+			}
+			continue
+		}
+		link := fmt.Sprintf("](https://github.com/rosenhouse/botbox/issues/%d)", limit.issue)
+		if !slices.ContainsFunc(bullets, func(bullet string) bool {
+			return strings.Contains(bullet, limit.says) && strings.Contains(bullet, link)
+		}) {
+			t.Errorf("README.md lists no limit that says %q and links #%d", limit.says, limit.issue)
+		}
+	}
+}
+
+func oneLine(text string) string {
+	return strings.Join(strings.Fields(text), " ")
 }
 
 // readmeOrder pairs each README section with the words DESIGN.md orders it by.
@@ -43,7 +88,7 @@ var readmeOrder = []struct{ heading, design string }{
 }
 
 func TestTheReadmeFollowsTheOrderDesignGives(t *testing.T) {
-	design := strings.Join(strings.Fields(readFile(t, "DESIGN.md")), " ")
+	design := oneLine(readFile(t, "DESIGN.md"))
 	_, order, _ := strings.Cut(design, "**README.** Usage-first; internals live here and in `docs/`. Order: ")
 	order, _, _ = strings.Cut(order, ". ")
 	var headings []string

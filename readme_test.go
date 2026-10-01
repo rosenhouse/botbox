@@ -2,6 +2,7 @@ package botbox_test
 
 import (
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -64,6 +65,27 @@ func TestTheREADMEInstallQuotesGoModsVersions(t *testing.T) {
 	for _, module := range []string{"go", "k8s.io/api", "sigs.k8s.io/controller-runtime"} {
 		if !quoted[module] {
 			t.Errorf("README.md's Install section quotes no version of %s.", module)
+		}
+	}
+}
+
+// go test caches a pass, and cannot see the controller or target.yaml that
+// botbox reads.
+func TestTheREADMERunsTheGoTestRecipeUncachedUnderItsBuildTag(t *testing.T) {
+	const recipe = "targets/toy-widget/botbox_test.go"
+	tag := regexp.MustCompile(`^//go:build (\w+)\n`).FindStringSubmatch(readFile(t, recipe))
+	if tag == nil {
+		t.Fatalf("%s has no build tag of one word.", recipe)
+	}
+	commands := regexp.MustCompile("run\\s+`(go test [^`]*)`").FindAllStringSubmatch(section(t, readFile(t, "README.md"), "### From go test"), -1)
+	if len(commands) == 0 {
+		t.Fatal("README.md's From go test section runs no go test command.")
+	}
+	for _, command := range commands {
+		flags := strings.Fields(command[1])
+		tags := slices.Index(flags, "-tags")
+		if !slices.Contains(flags, "-count=1") || tags < 0 || tags+1 == len(flags) || flags[tags+1] != tag[1] {
+			t.Errorf("README.md runs %q, and the recipe needs -count=1 and -tags %s.", command[1], tag[1])
 		}
 	}
 }

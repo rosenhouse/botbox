@@ -725,8 +725,9 @@ func TestBotbox(t *testing.T) {
 ```
 
 Install botbox on your PATH, build your controller and set `KUBEBUILDER_ASSETS`, then run
-`go test -tags botbox ./...`. The build tag keeps the test out of a plain `go test ./...` where
-botbox is not installed. Keep `--deadline` inside `go test`'s `-timeout`, 10 minutes by
+`go test -count=1 -tags botbox ./...`. `go test` cannot see a change to your controller or
+`target.yaml`, so `-count=1` stops it from reusing a cached pass. The build tag keeps the test
+out of a plain `go test ./...` where botbox is not installed. Keep `--deadline` inside `go test`'s `-timeout`, 10 minutes by
 default, so that botbox stops first.
 
 botbox has no Go API to call instead. A `ready: go:<name>` or `equal: go:<name>` hook takes

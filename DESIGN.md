@@ -2100,6 +2100,8 @@ built from source and run as a black-box binary.
   maintainer's to decide.
 - **D@59 A Go test runs botbox as a binary.** botbox has no Go API, so the README's
   `go test` recipe runs the installed `botbox` and fails the test on a non-zero exit. A
-  build tag keeps it out of a plain `go test ./...`. The envtest tier runs the recipe from
+  build tag keeps it out of a plain `go test ./...`. The README runs it with `-count=1`,
+  because go test caches a pass and cannot see a change to the controller or `target.yaml`.
+  The envtest tier runs the recipe from
   a copy of the repository's layout, on the toy with no bug and under B4, so a recipe
   that ignored the exit code fails there. Hooks stay in-repo (D2).

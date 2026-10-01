@@ -545,6 +545,20 @@ fixtures: [webhook.yaml]
 	}
 }
 
+func TestLoadRefusesAClusterScopedFixtureBeforeAnyFixtureNamespace(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"fixtures: [secret.yaml, role.yaml]\n", map[string]string{
+		"widget.yaml": sampleWidget,
+		"secret.yaml": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: ca\n  namespace: default\n",
+		"role.yaml":   "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: reader\n  namespace: default\n",
+	})
+
+	_, err := target.Load(path)
+
+	if err == nil || !strings.Contains(err.Error(), "cluster-scoped kinds: the fixture rbac.authorization.k8s.io/v1/ClusterRole reader") {
+		t.Errorf("Load returned %v, want it to refuse the cluster-scoped ClusterRole.", err)
+	}
+}
+
 func TestLoadReadsEveryManifestExtensionOfACRDDirectory(t *testing.T) {
 	for _, file := range []string{"crds/widget.json", "crds/widget.yml"} {
 		path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{

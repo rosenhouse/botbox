@@ -168,21 +168,29 @@ func load(path string) (*Target, error) {
 	if loaded.Sample.GetName() == "" {
 		return nil, fmt.Errorf("sample %s: holds no metadata.name; give it one, since each CR a sequence creates is named after it", samplePath)
 	}
-	for _, fixture := range declared.Fixtures {
-		fixturePath := resolve(dir, fixture)
-		objects, err := loadObjects(fixturePath)
-		if err != nil {
+	fixtureFiles := make([][]*unstructured.Unstructured, len(declared.Fixtures))
+	for i, fixture := range declared.Fixtures {
+		if fixtureFiles[i], err = loadObjects(resolve(dir, fixture)); err != nil {
 			return nil, fmt.Errorf("fixture: %w", err)
 		}
-		for _, object := range objects {
+		loaded.Fixtures = append(loaded.Fixtures, fixtureFiles[i]...)
+	}
+	crds, err := ReadCRDs(loaded.CRDs)
+	if err != nil {
+		return nil, fmt.Errorf("crds: %w", err)
+	}
+	if err := loaded.refuseClusterScoped(clusterScopedAtLoad(crds)); err != nil {
+		return nil, err
+	}
+	for i, fixture := range declared.Fixtures {
+		for _, object := range fixtureFiles[i] {
 			if namespace := object.GetNamespace(); namespace != "" {
 				return nil, fmt.Errorf("fixture %s: %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace, and the target may look for this one in %s",
-					fixturePath, object.GetKind(), object.GetName(), namespace, namespace)
+					resolve(dir, fixture), object.GetKind(), object.GetName(), namespace, namespace)
 			}
 		}
-		loaded.Fixtures = append(loaded.Fixtures, objects...)
 		if drawn, mutable := declared.Generate.Fixtures[fixture]; mutable {
-			fixtures, err := mutableFixtures(fixture, objects, drawn.Mutate)
+			fixtures, err := mutableFixtures(fixture, fixtureFiles[i], drawn.Mutate)
 			if err != nil {
 				return nil, err
 			}
@@ -193,13 +201,6 @@ func load(path string) (*Target, error) {
 		if !slices.Contains(declared.Fixtures, file) {
 			return nil, fmt.Errorf("generate.fixtures %s: fixtures lists no such file", file)
 		}
-	}
-	crds, err := ReadCRDs(loaded.CRDs)
-	if err != nil {
-		return nil, fmt.Errorf("crds: %w", err)
-	}
-	if err := loaded.refuseClusterScoped(clusterScopedAtLoad(crds)); err != nil {
-		return nil, err
 	}
 
 	if declared.Selector != "" {

@@ -438,9 +438,7 @@ func (f *Fault) validate(position int) error {
 		return fmt.Errorf("the fault carries %d actions, want exactly one of error, delay or drop", actions)
 	}
 	if verb := f.Match.Verb; verb != "" && !slices.Contains(proxy.Verbs, verb) {
-		last := len(proxy.Verbs) - 1
-		return fmt.Errorf("match.verb %q is not one of %s and %s",
-			verb, strings.Join(proxy.Verbs[:last], ", "), proxy.Verbs[last])
+		return fmt.Errorf("match.verb %q is not one of %s", verb, inWords(proxy.Verbs))
 	}
 	if strings.Contains(f.Match.Resource, "/") {
 		return fmt.Errorf("match.resource %q holds a slash; name the plural alone, such as configmaps. "+

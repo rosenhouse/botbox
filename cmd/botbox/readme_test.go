@@ -3,51 +3,62 @@ package main
 import (
 	"os"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
 
 // quickstartRun is the README's first cert-manager quickstart command and the
-// block that shows what it prints.
+// block that shows what botbox prints.
 var quickstartRun = regexp.MustCompile("(?s)```sh\nexamples/cert-manager/quickstart\\.sh ([^\n]*)\n```\n\n```\n(.*?)```\n")
 
-// What the cert-manager quickstart prints depends on what its seeds draw.
-func TestTheREADMEShowsWhatTheCertManagerQuickstartPrints(t *testing.T) {
+// What botbox prints in the cert-manager quickstart depends on what its seeds
+// draw.
+func TestTheREADMEShowsWhatBotboxPrintsInTheCertManagerQuickstart(t *testing.T) {
 	t.Chdir("../..")
-	m := quickstartRun.FindStringSubmatch(readFile(t, "README.md"))
-	if m == nil {
-		t.Fatal("The README runs no cert-manager quickstart and shows no output after it.")
-	}
-	args := append(quickstartArgs(t, strings.Fields(m[1])), "--out", t.TempDir())
+	args, shown := quickstart(t, readFile(t, "README.md"), readFile(t, "examples/cert-manager/quickstart.sh"))
+	args = append(args, "--out", t.TempDir())
 
 	// The fake session passes every run, as cert-manager does.
 	code, stdout, stderr := invokeWith(t, &fakeSession{}, rapidGenerator, args...)
 	if code != exitOK {
 		t.Fatalf("botbox %s exited %d: %s", strings.Join(args, " "), code, stderr)
 	}
-	if stdout != m[2] {
-		t.Errorf("The README shows\n%s\nafter quickstart.sh %s, and botbox printed\n%s", m[2], m[1], stdout)
+	if stdout != shown {
+		t.Errorf("The README shows\n%s\nand botbox %s printed\n%s", shown, strings.Join(args, " "), stdout)
 	}
 }
 
-// quickstartArgs are what examples/cert-manager/quickstart.sh passes botbox
-// when it is given args.
-func quickstartArgs(t *testing.T, args []string) []string {
+func TestQuickstartPassesBotboxTheREADMEsArgs(t *testing.T) {
+	readme := "```sh\nexamples/cert-manager/quickstart.sh --seed 7\n```\n\n```\nprinted\n```\n"
+	script := "KUBEBUILDER_ASSETS=x ./bin/botbox run \\\n  --runs 5 \"$@\"\necho done\n"
+	args, shown := quickstart(t, readme, script)
+	if want := []string{"run", "--runs", "5", "--seed", "7"}; !slices.Equal(args, want) || shown != "printed\n" {
+		t.Errorf("quickstart returned %q and %q, want %q and %q.", args, shown, want, "printed\n")
+	}
+}
+
+// quickstart returns what script passes botbox when it runs the README's first
+// cert-manager quickstart command, and the block after that command.
+func quickstart(t *testing.T, readme, script string) (args []string, shown string) {
 	t.Helper()
-	_, invocation, found := strings.Cut(readFile(t, "examples/cert-manager/quickstart.sh"), "./bin/botbox ")
+	m := quickstartRun.FindStringSubmatch(readme)
+	if m == nil {
+		t.Fatal("The README runs no cert-manager quickstart and shows no output after it.")
+	}
+	_, invocation, found := strings.Cut(script, "./bin/botbox ")
 	if !found {
 		t.Fatal("quickstart.sh runs no ./bin/botbox.")
 	}
 	invocation, _, _ = strings.Cut(strings.ReplaceAll(invocation, "\\\n", " "), "\n")
-	var botbox []string
 	for _, arg := range strings.Fields(invocation) {
 		if arg == `"$@"` {
-			botbox = append(botbox, args...)
+			args = append(args, strings.Fields(m[1])...)
 		} else {
-			botbox = append(botbox, arg)
+			args = append(args, arg)
 		}
 	}
-	return botbox
+	return args, m[2]
 }
 
 func readFile(t *testing.T, path string) string {

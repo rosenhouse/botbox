@@ -66,19 +66,16 @@ func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
 	}
 }
 
-var (
-	listItem = regexp.MustCompile(`\n *(?:[-*+]|[0-9]+[.)])[ \t]`)
-	// afterList is a blank line before an unindented paragraph, which ends a
-	// list.
-	afterList = regexp.MustCompile(`\n\n(\S)`)
-)
+var listItem = regexp.MustCompile(`\n *(?:[-*+]|[0-9]+[.)])[ \t]+`)
 
 // limitParts splits the limits section into its opening and its other parts:
 // each bullet, and each paragraph after the list.
 func limitParts(section string) (opening string, parts []string) {
 	items := listItem.Split(section, -1)
-	for _, item := range items[1:] {
-		parts = append(parts, strings.Split(afterList.ReplaceAllString(item, "\x00$1"), "\x00")...)
+	for i, marker := range listItem.FindAllString(section, -1) {
+		// A paragraph indented less than the item's text ends the list.
+		afterList := regexp.MustCompile(fmt.Sprintf(`\n\n {0,%d}(\S)`, column(strings.TrimPrefix(marker, "\n"))-1))
+		parts = append(parts, strings.Split(afterList.ReplaceAllString(items[i+1], "\x00$1"), "\x00")...)
 	}
 	for i := range parts {
 		parts[i] = oneLine(parts[i])
@@ -86,14 +83,28 @@ func limitParts(section string) (opening string, parts []string) {
 	return oneLine(items[0]), parts
 }
 
+// column is the width of start, which begins a line, with tab stops of 4.
+func column(start string) int {
+	width := 0
+	for _, r := range start {
+		if r == '\t' {
+			width += 4 - width%4
+		} else {
+			width++
+		}
+	}
+	return width
+}
+
 func TestLimitPartsSplitsEachBulletAndEachParagraphAfterTheList(t *testing.T) {
-	opening, parts := limitParts("\nOpening one.\n\nOpening two.\n\n- First\n  bullet.\n-\tSecond.\n\n  Second's paragraph.\n" +
-		"1. Third.\n\nAfter the list.\n")
+	opening, parts := limitParts("\nOpening one.\n\nOpening two.\n\n- First\n  bullet.\n\n  First's paragraph.\n\n After the first list.\n" +
+		"-\tSecond.\n\n    Second's paragraph.\n\n  After the second list.\n1.  Third.\n\n   Also after the list.\n\nAfter the list.\n")
 
 	if want := "Opening one. Opening two."; opening != want {
 		t.Errorf("limitParts gave the opening %q, want %q.", opening, want)
 	}
-	if want := []string{"First bullet.", "Second. Second's paragraph.", "Third.", "After the list."}; !slices.Equal(parts, want) {
+	if want := []string{"First bullet. First's paragraph.", "After the first list.", "Second. Second's paragraph.", "After the second list.",
+		"Third.", "Also after the list.", "After the list."}; !slices.Equal(parts, want) {
 		t.Errorf("limitParts gave the parts %q, want %q.", parts, want)
 	}
 }

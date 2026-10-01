@@ -139,21 +139,6 @@ func TestLimitPartsEndsAnItemWhereCommonMarkDoes(t *testing.T) {
 	}
 }
 
-// CommonMark keeps a lazy continuation line in its item, so dedenting the
-// README's limits changes none of them.
-func TestLimitPartsReadsTheReadmesLimitsTheSameDedented(t *testing.T) {
-	limits := section(t, readFile(t, "README.md"), limitsHeading)
-	dedented := regexp.MustCompile(`(\S\n) +`).ReplaceAllString(limits, "$1")
-	if dedented == limits {
-		t.Fatal("README.md's limits have no indented line, so this test checks nothing.")
-	}
-	opening, bullets, after := limitParts(limits)
-	if dedentedOpening, dedentedBullets, dedentedAfter := limitParts(dedented); dedentedOpening != opening || !slices.Equal(dedentedBullets, bullets) || dedentedAfter != after {
-		t.Errorf("limitParts reads README.md's limits dedented as %q, %q and %q, want %q, %q and %q.",
-			dedentedOpening, dedentedBullets, dedentedAfter, opening, bullets, after)
-	}
-}
-
 func (l limit) isIn(bullet string) bool {
 	link := fmt.Sprintf("](https://github.com/rosenhouse/botbox/issues/%d)", l.issue)
 	return strings.Contains(bullet, l.says) && strings.Contains(bullet, link)

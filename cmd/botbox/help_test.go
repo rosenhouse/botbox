@@ -100,7 +100,7 @@ func TestARequiredFlagIsMarkedRequiredWhateverItsDefault(t *testing.T) {
 }
 
 func TestEveryHelpLineButTheSynopsisFitsEightyColumns(t *testing.T) {
-	for _, c := range append(commands, command{}) {
+	for _, c := range slices.Concat(commands, []command{{}}) {
 		for _, line := range strings.Split(help(c.name), "\n") {
 			if line != "  "+c.synopsis() && utf8.RuneCountInString(line) > 80 {
 				t.Errorf("botbox %s --help has a line of %d columns:\n%s", c.name, utf8.RuneCountInString(line), line)

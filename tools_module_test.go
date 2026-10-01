@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -11,6 +12,32 @@ import (
 )
 
 const toolsRecipe = "examples/tools-module.sh"
+
+func TestTheReadmeSaysWhereTheToolsModuleRecipePinsBotbox(t *testing.T) {
+	script := readFile(t, toolsRecipe)
+	lines := strings.Split(strings.TrimSpace(script), "\n")
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "bin/botbox ") {
+		t.Errorf("%s ends with %q, and README.md says its last line runs bin/botbox.", toolsRecipe, last)
+	}
+	dir := toolsModuleDir(t, script)
+	keep := oneLine(section(t, readFile(t, "README.md"), "### Keep botbox out of your go.mod"))
+	for _, says := range []string{"`" + dir + "/go.mod` then pins botbox", "not `go -C " + dir + " tool botbox`", "runs botbox in `" + dir + "/`",
+		"Your own go.mod and go.work, and any package of yours in `" + path.Dir(dir) + "/`, stay as they were."} {
+		if !strings.Contains(keep, says) {
+			t.Errorf("README.md does not say %q, and %s pins botbox in %s.", says, toolsRecipe, dir)
+		}
+	}
+}
+
+// toolsModuleDir is the directory where script builds bin/botbox.
+func toolsModuleDir(t *testing.T, script string) string {
+	t.Helper()
+	dir := regexp.MustCompile(`(?m)^(?:\S+=\S+ )*go -C (\S+) build `).FindStringSubmatch(script)
+	if dir == nil {
+		t.Fatalf("%s builds bin/botbox with no go -C <dir> build.", toolsRecipe)
+	}
+	return dir[1]
+}
 
 // A reader may paste the recipe into a shell they go on using.
 func TestTheToolsModuleRecipeLeavesItsShellsVariablesAlone(t *testing.T) {

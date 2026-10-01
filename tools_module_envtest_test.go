@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -27,29 +26,14 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 	if oldest == nil || remedy == nil || stopped == nil {
 		t.Fatalf("README.md's Install section names no oldest go, no GOTOOLCHAIN to run the commands with, or no error that stops the tools module:\n%s", install)
 	}
-	oldGo := oldest[1] + ".0"
-	goroot := gorootOf(t, "go"+oldGo)
 	checkout, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
 	}
 	script := readFile(t, toolsRecipe)
-	lines := strings.Split(strings.TrimSpace(script), "\n")
-	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "bin/botbox ") {
-		t.Errorf("%s ends with %q, and README.md says its last line runs bin/botbox.", toolsRecipe, last)
-	}
-	toolsDir := regexp.MustCompile(`(?m)^(?:\S+=\S+ )*go -C (\S+) build `).FindStringSubmatch(script)
-	if toolsDir == nil {
-		t.Fatalf("%s builds bin/botbox with no go -C <dir> build.", toolsRecipe)
-	}
-	keep := strings.Join(strings.Fields(section(t, readme, "### Keep botbox out of your go.mod")), " ")
-	for _, says := range []string{"`" + toolsDir[1] + "/go.mod` then pins botbox", "not `go -C " + toolsDir[1] + " tool botbox`", "runs botbox in `" + toolsDir[1] + "/`",
-		"Your own go.mod and go.work, and any package of yours in `" + path.Dir(toolsDir[1]) + "/`, stay as they were."} {
-		if !strings.Contains(keep, says) {
-			t.Errorf("README.md does not say %q, and %s pins botbox in %s.", says, toolsRecipe, toolsDir[1])
-		}
-	}
-	recipe := replacingBotbox(t, script, checkout)
+	toolsDir, recipe := toolsModuleDir(t, script), replacingBotbox(t, script, checkout)
+	oldGo := oldest[1] + ".0"
+	goroot := gorootOf(t, "go"+oldGo)
 	operatorGoMod := "module example.com/operator\n\ngo " + oldGo + "\n"
 
 	newOperator := func(t *testing.T) string {
@@ -92,10 +76,10 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 		} else if !slices.Contains(strings.Split(out, "\n"), strings.TrimSuffix(string(version), "\n")) {
 			t.Errorf("The recipe does not run bin/botbox, which prints %q:\n%s", version, out)
 		}
-		tool := exec.Command("go", "-C", toolsDir[1], "tool", "botbox", "version")
+		tool := exec.Command("go", "-C", toolsDir, "tool", "botbox", "version")
 		tool.Dir, tool.Env = operator, append(env, "GOWORK=off")
 		if out, err := tool.CombinedOutput(); err != nil {
-			t.Errorf("%s/go.mod does not pin botbox as a tool: %v\n%s", toolsDir[1], err, out)
+			t.Errorf("%s/go.mod does not pin botbox as a tool: %v\n%s", toolsDir, err, out)
 		}
 	})
 

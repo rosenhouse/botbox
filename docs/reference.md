@@ -188,7 +188,10 @@ time to recover.
 Every op carries `i` and `t`. A settle wait follows each op that settles. It ends once
 `ready` holds on every CR and nothing has changed for `timeouts.stable`, or once
 `timeouts.settle` runs out. After a fault, a restart or a CR's deletion, it can run longer,
-while the checks still give your controller time. The checks run where it ends.
+while the checks still give your controller time. A request the proxy holds under
+`action.delay` counts as a change until the proxy forwards it. One held as the wait's time
+runs out keeps the wait open until `timeouts.settle` past its release. The checks run where
+it ends.
 
 | Op | Needs | May carry | Settles | What it does |
 |---|---|---|---|---|
@@ -232,8 +235,9 @@ while the checks still give your controller time. The checks run where it ends.
 
 A fault sets exactly one action. It ends at the first of its `until` triggers, or at the end
 of the run where it sets none. The proxy tries faults in op order, and the first that
-applies to a request wins. The checks do not judge a window a fault applied in, and they
-give your controller as long as the faults lasted, plus `timeouts.settle`, to recover.
+applies to a request wins. The checks do not judge a window a fault applied in or held a
+request in, and they give your controller as long as the faults lasted, plus
+`timeouts.settle`, to recover.
 botbox clears a fault still active at the end, and waits for your controller to recover. A
 fault that applies to no request tests nothing, and the run notes it.
 
@@ -244,7 +248,7 @@ fault that applies to no request tests nothing, and the run notes it.
 | `match.name` | every name | It is a glob over the object name in the request path, as Go's `path.Match` reads it. A list, a watch, a `deletecollection` and a create of an object carry an empty name there, which `*` matches. |
 | `match.fraction` | every request | It gives the share of matching requests the fault applies to, above 0 and up to 1. The sequence's `seed` draws which. |
 | `action.error` | none | The proxy answers with this status, from 400 to 599, and forwards nothing. |
-| `action.delay` | none | The proxy holds the request this long, such as `"500ms"`, then forwards it. It is not negative, and 0 leaves it unset. |
+| `action.delay` | none | The proxy holds the request this long, such as `"500ms"`, then forwards it. A watch counts as held only until then. It is not negative, and 0 leaves it unset. |
 | `action.drop` | none | `true` has the proxy close the connection without an answer. It forwards nothing. |
 | `until.op` | none | The fault ends before this op acts. It is above the fault's own `i`. Past the last op, the fault lasts to the end. |
 | `until.count` | none | The fault ends once it has applied to this many requests. It is above 0. |

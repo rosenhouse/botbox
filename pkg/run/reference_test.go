@@ -54,6 +54,17 @@ func TestTheReferenceSaysASettleWaitCanRunPastTimeoutsSettle(t *testing.T) {
 	}
 }
 
+func TestTheReferenceSaysAHeldRequestHoldsASettleWait(t *testing.T) {
+	for _, says := range []string{
+		"A request the proxy holds under `action.delay` counts as a change until the proxy forwards it.",
+		"One held as the wait's time runs out keeps the wait open until `timeouts.settle` past its release.",
+	} {
+		if !reference.Says(t, opsHeading, says) {
+			t.Errorf("%s does not say under %q: %s", reference.Path, opsHeading, says)
+		}
+	}
+}
+
 func TestTheReferenceListsEveryOpType(t *testing.T) {
 	var want []string
 	for _, opType := range opTypes {

@@ -428,7 +428,10 @@ drop the requests it matches. This is `targets/toy-widget/sequences/fault.json`:
 ```
 
 An invariant ignores any window the proxy applied a fault in, so what a fault tests is how
-the controller behaves once the fault stops. A controller backs off while its requests fail,
+the controller behaves once the fault stops. A delay's window lasts until the proxy forwards
+the last request it held, and a settle wait counts a held request as a change until then. A
+request held as the wait's time runs out keeps it open until `settle` past its release. A
+watch counts only until the proxy forwards it. A controller backs off while its requests fail,
 so once the faults stop botbox gives it as long as they lasted, plus `settle`, to converge.
 That includes a fault still active when the sequence ends, like the one above: botbox clears
 it and waits for the controller before it tears the run down. The proxy tries faults in op

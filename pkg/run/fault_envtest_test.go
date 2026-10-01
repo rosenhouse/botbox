@@ -259,6 +259,95 @@ func TestACrashLoopUnderAFaultThatNeverStopsFailsG4(t *testing.T) {
 	}
 }
 
+// heldCreate has the proxy hold the toy's ConfigMap creates for longer than
+// T_stable, then deletes a child. Until the proxy releases the create of its
+// replacement, status.ready counts a child that is not there.
+const heldCreate = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"delay": "3s"}}},
+    {"i": 2, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
+  ]
+}`
+
+// heldReads has the proxy hold the toy's watches of ConfigMaps, which it
+// makes as it restarts, and its lists of them, which it makes as it cleans up
+// after a deleted Widget.
+const heldReads = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "list", "resource": "configmaps"}, "action": {"delay": "1s"}}},
+    {"i": 2, "t": "fault", "spec": {"match": {"verb": "watch", "resource": "configmaps"}, "action": {"delay": "1s"}}},
+    {"i": 3, "t": "restart"},
+    {"i": 4, "t": "settle"},
+    {"i": 5, "t": "delete"}
+  ]
+}`
+
+// The correct toy passes, and each wait converges, no sooner than T_stable
+// after the proxy released every request it held, however long a held watch
+// then streams.
+func TestASettleWaitOutlastsTheRequestsTheProxyHolds(t *testing.T) {
+	t.Parallel()
+	binary := buildToy(t)
+	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
+	spendsItsCount := readSequence(t, heldCreate)
+	spendsItsCount.Ops[1].Fault.Until.Count = 1
+	for _, test := range []struct {
+		name     string
+		sequence run.Sequence
+		delay    time.Duration
+	}{
+		{"a create held while a child is gone", readSequence(t, heldCreate), 3 * time.Second},
+		{"a create that spends its fault's count", spendsItsCount, 3 * time.Second},
+		{"watches and lists", readSequence(t, heldReads), time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			toy := loadTarget(t, binary)
+
+			result, err := run.Run(t.Context(), toy, test.sequence, run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if result.Violation != nil {
+				t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+			}
+			for i, window := range result.Timeline.Faults {
+				if window.Start.IsZero() {
+					t.Errorf("The proxy held no request with fault %d.", i)
+				}
+			}
+			for _, op := range result.Timeline.Ops {
+				if wait := op.Settled; wait != nil {
+					requireQuietAfterHolds(t, op.Op.Index, *wait, result.Recorded.Requests, test.delay, toy.Timeouts.Stable)
+				}
+			}
+		})
+	}
+}
+
+// requireQuietAfterHolds requires a wait that converged T_stable after the
+// proxy released each request it held for delay that arrived before the end.
+func requireQuietAfterHolds(t *testing.T, op int, wait run.Wait, log []proxy.Request, delay, stable time.Duration) {
+	t.Helper()
+	if !wait.Converged {
+		t.Errorf("The wait after op %d expired at %v.", op, wait.Window.End)
+	}
+	for _, request := range log {
+		released := request.Start.Add(delay)
+		if strings.HasPrefix(request.Fault, "delay") && request.Start.Before(wait.Window.End) && wait.Window.End.Before(released.Add(stable)) {
+			t.Errorf("The wait after op %d ended at %v, less than T_stable after the proxy released the %s %s it held at %v.",
+				op, wait.Window.End, request.Verb, request.Path, released)
+		}
+	}
+}
+
 // The fault names the toy's CRD, which the API server serves as widgets.
 func TestAFaultOnAKindNameEndsTheRun(t *testing.T) {
 	t.Parallel()

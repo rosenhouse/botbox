@@ -325,20 +325,28 @@ func (o Op) validateFields() error {
 			continue
 		}
 		if wanted[field] {
-			return fmt.Errorf("a %s op needs %s", o.Type, field)
+			return fmt.Errorf("%s needs %s", o.Type.withArticle(), field)
 		}
 		if len(needed) == 0 {
-			return fmt.Errorf("a %s op takes no %s", o.Type, field)
+			return fmt.Errorf("%s takes no %s", o.Type.withArticle(), field)
 		}
-		return fmt.Errorf("a %s op takes no %s; it needs %s", o.Type, field, inWords(needed))
+		return fmt.Errorf("%s takes no %s; it needs %s", o.Type.withArticle(), field, inWords(needed))
 	}
 	if o.Type == OpDeleteManaged && *o.Nth < 0 {
 		return fmt.Errorf("index is %d, want the position of a managed object", *o.Nth)
 	}
 	if o.CR != "" && !slices.Contains(namingOps, o.Type) {
-		return fmt.Errorf("a %s op takes no cr", o.Type)
+		return fmt.Errorf("%s takes no cr", o.Type.withArticle())
 	}
 	return nil
+}
+
+// withArticle names the op type as a sentence does: "a create op", "an update op".
+func (t OpType) withArticle() string {
+	if strings.IndexAny(string(t), "aeiou") == 0 {
+		return "an " + string(t) + " op"
+	}
+	return "a " + string(t) + " op"
 }
 
 // inWords joins words as a sentence lists them: "a", "a and b", "a, b and c".

@@ -383,6 +383,9 @@ func TestSequenceNamesTheFieldsAnOpNeedsBesideOneItTakesNot(t *testing.T) {
 		`{"i": 0, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "index": 0, "until": {"op": 1}}`: "op 0: a deleteFixture op takes no index; it needs kind, name and until",
 		`{"i": 0, "t": "create", "obj": {"kind": "Widget"}, "name": "widget"}`:                                 "op 0: a create op takes no name; it needs obj",
 		`{"i": 0, "t": "settle", "name": "token"}`:                                                             "op 0: a settle op takes no name",
+		`{"i": 0, "t": "update", "obj": {"kind": "Widget"}}`:                                                   "op 0: an update op takes no obj; it needs patch",
+		`{"i": 0, "t": "updateFixture", "kind": "v1/Secret", "name": "token"}`:                                 "op 0: an updateFixture op needs patch",
+		`{"i": 0, "t": "updateFixture", "cr": "widget", "kind": "v1/Secret", "name": "token", "patch": {}}`:    "op 0: an updateFixture op takes no cr",
 	} {
 		_, err := UnmarshalSequence([]byte(`{"seed": 1, "target": "toy-widget", "ops": [` + ops + `]}`))
 

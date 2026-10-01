@@ -7,6 +7,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -52,10 +53,11 @@ func TestTheToolsModuleRecipeLeavesItsShellsVariablesAlone(t *testing.T) {
 
 func TestVariablesChangedByFindsEachWayToSetOne(t *testing.T) {
 	t.Setenv("GOWORK", "off") // The script's shell must not inherit it.
-	for _, set := range []string{"GOWORK=off; export GOWORK", "  export GOWORK=off", "set -a; GOWORK=off; set +a", "GOWORK=$(echo off)",
-		"GOWORK=off; mkdir -p tools/botbox"} {
-		if changed, err := variablesChangedBy(t, set+"\n"+readFile(t, toolsRecipe)); err != nil || len(changed) != 1 || changed[0] != "GOWORK" {
-			t.Errorf("variablesChangedBy found %q and %v where the recipe begins %q, want GOWORK.", changed, err, set)
+	for set, want := range map[string]string{"GOWORK=off; export GOWORK": "GOWORK", "  export GOWORK=off": "GOWORK",
+		"set -a; GOWORK=off; set +a": "GOWORK", "GOWORK=$(echo off)": "GOWORK", "GOWORK=off; mkdir -p tools/botbox": "GOWORK",
+		"PATH=$PATH:/x": "PATH"} {
+		if changed, err := variablesChangedBy(t, set+"\n"+readFile(t, toolsRecipe)); err != nil || !slices.Equal(changed, []string{want}) {
+			t.Errorf("variablesChangedBy found %q and %v where the recipe begins %q, want %s.", changed, err, set, want)
 		}
 	}
 	if _, err := variablesChangedBy(t, "false\n"+readFile(t, toolsRecipe)); err == nil {

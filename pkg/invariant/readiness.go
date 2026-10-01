@@ -26,7 +26,7 @@ func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 	stable := in.timeouts().Stable
 	changes := in.versionsIn(at.Add(-stable), at)
 	timeout := fmt.Sprintf("timeouts.settle is %s", in.timeouts().Settle)
-	if checkpoint.Stayed {
+	if checkpoint.Stayed || in.heldByDeletion(checkpoint) {
 		timeout = fmt.Sprintf("timeouts.delete is %s", in.timeouts().Delete)
 	}
 	violation := Violation{

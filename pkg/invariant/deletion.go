@@ -22,6 +22,19 @@ func (in Input) deletionOwed(t time.Time) time.Time {
 	return owed
 }
 
+// heldByDeletion reports whether a CR's deletion deadline held a wait open
+// past T_settle: the deadline fell after that and by the wait's end, and the
+// CR was still there at the end.
+func (in Input) heldByDeletion(checkpoint Checkpoint) bool {
+	for _, deleted := range in.crDeletionsBy(checkpoint.Time) {
+		_, gone := in.goneBy(deleted, checkpoint.Time)
+		if !gone && deleted.deadline.After(checkpoint.Began.Add(in.timeouts().Settle)) && !deleted.deadline.After(checkpoint.Time) {
+			return true
+		}
+	}
+	return false
+}
+
 // Excused reports whether a settle wait that expired is not G4's to report: a
 // fault excuses it, or G3 judges it.
 func (in Input) Excused(checkpoint Checkpoint) bool {

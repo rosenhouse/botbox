@@ -103,9 +103,27 @@ func TestAnExpiredWaitNamesItsTimeout(t *testing.T) {
 			record(3100*time.Millisecond, widget("13", uid("uid-w2"), spec(3))).
 			checkpoint(8*time.Second, invariant.Expired).waitBegan(3100 * time.Millisecond),
 			"expired with no fault active: in 4.9s (timeouts.settle is 5s), ready never held"},
+		{"a delete's settle wait that ran to its CR's deadline", beingDeleted().fault(11*time.Second, 11500*time.Millisecond).
+			checkpoint(20150*time.Millisecond, invariant.Expired),
+			"expired with no fault active: in 10.15s (timeouts.delete is 10s), the CR w was still being deleted"},
+		{"a delete's settle wait that ended before its CR's deadline", beingDeleted().
+			checkpoint(18*time.Second, invariant.Expired),
+			"expired with no fault active: in 8s (timeouts.settle is 5s)"},
+		{"a delete's settle wait that ran on after its CR went", beingDeleted().
+			remove(19*time.Second, deletedWidget("16")).
+			checkpoint(24*time.Second, invariant.Expired),
+			"expired with no fault active: in 14s (timeouts.settle is 5s)"},
+		{"a delete's settle wait that ran on after its CR went late", beingDeleted().fault(11*time.Second, 11500*time.Millisecond).
+			remove(21*time.Second, deletedWidget("16")).
+			checkpoint(22*time.Second, invariant.Expired),
+			"expired with no fault active: in 12s (timeouts.settle is 5s)"},
+		{"a settle wait that began too late for a CR's deadline to hold it", beingDeleted().fault(11*time.Second, 11500*time.Millisecond).
+			op(invariant.OpSettle, 16*time.Second).
+			checkpoint(21*time.Second, invariant.Expired),
+			"expired with no fault active: in 5s (timeouts.settle is 5s), the CR w was still being deleted"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			violation := expiredWait(t, test.run.through(14*time.Second))
+			violation := expiredWait(t, test.run.through(25*time.Second))
 
 			requireStatement(t, violation, test.want)
 		})

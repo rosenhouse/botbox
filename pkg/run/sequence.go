@@ -203,7 +203,8 @@ func refuseZeroTriggers(data []byte) error {
 			} `json:"spec"`
 		} `json:"ops"`
 	}
-	_ = json.NewDecoder(bytes.NewReader(data)).Decode(&written) // It decoded as a Sequence.
+	// data decoded as a Sequence, so it decodes here too.
+	_ = json.NewDecoder(bytes.NewReader(data)).Decode(&written)
 	for i, op := range written.Ops {
 		switch until := op.Spec.Until; {
 		case until.Count != nil && *until.Count == 0:

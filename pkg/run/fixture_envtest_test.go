@@ -3,6 +3,9 @@
 package run_test
 
 import (
+	"bytes"
+	"encoding/json"
+	"os"
 	"slices"
 	"strconv"
 	"testing"
@@ -17,6 +20,13 @@ const lastFixtureSeed = 60
 
 // seedThatFindsB14 draws an updateFixture and then a restart.
 const seedThatFindsB14 = 19
+
+// The unit tier pins what this test draws under goldenFixtureTarget in
+// goldenDraws.
+const (
+	goldenDraws         = "pkg/generate/testdata/draws.golden.json"
+	goldenFixtureTarget = "toy-widget with a label fixture"
+)
 
 // A correct toy passes what generation draws on its fixtures, so the fixture
 // ops find bugs rather than harness artefacts.
@@ -74,12 +84,16 @@ func TestGeneratedFixtureOps(t *testing.T) {
 // on a fixture.
 func fixtureSequences(t *testing.T, generator *generate.Generator) []run.Sequence {
 	t.Helper()
+	golden := goldenFixtureDraws(t)
 	var sequences []run.Sequence
 	drawn := map[run.OpType]int{}
 	for seed := int64(1); seed <= lastFixtureSeed; seed++ {
 		sequence, err := generator.Draw(seed)
 		if err != nil {
 			t.Fatalf("Drawing seed %d failed: %v", seed, err)
+		}
+		if !sameJSON(t, golden[strconv.FormatInt(seed, 10)], sequence) {
+			t.Fatalf("Seed %d draws a sequence that %s does not record under %q.", seed, goldenDraws, goldenFixtureTarget)
 		}
 		acts := false
 		for _, op := range sequence.Ops {
@@ -96,4 +110,28 @@ func fixtureSequences(t *testing.T, generator *generate.Generator) []run.Sequenc
 		t.Fatalf("Seeds 1 to %d draw %v, want at least five of each fixture op.", lastFixtureSeed, drawn)
 	}
 	return sequences
+}
+
+func goldenFixtureDraws(t *testing.T) map[string]json.RawMessage {
+	t.Helper()
+	content, err := os.ReadFile(repoRoot + "/" + goldenDraws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var golden map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(content, &golden); err != nil {
+		t.Fatalf("Reading %s failed: %v", goldenDraws, err)
+	}
+	return golden[goldenFixtureTarget]
+}
+
+func sameJSON(t *testing.T, recorded json.RawMessage, sequence run.Sequence) bool {
+	t.Helper()
+	drawn, err := sequence.Marshal()
+	if err != nil {
+		t.Fatalf("Marshalling seed %d failed: %v", sequence.Seed, err)
+	}
+	var compactRecorded, compactDrawn bytes.Buffer
+	return json.Compact(&compactRecorded, recorded) == nil && json.Compact(&compactDrawn, drawn) == nil &&
+		bytes.Equal(compactRecorded.Bytes(), compactDrawn.Bytes())
 }

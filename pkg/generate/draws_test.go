@@ -67,7 +67,7 @@ func file(path string) declaration {
 }
 
 // toyWithALabelFixture is the toy as pkg/run's TestGeneratedFixtureOps
-// declares it.
+// declares it. That test fails unless it draws what the golden file records.
 func toyWithALabelFixture(t *testing.T) *target.Target {
 	toy := loadTarget(t, toyTarget)
 	toy.Generate.Fixtures = []target.MutableFixture{{

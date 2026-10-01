@@ -1324,9 +1324,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   `make test` enforces these rules. The limits section opens with each limit no issue
   tracks. Each other limit is a `- ` bullet that links its issue, with its other lines
   indented two spaces, and nothing follows the list. Each line's text begins with a
-  letter, a link or a parenthesis, so no line opens a block that hides a limit. A test
-  refuses any other line, lists the limits, holds each bullet to a listed limit, and
-  holds the README and this document to each. A reviewer checks that the opening states
+  letter, `[` or `(`. The section holds no HTML, footnote or link definition, and no
+  bullet holds code or a backslash, so nothing hides a limit or its link. A test refuses
+  any other line, lists the limits, holds each bullet to a listed limit, and holds the
+  README and this document to each. A reviewer checks that the opening states
   no other limit and that each linked issue is open (§12). A fenced block preceded by
   `<!-- embed: <path> -->` has content, excluding the two fence lines, byte-identical to
   that file including its trailing newline; `<path>` is relative to the repository root;
@@ -2244,7 +2245,8 @@ built from source and run as a black-box binary.
   operator module with a `tools/` package and a go.work, as the oldest `go` the README
   names, with botbox replaced by the checkout. It also checks that the `go` before that
   one fails. The unit tier runs the script with `go` stubbed, and checks that it leaves
-  its shell's variables as they were.
+  its shell's variables as they were. Each line of the script runs every time, so that
+  check sees each change.
 - **D81 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
   the README's `go test` recipe runs `bin/botbox`, which the tools module of D80 builds,
   and fails the test on a non-zero exit. A build tag keeps it out of a plain

@@ -14,7 +14,11 @@ func TestBotbox(t *testing.T) {
 		"--seed", "1", "--runs", "3")
 	if deadline, ok := t.Deadline(); ok {
 		// Stop botbox before go test's -timeout, which would leave its control plane running.
-		botbox.Args = append(botbox.Args, "--deadline", (time.Until(deadline) - 30*time.Second).String())
+		left := time.Until(deadline).Truncate(time.Second) - 30*time.Second
+		if left <= 0 {
+			t.Fatal("go test's -timeout leaves botbox no time")
+		}
+		botbox.Args = append(botbox.Args, "--deadline", left.String())
 	}
 	botbox.Dir = "../.." // launch.binary is relative to the repository root.
 	botbox.Stdout, botbox.Stderr = os.Stdout, os.Stderr

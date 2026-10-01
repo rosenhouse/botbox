@@ -2105,8 +2105,10 @@ built from source and run as a black-box binary.
   and fails the test on a non-zero exit. A build tag keeps it out of a plain
   `go test ./...`. The README runs it with `-count=1`, because go test caches a pass and
   cannot see a change to the controller or `target.yaml`. The recipe sets `--deadline`
-  half a minute before go test's timeout. A test that the timeout ends leaves botbox to
-  die of SIGPIPE at its next write, with its control plane still running. The envtest
-  tier runs the recipe from a copy of the repository's layout: on the toy with no bug,
-  under B4, with a timeout too short for its runs, and with no controller to launch.
+  half a minute before go test's timeout, in whole seconds, and fails the test when that
+  leaves botbox no time. A test that the timeout ends leaves botbox to die of SIGPIPE at
+  its next write, with its control plane still running. The envtest tier runs the recipe
+  from a copy of the repository's layout: on the toy with no bug, under B4, with a
+  timeout too short for its runs, with one that leaves botbox no time, and with no
+  controller to launch.
   Hooks stay in-repo (D2).

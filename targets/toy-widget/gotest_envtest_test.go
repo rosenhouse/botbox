@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -33,7 +34,7 @@ func TestTheGoTestRecipe(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
-	fails := func(t *testing.T, timeout string, shown ...string) {
+	fails := func(t *testing.T, timeout string, shown ...string) string {
 		t.Helper()
 		out, err := runRecipe(timeout)
 		var exit *exec.ExitError
@@ -45,6 +46,7 @@ func TestTheGoTestRecipe(t *testing.T) {
 				t.Errorf("The failing test does not show %q:\n%s", want, out)
 			}
 		}
+		return out
 	}
 
 	t.Run("passes the toy with no bug", func(t *testing.T) {
@@ -56,7 +58,16 @@ func TestTheGoTestRecipe(t *testing.T) {
 
 	// The three runs take longer than the timeout leaves botbox.
 	t.Run("stops botbox before go test's timeout", func(t *testing.T) {
-		fails(t, "40s", "the --deadline of ", "botbox: exit status 2")
+		out := fails(t, "40s", "botbox: exit status 2")
+		if !regexp.MustCompile(`the --deadline of \d+s ended`).MatchString(out) {
+			t.Errorf("botbox names no deadline in whole seconds:\n%s", out)
+		}
+	})
+
+	t.Run("fails when go test's timeout leaves botbox no time", func(t *testing.T) {
+		if out := fails(t, "31s", "leaves botbox no time"); strings.Contains(out, "botbox: exit status") {
+			t.Errorf("The recipe ran botbox:\n%s", out)
+		}
 	})
 
 	t.Run("fails B4 and shows what botbox found", func(t *testing.T) {

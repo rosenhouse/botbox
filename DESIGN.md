@@ -1324,13 +1324,12 @@ the proxy; the `Image` launcher. Separate design addendum.
   `make test` enforces these rules. The limits section opens with each limit no issue
   tracks. Each other limit is a bullet that links its issue. A test lists the limits,
   holds each bullet and each paragraph after the list to one, and holds the README and
-  this document to each. A reviewer
-  checks that the opening states no other limit and that each linked issue is open
-  (§12). A fenced block preceded by `<!-- embed: <path> -->` has content,
-  excluding the two fence lines, byte-identical to that file including its trailing
-  newline; `<path>` is relative to the repository root; `make test` enforces it. It also
-  runs the cert-manager quickstart command against a fake session and requires the block
-  after it to hold what botbox prints.
+  this document to each. A reviewer checks that the opening states no other limit and
+  that each linked issue is open (§12). A fenced block preceded by
+  `<!-- embed: <path> -->` has content, excluding the two fence lines, byte-identical to
+  that file including its trailing newline; `<path>` is relative to the repository root;
+  `make test` enforces it. It also runs the cert-manager quickstart command against a
+  fake session and requires the block after it to hold what botbox prints.
 - **PRs.** Every PR description, issue, review and comment a Claude session posts begins
   with the line `🤖 Created by Claude 🤖` (CLAUDE.md). The description then names the
   milestone and the invariant/property IDs it touches, and carries a "Design change"
@@ -1357,9 +1356,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   that a test dies. It flags any import of controller-runtime outside the two places §11
   allows, a README embed block that differs from its file, a limit the README still states
   though the PR lifts it or its issue is closed, a limit the README's opening states that
-  the test does not list, a post whose first line is not
-  `🤖 Created by Claude 🤖`, and a PR description that lacks the milestone, the IDs, or
-  the "Design change" section when this document changed. Reviewers never merge.
+  the test does not list, a post whose first line is not `🤖 Created by Claude 🤖`, and a
+  PR description that lacks the milestone, the IDs, or the "Design change" section when
+  this document changed. Reviewers never merge.
 - **Journal:** `docs/journal.md`, one entry per milestone, recording what the agents
   got right, what they got wrong, and which prompt, skill, or convention change fixed
   it. This is a first-class deliverable of the repo.

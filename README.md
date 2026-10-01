@@ -146,8 +146,8 @@ The toy converges, so nothing looks wrong until the sequence deletes the Widget 
 ConfigMap stays. An envtest suite sees this only if it asserts each ownerReference itself:
 envtest runs no garbage collector, so the ConfigMap stays whether or not it carries one. botbox
 emulates the collector, and G3 fails. G3 judges every object of a kind your target manages, in
-every run, with no test code of yours. [docs/bug-matrix.md](docs/bug-matrix.md) lists each seeded bug and the check that
-catches it.
+every run, with no test code of yours. [docs/bug-matrix.md](docs/bug-matrix.md) lists each
+seeded bug and the check that catches it.
 
 In a fresh clone, the first `make assets-path` also installs setup-envtest and downloads the
 control plane, and the first `make build` compiles every dependency. After that, the replay

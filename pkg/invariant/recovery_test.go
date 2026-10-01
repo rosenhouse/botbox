@@ -188,6 +188,8 @@ func TestPendingRestartIsARestartAFaultExcused(t *testing.T) {
 			at: 12 * time.Second},
 		{name: "a restart at the instant asked about", run: newRun().fault(time.Second, 10*time.Second).exit(8*time.Second, 12*time.Second),
 			at: 12 * time.Second},
+		{name: "an exit at the instant asked about", run: newRun().fault(time.Second, 20*time.Second).exit(12*time.Second, 30*time.Second),
+			at: 12 * time.Second, want: 30 * time.Second},
 		{name: "a restart after an exit no fault excused", run: newRun().exit(8*time.Second, 30*time.Second),
 			at: 12 * time.Second},
 		{name: "a restart after an exit while recovery was owed", run: newRun().fault(time.Second, 2*time.Second).exit(7*time.Second, 30*time.Second),

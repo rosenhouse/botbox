@@ -14,18 +14,19 @@ your unit tests.
 
 botbox runs your controller on your machine, not in a Pod. Your controller cannot reach a Pod
 or a Service from there, and no admission or conversion webhook of yours runs. So write in
-your `sample` what your webhooks would add, and keep `primary` and your controller on the
-version your CRD stores. [docs/targets.md](docs/targets.md#generated-values) shows how to keep
-generated CRs within what your webhooks would admit.
+your `sample` CR what your webhooks would add, and keep your `primary` kind and your controller
+on the version your CRD stores. [docs/targets.md](docs/targets.md#generated-values) shows how
+to keep generated CRs within what your webhooks would admit.
 
 botbox generates sequences only for a primary kind your `crds` define. For a built-in kind,
 such as a Service, it runs only the [sequences you write](docs/targets.md#sequences-you-write).
+[target.yaml](#write-targetyaml) names the sample, the primary kind and the CRDs.
 
 - botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
-  fixture when it loads the target, or before the first run where only the cluster knows a
-  kind's scope, and exits 2. It watches only the namespace it creates for each run. So it
-  passes a controller that leaks a child in another namespace, and it cannot supply an object
-  your controller reads from another namespace
+  fixture when it loads the target, and exits 2. Where only the cluster knows a kind's scope,
+  it refuses the kind before the first run. It watches only the namespace it creates for each
+  run. So it passes a controller that leaks a child in another namespace, and it cannot supply
+  an object your controller reads from another namespace
   ([#38](https://github.com/rosenhouse/botbox/issues/38)).
 - botbox does not test your controller's RBAC. Its proxy sends your controller's requests with
   botbox's own credentials, which are admin on envtest, so a rule your Role lacks goes
@@ -45,7 +46,9 @@ export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 
 `go install` puts both tools in `$(go env GOPATH)/bin`, or in `$GOBIN` where you set it.
 `setup-envtest` downloads etcd and kube-apiserver, and `KUBEBUILDER_ASSETS` tells botbox where
-they are. A new shell needs the last three lines again.
+they are. On Linux it keeps them under `~/.local/share/kubebuilder-envtest`, and `--bin-dir`
+names another directory, as the [CI recipe](#running-in-ci) does. A new shell needs the last
+three lines again.
 
 botbox has no release yet, so `@latest` installs main as it is now. Name a commit in its place
 to install the same botbox every time, as [CI](#running-in-ci) should.
@@ -96,12 +99,12 @@ run 1: G3 the v1/ConfigMap widget-0 was still there 10s (timeouts.delete) after 
   the evidence is in botbox-out/20260930T195026Z-20260920/run-1
 ```
 
-botbox exits 1. The indented line says when G3 judged, and how many object versions it read:
-here one, of the ConfigMap `widget-0`. `report.md` in the evidence directory says what failed.
-The toy converges, so nothing looks wrong until the Widget is deleted and its ConfigMap stays.
-envtest runs no garbage collector, so an envtest suite catches this only if it asserts each
-ownerReference itself. botbox emulates the collector, and G3 judges every object of every kind
-your target manages, in every run, with no test code of yours.
+botbox exits 1. The first indented line says when G3 failed and how many object versions it
+quotes: here one, of the ConfigMap `widget-0`. `report.md` in the evidence directory says what
+failed. The toy converges, so nothing looks wrong until the Widget is deleted and its ConfigMap
+stays. envtest runs no garbage collector, so an envtest suite catches this only if it asserts
+each ownerReference itself. botbox emulates the collector, and G3 judges every object of every
+kind your target manages, in every run, with no test code of yours.
 
 ## Your own controller
 
@@ -164,12 +167,15 @@ Write yours in this order:
 4. `ready` is CEL over the CR's `metadata`, `spec` and `status`. Leave it out, and botbox uses
    `has(status.observedGeneration) && status.observedGeneration == metadata.generation`.
    Guard each optional field with `has()`.
-5. `properties` are optional checks of your own. A property's CEL reads the CR and `managed`,
-   the objects your controller manages for it. A property also runs where no CR exists, as
-   after the last delete, with empty `metadata`, `spec` and `status`. Guard it, as in
-   `!has(metadata.name) || managed.exists(o, o.kind == "ConfigMap")`.
+5. `properties` are optional checks of your own. A property runs once for each CR, and its
+   CEL reads that CR's `metadata`, `spec` and `status`. `managed` lists the whole objects of
+   your `manages` kinds whose ownerReferences name that CR or no CR, so a property can read
+   `o.metadata.name` or `o.data`. A property also runs where no CR exists, as after the last
+   delete, with empty `metadata`, `spec` and `status`. Guard what it reads there with
+   `has()`, as P1 does.
 6. `timeouts` and `thresholds` default to what suits most controllers. The toy is fast, so it
-   shortens its timeouts and lowers `errloop`.
+   shortens its timeouts. A 5s `settle` holds only 10 backoff repeats of a failing request, so
+   the toy also lowers `errloop` below 10.
 
 [docs/reference.md](docs/reference.md) lists every key with its default.
 [docs/targets.md](docs/targets.md) says how to choose the values: for a slow controller, one
@@ -181,7 +187,7 @@ Deployment, a Job or a PersistentVolumeClaim. If your controller waits on one, r
 
 ### Run it
 
-Run botbox from the directory that `launch.binary` is relative to:
+Run botbox where `launch.binary`'s path resolves, such as your repository root:
 
 ```sh
 botbox run --target target.yaml --runs 5
@@ -236,10 +242,10 @@ Before it reports, botbox minimizes a failing drawn sequence: it removes each op
 does not need. Each removal it tries replays a whole run, so this can take several minutes.
 botbox says so as soon as the run fails, as in
 `run 1: G3 failed, and minimizing its 12 ops can take minutes.` `sequence.json` in the
-evidence directory holds the minimized sequence. It lacks the `create` where your controller
-fails with no CR at all. Each run ends by deleting every CR and checking once more, so G3 or a
-property can fail a sequence with no `delete`. `summary.json`, one directory up, holds each
-run's sequence as drawn.
+evidence directory holds the minimized sequence. Where your controller fails with no CR at all,
+it lacks even the `create`. Each run ends by deleting every CR and checking once more, so G3
+or a property can fail a sequence with no `delete`. `summary.json`, one directory up, holds
+each run's sequence as drawn.
 
 | Check | Usual cause |
 |---|---|
@@ -265,16 +271,7 @@ jq -c 'select(.name == "widget-0") | .object.data' objects.jsonl
 ### When botbox exits 2
 
 botbox could not test your controller, and the message says what to change.
-
-- `KUBEBUILDER_ASSETS` names no etcd and kube-apiserver. Set it as [Install](#install) shows, or
-  point `--kubeconfig` at a cluster.
-- A key target.yaml does not take fails with its line, as in `line 6: timeouts.setle is not a
-  key; did you mean settle?`.
-- `launch.binary` is relative to the directory you run botbox in. `crds`, `sample` and
-  `fixtures` are relative to target.yaml.
-- Your controller stopped before its first settle wait converged, for example on a bad flag or a
-  taken port. botbox quotes the line it wrote that says why, and `target.log` in the run
-  directory holds the rest.
+[docs/failures.md](docs/failures.md#when-botbox-exits-2) lists the usual causes.
 
 ## Running in CI
 

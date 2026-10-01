@@ -19,7 +19,8 @@ or a partial run of the minimized sequence.
 
 ## The evidence
 
-A failing run writes its evidence in `run-<n>/`:
+A passing run leaves only its entry in the summary. A failing run writes its evidence in
+`run-<n>/`:
 
 - `report.md` says what failed, gives the command that reproduces it, and quotes the sequence
   and the evidence.
@@ -58,16 +59,15 @@ A G5 lists each field the restart changed, with its value before and after, and 
 prints names the first. If your controller stamps one of those fields at startup, paste its
 path into `equalIgnore` as written. A Secret's values appear there as markers too.
 
-A passing run leaves only its entry in the summary.
-
 ## When a property fails
 
-A property runs where its `when` says, at each checkpoint by default, once for each CR. It binds
-that CR's `metadata`, `spec` and `status`, and `managed`: the objects whose ownerReferences name
-that CR, and those that name no CR. Where no CR exists, it runs once with empty `metadata`,
-`spec` and `status` over every managed object, and the report says that no CR existed. Each run
-ends by deleting every CR and checking once more. So a property whose `when` is `checkpoint` or
-`end` always runs where no CR exists. Guard it with `has()`, or begin it with
+Each run ends with a teardown, which deletes every CR and checks once more. A property runs
+where its `when` says, once for each CR. Its default `when`, `checkpoint`, runs it wherever a
+settle wait ends and at the end of the teardown. It binds that CR's `metadata`, `spec` and
+`status`, and `managed`: the objects whose ownerReferences name that CR, and those that name no
+CR. Where no CR exists, it runs once with empty `metadata`, `spec` and `status` over every
+managed object, and the report says that no CR existed. So a property whose `when` is
+`checkpoint` or `end` always runs where no CR exists. Guard it with `has()`, or begin it with
 `!has(metadata.name) ||`, which holds there.
 
 The report quotes the property's description, the versions of the CR it failed on, and the

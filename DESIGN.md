@@ -1324,8 +1324,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   botbox and the control plane that install leaves; writing `target.yaml` for your own
   controller, around the toy's `target.yaml` embedded as the worked example, with how to
   run it and a sequence to pin per managed kind and per property, which the envtest tier
-  runs; reading a failure, with the usual cause of each check and what to change when
-  botbox exits 2; a CI recipe for adopters,
+  runs; reading a failure, with the usual cause of each check and a link to what to change
+  when botbox exits 2; a CI recipe for adopters,
   embedded from `examples/ci/github-actions.yml`, a tools module that keeps botbox out of
   an operator's go.mod, embedded from `examples/tools-module.sh`, which the envtest tier
   runs (D80), and a test that runs botbox from `go test`, embedded from
@@ -2303,4 +2303,6 @@ built from source and run as a black-box binary.
   first. A walker also waited eight silent minutes for a find, twice the 4m the derived
   deadline's line seemed to promise. That line now says minimizing gets the rest of the
   deadline, and botbox prints the failed check before it minimizes. The README says the
-  derived deadline is a worst case, and how to size a shorter one.
+  derived deadline is a worst case, and how to size a shorter one. `botbox --help` says
+  botbox runs a real kube-apiserver and etcd, and no longer that it injects faults, which
+  drawn sequences never do.

@@ -263,16 +263,6 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 			want: "until.for -2s is negative",
 		},
 		{
-			name: "a fault that runs out after a count of 0",
-			ops:  `{"i": 0, "t": "settle"}, {"i": 1, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 0}}}`,
-			want: "op 1: until.count is 0; give a count above 0, or leave it out",
-		},
-		{
-			name: "a fault that runs out after no time",
-			ops:  `{"i": 0, "t": "settle"}, {"i": 1, "t": "fault", "spec": {"action": {"drop": true}, "until": {"count": 2, "for": "0s"}}}`,
-			want: "op 1: until.for is 0s; give a duration above 0, or leave it out",
-		},
-		{
 			name: "a fault that runs out on an unknown trigger",
 			ops:  `{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"after": "2s"}}}`,
 			want: `"after"`,
@@ -383,6 +373,21 @@ func TestSequenceRejectsMalformedOps(t *testing.T) {
 				t.Errorf("The op %s was rejected with %q, want the error to name %q.", test.ops, err, test.want)
 			}
 		})
+	}
+}
+
+// The JSON parses, but botbox would read a count or for of 0 as no trigger.
+func TestSequenceRefusesATriggerOf0AtItsOp(t *testing.T) {
+	for until, want := range map[string]string{
+		`{"count": 0}`:              "op 1: until.count is 0; give a count above 0, or leave it out",
+		`{"count": 2, "for": "0s"}`: "op 1: until.for is 0s; give a duration above 0, or leave it out",
+	} {
+		_, err := UnmarshalSequence([]byte(`{"seed": 1, "target": "toy-widget", "ops": [{"i": 0, "t": "settle"}, ` +
+			`{"i": 1, "t": "fault", "spec": {"action": {"drop": true}, "until": ` + until + `}}, {"i": 2, "t": "settle"}]}`))
+
+		if err == nil || err.Error() != want {
+			t.Errorf("The until %s was refused with %v, want %q.", until, err, want)
+		}
 	}
 }
 

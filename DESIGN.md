@@ -2092,11 +2092,13 @@ built from source and run as a black-box binary.
   works on the whole module graph, so requiring botbox, or importing any of its packages,
   raises a module to botbox's Go, Kubernetes and controller-runtime versions (D11). The
   README installs botbox with `go install`, or with `examples/tools-module.sh`, which
-  pins it in a module of its own under `tools/`. The script sets the tools module's go
-  line before `go get -tool`, so that a `go` before 1.24, which lacks the flag, switches
-  first. It builds `bin/botbox`, because `go -C tools tool botbox` runs botbox in
-  `tools/`, where `launch.binary` does not resolve. The envtest tier runs the script in a
-  fresh operator module, as the oldest `go` the README names, with botbox replaced by the
+  pins it in a module of its own under `tools/botbox/`. A new directory leaves a `tools/`
+  package of the operator's own, a common place for one, in the operator's module. The
+  script sets the tools module's go line before `go get -tool`, so that a `go` before
+  1.24, which lacks the flag, switches first. It builds `bin/botbox`, because
+  `go -C tools/botbox tool botbox` runs botbox in `tools/botbox/`, where `launch.binary`
+  does not resolve. The envtest tier runs the script in a fresh operator module with a
+  `tools/` package, as the oldest `go` the README names, with botbox replaced by the
   checkout.
 - **D@59 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
   the README's `go test` recipe runs `bin/botbox`, which the tools module of D@58 builds,

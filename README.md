@@ -39,20 +39,21 @@ it a module of its own. Run this from your repository root:
 
 <!-- embed: examples/tools-module.sh -->
 ```sh
-mkdir tools
-cd tools
-go mod init example.com/operator/tools
+mkdir -p tools/botbox
+cd tools/botbox
+go mod init example.com/operator/tools/botbox
 go mod edit -go=1.26.0
 go get -tool github.com/rosenhouse/botbox/cmd/botbox@latest
-cd ..
-go -C tools build -o ../bin/botbox github.com/rosenhouse/botbox/cmd/botbox
+cd ../..
+go -C tools/botbox build -o ../../bin/botbox github.com/rosenhouse/botbox/cmd/botbox
 bin/botbox version
 ```
 
 The go line comes first, so that a `go` before 1.24, which lacks `go get -tool`, switches to a
-newer Go before it needs the flag. `tools/go.mod` then pins botbox, and your own go.mod stays as
-it was. Run `bin/botbox` as the last line does, not `go -C tools tool botbox`, which runs botbox
-in `tools/`, where your `launch.binary` does not resolve.
+newer Go before it needs the flag. `tools/botbox/go.mod` then pins botbox. Your own go.mod, and
+any package of yours in `tools/`, stay as they were. Run `bin/botbox` as the last line does, not
+`go -C tools/botbox tool botbox`, which runs botbox in `tools/botbox/`, where your
+`launch.binary` does not resolve.
 
 ### Against kind
 

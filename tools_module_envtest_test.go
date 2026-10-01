@@ -40,10 +40,12 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 	recipe := replacingBotbox(t, readFile(t, toolsRecipe), checkout)
 	operatorGoMod := "module example.com/operator\n\ngo " + oldGo + "\n"
 
+	// The operator pins its own tools in tools/tools.go, a common place for them.
 	run := func(t *testing.T, gotoolchain string) (operator string, env []string, output string, err error) {
 		operator = t.TempDir()
 		writeFile(t, filepath.Join(operator, "go.mod"), operatorGoMod)
 		writeFile(t, filepath.Join(operator, "go.sum"), "")
+		writeFile(t, filepath.Join(operator, "tools", "tools.go"), "//go:build tools\n\npackage tools\n")
 		cmd := exec.Command("sh", "-e", "-c", recipe)
 		cmd.Dir = operator
 		cmd.Env = goEnv(strings.TrimSpace(string(goroot)), gotoolchain)
@@ -61,16 +63,21 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 				t.Errorf("The recipe changed the operator's %s to:\n%s", name, after)
 			}
 		}
+		list := exec.Command("go", "list", "-tags", "tools", "./tools")
+		list.Dir, list.Env = operator, env
+		if out, err := list.CombinedOutput(); err != nil || string(out) != "example.com/operator/tools\n" {
+			t.Errorf("The recipe took the operator's tools package out of its module: %v\n%s", err, out)
+		}
 		version, err := exec.Command(filepath.Join(operator, "bin", "botbox"), "version").CombinedOutput()
 		if err != nil {
 			t.Errorf("The recipe built no bin/botbox: %v\n%s", err, version)
 		} else if !slices.Contains(strings.Split(out, "\n"), strings.TrimSuffix(string(version), "\n")) {
 			t.Errorf("The recipe does not run bin/botbox, which prints %q:\n%s", version, out)
 		}
-		tool := exec.Command("go", "-C", "tools", "tool", "botbox", "version")
+		tool := exec.Command("go", "-C", "tools/botbox", "tool", "botbox", "version")
 		tool.Dir, tool.Env = operator, env
 		if out, err := tool.CombinedOutput(); err != nil {
-			t.Errorf("tools/go.mod does not pin botbox as a tool: %v\n%s", err, out)
+			t.Errorf("tools/botbox/go.mod does not pin botbox as a tool: %v\n%s", err, out)
 		}
 	})
 

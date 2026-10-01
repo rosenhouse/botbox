@@ -1748,10 +1748,11 @@ built from source and run as a black-box binary.
   fixture, cert-manager and external-secrets. It takes the example and kind tiers' seeds
   from the Makefile, and the fixture envtest fails unless it draws what the record holds. A
   change to generation or to rapid that moves a draw fails until the test is rerun with
-  `-update`. The README's quickstarts must run the Makefile's example seed. Another test
-  runs the README's cert-manager quickstart command as `quickstart.sh` passes it on, and
-  fails unless the README shows what botbox prints. The README tells CI to pin botbox to a
-  commit and to replay a failing `sequence.json` against the base branch.
+  `-update`. The README's quickstarts must run the Makefile's example seed, and the drawn
+  runs the README shows must be of that seed. Another test runs the README's cert-manager
+  quickstart command as `quickstart.sh` passes it on, and fails unless the README shows what
+  botbox prints. The README tells CI to pin botbox to a commit and to replay a failing
+  `sequence.json` against the base branch.
 - **D55 Generation keeps the CRD's own rules, judged by the API server's code.** The
   generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
   rule `self.maxUnavailable <= self.count`, 15 of 100 drawn sequences broke it, and the

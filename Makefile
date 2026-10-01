@@ -25,17 +25,16 @@ KIND_NODE_IMAGE ?= kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405
 # Each example draws its own sequences (DESIGN.md §10, M5). A pull request fixes
 # the seeds, so that a failing tier means the change under review and not a new
 # draw, and so a tier stays inside the ten minutes §11 budgets. The nightly
-# workflow draws its own seeds. Against cert-manager, seeds 23 to 27 draw a
-# second Certificate, a recreate and a restart between them, and the pinned
-# sequences delete the Certificate and its managed objects. Its negative
-# control runs seed 23 alone, which draws a single op and so costs no replay to
-# minimize.
+# workflow draws its own seeds. Against cert-manager, these seeds draw a second
+# Certificate, a recreate and a restart between them, and the pinned sequences
+# delete the Certificate and its managed objects. Its negative control runs the
+# first seed alone, which draws a single op and so costs no replay to minimize.
 EXAMPLE_SEED ?= 23
 EXAMPLE_RUNS ?= 5
 EXAMPLE_DEADLINE ?= 5m
 NIGHTLY_RUNS ?= 20
 NIGHTLY_DEADLINE ?= 30m
-# The kind tier draws the toy's seeds 1 to 3, which the golden draws record.
+# The golden draws record the toy's seeds the kind tier draws.
 KIND_SEED ?= 1
 KIND_RUNS ?= 3
 KIND_DEADLINE ?= 5m

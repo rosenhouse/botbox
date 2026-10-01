@@ -2,6 +2,7 @@ package botbox_test
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -23,6 +24,23 @@ func TestTheREADMEsQuickstartsRunTheMakefilesExampleSeed(t *testing.T) {
 	}
 	if want := "Seed " + seed + " draws a single op"; !strings.Contains(readme, want) {
 		t.Errorf("README.md does not say %q.", want)
+	}
+}
+
+func TestTheREADMEShowsRunsOfTheMakefilesExampleSeeds(t *testing.T) {
+	first, err := strconv.Atoi(makefilePins(t)["EXAMPLE_SEED"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	runs := regexp.MustCompile(`(?m)^run (\d+): seed (\d+), generated$`).FindAllStringSubmatch(readFile(t, "README.md"), -1)
+	if len(runs) == 0 {
+		t.Fatal("README.md shows no drawn run, so this test checks nothing.")
+	}
+	for _, run := range runs {
+		n, _ := strconv.Atoi(run[1])
+		if want := strconv.Itoa(first + n - 1); run[2] != want {
+			t.Errorf("README.md shows %q, and run %d of the Makefile's example seeds draws seed %s.", run[0], n, want)
+		}
 	}
 }
 

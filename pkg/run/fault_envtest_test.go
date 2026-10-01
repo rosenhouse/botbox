@@ -297,6 +297,8 @@ func TestASettleWaitOutlastsTheRequestsTheProxyHolds(t *testing.T) {
 	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
 	spendsItsCount := readSequence(t, heldCreate)
 	spendsItsCount.Ops[1].Fault.Until.Count = 1
+	pastSettle := readSequence(t, heldCreate)
+	pastSettle.Ops[1].Fault.Action.Delay = run.Duration(6 * time.Second)
 	for _, test := range []struct {
 		name     string
 		sequence run.Sequence
@@ -304,6 +306,7 @@ func TestASettleWaitOutlastsTheRequestsTheProxyHolds(t *testing.T) {
 	}{
 		{"a create held while a child is gone", readSequence(t, heldCreate), 3 * time.Second},
 		{"a create that spends its fault's count", spendsItsCount, 3 * time.Second},
+		{"a create held past timeouts.settle", pastSettle, 6 * time.Second},
 		{"watches and lists", readSequence(t, heldReads), time.Second},
 	} {
 		t.Run(test.name, func(t *testing.T) {

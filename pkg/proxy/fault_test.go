@@ -261,6 +261,17 @@ func TestAFaultsWindowLastsWhileItHoldsARequest(t *testing.T) {
 	}
 }
 
+func TestADelayThatStillAppliesStaysOpenOnceItReleasesARequest(t *testing.T) {
+	p := faultedProxy(t, 0)
+	id := p.AddFault(proxy.FaultSpec{Action: proxy.Delay{For: time.Millisecond}})
+
+	do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", nil)
+
+	if window := p.Window(id); window.First.IsZero() || !window.Retired.IsZero() {
+		t.Errorf("The delay ran %+v, want it applied and still applying.", window)
+	}
+}
+
 // arrival waits for the proxy to record the one request a test sent.
 func arrival(t *testing.T, p *proxy.Proxy) time.Time {
 	t.Helper()

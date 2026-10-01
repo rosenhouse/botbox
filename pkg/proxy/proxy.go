@@ -140,7 +140,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	defer p.inFlight.Done()
 
 	request := newRequest(r)
-	action := p.faultFor(request)
+	action, held := p.faultFor(request)
 	if action != nil {
 		request.Fault = action.String()
 	}
@@ -158,7 +158,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		drop(response)
 		return
 	case Delay:
-		if !sleep(r.Context(), action.For) {
+		if !p.await(r.Context(), held, action.For) {
 			return
 		}
 	}

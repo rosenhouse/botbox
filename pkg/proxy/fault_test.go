@@ -1,6 +1,7 @@
 package proxy_test
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -152,6 +153,125 @@ func TestDelayHoldsTheRequestBack(t *testing.T) {
 	if got := p.Log()[0].Fault; got != "delay(200ms)" {
 		t.Errorf("The delayed request records fault %q, want delay(200ms).", got)
 	}
+}
+
+// A delay holds a request until the proxy forwards it, whether its response
+// then ends or streams on as a watch's does.
+func TestHeldReportsARequestUntilTheProxyForwardsIt(t *testing.T) {
+	const delay = 200 * time.Millisecond
+	for _, test := range []struct{ name, path string }{
+		{"a get", "/api/v1/namespaces/ns1/configmaps/cm1"},
+		{"a list", "/api/v1/namespaces/ns1/configmaps"},
+		{"a watch", "/api/v1/namespaces/ns1/configmaps?watch=true"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			forwarded := make(chan struct{})
+			p := startProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				close(forwarded)
+				w.WriteHeader(http.StatusOK)
+				http.NewResponseController(w).Flush()
+				if r.URL.Query().Get("watch") == "true" {
+					<-r.Context().Done()
+				}
+			}))
+			p.AddFault(proxy.FaultSpec{Action: proxy.Delay{For: delay}})
+
+			resp := make(chan *http.Response, 1)
+			go func() {
+				if r, err := http.Get(p.URL() + test.path); err == nil {
+					resp <- r
+				}
+			}()
+			arrived := arrival(t, p)
+			whileHeld, _ := p.Held(time.Now())
+			<-forwarded
+			afterward, released := p.Held(time.Now())
+			beforeIt, notYet := p.Held(arrived)
+			(<-resp).Body.Close()
+
+			if !whileHeld {
+				t.Error("The proxy reports no request held during the delay.")
+			}
+			if afterward || released.Before(arrived.Add(delay)) {
+				t.Errorf("Once forwarded, the proxy reports (%t, %v), want no request held and a release %v after %v.", afterward, released, delay, arrived)
+			}
+			if beforeIt || !notYet.IsZero() {
+				t.Errorf("Of the requests before %v, the proxy reports (%t, %v), want none.", arrived, beforeIt, notYet)
+			}
+		})
+	}
+}
+
+// A target that gives up on a held request ends its hold.
+func TestHeldReleasesARequestTheTargetGaveUpOn(t *testing.T) {
+	p := faultedProxy(t, 0, proxy.FaultSpec{Action: proxy.Delay{For: time.Hour}})
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, "GET", p.URL()+"/api/v1/namespaces/ns1/configmaps", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := http.DefaultClient.Do(req); err == nil {
+		t.Fatal("The request succeeded although the client gave up on it.")
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for holding, released := p.Held(time.Now()); holding || released.IsZero(); holding, released = p.Held(time.Now()) {
+		if time.Now().After(deadline) {
+			t.Fatalf("The proxy still reports (%t, %v) for a request the client gave up on.", holding, released)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// A fault lasts until the proxy releases what it held, though it applies to
+// no request after the one it holds.
+func TestAFaultsWindowLastsWhileItHoldsARequest(t *testing.T) {
+	const delay = 200 * time.Millisecond
+	for name, retire := range map[string]func(*proxy.Proxy, proxy.FaultID){
+		"a count spent on the request": func(*proxy.Proxy, proxy.FaultID) {},
+		"RemoveFault":                  (*proxy.Proxy).RemoveFault,
+		"ClearFaults":                  func(p *proxy.Proxy, _ proxy.FaultID) { p.ClearFaults() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := faultedProxy(t, 0)
+			id := p.AddFault(proxy.FaultSpec{Action: proxy.Delay{For: delay}, Until: proxy.Trigger{Count: 1}})
+
+			answered := make(chan struct{})
+			go func() {
+				defer close(answered)
+				if resp, err := http.Get(p.URL() + "/api/v1/namespaces/ns1/configmaps"); err == nil {
+					resp.Body.Close()
+				}
+			}()
+			arrived := arrival(t, p)
+			retire(p, id)
+			whileHeld := p.Window(id)
+			<-answered
+			afterward := p.Window(id)
+
+			if !whileHeld.Retired.IsZero() {
+				t.Errorf("The fault retired at %v while the proxy held its request.", whileHeld.Retired)
+			}
+			if afterward.Retired.Before(arrived.Add(delay)) {
+				t.Errorf("The fault retired at %v, want no sooner than the release %v after %v.", afterward.Retired, delay, arrived)
+			}
+		})
+	}
+}
+
+// arrival waits for the proxy to record the one request a test sent.
+func arrival(t *testing.T, p *proxy.Proxy) time.Time {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(p.Log()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("The request never reached the proxy.")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	return onlyRequest(t, p).Start
 }
 
 func TestDropClosesTheConnectionWithoutAResponse(t *testing.T) {

@@ -2151,10 +2151,10 @@ built from source and run as a black-box binary.
   prints the command's synopsis. A message names the target.yaml key and its value rather
   than a symbol of this document. G4 gives how long an expired wait ran beside the key
   that bounds it, since a wait can run longer: `timeouts.delete` for a wait that a
-  deleted CR's deadline held open, and `timeouts.settle` for the rest. A G3 note names
-  what deleted the CR where botbox can tell, because a run may delete one CR twice. It
-  names the first op that found the CR, because a lagging Observer shows the CR to the op
-  after the one that deleted it.
+  deleted CR's deadline held open while the CR stayed, and `timeouts.settle` for the
+  rest. A G3 note names what deleted the CR where botbox can tell, because a run may
+  delete one CR twice. It names the first op that found the CR, because a lagging
+  Observer shows the CR to the op after the one that deleted it.
   Splitting this document was rejected, because the hourly Routine reads it whole.
 - **D75 This document gives intent where a listing would drift.** §8.2 names `go doc`
   rather than listing `Target`'s fields, and a test holds §11's synopsis to each

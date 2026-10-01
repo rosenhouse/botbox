@@ -614,7 +614,7 @@ func TestLoadRefusesAFixtureOfANamespacedKindThatNamesANamespace(t *testing.T) {
 
 		_, err := target.Load(path)
 
-		want := filepath.Join(filepath.Dir(path), "issuer.yaml") + ": the fixture " + kind.apiVersion + "/" + kind.kind +
+		want := "fixture " + filepath.Join(filepath.Dir(path), "issuer.yaml") + ": the fixture " + kind.apiVersion + "/" + kind.kind +
 			" ca sets metadata.namespace default; drop it," +
 			" because botbox creates fixtures in each run's own namespace, and the target may look for this one in default"
 		if err == nil || !strings.HasSuffix(err.Error(), want) {

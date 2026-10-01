@@ -228,10 +228,11 @@ which the default catches. A 5s `settle` holds only 10 of them, so it needs `err
 or less.
 
 botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
-fixture when it loads the target, or, for a custom kind that `crds` does not define,
-before the first run. It refuses a fixture that sets `metadata.namespace`. It watches only
-the run namespace, so it does not see a child your controller creates in another
-namespace. G3 therefore passes a controller that leaves such a child behind.
+fixture when it loads the target. Where only the cluster knows a kind's scope, as for a
+CRD that `crds` does not list, botbox refuses the kind before the first run. It refuses a
+fixture that sets `metadata.namespace`. It watches only the run namespace, so it does not
+see a child your controller creates in another namespace. G3 therefore passes a
+controller that leaves such a child behind.
 
 Each run creates its own namespace, and the kubeconfig botbox hands your controller names
 that namespace. `launch.env` sets variables for your controller. In its values and in

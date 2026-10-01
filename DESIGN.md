@@ -974,7 +974,9 @@ JSONPath is not supported anywhere.
 `ready` binds `metadata`, `spec` and `status` to the corresponding top-level fields of a
 primary CR as dynamic maps; a missing field binds to an empty map. `Ready` holds where it
 holds on every primary CR. A property binds those three to each primary CR in turn, and
-holds where it holds on each. It also binds `managed`, the managed objects that name that
+holds where it holds on each. Where no primary CR exists, as at the teardown's checkpoint,
+it runs once with the three empty, over every managed object, and a violation there says
+that no CR existed. It also binds `managed`, the managed objects that name that
 CR in their ownerReferences or name no CR (§6), as dynamic maps, each carrying
 `apiVersion`, `kind`, `metadata` and the object's other top-level fields. The standard
 macros (`exists`, `all`, `has`, `map`, `filter`) and the string extensions are available. At a checkpoint the harness reads `managed` from the API server, not from the

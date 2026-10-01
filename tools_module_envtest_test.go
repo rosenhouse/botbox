@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -39,12 +40,13 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "bin/botbox ") {
 		t.Errorf("%s ends with %q, and README.md says its last line runs bin/botbox.", toolsRecipe, last)
 	}
-	toolsDir := regexp.MustCompile(`(?m)^go -C (\S+) build `).FindStringSubmatch(script)
+	toolsDir := regexp.MustCompile(`(?m)^(?:\S+=\S+ )*go -C (\S+) build `).FindStringSubmatch(script)
 	if toolsDir == nil {
 		t.Fatalf("%s builds bin/botbox with no go -C <dir> build.", toolsRecipe)
 	}
 	keep := strings.Join(strings.Fields(section(t, readme, "### Keep botbox out of your go.mod")), " ")
-	for _, says := range []string{"`" + toolsDir[1] + "/go.mod` then pins botbox", "not `go -C " + toolsDir[1] + " tool botbox`", "runs botbox in `" + toolsDir[1] + "/`"} {
+	for _, says := range []string{"`" + toolsDir[1] + "/go.mod` then pins botbox", "not `go -C " + toolsDir[1] + " tool botbox`", "runs botbox in `" + toolsDir[1] + "/`",
+		"Your own go.mod and go.work, and any package of yours in `" + path.Dir(toolsDir[1]) + "/`, stay as they were."} {
 		if !strings.Contains(keep, says) {
 			t.Errorf("README.md does not say %q, and %s pins botbox in %s.", says, toolsRecipe, toolsDir[1])
 		}
@@ -66,15 +68,17 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 		return cmd.Env, string(out), err
 	}
 
-	t.Run("builds bin/botbox and leaves the operator's module alone", func(t *testing.T) {
+	t.Run("builds bin/botbox and leaves the operator's module and workspace alone", func(t *testing.T) {
 		operator := newOperator(t)
 		// The operator pins its own tools in tools/tools.go, a common place for them.
 		writeFile(t, filepath.Join(operator, "tools", "tools.go"), "//go:build tools\n\npackage tools\n")
+		goWork := "go " + oldGo + "\n\nuse .\n"
+		writeFile(t, filepath.Join(operator, "go.work"), goWork)
 		env, out, err := run(operator, goroot, remedy[1])
 		if err != nil {
 			t.Fatalf("The recipe returned %v:\n%s", err, out)
 		}
-		for name, before := range map[string]string{"go.mod": operatorGoMod, "go.sum": ""} {
+		for name, before := range map[string]string{"go.mod": operatorGoMod, "go.sum": "", "go.work": goWork} {
 			if after := readFile(t, filepath.Join(operator, name)); after != before {
 				t.Errorf("The recipe changed the operator's %s to:\n%s", name, after)
 			}
@@ -91,7 +95,7 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 			t.Errorf("The recipe does not run bin/botbox, which prints %q:\n%s", version, out)
 		}
 		tool := exec.Command("go", "-C", toolsDir[1], "tool", "botbox", "version")
-		tool.Dir, tool.Env = operator, env
+		tool.Dir, tool.Env = operator, append(env, "GOWORK=off")
 		if out, err := tool.CombinedOutput(); err != nil {
 			t.Errorf("%s/go.mod does not pin botbox as a tool: %v\n%s", toolsDir[1], err, out)
 		}

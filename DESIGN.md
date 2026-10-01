@@ -2234,11 +2234,15 @@ built from source and run as a black-box binary.
   pins it in a module of its own under `tools/botbox/`. A new directory leaves a `tools/`
   package of the operator's own, a common place for one, in the operator's module. The
   script sets the tools module's go line before `go get -tool`, so that a `go` before
-  1.24, which lacks the flag, switches first. It builds `bin/botbox`, because
-  `go -C tools/botbox tool botbox` runs botbox in `tools/botbox/`, where `launch.binary`
-  does not resolve. The envtest tier runs the script in a fresh operator module with a
-  `tools/` package, as the oldest `go` the README names, with botbox replaced by the
-  checkout. It also checks that the `go` before that one fails.
+  1.24, which lacks the flag, switches first. Its `go get` and its build run with
+  `GOWORK=off`, because an operator's go.work would hold back that switch, take the
+  raised go line, and leave the tools module out of the build. Exporting `GOWORK` was
+  rejected, because a reader who pastes the script into a shell would keep it. It builds
+  `bin/botbox`, because `go -C tools/botbox tool botbox` runs botbox in `tools/botbox/`,
+  where `launch.binary` does not resolve. The envtest tier runs the script in a fresh
+  operator module with a `tools/` package and a go.work, as the oldest `go` the README
+  names, with botbox replaced by the checkout. It also checks that the `go` before that
+  one fails.
 - **D81 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
   the README's `go test` recipe runs `bin/botbox`, which the tools module of D80 builds,
   and fails the test on a non-zero exit. A build tag keeps it out of a plain

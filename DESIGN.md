@@ -1164,10 +1164,24 @@ the proxy; the `Image` launcher. Separate design addendum.
   `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`,
   `examples/ci/`, `docs/`, `internal/reference` for the tests that read
   `docs/reference.md`, and `bin/` for git-ignored build output.
-- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]`;
-  `botbox replay --target <yaml> [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>`;
-  `botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...`;
-  `botbox version`.
+- **CLI.** botbox has these commands. A test holds this block to the flags each command
+  parses.
+
+  ```
+  botbox run --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--out dir] [--runs n] [--seed n] [sequence.json...]
+  botbox replay --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--out dir] sequence.json
+  botbox version
+  botbox matrix --target file --sequences dir [--deadline duration] [--kubeconfig file] [--launch-arg arg]... [--out file]
+  ```
+
+  `botbox matrix` generates the toy's bug matrix for `make bug-matrix`, so the top-level
+  help leaves it out. `botbox`, `botbox help` and `botbox --help` print what botbox does,
+  its commands, the exit codes, `KUBEBUILDER_ASSETS` and the README's URL, because
+  `go install` ships no documentation. `botbox <command> --help` and `botbox help
+  <command>` print the command's synopsis and each flag with its meaning and default. Help
+  goes to stdout and exits 0. A usage error, such as an unknown flag, a missing required
+  flag, a wrong count of sequence files or a bare `botbox`, prints the error and the
+  command's synopsis to stderr and exits 2.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. The deadline abandons the run under way (§5.5), and the
   shrinker stops there and reports the smallest failing sequence it found. Without

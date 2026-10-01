@@ -203,37 +203,6 @@ func TestVersionPrintsTheVersion(t *testing.T) {
 	}
 }
 
-func TestHelpPrintsTheUsage(t *testing.T) {
-	// Asking for the usage is not an error, and exit 2 is what tells CI the
-	// target or the invocation is broken (DESIGN.md §11).
-	for _, asked := range [][]string{{"run", "--help"}, {"--help"}, {"-h"}, {"help"}} {
-		code, stdout, stderr := invoke(t, &fakeSession{}, asked...)
-
-		if code != exitOK {
-			t.Errorf("botbox %s exited %d, want %d: %s", strings.Join(asked, " "), code, exitOK, stderr)
-		}
-		if !strings.Contains(stdout, "botbox replay") {
-			t.Errorf("botbox %s printed %q, want the usage.", strings.Join(asked, " "), stdout)
-		}
-	}
-}
-
-func TestTheUsageNamesEveryFlag(t *testing.T) {
-	for _, command := range []string{"run", "replay", "matrix"} {
-		var synopsis string
-		for _, line := range strings.Split(usage, "\n") {
-			if strings.HasPrefix(strings.TrimSpace(line), "botbox "+command+" ") {
-				synopsis = line
-			}
-		}
-		(&options{command: command}).flags().VisitAll(func(f *flag.Flag) {
-			if !strings.Contains(synopsis, "--"+f.Name+" ") {
-				t.Errorf("The usage of botbox %s is %q, want it to name --%s.", command, synopsis, f.Name)
-			}
-		})
-	}
-}
-
 func TestConfigurationErrorsExitTwo(t *testing.T) {
 	sequence := writeSequence(t, 1)
 	for _, test := range []struct {

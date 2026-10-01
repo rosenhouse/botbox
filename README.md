@@ -14,6 +14,9 @@ index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0
 export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 ```
 
+`botbox --help` lists the commands and the exit codes. `botbox run --help` lists each flag of
+`run` with its default.
+
 ### Against kind
 
 botbox starts its own API server by default. That server runs no controller manager and no

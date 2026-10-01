@@ -314,6 +314,12 @@ func (o Op) validateFields() error {
 		"until": o.Until != nil,
 	}
 	wanted := fieldsOf(o.Type)
+	var needed []string
+	for _, field := range opFields {
+		if wanted[field] {
+			needed = append(needed, field)
+		}
+	}
 	for _, field := range opFields {
 		if carried[field] == wanted[field] {
 			continue
@@ -321,7 +327,10 @@ func (o Op) validateFields() error {
 		if wanted[field] {
 			return fmt.Errorf("a %s op needs %s", o.Type, field)
 		}
-		return fmt.Errorf("a %s op takes no %s", o.Type, field)
+		if len(needed) == 0 {
+			return fmt.Errorf("a %s op takes no %s", o.Type, field)
+		}
+		return fmt.Errorf("a %s op takes no %s; it needs %s", o.Type, field, inWords(needed))
 	}
 	if o.Type == OpDeleteManaged && *o.Nth < 0 {
 		return fmt.Errorf("index is %d, want the position of a managed object", *o.Nth)
@@ -330,6 +339,15 @@ func (o Op) validateFields() error {
 		return fmt.Errorf("a %s op takes no cr", o.Type)
 	}
 	return nil
+}
+
+// inWords joins words as a sentence lists them: "a", "a and b", "a, b and c".
+func inWords(words []string) string {
+	last := len(words) - 1
+	if last == 0 {
+		return words[0]
+	}
+	return strings.Join(words[:last], ", ") + " and " + words[last]
 }
 
 // namingOps act on a CR an earlier op created, which cr names.

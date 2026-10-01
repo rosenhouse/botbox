@@ -756,6 +756,9 @@ Details the example does not show:
 
 `botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
 embed the minimized sequence in this format. `docs/reference.md` lists every field, op and
+botbox refuses an op that lacks a field its type needs, or carries one it does not take.
+The error names the fields the type needs.
+
 fault field, and its example sequence sets each one (§11).
 
 ## 8. Target contract

@@ -239,14 +239,18 @@ func TestPassesTheTargetsImpersonationHeadersThrough(t *testing.T) {
 		seen <- r.Header
 	}))
 
-	do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", http.Header{
-		"Impersonate-User":  {"someone"},
-		"Impersonate-Group": {"some-group"}})
+	sent := http.Header{
+		"Impersonate-User":         {"someone"},
+		"Impersonate-Uid":          {"some-uid"},
+		"Impersonate-Group":        {"group-a", "group-b"},
+		"Impersonate-Extra-Scopes": {"scope-a", "scope-b"}}
+	do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", sent)
 
 	got := <-seen
-	if got.Get("Impersonate-User") != "someone" || got.Get("Impersonate-Group") != "some-group" {
-		t.Errorf("The upstream saw Impersonate-User %q and Impersonate-Group %q, want them as the target sent them.",
-			got.Get("Impersonate-User"), got.Get("Impersonate-Group"))
+	for name, values := range sent {
+		if !slices.Equal(got.Values(name), values) {
+			t.Errorf("The upstream saw %s %q, want %q as the target sent it.", name, got.Values(name), values)
+		}
 	}
 }
 

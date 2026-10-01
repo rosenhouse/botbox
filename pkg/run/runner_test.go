@@ -1417,6 +1417,24 @@ func TestRunGivesTheCRARecreateDeletesUntilItsDeadline(t *testing.T) {
 			t.Errorf("The recreate waited for the CR until %v, want %v after the delete.", h.awaitedUntil, testTimeouts.Delete)
 		}
 	})
+
+	t.Run("past a request the proxy held by then", func(t *testing.T) {
+		h := newFakeHarness()
+		const releasedAfter = time.Minute
+		h.holds = func(before time.Time) (bool, time.Time) { return false, before.Add(releasedAfter) }
+		began := time.Now()
+
+		_, err := runFake(t, h, nil, sequence)
+
+		ended := time.Now()
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		past := testTimeouts.Delete + releasedAfter + testTimeouts.Settle
+		if len(h.awaitedUntil) != 1 || h.awaitedUntil[0].Before(began.Add(past)) || h.awaitedUntil[0].After(ended.Add(past)) {
+			t.Errorf("The recreate waited for the CR until %v, want T_settle past the release %v after its deadline.", h.awaitedUntil, releasedAfter)
+		}
+	})
 }
 
 // A recreate cannot create a CR while the old one stays, so the wait for it is

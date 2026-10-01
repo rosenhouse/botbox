@@ -81,16 +81,28 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 				deadline = owed
 			}
 		}
-		// A request that reached the proxy before the deadline gives the target
-		// T_settle past its release. Each hold ends within its delay.
-		holding, released := s.held(deadline)
-		if !holding && !now.Before(deadline) && !now.Before(released.Add(s.timeouts.Settle)) {
+		if !now.Before(heldOpen(s.held, deadline, now, s.timeouts.Settle)) {
 			return false, nil
 		}
 		if err := s.sleep(ctx, s.poll); err != nil {
 			return false, err
 		}
 	}
+}
+
+// heldOpen is when a wait whose time runs out at deadline may end: T_settle
+// past the release of each request that reached the proxy before deadline.
+// While the proxy still holds one, that is past T_settle from now. Each hold
+// ends within its delay.
+func heldOpen(held func(before time.Time) (bool, time.Time), deadline, now time.Time, settle time.Duration) time.Time {
+	holding, released := held(deadline)
+	if holding {
+		released = now
+	}
+	if end := released.Add(settle); end.After(deadline) {
+		return end
+	}
+	return deadline
 }
 
 func closed(c <-chan struct{}) bool {

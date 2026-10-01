@@ -33,7 +33,8 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 	waits := float64(defaultNamespaceDefaultsWithin)
 	faults, stops, exits, untriggered := 0, 0, 0, false
 	// delay is the longest a fault so far holds a request. A request held as
-	// a wait's time runs out holds the wait open for hold more.
+	// a wait's time runs out holds the wait open for hold more, a recreate's
+	// wait for its CR too.
 	var delay, hold float64
 	for _, op := range s.Ops {
 		if faults > 0 {
@@ -48,7 +49,7 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 		case OpRecreate:
 			// Its wait for the CR to go lasts while the run is owed time,
 			// which can run T_settle past what the ops before it were given.
-			waits += max(deletion, settle)
+			waits += max(deletion, settle) + hold
 		case OpRestart:
 			// The target is owed T_settle past its return, which can come
 			// T_settle after the restart.

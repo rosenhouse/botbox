@@ -570,8 +570,9 @@ func (r *runner) create(ctx context.Context, op Op) error {
 }
 
 // recreate deletes the CR, waits for it to go and creates the op's object. The
-// wait lasts T_delete, or longer while the run is owed time. A CR still there
-// where the wait ends is judged there.
+// wait lasts T_delete, or longer while the run is owed time or the proxy holds
+// a request, as a settle wait does. A CR still there where the wait ends is
+// judged there.
 func (r *runner) recreate(ctx context.Context, op Op, cr string) error {
 	due := r.now().Add(r.target.Timeouts.Delete)
 	if err := r.h.deleteCR(ctx, cr); err != nil {
@@ -579,10 +580,11 @@ func (r *runner) recreate(ctx context.Context, op Op, cr string) error {
 	}
 	wait := Wait{Window: Window{Start: r.now()}}
 	gone, err := r.h.awaitCRGone(ctx, cr, func() time.Time {
+		deadline := due
 		if owed := r.owed(); owed.After(due) {
-			return owed
+			deadline = owed
 		}
-		return due
+		return heldOpen(r.h.held, deadline, r.now(), r.target.Timeouts.Settle)
 	})
 	switch {
 	case err != nil:

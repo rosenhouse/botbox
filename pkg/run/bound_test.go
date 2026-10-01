@@ -98,6 +98,19 @@ func (w *waitingHarness) settle(ctx context.Context, owed func() time.Time) (boo
 	}
 }
 
+// held has the proxy hold, once a fault op has run, a request that arrives
+// just before before.
+func (w *waitingHarness) held(before time.Time) (bool, time.Time) {
+	arrived := before.Add(-time.Millisecond)
+	if w.delay == 0 || w.added == 0 || w.at.Before(arrived) {
+		return false, time.Time{}
+	}
+	if released := arrived.Add(w.delay); !w.at.Before(released) {
+		return false, released
+	}
+	return true, time.Time{}
+}
+
 // faultWindow keeps each fault open until it releases the request it held as
 // it retired.
 func (w *waitingHarness) faultWindow(id proxy.FaultID) proxy.FaultWindow {
@@ -308,6 +321,9 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 		{name: "delays whose triggers run out as a wait would end", timeouts: long,
 			ops:     []Op{createOp, delayed(Trigger{Count: 3}), delayed(Trigger{Count: 3}), updateOp},
 			settles: []bool{true, false}, runsOut: []int{2, 2}, delay: heldFor, waits: 4*time.Hour + 26*time.Minute + 11*time.Second},
+		{name: "a recreate under a delay", timeouts: settlesLonger,
+			ops: []Op{createOp, delayed(Trigger{}), recreateOp, settleOp}, settles: []bool{true, false, false}, delay: heldFor,
+			waits: 4*time.Hour + 59*time.Minute + 10*time.Second},
 		{name: "exits under a delay", timeouts: target.DefaultTimeouts,
 			ops: []Op{createOp, delayed(Trigger{}), updateOp}, settles: []bool{true, false}, exitsLate: []int{2, 3}, delay: heldFor,
 			waits: 2*time.Hour + 2*time.Minute + 50*time.Second},
@@ -461,7 +477,7 @@ func TestBoundDoublesTheRunEachTimeFaultsStop(t *testing.T) {
 // delay past its trigger.
 func TestBoundAllowsForTheRequestsAFaultHolds(t *testing.T) {
 	defaults := withTimeouts(target.DefaultTimeouts)
-	const settle, teardown, delay = 30 * time.Second, 140 * time.Second, 2 * time.Minute
+	const settle, deletion, teardown, delay = 30 * time.Second, time.Minute, 140 * time.Second, 2 * time.Minute
 	const hold = delay + settle
 	exit := launch.MaxBackoff + 2*settle
 	stop := func(before time.Duration) time.Duration { return 2*(before+delay) + settle + hold + exit }
@@ -479,6 +495,8 @@ func TestBoundAllowsForTheRequestsAFaultHolds(t *testing.T) {
 			stop(run+4*exit+3*guard+hold) + teardown},
 		{"a wait before the delay", []Op{createOp, updateOp, held, settleOp},
 			stop(run+settle+2*exit+guard+hold) + teardown},
+		{"a recreate's wait for its CR", []Op{createOp, held, {Type: OpRecreate, Obj: widget("widget"), NoSettle: true}, settleOp},
+			stop(run+deletion+3*exit+2*guard+2*hold) + teardown},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if bound := Bound(defaults, sequenceOf(test.ops...)); bound != test.want {

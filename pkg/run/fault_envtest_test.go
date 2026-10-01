@@ -349,6 +349,19 @@ const heldDeletes = `{
   ]
 }`
 
+// heldFinalizer has the proxy hold the toy's patch that clears its Widget's
+// finalizer for longer than timeouts.delete, which a recreate waits for the
+// Widget to go.
+const heldFinalizer = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "patch", "resource": "widgets"}, "action": {"delay": "12s"}, "until": {"count": 1}}},
+    {"i": 2, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}}
+  ]
+}`
+
 // The correct toy passes where a wait ends with a request still held.
 func TestTheCorrectToyPassesWhereAWaitEndsWithARequestHeld(t *testing.T) {
 	t.Parallel()
@@ -360,6 +373,7 @@ func TestTheCorrectToyPassesWhereAWaitEndsWithARequestHeld(t *testing.T) {
 		noted string
 	}{
 		{"a delete's wait", heldDeletes, "P1 is not evaluated at the checkpoint after op 2 (delete)"},
+		{"a recreate's wait for its CR", heldFinalizer, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()

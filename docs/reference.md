@@ -190,15 +190,16 @@ Every op carries `i` and `t`. A settle wait follows each op that settles. It end
 `timeouts.settle` runs out. After a fault, a restart or a CR's deletion, it can run longer,
 while the checks still give your controller time. A request the proxy holds under
 `action.delay` counts as a change until the proxy forwards it. One held as the wait's time
-runs out keeps the wait open until `timeouts.settle` past its release. The checks run where
-it ends.
+runs out keeps the wait open until `timeouts.settle` past its release. It keeps a
+`recreate`'s wait for its old CR open the same way. The checks run where it ends. botbox does
+not check your properties where a wait ends with a request still held, and the run notes it.
 
 | Op | Needs | May carry | Settles | What it does |
 |---|---|---|---|---|
 | `create` | `obj` | `noSettle` | yes | It creates `obj`, whose name no live CR has. |
 | `update` | `patch` | `cr`, `noSettle` | yes | It applies `patch` to the CR as a JSON merge patch. |
 | `delete` | none | `cr`, `noSettle` | yes | It deletes the CR and waits up to `timeouts.delete` for it to go. |
-| `recreate` | `obj` | `cr`, `noSettle` | yes | It deletes the CR, waits up to `timeouts.delete` for it to go, and creates `obj`, which has the CR's name. |
+| `recreate` | `obj` | `cr`, `noSettle` | yes | It deletes the CR, waits up to `timeouts.delete` for it to go, or longer as a settle wait can, and creates `obj`, which has the CR's name. |
 | `settle` | none | none | yes | It waits for your controller to converge. |
 | `restart` | none | none | no | It kills your controller and starts it again. |
 | `fault` | `spec` | none | no | It adds a fault the proxy applies to your controller's requests. |

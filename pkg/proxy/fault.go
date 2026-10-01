@@ -141,8 +141,8 @@ func (p *Proxy) Window(id FaultID) FaultWindow {
 
 // Held reports, of the requests that reached the proxy before t, whether a
 // delay still holds one and when the proxy last released one. The proxy
-// releases a request when it forwards it or the target gives up on it, so a
-// watch counts only until its response can start.
+// releases a request when it forwards it, or when the target hangs up on one
+// without a body, so a watch counts only until its response can start.
 func (p *Proxy) Held(t time.Time) (holding bool, released time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -262,8 +262,9 @@ func (p *Proxy) faultFor(r Request) (FaultAction, *hold) {
 	return nil, nil
 }
 
-// await keeps a held request from the API server for d, or until the target
-// gives up on it, and reports whether d elapsed.
+// await keeps a held request from the API server for d, and reports whether d
+// elapsed. ctx ends sooner where the target hangs up on a request without a
+// body: Go's server notices a hangup only once it has read the body.
 func (p *Proxy) await(ctx context.Context, held *hold, d time.Duration) bool {
 	elapsed := sleep(ctx, d)
 	p.mu.Lock()

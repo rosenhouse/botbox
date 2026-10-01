@@ -146,10 +146,11 @@ Responsibilities:
 - **Record** every request: verb, group/version/resource, namespace, name, status code,
   latency, timestamp. This log is the primary signal for G1.
 - **Stream** long-lived watch responses without buffering (`FlushInterval = -1`).
-- **Hold** a request a delay applies to until the delay ends or the target gives up on
-  it, and report whether it holds one and when it released the last. It forwards a
-  held watch once the delay ends, so a watch counts as held only until then, however
-  long it streams.
+- **Hold** a request a delay applies to, and report whether it holds one and when it
+  released the last. It releases a request when it forwards it, once the delay ends, or
+  when the target hangs up on one without a body. Go's server notices a hangup only
+  once it has read the body, so a held write is forwarded anyway. A watch counts as held
+  only until it is forwarded, however long it streams.
 - **Inject faults** according to an active `FaultSpec`:
 
 ```go
@@ -278,7 +279,8 @@ The Runner executes one sequence:
    check reports it cannot go on, so the run ends as a harness error.
    A request the proxy holds counts as a change until the proxy releases it (§5.2), since
    it is about to change what the checks read. A request that reached the proxy before a
-   wait's time ran out holds the wait open until `T_settle` past its release.
+   wait's time ran out holds the wait open until `T_settle` past its release. It holds a
+   `recreate`'s wait for its old CR open the same way.
    Until a settle wait has converged, normally op 0's, a wait also ends where the target's
    process exits, and the Runner checks the target is running before it applies each op. A
    target that stopped then ends the run as a harness error naming the op it was at (§11):
@@ -310,7 +312,9 @@ The Runner executes one sequence:
    the target waits for it. Any other restart gives it no more time, and its startup
    requests count toward G1 where they land in a quiet window (§6). A target not back when
    a wait expires fails G4. A restart that fails ends the run as the harness error above.
-3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
+3. Evaluate invariants and properties at each checkpoint (§4). Properties are not
+   evaluated where the proxy held a request of the target's, which was about to change
+   what they read, and the run notes each such checkpoint. A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
 4. Tear down. Clear every active fault. If the target is still owed time to recover from
@@ -503,9 +507,10 @@ its delay retries within as long as it has been failing. Once faults stop, G4 th
 gives the target as long as they lasted plus `T_settle`. The faults are those whose
 windows reach past the last settle wait that converged, because a target that converged
 had recovered. They lasted from the first request the proxy faulted with any of them, or
-from that convergence if it came later, to the instant the last of them stopped. A settle
-wait does not give up before that time has passed, and one that expired is excused only
-while a fault is active or that time is still owed. A spec change made within that time is
+from that convergence if it came later, to the instant the last of them stopped, or
+released the last request it held where that is later. A settle wait does not give up
+before that time has passed, and one that expired is excused only while a fault is
+active or that time is still owed. A spec change made within that time is
 judged at the later of the two deadlines. A settle wait that converged sooner ends that
 time early. A target that exits while a fault excuses it, as controller-runtime with
 leader election on does when it loses its lease, then waits out the restart's backoff
@@ -2016,7 +2021,10 @@ built from source and run as a black-box binary.
   first wait up to 5 min for a restart, and then owe `T_settle` past a return that can
   come `T_settle` after the op (§5.5). Faults that stopped are owed as long as they lasted
   plus `T_settle` (§6), so each time faults stop, the deadline doubles what the run had
-  and allows another exit. Faults with no trigger stop together, at the teardown.
+  and allows another exit. A request a delay holds can keep a wait open past its time,
+  so the deadline adds the longest delay so far and `T_settle` to each wait. A fault
+  lasts until the proxy releases what it held (§5.5), so the deadline adds that delay to
+  the faults' length too. Faults with no trigger stop together, at the teardown.
   Minimizing gets what the runs left plus 4m, so it may still stop early. At §6's
   timeouts, a create and an update get 3m50s, and ten drawn runs tens of minutes. A fault
   that stops before the update raises the 3m50s to 47 min. Four such faults, each before
@@ -2272,17 +2280,25 @@ built from source and run as a black-box binary.
   changed while the proxy held the create, so the wait converged, and P1 failed the
   correct toy in 3 of 3 runs. A held request now counts as a change until the proxy
   releases it, so a wait converges no sooner than `T_stable` after the last release. The
-  proxy releases a request when it forwards it or the target gives up on it. A watch
-  therefore counts only until its response can start. Counting it while it streams would
-  keep every wait after a delayed watch from converging. Every held request counts,
-  leader election's too, because a target may manage Leases. A delay on lease renewals
-  can then keep waits from converging until the fault stops. Counting only writes was
-  rejected, because a held read delays the reaction it feeds as much. A request that
-  reached the proxy before a wait's time ran out holds the wait open until `T_settle`
-  past its release. Ending the wait sooner checks properties against a state the request
-  is about to change. A request that arrives later does not hold the wait, so a wait
-  under a proxy that holds one request after another ends no later than the longest
-  delay and `T_settle` past its time. A fault's window also lasts until the proxy
-  releases what it held, because the target still waits on the fault. The checks
-  therefore excuse the target over that time, and the time it owes runs from the
-  release. The derived deadline allows for both.
+  proxy releases a request when it forwards it, or when the target hangs up on one without
+  a body. A watch therefore counts only until its response can start. Counting it while it
+  streams would keep every wait after a delayed watch from converging. Every held request
+  counts, leader election's too, because a target may manage Leases. A delay on lease
+  renewals can then keep waits from converging until the fault stops. Counting only writes
+  was rejected, because a held read delays the reaction it feeds as much. A request that
+  reached the proxy before a wait's time ran out holds the wait open until `T_settle` past
+  its release. Ending the wait sooner checks properties against a state the request is
+  about to change. A `recreate`'s wait for its old CR is held open the same way. Under a
+  12 s delay on the toy's Widget patches, that wait otherwise ended while the proxy held
+  the patch that clears the finalizer, and P1 failed the correct toy. A request that
+  arrives later does not hold the wait, so a wait under a proxy that holds one request
+  after another ends no later than the longest delay and `T_settle` past its time. Such a
+  wait can still end while the proxy holds a request. Under a 6 s delay on every ConfigMap
+  request, the wait after a `delete` of the toy's Widget ended while the proxy held the
+  toy's delete of its second child, and P1 failed the correct toy in 2 of 2 runs. So
+  properties are not evaluated at a checkpoint where the proxy held a request of the
+  target's, and the run notes each such checkpoint. Once every fault's window has closed,
+  the proxy holds nothing, so later checkpoints judge properties as before. A fault's
+  window also lasts until the proxy releases what it held, because the target still waits
+  on the fault. The checks therefore excuse the target over that time, and the time it
+  owes runs from the release. The derived deadline allows for both.

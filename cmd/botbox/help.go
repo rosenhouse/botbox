@@ -134,7 +134,7 @@ func help(name string) string {
 		b.WriteString("\nFlags:\n")
 		for _, f := range flags {
 			_, says := flag.UnquoteUsage(f)
-			fmt.Fprintf(&b, "  %s\n      %s%s\n", flagWord(f), says, c.annotation(f))
+			fmt.Fprintf(&b, "  %s\n%s\n", flagWord(f), wrap("      ", says+c.annotation(f)))
 		}
 	}
 	if c.exits != "" {
@@ -150,14 +150,31 @@ checks that it converges, goes quiet and cleans up.
 
 // annotation says the flag is required, or what it defaults to.
 func (c command) annotation(f *flag.Flag) string {
+	if slices.Contains(c.required, f.Name) {
+		return " (required)"
+	}
 	switch f.DefValue {
 	case "", "0", "0s":
-		if slices.Contains(c.required, f.Name) {
-			return " (required)"
-		}
 		return ""
 	}
 	return " (default " + f.DefValue + ")"
+}
+
+// wrap breaks text into lines of at most 80 columns that begin with indent.
+func wrap(indent, text string) string {
+	lines := []string{indent}
+	for _, word := range strings.Fields(text) {
+		last := &lines[len(lines)-1]
+		switch {
+		case *last == indent:
+			*last += word
+		case len(*last)+1+len(word) > 80:
+			lines = append(lines, indent+word)
+		default:
+			*last += " " + word
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // usage is what botbox prints after a usage error: the command's synopsis, or

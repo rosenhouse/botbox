@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 var helpForms = []struct {
@@ -63,9 +64,10 @@ func TestACommandsHelpDescribesEachFlagWithItsDefault(t *testing.T) {
 		if !strings.HasPrefix(got, "Usage:\n  "+c.synopsis()+"\n\n"+c.about+"\n") {
 			t.Errorf("botbox %s --help begins %q, want its synopsis and what it does.", c.name, firstLines(got, 4))
 		}
+		flat := strings.Join(strings.Fields(got), " ")
 		(&options{command: c.name}).flags().VisitAll(func(f *flag.Flag) {
 			placeholder, usage := flag.UnquoteUsage(f)
-			if want := "\n  --" + f.Name + " " + placeholder + "\n      " + usage; !strings.Contains(got, want) {
+			if want := "--" + f.Name + " " + placeholder + " " + usage; !strings.Contains(flat, want) {
 				t.Errorf("botbox %s --help does not describe --%s: want %q in\n%s", c.name, f.Name, want, got)
 			}
 		})
@@ -86,6 +88,41 @@ func TestACommandsHelpDescribesEachFlagWithItsDefault(t *testing.T) {
 	for _, c := range commands {
 		if got := strings.Count(help(c.name), "(required)"); got != len(c.required) {
 			t.Errorf("botbox %s --help marks %d flags required, want %d: %v.", c.name, got, len(c.required), c.required)
+		}
+	}
+}
+
+func TestARequiredFlagIsMarkedRequiredWhateverItsDefault(t *testing.T) {
+	c := command{required: []string{"target"}}
+	if got := c.annotation(&flag.Flag{Name: "target", DefValue: "target.yaml"}); got != " (required)" {
+		t.Errorf("A required flag with a default is annotated %q, want %q.", got, " (required)")
+	}
+}
+
+func TestEveryHelpLineButTheSynopsisFitsEightyColumns(t *testing.T) {
+	for _, c := range append(commands, command{}) {
+		for _, line := range strings.Split(help(c.name), "\n") {
+			if line != "  "+c.synopsis() && utf8.RuneCountInString(line) > 80 {
+				t.Errorf("botbox %s --help has a line of %d columns:\n%s", c.name, utf8.RuneCountInString(line), line)
+			}
+		}
+	}
+}
+
+func TestRunAndReplaySayWhichSequencesTheyRunAndMinimize(t *testing.T) {
+	for name, says := range map[string][]string{
+		"run": {
+			"botbox run draws --runs sequences of ops on the target's custom resources and runs each against a fresh namespace.",
+			"It stops at the first sequence that fails a check, minimizes it, and writes a report.",
+			"Sequence files given as arguments run as written instead, and botbox does not minimize them.",
+		},
+		"replay": {"botbox replay runs one sequence file as written, such as the sequence.json of a failing run, and writes a report if it fails."},
+	} {
+		got := strings.Join(strings.Fields(help(name)), " ")
+		for _, want := range says {
+			if !strings.Contains(got, want) {
+				t.Errorf("botbox %s --help does not say %q:\n%s", name, want, help(name))
+			}
 		}
 	}
 }
@@ -112,7 +149,11 @@ func TestTheTopLevelHelpListsTheCommandsUsersRun(t *testing.T) {
 	if want := "botbox finds bugs in a Kubernetes controller."; !strings.HasPrefix(got, want) {
 		t.Errorf("botbox --help begins %q, want %q.", firstLines(got, 1), want)
 	}
-	for _, want := range []string{"\n  run ", "\n  replay ", "\n  version ", "https://github.com/rosenhouse/botbox"} {
+	for _, want := range []string{
+		"\n  run ", "\n  replay ", "\n  version ",
+		"\nRun 'botbox <command> --help' or 'botbox help <command>' for a command's flags.\n",
+		"https://github.com/rosenhouse/botbox", "\ndocs/reference.md there lists every key of target.yaml and every op.\n",
+	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("botbox --help lacks %q:\n%s", want, got)
 		}

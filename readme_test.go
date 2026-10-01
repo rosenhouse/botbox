@@ -71,13 +71,18 @@ var (
 	blankLine = regexp.MustCompile(`\n\s*\n`)
 )
 
+// opensBlock starts a heading, a fence, a block quote, a thematic break or HTML.
+const opensBlock = `(?:#{1,6}(?:[ \t]|$)|` + "```|~~~" + `|>|(?:\*[ \t]*){3,}$|(?:-[ \t]*){3,}$|(?:_[ \t]*){3,}$|<)`
+
 // limitParts splits the limits section into its opening and its other parts:
-// each bullet, and each paragraph after the list.
+// each bullet, and each paragraph after the list. A line indented less than an
+// item's text ends the item after a blank line, or where it opens a block.
+// CommonMark keeps any other such line in the item as a lazy continuation line,
+// and some HTML too.
 func limitParts(section string) (opening string, parts []string) {
 	items := listItem.Split(section, -1)
 	for i, marker := range listItem.FindAllString(section, -1) {
-		// A line indented less than the item's text ends the item.
-		end := regexp.MustCompile(fmt.Sprintf(`\n {0,%d}\S`, column(strings.TrimPrefix(marker, "\n"))-1))
+		end := regexp.MustCompile(fmt.Sprintf(`(?m)\n\s*\n {0,%[1]d}\S|\n {0,%[1]d}%[2]s`, column(strings.TrimPrefix(marker, "\n"))-1, opensBlock))
 		item, after := items[i+1], ""
 		if at := end.FindStringIndex(item); at != nil {
 			item, after = item[:at[0]], item[at[0]:]
@@ -115,6 +120,39 @@ func TestLimitPartsSplitsEachBulletAndEachParagraphAfterTheList(t *testing.T) {
 	if want := []string{"First bullet. First's paragraph.", "After the first list.", "Second. Second's paragraph.", "After the second list.",
 		"Third.", "Also after the list.", "After the list.", "Fourth.", "<p>After the fourth.</p>"}; !slices.Equal(parts, want) {
 		t.Errorf("limitParts gave the parts %q, want %q.", parts, want)
+	}
+}
+
+func TestLimitPartsEndsAnItemWhereCommonMarkDoes(t *testing.T) {
+	for _, test := range []struct {
+		next string
+		ends bool
+	}{
+		{"lazy.", false}, {" lazy.", false}, {"#lazy.", false}, {"\n  Inside.", false},
+		{"\n After.", true}, {" \nAfter.", true}, {"# Heading", true}, {"```", true}, {"~~~", true}, {" > Quote", true},
+		{"***", true}, {"---", true}, {"_ _ _", true}, {"<p>HTML</p>", true},
+	} {
+		want := []string{"Item. " + oneLine(test.next)}
+		if test.ends {
+			want = []string{"Item.", oneLine(test.next)}
+		}
+		if _, parts := limitParts("\n- Item.\n" + test.next + "\n"); !slices.Equal(parts, want) {
+			t.Errorf("limitParts gave the parts %q where %q follows an item, want %q.", parts, test.next, want)
+		}
+	}
+}
+
+// CommonMark keeps a lazy continuation line in its item, so dedenting the
+// README's limits changes none of them.
+func TestLimitPartsReadsTheReadmesLimitsTheSameDedented(t *testing.T) {
+	limits := section(t, readFile(t, "README.md"), limitsHeading)
+	dedented := regexp.MustCompile(`(\S\n) +`).ReplaceAllString(limits, "$1")
+	if dedented == limits {
+		t.Fatal("README.md's limits have no indented line, so this test checks nothing.")
+	}
+	opening, parts := limitParts(limits)
+	if dedentedOpening, dedentedParts := limitParts(dedented); dedentedOpening != opening || !slices.Equal(dedentedParts, parts) {
+		t.Errorf("limitParts reads README.md's limits dedented as %q and %q, want %q and %q.", dedentedOpening, dedentedParts, opening, parts)
 	}
 }
 

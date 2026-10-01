@@ -257,8 +257,8 @@ botbox could not test your controller, and the message says what to change.
 ## Running in CI
 
 Copy this workflow into `.github/workflows/`, and replace its build and `target.yaml` with your
-own. Set `BOTBOX_VERSION` to a commit of main, because `@latest` tracks main. The workflow needs
-no go.mod, no cluster and no registry.
+own. Set `BOTBOX_VERSION` to a commit of main, because `@latest` tracks main. botbox's steps
+need no go.mod, no cluster and no registry.
 
 <!-- embed: examples/ci/github-actions.yml -->
 ```yaml
@@ -326,17 +326,23 @@ jobs:
           path: botbox-out/
 ```
 
-A pull request runs fixed seeds, so a failure there comes from the change under review. The
-nightly run draws fresh seeds. A seed names a sequence only for one build of botbox and one
-`target.yaml`, so an upgrade or an edit to your CRD, `sample`, `generate` or `manages` draws
-other sequences. To tell whether a failure comes from the change under review, replay its
-`sequence.json` against the base branch's controller.
+The job caches botbox and setup-envtest in `~/go/bin`, and the control plane in `bin/envtest`,
+under a key of their versions. A Go repository may instead read Go's version from its go.mod
+and turn setup-go's cache on.
+
+A pull request runs fixed seeds, so its runs repeat from one commit to the next. The nightly run
+draws fresh seeds. A seed names a sequence only for one build of botbox and one `target.yaml`,
+so upgrading botbox, or editing your CRD or `target.yaml`, can draw other sequences. To tell
+whether a failure comes from the change under review, replay its `sequence.json` against the
+base branch's controller.
 
 Add a step that runs your pinned sequences, such as
 `exec botbox run --target target.yaml --deadline 10m --out botbox-out sequences/*.json`.
 
-`--deadline` caps each step. When the deadline ends a run, or stops botbox before its last run,
-botbox exits 2 rather than reporting a find. So give it room for your controller.
+`--deadline` caps each botbox invocation, and botbox stops within seconds of it. When the
+deadline ends a run, or stops botbox before its last run, botbox exits 2 rather than reporting
+a find. So give it room for your controller. Run the pull request's command once without
+`--deadline`, and botbox prints the deadline it derives. Use that, or fewer `--runs`.
 
 The job uploads `botbox-out/`, which holds each run's sequence and a failing run's evidence.
 Anyone who can read the repository can download it, and botbox hides only the values of a
@@ -370,12 +376,18 @@ GOWORK=off go -C tools/botbox build -o ../../bin/botbox github.com/rosenhouse/bo
 bin/botbox version
 ```
 
-`tools/botbox/go.mod` then pins botbox. Your own go.mod and go.work, and any package of yours
-in `tools/`, stay as they were. Under `GOTOOLCHAIN=local`, a `go` before 1.24 stops this recipe
-with `flag provided but not defined: -tool`. Run `bin/botbox` as the last line does, not
-`go -C tools/botbox tool botbox`, which runs botbox in `tools/botbox/`, where your
-`launch.binary` does not resolve. In the CI workflow, replace the `go install` of botbox with
-the recipe's `go -C tools/botbox build` line, and run `bin/botbox`.
+`go mod edit -go` comes before `go get -tool`, so that a `go` before 1.24, which lacks `-tool`,
+switches to a newer Go first. `GOWORK=off` leaves out a go.work of yours, whose go line
+`go get` would raise. `tools/botbox/go.mod` then pins botbox. Your own go.mod and go.work, and
+any package of yours in `tools/`, stay as they were. Under `GOTOOLCHAIN=local`, a `go` before
+1.24 stops this recipe with `flag provided but not defined: -tool`. Run `bin/botbox` as the last
+line does, not `go -C tools/botbox tool botbox`, which runs botbox in `tools/botbox/`, where
+your `launch.binary` does not resolve.
+
+In the CI workflow, build `bin/botbox` with the recipe's `go -C tools/botbox build` line, in a
+step of its own after checkout, because the cache holds no `bin/botbox`. Install only
+setup-envtest in the cached step, drop `BOTBOX_VERSION` from the workflow and its cache key,
+and run `bin/botbox`.
 
 ### From go test
 

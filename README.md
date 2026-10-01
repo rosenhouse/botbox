@@ -175,8 +175,8 @@ Write yours in this order:
 [docs/targets.md](docs/targets.md) says how to choose the values: for a slow controller, one
 that resyncs on a timer, one that reads objects it does not own, and more.
 
-botbox starts envtest, which runs no Pod and never moves the status of a Deployment, a Job or a
-PersistentVolumeClaim. If your controller waits on one, run botbox
+By default, botbox starts envtest, which runs no Pod and never moves the status of a
+Deployment, a Job or a PersistentVolumeClaim. If your controller waits on one, run botbox
 [against a cluster](docs/targets.md#against-a-cluster), such as kind.
 
 ### Run it
@@ -400,7 +400,8 @@ your `launch.binary` does not resolve.
 In the CI workflow, build `bin/botbox` with the recipe's `go -C tools/botbox build` line, in a
 step of its own after checkout, because the cache holds no `bin/botbox`. Install only
 setup-envtest in the cached step, drop `BOTBOX_VERSION` from the workflow and its cache key,
-and run `bin/botbox`.
+and run `bin/botbox`. setup-go's cache, with `cache: true` and
+`cache-dependency-path: tools/botbox/go.sum`, keeps that build's downloads.
 
 ### From go test
 

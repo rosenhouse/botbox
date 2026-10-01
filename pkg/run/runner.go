@@ -149,7 +149,7 @@ type Timeline struct {
 	// Faults are the windows the proxy applied each fault op's fault in, one
 	// per fault op. A window with no Start is a fault the proxy applied to no
 	// request, which changed nothing and excuses nothing (D36). A window with
-	// no End is a fault the proxy still applies.
+	// no End is a fault the proxy still applies or still holds a request of.
 	Faults []Window
 	// Forced names every object the teardown force-removed a finalizer from.
 	// A run that was not abandoned notes each one: G3 judged the deletion
@@ -373,7 +373,8 @@ type heldFault struct {
 	until *int
 	// window is the fault's place in Timeline.Faults.
 	window int
-	// retired is whether the proxy has stopped applying it.
+	// retired is whether the proxy has stopped applying it and released what
+	// it held.
 	retired bool
 }
 
@@ -887,9 +888,9 @@ func (r *runner) expireFaults(op int) {
 
 // readFaultWindows writes what the proxy has done with each fault into the
 // timeline: a window opens where the proxy first applied the fault and closes
-// where the proxy stopped applying it (D36). A fault the proxy never applied
-// leaves its window unopened, because the run then ran as if the fault op
-// were not there.
+// where the proxy stopped applying it and released what it held (D36). A fault
+// the proxy never applied leaves its window unopened, because the run then ran
+// as if the fault op were not there.
 func (r *runner) readFaultWindows() {
 	for i := range r.faults {
 		fault := &r.faults[i]

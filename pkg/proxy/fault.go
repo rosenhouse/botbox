@@ -129,8 +129,8 @@ type FaultWindow struct {
 
 // Window reports what the proxy has done with the fault, removed or not. The
 // Runner reads it into the run's timeline: a fault excuses the target over the
-// window the proxy applied it in, and a fault it never applied excuses nothing
-// (DESIGN.md §6).
+// window the proxy applied it in or held a request of the target's, and a fault
+// it never applied excuses nothing (DESIGN.md §6).
 func (p *Proxy) Window(id FaultID) FaultWindow {
 	now := time.Now()
 	p.mu.Lock()

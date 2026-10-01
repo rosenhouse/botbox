@@ -98,6 +98,7 @@ func TestTheReferenceGivesTheBoundsOfFaultValues(t *testing.T) {
 	}{
 		{"match.fraction", "above 0 and up to 1", `{"match": {"fraction": %s}, "action": {"drop": true}}`, []string{"0.001", "1"}, []string{"0", "1.001"}},
 		{"action.error", "from 400 to 599", `{"action": {"error": %s}}`, []string{"400", "599"}, []string{"399", "600"}},
+		{"action.delay", "It is not negative, and 0 leaves it unset.", `{"action": {"delay": "%s"}}`, []string{"1ns"}, []string{"-1ns"}},
 		{"until.count", "It is above 0.", `{"action": {"drop": true}, "until": {"count": %s}}`, []string{"1"}, []string{"0", "-1"}},
 		{"until.for", "It is above 0.", `{"action": {"drop": true}, "until": {"for": "%s"}}`, []string{"1ns"}, []string{"0s", "-1ns"}},
 	} {

@@ -241,7 +241,7 @@ fault that applies to no request tests nothing, and the run notes it.
 | `match.name` | every name | It is a glob over the object name in the request path, as Go's `path.Match` reads it. A list, a watch, a `deletecollection` and a create of an object carry an empty name there, which `*` matches. |
 | `match.fraction` | every request | It gives the share of matching requests the fault applies to, above 0 and up to 1. The sequence's `seed` draws which. |
 | `action.error` | none | The proxy answers with this status, from 400 to 599, and forwards nothing. |
-| `action.delay` | none | The proxy holds the request this long, such as `"500ms"`, then forwards it. |
+| `action.delay` | none | The proxy holds the request this long, such as `"500ms"`, then forwards it. It is not negative, and 0 leaves it unset. |
 | `action.drop` | none | `true` has the proxy close the connection without an answer. It forwards nothing. |
 | `until.op` | none | The fault ends before this op acts. It is above the fault's own `i`. Past the last op, the fault lasts to the end. |
 | `until.count` | none | The fault ends once it has applied to this many requests. It is above 0. |

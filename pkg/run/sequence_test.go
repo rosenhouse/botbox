@@ -407,6 +407,7 @@ func TestSequenceAcceptsTheOpsTheRunnerExecutes(t *testing.T) {
 		`{"i": 0, "t": "fault", "spec": {"match": {"verb": "deletecollection"}, "action": {"drop": true}}}`,
 		`{"i": 0, "t": "fault", "spec": {"match": {"name": "widget-*", "fraction": 1}, "action": {"error": 400}}}`,
 		`{"i": 0, "t": "fault", "spec": {"match": {"fraction": 0.25}, "action": {"error": 599}}}`,
+		`{"i": 0, "t": "fault", "spec": {"action": {"error": 500, "delay": "0s"}}}`,
 		`{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"op": 1}}}`,
 		`{"i": 0, "t": "fault", "spec": {"action": {"drop": true}, "until": {"op": 2}}}`,
 		`{"i": 0, "t": "updateFixture", "kind": "v1/Secret", "name": "token", "patch": {"data": {"token": "abcd"}}}`,

@@ -14,9 +14,9 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// theSeedThatDrawsAB2Reproducer draws seven ops, which is enough that the
-// shrink pass has something to do. A correct toy passes the sequence it draws,
-// so the failure the test finds is the seeded bug's.
+// theSeedThatDrawsAB2Reproducer draws more than three ops, so the shrink pass
+// has something to do. A correct toy passes the sequence it draws, so the
+// failure the test finds is the seeded bug's.
 const theSeedThatDrawsAB2Reproducer = 2
 
 // The acceptance of DESIGN.md §10 M5: with --bug=2 the harness finds a failure

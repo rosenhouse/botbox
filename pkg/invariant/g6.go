@@ -23,7 +23,7 @@ func NoErrorLoop(in Input) (Result, error) {
 			continue
 		}
 		out.violate(Violation{
-			Statement: fmt.Sprintf("the target repeated the failing request %s %d times within %s, where thresholds.errloop allows %d",
+			Statement: fmt.Sprintf("the target repeated the failing request %s %d times within %s (timeouts.settle), where thresholds.errloop allows %d",
 				repeated.key, len(burst), in.timeouts().Settle, threshold),
 			At: burst[0].Start,
 		}.quotingRequests(Recent(burst)))

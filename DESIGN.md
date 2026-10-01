@@ -24,7 +24,8 @@ such as Eventually Stable Reconciliation (ESR), but requires rewriting the contr
    configuration, plus optional per-controller **properties**.
 5. Shrinking any failing sequence to a minimal reproducer and emitting a report.
 
-The controller is a black box. If it talks to an API server, it can be tested.
+The controller is a black box, which botbox drives through the API server. The README
+lists what botbox cannot test yet.
 
 ## 2. Non-goals
 
@@ -106,9 +107,11 @@ type Launcher interface {
 Implementations:
 
 - `Binary` — the primary launcher and the only one required through M6. Exec a local
-  binary. botbox writes a kubeconfig whose server is the proxy URL and whose context names
-  the run namespace, and exports it as `KUBECONFIG`. It substitutes `$KUBECONFIG` and
-  `$NAMESPACE`, the run namespace, in `launch.args` and in the values of `launch.env`.
+  binary. It runs on botbox's host, which routes to no Pod and resolves no Service name of
+  the test cluster. botbox writes a kubeconfig whose server is the proxy URL and whose
+  context names the run namespace, and exports it as `KUBECONFIG`. It substitutes
+  `$KUBECONFIG` and `$NAMESPACE`, the run namespace, in `launch.args` and in the values of
+  `launch.env`.
   `launch.env` sets variables over the environment the target inherits from botbox, and
   may not set `KUBECONFIG`. The target's stdout and stderr go to `target.log` in the run
   directory. `Restart` sends SIGKILL, waits for the process to be reaped, then execs
@@ -133,7 +136,10 @@ The proxy is an `httputil.ReverseProxy` in front of the test cluster. It listens
 HTTP/2 only over TLS. The proxy's upstream transport comes from the test cluster's
 `rest.Config` via `rest.TransportFor`, so it carries whatever that cluster uses: a client
 certificate on envtest, a token or exec credential on a kubeconfig cluster. The proxy
-strips any inbound `Authorization` header.
+strips any inbound `Authorization` header. The target's requests therefore carry botbox's
+credentials, admin on envtest, and the target's RBAC is never exercised (§14). A target's
+own `Impersonate-*` headers pass through, and the API server honors them under botbox's
+credentials.
 
 Responsibilities:
 
@@ -171,7 +177,9 @@ The Observer runs independent informers on the real API server, not through the 
 for the target's CRD(s) and the resource kinds the target declares it manages. It records,
 per object: resourceVersion history with timestamps, generation vs observedGeneration
 where present, finalizers, ownerReferences, deletion timestamps, and the UID, on which
-attribution (§6) and the garbage-collector emulation (§5.8) rely.
+attribution (§6) and the garbage-collector emulation (§5.8) rely. It watches the run
+namespace alone, so the primary and every managed kind must be namespaced (§8.1), and it
+does not see a child the target creates in another namespace.
 
 The Observer must never affect the target. It has its own credentials and never writes.
 Deleting a managed object behind the target's back is a Runner control op
@@ -204,7 +212,8 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   names no fixture draws no fixture op.
 - **Schema-driven mutation** from the CRD's OpenAPI v3 schema: numeric ranges, enums,
   string patterns, optional-field presence, list length, map size. Generic and works on
-  any CRD.
+  any CRD. botbox draws no sequence for a built-in primary kind, whose schema it does not
+  read, and runs only the sequences a user writes.
 - **Valid by the CRD's own rules.** Every create, recreate and update the generator draws
   passes the CRD as the API server judges the CR botbox wrote: defaults, value
   validations, list types and `x-kubernetes-validations` rules, transition rules included.
@@ -223,8 +232,9 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   every value drawn. Without `generate.mutate`, botbox prints each spec path it leaves
   alone, and why: its schema says too little to draw from, such as an int-or-string, the
   generator cannot draw a value for it, or the CRD refuses every value drawn for it.
-- **Hand-written generators** per target override schema-driven ones for fields with
-  semantics the schema does not capture. In-repo targets only.
+- **Hand-written generators** per target are deferred (#59). No target needs one, since
+  `sample`, `generate.mutate` and `generate.overlay` keep generation inside what a target
+  accepts (§8.3), and one would need a public Go API.
 
 Every sequence is serializable to JSON (§7) so it can be replayed without rapid. A seed
 names a sequence for one build of botbox and one target declaration. A golden test records
@@ -285,10 +295,14 @@ The Runner executes one sequence:
    outlasts a wait. A target that converges after an exit passes. botbox chose when to
    restart the target after a `Restart` op and after an exit a fault excuses (§6), so a
    wait gives it `T_settle` past its return from either, where it returns within `T_settle`
-   of the restart, and `T_settle` past the restart where it does not. Any other restart
-   gives it no more time, and its startup requests count toward G1 where they land in a
-   quiet window (§6). A target not back when a wait expires fails G4. A restart that fails
-   ends the run as the harness error above.
+   of the restart, and `T_settle` past the restart where it does not. While a fault is
+   active, only the first exit a fault excused during each op gets that time (§6). An exit
+   is during the last op stamped before it. An op stamped before the target has had that
+   time after an earlier exit gives it that time too. Before it stamps an op, the Runner
+   waits for any restart that follows an exit a fault excused, so the op never lands while
+   the target waits for it. Any other restart gives it no more time, and its startup
+   requests count toward G1 where they land in a quiet window (§6). A target not back when
+   a wait expires fails G4. A restart that fails ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
@@ -318,13 +332,21 @@ without noting them. It stops the target without a grace period and deletes the 
 on a budget of its own. Supervision ends with the context, so the target does not
 restart.
 
-Cleanup between runs never restarts the API server, because rapid's shrinker re-invokes
-the test function many times.
+Cleanup between runs never restarts the API server, because a shrink pass replays a
+sequence many times and starting a control plane costs seconds.
 
-**Shrinking** is sequence-level: rapid drives it, and additionally a custom pass removes
-ops one at a time and replays from clean state, keeping the shorter sequence if it still
-fails. Fault ops shrink toward "no fault" and shorter durations. Shrinking stops at the
-run deadline (§11).
+**Shrinking** is sequence-level, and botbox's own pass does all of it. It removes one op at
+a time and replays what is left from clean state. Where an op stays and carries a fault,
+it halves `until.count`, `until.for` and `action.delay` one at a time, while the replay
+still fails, but never a count below 1 or a duration below 10 ms. A candidate replaces
+the sequence where its replay fails the same check, by ID. One whose replay errs does
+not, and one the sequence format refuses is not replayed. The pass goes over the sequence
+again until nothing simplifies. Field values are not shrunk. The pass stops at the
+deadline (§11) and keeps the smallest failing sequence it found. rapid only draws
+sequences, through `Example`, which does not shrink (§5.4). rapid shrinks only inside
+`rapid.Check`, and it shrinks the choices a value is drawn from rather than the ops. The
+pass shrinks the JSON sequence the report carries. Each replay is a whole run against the
+cluster.
 
 ### 5.6 Invariant engine
 
@@ -433,7 +455,11 @@ Consequences:
   and no PersistentVolume carries `kubernetes.io/pv-protection`. On a kubeconfig cluster a
   Job or ReplicationController deleted without a policy orphans its Pods, and a claim
   keeps its finalizer until no Pod uses it.
-- **No admission webhooks.** See §8.3.
+- **No admission or conversion webhooks.** botbox installs no admission webhook (§8.3).
+  envtest removes a CRD's conversion webhook, so the API server converts a CR between
+  versions by `apiVersion` alone. A kubeconfig cluster keeps the webhook. botbox deploys
+  no webhook Service, so a request that needs conversion fails unless the cluster serves
+  one.
 
 ## 6. Generic invariants
 
@@ -477,8 +503,16 @@ time early. A target that exits while a fault excuses it, as controller-runtime 
 leader election on does when it loses its lease, then waits out the restart's backoff
 (§5.1), which botbox chose. G4 gives it `T_settle` past its return from that restart too,
 as after a `Restart` (§5.5), and does not judge a window the exit falls in, as it does not
-judge one a fault reaches into. Only a fault excuses an exit, so a crash loop that a fault
-set off still fails G4.
+judge one a fault reaches into. While a fault is active, only the target's first such exit
+during each op is owed that time, because owing each later exit would hold a crash loop's
+wait open for as long as the fault lasts. If the target exits again during the op, the
+wait can end before it restarts, and the properties are checked there. No op lands while
+the target waits to restart after an exit a fault excused, and an op that lands before
+the target has had its time after such an exit owes it that time too (§5.5). That time
+ends within `2 × T_settle` of the op, so it bounds the op's wait. Once no fault is active,
+every exit a fault excused is owed its time. Only a fault excuses an exit, so a crash loop
+that a fault set off still fails G4, at the latest in the wait the teardown gives the
+target once it has cleared the faults.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -568,15 +602,19 @@ not come back, where the op followed such a change before the run converged or f
 `Restart` the target had not yet answered, or where a fault reached into the op or its
 wait or the target was still owed time to recover from one where the wait ended. The
 Runner carries the last checkpoint's notes out and `botbox` prints them at the end of the
-run, because a check that was skipped otherwise reads like one that passed. G5 also notes
-an `equalIgnore` path it could not follow (§8.1), since it then compares a field the
-target meant it to skip. The Runner also notes each ownerReference the collector could not
-resolve (§5.8), since the object that carries it stays, and G3 would report it without
-saying why. It notes each fault op whose fault the proxy applied to no request, since that
-fault tested nothing (D36). It notes each exit of the target it restarted (§5.5), since a
-run that passes shows no other sign of it. A G4 report on envtest also notes the managed
-kinds whose status envtest never changes (§5.8), since G4 may fail for that alone. botbox
-prints that note once, when the invocation starts, rather than with a run's notes.
+run, because a check that was skipped otherwise reads like one that passed. A run may
+delete one CR more than once, so a G3 note names the first `delete` or `recreate` that
+found the CR, or else the teardown. The Observer can record a deletion after the next op
+begins, and that op finds the CR too. Where neither found it, as when an op deleted a CR
+the Observer had not yet seen, the note names only the CR. G5 also notes an `equalIgnore`
+path it could not follow (§8.1), since it then compares a field the target meant it to
+skip. The Runner also notes each ownerReference the collector could not resolve (§5.8),
+since the object that carries it stays, and G3 would report it without saying why. It
+notes each fault op whose fault the proxy applied to no request, since that fault tested
+nothing (D36). It notes each exit of the target it restarted (§5.5), since a run that
+passes shows no other sign of it. A G4 report on envtest also notes the managed kinds
+whose status envtest never changes (§5.8), since G4 may fail for that alone. botbox prints
+that note once, when the invocation starts, rather than with a run's notes.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2, G5 and G7 need none of their own, but they
@@ -660,8 +698,10 @@ Details the example does not show:
   names its CR in `obj`, and a `recreate` creates the CR it deletes. These are
   configuration errors: an `obj` with no `metadata.name`, an op on a CR that no earlier
   `create` or `recreate` creates, an `update` or `delete` of a CR deleted since it was last
-  created, a `recreate` whose `obj` names another CR, and a `create` of a CR that no
-  `delete` has removed since.
+  created, a `recreate` whose `obj` names another CR, a `create` of a CR that no
+  `delete` has removed since, and a `create` of a CR that a `noSettle` `delete` removed
+  with no op since that settles. A finalizer may still hold that CR, and the API server
+  refuses the create while one does. A `recreate` waits for its old CR to go.
 - A sequence ends with an op that settles, or nothing judges the state it leaves behind
   (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
 - G5 judges a `restart` only between two converged settle waits with no fault's window
@@ -679,6 +719,12 @@ Details the example does not show:
   installed counts, and a name the API server does not serve ends the run as a
   configuration error. It holds no slash, so it names no group, version or subresource. A
   fault on `widgets` also matches the requests to `widgets/status`.
+- A fault's `match.name` is a glob as Go's `path.Match` reads it. `match.fraction` is a
+  share above 0 and up to 1, and a fault without one applies to every request it
+  matches. `action.error` is a status from 400 to 599. `action.delay` is not negative, and
+  0 leaves it unset. `until.count` and `until.for` are above 0, because botbox would read 0
+  as no trigger. `until.op` is above the fault's own index, and an index past the last op
+  lets the fault outlast the sequence. Any other value is a configuration error.
 - Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
   tries faults in op order, the first that applies to a request wins, and each runs out on
   its own `until`.
@@ -709,7 +755,8 @@ Details the example does not show:
   `noSettle` op and a `deleteManaged`.
 
 `botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
-embed the minimized sequence in this format.
+embed the minimized sequence in this format. `docs/reference.md` lists every field, op and
+fault field, and its example sequence sets each one (§11).
 
 ## 8. Target contract
 
@@ -783,7 +830,8 @@ did nothing wrong.
 
 A key target.yaml does not take is a configuration error. It names the key's line and
 dotted path, and the key within two edits of it, or else the keys its block takes. A swap
-of two adjacent letters counts as one edit.
+of two adjacent letters counts as one edit. `docs/reference.md` lists every key with its
+default and meaning (§11).
 
 `generate.maxCRs` bounds the primary CRs a sequence creates, and `1` keeps a run to the
 sample alone, for a controller that takes one CR per namespace. `generate.distinct` names
@@ -846,13 +894,19 @@ cert-manager lists CertificateRequest: a request records one issuance, and a Rea
 Certificate whose request is deleted issues no new one.
 
 The primary, every managed kind and every fixture must be namespaced, because a run owns
-one namespace (§5.5, D13). botbox refuses the cluster-scoped ones before the first run, in
-two checks that each name every kind they refuse: one when it loads the target, for the
-kinds its `crds` define, and one once the control plane is up, for the rest. botbox
-observes only the run namespace, so it does not see a child the target creates in another.
+one namespace (§5.5, D13). botbox judges scopes in two checks, and each refuses every
+cluster-scoped kind it knows in one error. The first runs when botbox loads the target.
+It knows the kinds a Kubernetes 1.37 API server serves by default and the kinds the
+`crds` define. The second runs through discovery once the control plane is up, before
+the first run. It knows the rest, such as a kind whose CRD the cluster holds but `crds`
+does not list. On `--kubeconfig`, a target with kinds of both sorts therefore hears of
+them in two errors. botbox observes only the run namespace, so it does not see a child
+the target creates in another.
 botbox creates the CR and each fixture in the run namespace. A fixture sets no
-`metadata.namespace`, because the target may look for it in the namespace it names. The
-CR may set one, which botbox replaces, because the target finds a CR by watching.
+`metadata.namespace`, because the target may look for it in the namespace it names. A
+check refuses such a fixture only if it found no cluster-scoped kind and knows the
+fixture's kind is namespaced. The run refuses the rest. The CR may set one, which botbox
+replaces, because the target finds a CR by watching.
 
 `equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
 holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
@@ -887,42 +941,13 @@ server does take a supported flag, and the ephemeral port above keeps it out of 
 
 ### 8.2 Go form
 
-```go
-type Target struct {
-    Name, Version string
-    CRDs          []string
-    Primary       schema.GroupVersionKind
-    Sample        *unstructured.Unstructured
-    Fixtures      []*unstructured.Unstructured
-    Manages       []schema.GroupVersionKind
-    NotRecreated  []schema.GroupVersionKind             // managed kinds G7 exempts
-    Selector      labels.Selector
-    Ready         func(*unstructured.Unstructured) bool // compiled from `ready`, or a hook
-    ReadyExpr     string                                // `ready` as declared, the default, or go:<name>
-    Equal         func(a, b Snapshot) bool              // §6 default plus `equalIgnore`, or a hook
-    Properties    []Property
-    Generate      GenerateSpec
-    Launch        LaunchSpec
-    Timeouts      Timeouts
-    Thresholds    Thresholds
-}
-
-type Property struct {
-    ID, Description string
-    Eval            func(cr *unstructured.Unstructured, managed []*unstructured.Unstructured) bool
-    When            PropertyWhen // Always, Checkpoint, End
-}
-
-type Snapshot struct {
-    GVK    schema.GroupVersionKind
-    Name   string
-    Object *unstructured.Unstructured
-}
-```
-
-`pkg/target` loads the YAML into this struct. Everything downstream consumes the struct.
-The Runner keys snapshots by kind and name, never by UID, so a recreated object compares
-against its predecessor.
+`pkg/target` loads the YAML into a `Target`, and everything downstream consumes it.
+`go doc github.com/rosenhouse/botbox/pkg/target Target` lists its fields, so this document
+gives only the intent. `Ready` returns an error beside its verdict, and an error means not
+ready (§8.4). A property's error is a configuration error. A nil `Equal` means the §6
+default with the `equalIgnore` paths. An `equal` hook replaces the default and takes no
+`equalIgnore` (§8.1). The Runner keys snapshots by kind and name, never by UID, so a
+recreated object compares against its predecessor.
 
 ### 8.3 Generation constraints and admission webhooks
 
@@ -965,7 +990,8 @@ expression and the CR's status beside it (§5.7). An evaluation error in a prope
 configuration error.
 
 A Go hook is a function registered under a name in `pkg/target` and referenced as
-`ready: go:<name>` or `equal: go:<name>`. Hooks exist for in-repo targets only.
+`ready: go:<name>` or `equal: go:<name>`. Hooks exist for in-repo targets only. No Go
+function runs botbox end to end, and its packages make no compatibility promise (D81).
 
 ## 9. Toy target: `Widget`
 
@@ -1000,6 +1026,11 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
 - `--label-from=<name>` has each child copy `data.label` of that ConfigMap in the Widget's
   namespace, and the toy watches that ConfigMap. The target sets it to `widget-config`,
   which it declares as a fixture.
+- `--lease=<duration>` has the toy elect a leader through a Lease in `WATCH_NAMESPACE`
+  that lasts that long, renew it within two thirds of that, and exit when it loses the
+  lease, as controller-runtime does. The envtest tier runs it at 3 s under a fault that
+  fails most lease updates, so the toy can lose its lease and restart until the teardown
+  clears the fault (§6, recovery from faults).
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 
@@ -1145,7 +1176,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   asset fails rather than passing quietly. Values live in the Makefile. The README's Install
   block and the CI recipe repeat the envtest pins for adopters to copy. The recipe also
   repeats go.mod's module and Go version, and the runner and action releases of
-  `.github/workflows/`. `make test` holds each copy to its source. Each `--deadline` in the
+  `.github/workflows/`. The Install section quotes go.mod's Go version and the k8s.io/api
+  and controller-runtime versions that requiring botbox forces on a module (D80).
+  `make test` holds each copy to its source. Each `--deadline` in the
   recipe gives a run at least the time that the Makefile's example tiers give one. Bumps
   are their own PRs, never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
@@ -1154,11 +1187,32 @@ the proxy; the `Image` launcher. Separate design addendum.
 - **Layout.** `cmd/botbox/`, `pkg/cluster`, `pkg/proxy`, `pkg/observe`,
   `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`,
-  `examples/ci/`, `docs/`, and `bin/` for git-ignored build output.
-- **CLI.** `botbox run --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]`;
-  `botbox replay --target <yaml> [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>`;
-  `botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...`;
-  `botbox version`.
+  `examples/ci/`, `docs/`, `internal/reference` for the tests that read
+  `docs/reference.md`, and `bin/` for git-ignored build output.
+- **CLI.** botbox has these commands. A test holds this block to the flags each command
+  parses.
+
+  ```
+  botbox run --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--out dir] [--runs n] [--seed n] [sequence.json...]
+  botbox replay --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--out dir] sequence.json
+  botbox version
+  botbox matrix --target file --sequences dir [--deadline duration] [--kubeconfig file] [--launch-arg arg]... [--out file]
+  ```
+
+  `botbox matrix` generates the toy's bug matrix for `make bug-matrix`, so the top-level
+  help leaves it out. `botbox help` and `botbox --help` print what botbox does, its
+  commands, the exit codes, `KUBEBUILDER_ASSETS` and the README's URL, because
+  `go install` ships no documentation. `botbox <command> --help` and
+  `botbox help <command>` print the command's synopsis and each flag with its meaning and
+  default. `-h`, `--h`, `-help` or `--help` after a sequence file asks for help too. Help
+  goes to stdout and exits 0. A bare `botbox` prints botbox's help to stderr and exits 2. A
+  usage error, such as an unknown flag, a missing required flag, another flag or `--` after
+  a sequence file or a wrong count of sequence files, exits 2 and prints the error and the
+  command's synopsis to stderr. It spells a flag with two dashes, as the help does, but
+  quotes a flag after a sequence file as given. No message botbox prints cites this
+  document or uses its symbols, such as `T_settle`. A message names the target.yaml key
+  and its value instead, as in `2s (timeouts.stable)`. A test scans the code's string
+  literals for them.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. The deadline abandons the run under way (§5.5), and the
   shrinker stops there and reports the smallest failing sequence it found. Without
@@ -1169,7 +1223,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
   CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
-  harness error, or a deadline that stopped the invocation before its last run.
+  harness error, or a deadline that ended a run or stopped the invocation before its last
+  run. A deadline that ends minimization leaves the violation, and exit 1, standing.
   SIGINT, SIGTERM and SIGHUP interrupt the invocation. No further run starts, and the run
   under way is abandoned (§5.5). `botbox run` and `botbox replay` name its directory, and
   `botbox matrix` names its row. A run that failed before the interrupt reports its own
@@ -1232,7 +1287,19 @@ the proxy; the `Image` launcher. Separate design addendum.
   through `--kubeconfig` against a kind cluster it creates and deletes, on demand. It
   passes `b0.json` and fixed seeds, and fails B3 on G3 and B8 on G7 as its negative
   controls. It installs the pinned kind into `bin/` and needs Docker. The nightly workflow
-  runs the same runs with `make test-kind-runs`.
+  runs the same runs with `make test-kind-runs`. `make hunt-cert-manager` and
+  `make hunt-external-secrets` hunt for bugs in the adopted examples, on demand and on no
+  pull request. Each runs every family in `examples/<example>/sequences/hunt/`, then up to
+  `HUNT_RUNS` seeds drawn from `HUNT_SEED` on, each in an invocation of its own, until
+  `HUNT_MINUTES` runs out. Each invocation writes under `botbox-out/hunt-<example>/`. A
+  family is checked in only once it passes the pinned controller.
+- **Triage.** A hunt run that fails is a candidate, not a bug. Triage replays it three
+  times, reproduces it by hand against envtest unless only botbox's proxy can inject its
+  faults, reads upstream's code path and searches upstream's tracker. A candidate that no
+  replay reproduces, or that breaks a botbox rule and no upstream contract, becomes a
+  botbox issue. A candidate that breaks an upstream contract becomes a draft under
+  `docs/findings/`, with its sequence and how many replays failed, for botbox's
+  maintainer to file upstream. One that upstream's tracker already holds needs no draft.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
@@ -1241,18 +1308,40 @@ the proxy; the `Image` launcher. Separate design addendum.
   as a GitHub release asset, and are pinned.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
-  (five lines); install; quickstart against cert-manager, then what the second example
-  adds; writing `target.yaml` for your own controller; reading a report; what to change
-  when botbox exits 2; a CI recipe for adopters, embedded from `examples/ci/github-actions.yml`;
-  a one-line-per-invariant table linking to §6; a closing "Design and
-  internals" link to this document and to
-  `docs/bug-matrix.md`. A fenced block preceded by `<!-- embed: <path> -->` has content,
-  excluding the two fence lines, byte-identical to that file including its trailing
-  newline; `<path>` is relative to the repository root; `make test` enforces it.
+  (five lines); what it cannot test yet; install, and a tools module that keeps botbox
+  out of an operator's go.mod, embedded from `examples/tools-module.sh`, which the envtest
+  tier runs (D80); a find in half a minute, a replay of a bug seeded into the toy, which
+  says that every find the README shows is seeded or a negative control and whose command
+  an envtest test runs as written; quickstart against cert-manager, then what the second
+  example adds; writing `target.yaml` for your own controller; reading a report; what to
+  change when botbox exits 2; a CI recipe for adopters, embedded from
+  `examples/ci/github-actions.yml`, and a test that runs botbox from `go test`, embedded
+  from `targets/toy-widget/botbox_test.go`, which the envtest tier runs (D81); a
+  one-line-per-invariant table linking to §6; a closing "Development and internals"
+  section that links to this document and to `docs/bug-matrix.md`. Only the Invariants
+  section and that closing section link here, and only the closing section cites a
+  section, a decision or a symbol of this document. The README names no milestone.
+  `make test` enforces these rules. The limits section opens with each limit no issue
+  tracks. Each other limit is a `- ` bullet that links its issue, with its other lines
+  indented two spaces, and nothing follows the list. Each line's text begins with a
+  letter, `[` or `(`. The section holds no HTML, footnote or link definition, and no
+  bullet holds code or a backslash, so nothing hides a limit or its link. A test refuses
+  any other line, lists the limits, holds each bullet to a listed limit, and holds the
+  README and this document to each. A reviewer checks that the opening states
+  no other limit and that each linked issue is open (§12). A fenced block preceded by
+  `<!-- embed: <path> -->` has content, excluding the two fence lines, byte-identical to
+  that file including its trailing newline; `<path>` is relative to the repository root;
+  `make test` enforces it. It also runs the cert-manager quickstart command against a
+  fake session and requires the block after it to hold what botbox prints.
 - **PRs.** Every PR description, issue, review and comment a Claude session posts begins
   with the line `🤖 Created by Claude 🤖` (CLAUDE.md). The description then names the
   milestone and the invariant/property IDs it touches, and carries a "Design change"
   section whenever it edits this document.
+- **Reference.** `docs/reference.md` gives every target.yaml key, sequence field, op and
+  fault field a row with its meaning, and each key its default. Tests hold the rows to the
+  code. The page embeds examples that set every key but `equal`, and every op and field.
+  The toy must pass the example sequence with each fault applied and no check left
+  unjudged.
 - **No flaky-test retries in CI.** A flaky harness test is a P0 bug in the harness.
 - **Seeds are always printed.** Every failure is reproducible from its sequence, and from
   its seed with the same botbox build and target declaration (§5.4).
@@ -1268,9 +1357,11 @@ the proxy; the `Image` launcher. Separate design addendum.
   lists. A reviewer reads the diff against §6, §8 and §11, citing the section it applies,
   and it may run the code: start a cluster, drive the binary, mutate a function and check
   that a test dies. It flags any import of controller-runtime outside the two places §11
-  allows, a README embed block that differs from its file, a post whose first line is not
-  `🤖 Created by Claude 🤖`, and a PR description that lacks the milestone, the IDs, or
-  the "Design change" section when this document changed. Reviewers never merge.
+  allows, a README embed block that differs from its file, a limit the README still states
+  though the PR lifts it or its issue is closed, a limit the README's opening states that
+  the test does not list, a post whose first line is not `🤖 Created by Claude 🤖`, and a
+  PR description that lacks the milestone, the IDs, or the "Design change" section when
+  this document changed. Reviewers never merge.
 - **Journal:** `docs/journal.md`, one entry per milestone, recording what the agents
   got right, what they got wrong, and which prompt, skill, or convention change fixed
   it. This is a first-class deliverable of the repo.
@@ -1328,7 +1419,9 @@ the proxy; the `Image` launcher. Separate design addendum.
    under `refreshPolicy: Periodic` writes such a field, and D40 answered it with a
    target-side setting. The question stands for a controller that offers no such
    setting.
-2. How is a cluster-scoped primary CR (ClusterIssuer-like) isolated per run?
+2. How is a cluster-scoped primary CR (ClusterIssuer-like), managed kind or fixture
+   isolated per run? Should botbox observe a child the target creates in another
+   namespace?
 3. Should a later phase run the target's admission webhook in envtest, so that generation
    can widen beyond `generate.mutate`?
 4. Is `InProcess` worth reviving for speed once envtest run time is measured?
@@ -1339,6 +1432,12 @@ the proxy; the `Image` launcher. Separate design addendum.
 6. G5 takes an op on one CR to change only that CR and what it owns (§6). Should it judge
    less for a controller whose CRs refer to one another, such as one CR delegating to
    another of its kind?
+7. Should a target declare its RBAC and run under it (§5.2)? The proxy could send a token
+   that botbox requests for a ServiceAccount of the run, bound to the target's Roles and
+   ClusterRoles. On envtest 1.37, such a token was refused a verb and a resource its Role
+   lacked, another namespace, and an impersonation of `system:masters`.
+8. What lets the README show a find in a real controller as a bug botbox found: upstream
+   acknowledging it, or a deterministic replay that a reading of upstream's code confirms?
 
 ## 15. Decision log
 
@@ -1705,7 +1804,7 @@ built from source and run as a black-box binary.
   for it there, while the target finds a moved CR by watching. `launch.binary` keeps the
   working directory as its base, because `launch.args` and the target's own relative paths
   resolve from there. The Runner checks a fault's resource when it applies the fault op,
-  not when the run starts, because a target may install its CRDs itself.
+  not when the run starts, because a target may install its CRDs itself. Amended by D78.
 - **D53 botbox restarts a target that exits once it has converged, and a crash loop is a
   G4.** Controllers are deployed to be restarted, and controller-runtime with leader
   election on exits on purpose when it loses its lease, which a fault can cause. A new
@@ -1724,10 +1823,15 @@ built from source and run as a black-box binary.
   `Example(seed)`, which rapid documents as fit only for examples and which promises nothing
   across versions. A draw also depends on the CRD schema, the sample, `generate` and
   `manages`. The Makefile, the README and the envtest tier rely on what particular seeds
-  draw. `pkg/generate` records the draws of those seeds for the toy, cert-manager and
-  external-secrets. A change to generation or to rapid that moves a draw fails until the
-  test is rerun with `-update`. The README tells CI to pin botbox to a commit and to replay
-  a failing `sequence.json` against the base branch.
+  draw. `pkg/generate` records the draws of those seeds for the toy, the toy with a label
+  fixture, cert-manager and external-secrets. It takes the example and kind tiers' seeds
+  from the Makefile, and the fixture envtest fails unless it draws what the record holds. A
+  change to generation or to rapid that moves a draw fails until the test is rerun with
+  `-update`. The README's quickstarts must run the Makefile's example seed, and the drawn
+  runs the README shows must start at that seed. Another test runs the README's cert-manager
+  quickstart command as `quickstart.sh` passes it on, and fails unless the README shows what
+  botbox prints. The README tells CI to pin botbox to a commit and to replay a failing
+  `sequence.json` against the base branch.
 - **D55 Generation keeps the CRD's own rules, judged by the API server's code.** The
   generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
   rule `self.maxUnavailable <= self.count`, 15 of 100 drawn sequences broke it, and the
@@ -1900,19 +2004,18 @@ built from source and run as a black-box binary.
   for the target's return (D69), the teardown, stopping the target and deleting the
   namespace. A target that exits while a fault excuses it is owed `T_settle` past its
   return, which can come `T_settle` after a restart whose backoff can reach 5 min (§5.1),
-  so each fault op allows one such exit. Faults that stopped are owed as long as they
-  lasted plus `T_settle` (§6), so each time faults stop, the deadline doubles what the run
-  had and allows another exit. Faults with no trigger stop together, at the teardown.
+  so from the first fault op on, each op allows one such exit (§6). Each op after it may
+  first wait up to 5 min for a restart, and then owe `T_settle` past a return that can
+  come `T_settle` after the op (§5.5). Faults that stopped are owed as long as they lasted
+  plus `T_settle` (§6), so each time faults stop, the deadline doubles what the run had
+  and allows another exit. Faults with no trigger stop together, at the teardown.
   Minimizing gets what the runs left plus 4m, so it may still stop early. At §6's
   timeouts, a create and an update get 3m50s, and ten drawn runs tens of minutes. A fault
-  that stops before the update raises the 3m50s to 24 min. Four such faults, each before
-  an update of its own, give 9 h, past GitHub Actions' 6 h job limit. botbox prints the
-  deadline, and a sequence with faults should set `--deadline`. An explicit `--deadline`
-  must be positive and is used as given. The derived deadline ends no run the Runner would
-  end on its own, unless a request hangs or a target exits more than once per fault op
-  while faults are active. The Runner owes each such exit `T_settle` past its return, so a
-  crash loop under an active fault runs until the deadline and exits 2 rather than failing
-  G4 (#79).
+  that stops before the update raises the 3m50s to 47 min. Four such faults, each before
+  an update of its own, give 26 h, past GitHub Actions' 6 h job limit. botbox
+  prints the deadline, and a sequence with faults should set `--deadline`. An explicit
+  `--deadline` must be positive and is used as given. The derived deadline ends no run the
+  Runner would end on its own, unless a request hangs.
 - **D65 G6 counts each namespace's requests apart.** Ten runs of external-secrets with
   no flags failed G6 at run 8: the controller repeated `create events` 34 times in 30 s.
   None went to the run namespace. envtest never finishes deleting a namespace, so each
@@ -2038,3 +2141,121 @@ built from source and run as a black-box binary.
   `sequence.json`, `kubeconfig` and `target.log`, under a summary that said the directory
   held a partial run of the minimized sequence. Naming the run each file came from was
   rejected, because a run that ends replaces the drawn run's recordings anyway.
+- **D73 One page lists every key, op and fault field, and tests keep it whole.** Some
+  keys and fault fields appeared only in the Go source. `docs/reference.md` gives each a
+  row, and tests hold the rows to the code (§11). A fault field value that tests something
+  else is refused, such as a `fraction` of 0, which botbox read as every request, an
+  `until.count` or `until.for` of 0, which botbox read as no trigger, or an `until.op` at
+  or before the fault's own op. Keeping the reference in DESIGN.md was rejected, because
+  DESIGN.md mixes the contract with internals, milestones and decisions.
+- **D74 botbox's help and messages need no design document.** `go install` ships no
+  DESIGN.md. Each command's help is generated from its flags and gives each flag's
+  default, and botbox's help gives the exit codes and `KUBEBUILDER_ASSETS`. A usage error
+  prints the command's synopsis. A message names the target.yaml key and its value rather
+  than a symbol of this document. G4 gives how long an expired wait ran beside the key
+  that bounds it, since a wait can run longer: `timeouts.delete` for a wait that a
+  deleted CR's deadline held open while the CR stayed, and `timeouts.settle` for the
+  rest. A G3 note names what deleted the CR where botbox can tell, because a run may
+  delete one CR twice. It names the first op that found the CR, because a lagging
+  Observer shows the CR to the op after the one that deleted it.
+  Splitting this document was rejected, because the hourly Routine reads it whole.
+- **D75 This document gives intent where a listing would drift.** §8.2 names `go doc`
+  rather than listing `Target`'s fields, and a test holds §11's synopsis to each
+  command's flags. botbox shrinks with its own pass, because rapid shrinks only inside
+  `rapid.Check` and shrinks the choices a sequence is drawn from rather than its ops.
+  Hand-written generators wait for a target that needs one.
+- **D76 The README says what botbox cannot test yet.** An adopter found each limit only
+  by trying, after the control plane had started. A section right after the intro states
+  them. Each limit an open issue tracks is a bullet that links it. The opening states those
+  no issue tracks: a target on the host, webhooks, and generation for a built-in primary
+  kind. A test lists each limit with words the README and this document say of it, so a
+  change that lifts one edits all three (§12). A fixed port is not listed, because the
+  message botbox exits 2 with names the fix in `launch.args`.
+- **D77 While a fault is active, each op owes only its first exit and the exits it lands
+  soon after, and no op lands while the target waits to restart.** B12, under a fault that
+  never stopped, crashed six times and ran until a 3m deadline. Each exit the fault excused
+  owed `T_settle` past a restart whose backoff doubled, so the wait after the update never
+  ended, and the derived deadline was 2h45m. Owing one exit during each op bounds each
+  wait, and a correct controller that loses its lease once during an op still gets
+  `T_settle` past its return before the next op. Once no fault is active, every exit a
+  fault excused is owed, and nothing excuses an exit past the faults' recovery. B12
+  therefore fails G4 in the teardown's recovery wait: a minute into `b12-fault.json`, and
+  5.5 min into the issue's sequence, whose fault lasts longer. Owing only the first exit
+  after each fault began was rejected. Under a fault that failed 80% of its lease updates,
+  the correct toy then saw a `deleteManaged` land while it waited out a later backoff, and
+  P1 failed. A fault excuses G4, not a property, so the Runner waits for such a restart
+  before each op whatever the faults. With that wait alone, the op lands as the toy
+  restarts, before it has won its lease back, and one of two runs still failed P1. Owing
+  the first exit during each op passed both. Where the toy exited twice during an op, the
+  next op still landed at the second restart and owed nothing past it, in 8 of 11 replays
+  that also delayed the toy's Widget patches. So an op that lands before the target has
+  had its time after an exit owes that exit too. That time ends within `2 × T_settle` of
+  the op, so the wait stays bounded. Counting that exit as the op's first was rejected,
+  because the op's own first exit, common under such a fault, would then owe nothing. The
+  derived deadline allows an exit per op from the first fault op on, and a backoff and
+  `T_settle` per op after it, so it ends no run the Runner would end on its own. The toy's
+  `--lease` elects a leader, so a fault on leases makes the correct toy exit as
+  controller-runtime does.
+- **D78 botbox knows the scope of every built-in kind.** Under D52, a built-in
+  cluster-scoped kind was refused only after envtest had started, or after the CRDs were
+  installed on a `--kubeconfig` cluster. A target with a cluster-scoped CRD and a
+  ClusterRole under `manages` heard only of the CRD. A cluster-scoped fixture that set a
+  namespace was told to drop the namespace. botbox now lists the scope of each kind a
+  Kubernetes 1.37 API server serves by default. An envtest test compares that list with
+  discovery on the pinned API server, so bumping that version means updating the list.
+  Loading the target judges those kinds and the kinds of `crds`. Discovery, before the
+  first run, judges the rest: a CRD that `crds` does not list, an aggregated API, or a
+  kind newer than the list. Each check refuses every cluster-scoped kind it knows in one
+  error. Only then does it refuse a fixture of a kind it knows to be namespaced that sets
+  a namespace. The run refuses such a fixture of any other kind rather than move it. A
+  target with kinds of both sorts hears of them in two errors. Merging them into one was
+  rejected, because the first check refuses before botbox installs CRDs on a
+  `--kubeconfig` cluster.
+- **D79 The README's first find is a seeded bug, and a hunt looks for real ones.** Every
+  find the README shows is planted, and a find in a real controller needs a build of
+  minutes. So the README says so, and its first find, after Install, replays the toy's B3.
+  An envtest test runs that command as written and matches what it prints. A real
+  controller may break under API faults, restarts mid-reconcile, changed or missing
+  fixtures and several CRs, and generation draws no fault. So each adopted example carries
+  hand-written families under `sequences/hunt/`, and `make hunt-<example>` runs them and
+  then drawn seeds until a time box runs out. Each family and seed runs in an invocation
+  of its own, because an invocation stops at its first failing run and a hunt keeps every
+  failure. A run the time box cut is no failure, but a find reported after the box's end
+  is one. The hunt runs a copy of `bin/botbox`, so a rebuild during a hunt changes
+  nothing. A family is checked in only once it passes the pinned controller. A run that
+  fails is a candidate until triage keeps it (§11). No agent files a candidate upstream,
+  because an issue there speaks for the maintainer. No pull request runs a hunt, because
+  one takes hours. A `create` of a CR that a `noSettle` `delete` removed, with no op since
+  that settles, is a configuration error (§7), because a finalizer may still hold the old
+  CR. Letting that create wait for the old CR was rejected, because a `recreate` already
+  does.
+- **D80 The README keeps botbox out of an operator's go.mod.** Minimal version selection
+  works on the whole module graph, so requiring botbox, or importing any of its packages,
+  raises a module to botbox's Go, Kubernetes and controller-runtime versions (D11). The
+  README installs botbox with `go install`, or with `examples/tools-module.sh`, which
+  pins it in a module of its own under `tools/botbox/`. A new directory leaves a `tools/`
+  package of the operator's own, a common place for one, in the operator's module. The
+  script sets the tools module's go line before `go get -tool`, so that a `go` before
+  1.24, which lacks the flag, switches first. Its `go get` and its build run with
+  `GOWORK=off`, because an operator's go.work would hold back that switch, take the
+  raised go line, and leave the tools module out of the build. Exporting `GOWORK` was
+  rejected, because a reader who pastes the script into a shell would keep it. It builds
+  `bin/botbox`, because `go -C tools/botbox tool botbox` runs botbox in `tools/botbox/`,
+  where `launch.binary` does not resolve. The envtest tier runs the script in a fresh
+  operator module with a `tools/` package and a go.work, as the oldest `go` the README
+  names, with botbox replaced by the checkout. It also checks that the `go` before that
+  one fails. The unit tier runs the script with `go` stubbed, and checks that it leaves
+  its shell's variables as they were. Each line of the script runs every time, so that
+  check sees each change to a variable the script names.
+- **D81 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
+  the README's `go test` recipe runs `bin/botbox`, which the tools module of D80 builds,
+  and fails the test on a non-zero exit. A build tag keeps it out of a plain
+  `go test ./...`. The README runs it with `-count=1`, because go test caches a pass and
+  cannot see a change to the controller or `target.yaml`. The recipe sets `--deadline`
+  half a minute before go test's timeout, in whole seconds, and fails the test when that
+  leaves botbox no time. A test that the timeout ends leaves botbox to die of SIGPIPE at
+  its next write, with its control plane still running. The envtest tier runs the recipe
+  from a copy of the repository's layout: on the toy with no bug, under B4, with a
+  timeout too short for its runs, with one that leaves botbox no time, and with no
+  controller to launch.
+  Hooks stay in-repo (D2).

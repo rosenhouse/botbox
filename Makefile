@@ -25,20 +25,24 @@ KIND_NODE_IMAGE ?= kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405
 # Each example draws its own sequences (DESIGN.md §10, M5). A pull request fixes
 # the seeds, so that a failing tier means the change under review and not a new
 # draw, and so a tier stays inside the ten minutes §11 budgets. The nightly
-# workflow draws its own seeds. Against cert-manager, seeds 23 to 27 draw a
-# second Certificate, a recreate and a restart between them, and the pinned
-# sequences delete the Certificate and its managed objects. Its negative
-# control runs seed 23 alone, which draws a single op and so costs no replay to
-# minimize.
+# workflow draws its own seeds. Against cert-manager, these seeds draw a second
+# Certificate, a recreate and a restart between them, and the pinned sequences
+# delete the Certificate and its managed objects. Its negative control runs the
+# first seed alone, which draws a single op and so costs no replay to minimize.
 EXAMPLE_SEED ?= 23
 EXAMPLE_RUNS ?= 5
 EXAMPLE_DEADLINE ?= 5m
 NIGHTLY_RUNS ?= 20
 NIGHTLY_DEADLINE ?= 30m
-# The kind tier draws the toy's seeds 1 to 3, which the golden draws record.
+# The golden draws record the toy's seeds the kind tier draws.
 KIND_SEED ?= 1
 KIND_RUNS ?= 3
 KIND_DEADLINE ?= 5m
+# A hunt runs an example's families and then its drawn seeds until the time
+# box, in minutes, runs out. Move HUNT_SEED on between hunts.
+HUNT_MINUTES ?= 120
+HUNT_RUNS ?= 1000
+HUNT_SEED ?= 1000
 
 # Project-local tool and asset directories. Both are git-ignored.
 LOCALBIN := $(CURDIR)/bin
@@ -85,6 +89,7 @@ help:
 	@echo "  cert-manager-crds                      Refetch the pinned cert-manager CRD release asset."
 	@echo "  cert-manager-version                   Print CERT_MANAGER_VERSION and nothing else."
 	@echo "  verify-cert-manager-pin                Fail if the example drifted from the pin."
+	@echo "  verify-cert-manager-port               Fail if port 9403, where cert-manager listens, is bound."
 	@echo "  external-secrets                       Clone and build the pinned external-secrets controller."
 	@echo "  external-secrets-crds                  Refetch the pinned external-secrets CRD release asset."
 	@echo "  external-secrets-version               Print EXTERNAL_SECRETS_VERSION and nothing else."
@@ -95,6 +100,8 @@ help:
 	@echo "  test-example-external-secrets          Run the external-secrets example and its negative control."
 	@echo "  test-example-nightly                   Run the cert-manager example on seeds botbox draws."
 	@echo "  test-example-external-secrets-nightly  Run the external-secrets example on seeds botbox draws."
+	@echo "  hunt-cert-manager                      Hunt for bugs in cert-manager for HUNT_MINUTES or HUNT_RUNS seeds."
+	@echo "  hunt-external-secrets                  Hunt for bugs in external-secrets for HUNT_MINUTES or HUNT_RUNS seeds."
 	@echo "  test-kind                              Run the toy through --kubeconfig against a throwaway kind cluster."
 	@echo "  kind-cluster                           Create the kind cluster test-kind runs against."
 	@echo "  test-kind-runs                         Run the toy against the cluster kind-cluster created."
@@ -374,6 +381,29 @@ test-example-external-secrets-nightly: verify-external-secrets-pin setup build
 	@examples/external-secrets/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE) \
 		|| { echo "test-example-external-secrets-nightly: a drawn seed failed."; exit 1; }
 	$(call external-secrets-control,test-example-external-secrets-nightly)
+
+# A hunt takes hours, so no pull request runs one. Each invocation writes under
+# botbox-out/hunt-<example>/, which keeps every failing run's evidence.
+HUNT = HUNT_MINUTES=$(HUNT_MINUTES) HUNT_RUNS=$(HUNT_RUNS) HUNT_SEED=$(HUNT_SEED) \
+	KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" examples/hunt.sh
+
+.PHONY: hunt-cert-manager
+hunt-cert-manager: verify-cert-manager-port verify-cert-manager-pin setup build cert-manager
+	$(HUNT) examples/cert-manager/target.yaml examples/cert-manager/sequences/hunt botbox-out/hunt-cert-manager
+
+# cert-manager's healthz port is fixed, so its runs cannot overlap.
+.PHONY: verify-cert-manager-port
+verify-cert-manager-port:
+	@if ! command -v lsof >/dev/null; then \
+		echo "lsof is missing, so nothing checked whether port 9403 is free." >&2; \
+	elif lsof -nP -iTCP:9403 -sTCP:LISTEN >/dev/null; then \
+		echo "port 9403 is bound. cert-manager listens there, so its runs cannot overlap." >&2; \
+		exit 1; \
+	fi
+
+.PHONY: hunt-external-secrets
+hunt-external-secrets: verify-external-secrets-pin setup build external-secrets
+	$(HUNT) examples/external-secrets/target.yaml examples/external-secrets/sequences/hunt botbox-out/hunt-external-secrets
 
 $(KIND):
 	GOBIN=$(dir $@) go install sigs.k8s.io/kind@$(KIND_VERSION)

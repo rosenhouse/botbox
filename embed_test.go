@@ -34,12 +34,17 @@ func TestMarkdownEmbedsMatchTheirFiles(t *testing.T) {
 	}
 }
 
-// The README shows the files an adopter copies, and so cannot drift from them.
-func TestREADMEEmbedsWhatAnAdopterCopies(t *testing.T) {
-	doc := readFile(t, "README.md")
-	for _, path := range []string{"examples/cert-manager/quickstart.sh", "examples/ci/github-actions.yml"} {
-		if marker := embedMarker + " " + path + " -->"; !strings.Contains(doc, marker) {
-			t.Errorf("README.md does not embed %s: no %q", path, marker)
+// A page shows the files it describes, and so cannot drift from them.
+func TestPagesEmbedTheFilesTheyShow(t *testing.T) {
+	for page, paths := range map[string][]string{
+		"README.md":         {"examples/cert-manager/quickstart.sh", "examples/ci/github-actions.yml", "examples/tools-module.sh", "targets/toy-widget/botbox_test.go"},
+		"docs/reference.md": {"docs/reference/target.yaml", "docs/reference/sequence.json"},
+	} {
+		doc := readFile(t, page)
+		for _, path := range paths {
+			if marker := embedMarker + " " + path + " -->"; !strings.Contains(doc, marker) {
+				t.Errorf("%s does not embed %s: no %q", page, path, marker)
+			}
 		}
 	}
 }
@@ -153,6 +158,39 @@ func fencedBlock(lines []string) (string, bool) {
 		return strings.Join(content[:end], ""), true
 	}
 	return "", false
+}
+
+func TestFencedBlocksReturnsEachBlockInOrder(t *testing.T) {
+	doc := "text\n\n```sh\nmake\n```\n\nmore\n\n````\n```\nnested\n````\n"
+	if got, want := fencedBlocks(doc), []string{"make\n", "```\nnested\n"}; !slices.Equal(got, want) {
+		t.Errorf("fencedBlocks returned %q, not %q", got, want)
+	}
+}
+
+// A fence that never closes runs to the end of the document.
+func TestFencedBlocksFindsNoBlockInsideAnUnclosedOne(t *testing.T) {
+	if got := fencedBlocks("````\n```\ninside\n```\n"); len(got) != 0 {
+		t.Errorf("fencedBlocks returned %q from inside a block that never closes", got)
+	}
+}
+
+// fencedBlocks returns the content of each fenced block in doc.
+func fencedBlocks(doc string) []string {
+	var blocks []string
+	lines := strings.SplitAfter(doc, "\n")
+	for i := 0; i < len(lines); i++ {
+		fence := openingFence(lines[i])
+		if fence == "" {
+			continue
+		}
+		end := slices.IndexFunc(lines[i+1:], func(line string) bool { return closesFence(line, fence) })
+		if end < 0 {
+			break
+		}
+		blocks = append(blocks, strings.Join(lines[i+1:i+1+end], ""))
+		i += end + 1
+	}
+	return blocks
 }
 
 // openingFence returns the run of backticks a fenced block opens with, or the

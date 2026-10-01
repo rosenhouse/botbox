@@ -202,6 +202,11 @@ type Wait struct {
 	Converged bool
 }
 
+// checkpoint is where the wait after op ended.
+func (w Wait) checkpoint(op int) Checkpoint {
+	return Checkpoint{At: w.Window.End, Began: w.Window.Start, Op: op, Converged: w.Converged}
+}
+
 // Checkpoint is where the checks ran (DESIGN.md §4).
 type Checkpoint struct {
 	// At is where the settle wait ended, or where the teardown's deletion
@@ -214,6 +219,9 @@ type Checkpoint struct {
 	// Converged is whether that wait converged. At the teardown's checkpoint
 	// it is whether the namespace came clean within the deletion window.
 	Converged bool
+	// Stayed marks a recreate's wait for its old CR to go, which ended with
+	// the CR still there.
+	Stayed bool
 }
 
 // Window is a stretch of a run's time.
@@ -436,19 +444,26 @@ func (r *runner) applyOps(ctx context.Context) error {
 // has stopped ends the run here, because the op would otherwise be applied to
 // nothing (DESIGN.md §5.5).
 func (r *runner) applyOp(ctx context.Context, op Op) error {
+	r.expireFaults(op.Index)
+	if err := r.awaitRestart(ctx); err != nil {
+		return err
+	}
 	if status := r.h.targetStatus(); !status.Running {
 		return r.targetStopped(ctx, status)
 	}
-	r.expireFaults(op.Index)
 	applied := AppliedOp{Op: op, At: r.now()}
 	if op.Type.OnCR() {
 		applied.CR = op.crName(r.target.Sample.GetName())
 	}
+	// The op is on the timeline while it acts, so that an exit during it is
+	// the op's.
+	r.timeline.Ops = append(r.timeline.Ops, applied)
+	landed := len(r.timeline.Ops) - 1
 	var err error
 	if applied.Restored, err = r.restoreFixtures(ctx, op.Index); err == nil {
 		applied.Deleted, err = r.apply(ctx, op, applied.CR)
 	}
-	r.timeline.Ops = append(r.timeline.Ops, applied)
+	r.timeline.Ops[landed] = applied
 	if stayed := (*crStayed)(nil); errors.As(err, &stayed) {
 		return r.judgeStayed(ctx, op, stayed)
 	}
@@ -457,6 +472,15 @@ func (r *runner) applyOp(ctx context.Context, op Op) error {
 	}
 	if op.Settles() {
 		return r.settle(ctx, op)
+	}
+	return nil
+}
+
+// awaitRestart waits for the target to restart after an exit a fault excused.
+func (r *runner) awaitRestart(ctx context.Context) error {
+	now := r.now()
+	if restart := r.asOf(now).PendingRestart(now); !restart.IsZero() {
+		return r.h.sleep(ctx, restart.Sub(now))
 	}
 	return nil
 }
@@ -578,7 +602,9 @@ func (s *crStayed) Error() string {
 // judgeStayed checkpoints where a recreate's wait for its CR ended. A CR that
 // no check reports there is a harness error, since the op cannot go on.
 func (r *runner) judgeStayed(ctx context.Context, op Op, stayed *crStayed) error {
-	if err := r.judge(ctx, op.Index, stayed.wait, invariant.Input.Excused); err != nil || r.violation != nil {
+	checkpoint := stayed.wait.checkpoint(op.Index)
+	checkpoint.Stayed = true
+	if err := r.judge(ctx, checkpoint, invariant.Input.Excused); err != nil || r.violation != nil {
 		return err
 	}
 	return stayed
@@ -622,7 +648,7 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 		return err
 	}
 	r.timeline.Ops[len(r.timeline.Ops)-1].Settled = &wait
-	return r.judge(ctx, op.Index, wait, invariant.Input.Excused)
+	return r.judge(ctx, wait.checkpoint(op.Index), invariant.Input.Excused)
 }
 
 // wait waits up to T_settle for the target to converge, or longer while it is
@@ -666,16 +692,15 @@ func (r *runner) readExits() { r.timeline.Exits = r.h.exits() }
 
 // judge checkpoints where a settle wait ended. A wait that expired unexcused
 // is a G4 violation, which ends the run.
-func (r *runner) judge(ctx context.Context, op int, wait Wait, excused func(invariant.Input, invariant.Checkpoint) bool) error {
-	if !wait.Converged {
+func (r *runner) judge(ctx context.Context, checkpoint Checkpoint, excused func(invariant.Input, invariant.Checkpoint) bool) error {
+	if !checkpoint.Converged {
 		// A target that is gone cannot converge, so that is the harness's
 		// failure to report, not the target's to answer for.
 		if status := r.h.targetStatus(); !status.Running {
 			return r.targetStopped(ctx, status)
 		}
 	}
-	checkpoint := Checkpoint{At: wait.Window.End, Began: wait.Window.Start, Op: op, Converged: wait.Converged}
-	expired := !wait.Converged && !excused(r.asOf(checkpoint.At), engineCheckpoint(checkpoint))
+	expired := !checkpoint.Converged && !excused(r.asOf(checkpoint.At), engineCheckpoint(checkpoint))
 	return r.checkpoint(checkpoint, expired)
 }
 
@@ -891,7 +916,7 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 		r.timeline.Recovery = &wait
 		// The faults are cleared, and the wait ran until the time they left
 		// the target was up, so no fault excuses it.
-		err = r.judge(ctx, Recovery, wait, invariant.Input.DeletionOverdue)
+		err = r.judge(ctx, wait.checkpoint(Recovery), invariant.Input.DeletionOverdue)
 	}
 	if err != nil {
 		r.failed = true
@@ -1012,12 +1037,16 @@ func (r *runner) teardownBudget() time.Duration {
 
 // spec is the fault in the form the proxy injects (DESIGN.md §5.2).
 func (f Fault) spec() proxy.FaultSpec {
+	var fraction float64 // The proxy reads 0 as every request.
+	if f.Match.Fraction != nil {
+		fraction = *f.Match.Fraction
+	}
 	return proxy.FaultSpec{
 		Match: proxy.RequestMatcher{
 			Verb:     f.Match.Verb,
 			Resource: f.Match.Resource,
 			Name:     f.Match.Name,
-			Fraction: f.Match.Fraction,
+			Fraction: fraction,
 		},
 		Action: f.Action.action(),
 		Until:  proxy.Trigger{Count: f.Until.Count, For: time.Duration(f.Until.For)},

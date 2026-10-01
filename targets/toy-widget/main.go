@@ -36,11 +36,12 @@ func run(args []string, out io.Writer) error {
 	flags := flag.NewFlagSet("toy-widget", flag.ContinueOnError)
 	flags.SetOutput(io.Discard) // main reports what Parse rejects; --help prints below.
 	kubeconfig := flags.String("kubeconfig", "", "path to a kubeconfig file; defaults to $KUBECONFIG, then to the in-cluster configuration")
-	bugID := flags.Int("bug", 0, fmt.Sprintf("seeded bug to run, 0 to %d; 0 is the correct controller (DESIGN.md §9.1)", controller.MaxBug))
+	bugID := flags.Int("bug", 0, fmt.Sprintf("seeded bug to run, 0 to %d; 0 is the correct controller", controller.MaxBug))
 	metricsAddress := flags.String("metrics-bind-address", "0", "address the metrics server binds to; 0 disables it")
 	resync := flags.Duration("resync", 0, "requeue every Widget this often and write its status each time; 0 disables it")
 	cleanupDelay := flags.Duration("cleanup-delay", 0, "how long a deleted Widget keeps its finalizer before the controller cleans up")
 	labelFrom := flags.String("label-from", "", "a ConfigMap in the Widget's namespace whose data.label each child copies")
+	lease := flags.Duration("lease", 0, "elect a leader through a Lease in $WATCH_NAMESPACE that lasts this long, and exit on losing it; 0 elects none")
 	if err := flags.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			flags.SetOutput(out)
@@ -58,6 +59,9 @@ func run(args []string, out io.Writer) error {
 	if *cleanupDelay < 0 {
 		return fmt.Errorf("--cleanup-delay=%v: want 0 or more", *cleanupDelay)
 	}
+	if *lease < 0 {
+		return fmt.Errorf("--lease=%v: want 0 or more", *lease)
+	}
 
 	ctrl.SetLogger(zap.New(zap.UseDevMode(true)))
 
@@ -69,7 +73,7 @@ func run(args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	manager, err := ctrl.NewManager(config, managerOptions(scheme, *metricsAddress))
+	manager, err := ctrl.NewManager(config, managerOptions(scheme, *metricsAddress, *lease))
 	if err != nil {
 		return fmt.Errorf("creating the manager: %w", err)
 	}
@@ -93,15 +97,22 @@ func run(args []string, out io.Writer) error {
 }
 
 // managerOptions confines the cache to the namespace WATCH_NAMESPACE names,
-// where it is set, as an operator-sdk operator does.
-func managerOptions(scheme *runtime.Scheme, metricsAddress string) ctrl.Options {
+// where it is set, as an operator-sdk operator does. A lease elects a leader
+// there, and the manager stops once it loses the lease.
+func managerOptions(scheme *runtime.Scheme, metricsAddress string, lease time.Duration) ctrl.Options {
+	namespace := os.Getenv("WATCH_NAMESPACE")
 	options := ctrl.Options{
 		Scheme:         scheme,
 		Metrics:        metricsserver.Options{BindAddress: metricsAddress},
-		LeaderElection: false,
+		LeaderElection: lease > 0,
 	}
-	if namespace := os.Getenv("WATCH_NAMESPACE"); namespace != "" {
+	if namespace != "" {
 		options.Cache.DefaultNamespaces = map[string]cache.Config{namespace: {}}
+	}
+	if lease > 0 {
+		renew, retry := lease*2/3, lease/5
+		options.LeaderElectionID, options.LeaderElectionNamespace = "toy-widget", namespace
+		options.LeaseDuration, options.RenewDeadline, options.RetryPeriod = &lease, &renew, &retry
 	}
 	return options
 }

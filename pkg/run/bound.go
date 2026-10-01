@@ -13,9 +13,8 @@ import (
 const stopBudget = launch.StopWithin + namespaceDeletionBudget
 
 // Bound is the longest the Runner's waits can make the runs of the sequences
-// take, one after another. A target that exits more than once per fault op
-// while faults are active can outlast it. A bound too long for a Duration is
-// the longest Duration.
+// take, one after another. A bound too long for a Duration is the longest
+// Duration.
 func Bound(t *target.Target, sequences ...Sequence) time.Duration {
 	// Faults double the bound, so it is added up in float64, which does not
 	// overflow.
@@ -32,8 +31,14 @@ func Bound(t *target.Target, sequences ...Sequence) time.Duration {
 func bound(timeouts target.Timeouts, s Sequence) float64 {
 	settle, deletion := float64(timeouts.Settle), float64(timeouts.Delete)
 	waits := float64(defaultNamespaceDefaultsWithin)
-	faults, stops, untriggered := 0, 0, false
+	faults, stops, exits, untriggered := 0, 0, 0, false
 	for _, op := range s.Ops {
+		if faults > 0 {
+			// The op may first wait for the target to restart. The target is
+			// then owed T_settle past a return that can come T_settle after
+			// the op, T_settle more than a settle wait.
+			waits += float64(launch.MaxBackoff) + settle
+		}
 		switch op.Type {
 		case OpDelete, OpDeleteFixture:
 			waits += deletion
@@ -53,6 +58,9 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 				stops++
 			}
 		}
+		if faults > 0 {
+			exits++
+		}
 		if op.Settles() {
 			waits += settle
 		}
@@ -61,11 +69,12 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 	if untriggered {
 		stops++
 	}
-	// Each fault allows an exit, owed T_settle past a return that can come
-	// T_settle after a restart that can take MaxBackoff. Faults that stop are
-	// owed as long as they lasted and T_settle, and allow another exit.
+	// From the first fault on, each op allows an exit, owed T_settle past a
+	// return that can come T_settle after a restart that can take MaxBackoff.
+	// Faults that stop are owed as long as they lasted and T_settle, and allow
+	// another exit.
 	exit := float64(launch.MaxBackoff) + 2*settle
-	waits += float64(faults) * exit
+	waits += float64(exits) * exit
 	for range stops {
 		waits = 2*waits + settle + exit
 	}

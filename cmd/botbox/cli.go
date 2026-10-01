@@ -40,14 +40,6 @@ const (
 	minimizing = 4 * time.Minute
 )
 
-const usage = `botbox exercises a controller against the generic invariants of DESIGN.md §6.
-
-  botbox run    --target <yaml> [--runs N] [--seed S] [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... [<sequence.json>...]
-  botbox replay --target <yaml> [--out DIR] [--deadline D] [--junit FILE] [--kubeconfig FILE] [--launch-arg ARG]... <sequence.json>
-  botbox matrix --target <yaml> --sequences <dir> [--out FILE] [--deadline D] [--kubeconfig FILE] [--launch-arg ARG]...
-  botbox version
-`
-
 const (
 	// shrinkDir holds the replays of a shrink pass, which the run directory
 	// keeps none of (DESIGN.md §11).
@@ -133,13 +125,19 @@ func exitStatus(ctx context.Context, code int) int {
 }
 
 func (c *cli) dispatch(ctx context.Context, args []string) int {
+	if len(args) == 0 {
+		fmt.Fprint(c.stderr, help(""))
+		return exitError
+	}
 	opts, paths, err := parse(args)
 	if errors.Is(err, flag.ErrHelp) {
-		fmt.Fprint(c.stdout, usage)
+		fmt.Fprint(c.stdout, help(opts.command))
 		return exitOK
 	}
 	if err != nil {
-		return c.failUnrecorded(opts, nil, err)
+		code := c.failUnrecorded(opts, nil, err)
+		fmt.Fprint(c.stderr, usage(opts.command))
+		return code
 	}
 	switch opts.command {
 	case "version":
@@ -679,24 +677,21 @@ func (o options) invocationSeed(first run.Sequence) int64 {
 	return first.Seed
 }
 
+// parse reads an invocation of at least a command. Its errors are usage
+// errors, and opts.command names the command whose usage they need, if any.
 func parse(args []string) (options, []string, error) {
-	if len(args) == 0 {
-		return options{}, nil, errors.New("no command\n" + usage)
+	if asksForHelp(args[0]) {
+		return parseHelp(args[1:])
 	}
 	opts := options{command: args[0]}
-	switch opts.command {
-	case "help", "-h", "--help":
-		return opts, nil, flag.ErrHelp
-	case "version":
-		return opts, nil, nil
-	case "run", "replay", "matrix":
-	default:
-		return opts, nil, fmt.Errorf("%q is not a botbox command\n%s", opts.command, usage)
+	c, found := lookup(opts.command)
+	if !found {
+		return opts, nil, fmt.Errorf("%q is not a botbox command", opts.command)
 	}
 
 	flags := opts.flags()
 	if err := flags.Parse(args[1:]); err != nil {
-		return opts, nil, err
+		return opts, nil, twoDashes(err)
 	}
 	flags.Visit(func(f *flag.Flag) {
 		opts.seedGiven = opts.seedGiven || f.Name == "seed"
@@ -705,8 +700,22 @@ func parse(args []string) (options, []string, error) {
 	})
 
 	sequences := flags.Args()
-	if opts.target == "" {
-		return opts, nil, errors.New("the --target flag is required")
+	if misplaced, found := misplacedFlag(args[1:], sequences); found {
+		switch {
+		case asksForHelp(misplaced):
+			return opts, nil, flag.ErrHelp
+		case misplaced == "--":
+			return opts, nil, fmt.Errorf("-- follows %s, and it goes before the first sequence file", sequences[0])
+		}
+		return opts, nil, fmt.Errorf("%s follows %s, and flags go first", misplaced, sequences[0])
+	}
+	for _, name := range c.required {
+		if flags.Lookup(name).Value.String() == "" {
+			return opts, nil, fmt.Errorf("the --%s flag is required", name)
+		}
+	}
+	if opts.command == "version" && len(sequences) > 0 {
+		return opts, nil, fmt.Errorf("version takes no argument: %s", strings.Join(sequences, " "))
 	}
 	if opts.deadlineGiven && opts.deadline <= 0 {
 		return opts, nil, fmt.Errorf("--deadline is %s, and an invocation needs time to run: leave the flag out, and botbox derives one", opts.deadline)
@@ -717,17 +726,55 @@ func parse(args []string) (options, []string, error) {
 		}
 	}
 	if opts.command == "replay" && len(sequences) != 1 {
-		return opts, nil, fmt.Errorf("botbox replay takes one sequence file, and %d were given", len(sequences))
+		return opts, nil, fmt.Errorf("replay takes one sequence file, and %d were given", len(sequences))
 	}
-	if opts.command == "matrix" {
-		if opts.sequences == "" {
-			return opts, nil, errors.New("the --sequences flag is required: it holds one sequence per seeded bug")
-		}
-		if len(sequences) > 0 {
-			return opts, nil, fmt.Errorf("botbox matrix takes no sequence file, and %d were given: it runs the --sequences directory", len(sequences))
-		}
+	if opts.command == "matrix" && len(sequences) > 0 {
+		return opts, nil, fmt.Errorf("matrix takes no sequence file, since it runs the --sequences directory: %s", strings.Join(sequences, " "))
 	}
 	return opts, sequences, nil
+}
+
+// singleDash is where an error of the flag package spells a flag with one dash.
+var singleDash = regexp.MustCompile(`((?:defined|argument): |for flag )-`)
+
+// twoDashes spells the flag in a parse error with two dashes, as the help does.
+func twoDashes(err error) error {
+	if errors.Is(err, flag.ErrHelp) {
+		return err
+	}
+	return errors.New(singleDash.ReplaceAllString(err.Error(), "$1--"))
+}
+
+// misplacedFlag is a flag after the first operand, where parsing stopped.
+// Operands after a "--" are files, whatever they look like.
+func misplacedFlag(args, operands []string) (string, bool) {
+	if len(operands) < len(args) && args[len(args)-len(operands)-1] == "--" {
+		return "", false
+	}
+	for _, operand := range operands {
+		if len(operand) > 1 && strings.HasPrefix(operand, "-") {
+			return operand, true
+		}
+	}
+	return "", false
+}
+
+func asksForHelp(arg string) bool {
+	return slices.Contains([]string{"help", "-h", "--h", "-help", "--help"}, arg)
+}
+
+// parseHelp reads the operands of botbox help.
+func parseHelp(operands []string) (options, []string, error) {
+	switch {
+	case len(operands) == 0 || len(operands) == 1 && asksForHelp(operands[0]):
+		return options{}, nil, flag.ErrHelp
+	case len(operands) > 1:
+		return options{}, nil, fmt.Errorf("help takes one command, and %d were given", len(operands))
+	}
+	if _, found := lookup(operands[0]); !found {
+		return options{}, nil, fmt.Errorf("%q is not a botbox command", operands[0])
+	}
+	return options{command: operands[0]}, nil, flag.ErrHelp
 }
 
 // validateRuns holds --runs to the sequences botbox draws itself: named
@@ -745,22 +792,28 @@ func (o options) validateRuns(named int) error {
 func (o *options) flags() *flag.FlagSet {
 	flags := flag.NewFlagSet("botbox "+o.command, flag.ContinueOnError)
 	flags.SetOutput(io.Discard) // The caller prints what Parse returns.
-	flags.StringVar(&o.target, "target", "", "the target.yaml to exercise")
-	flags.StringVar(&o.kubeconfig, "kubeconfig", "", "an existing cluster to run against, instead of envtest")
-	flags.DurationVar(&o.deadline, "deadline", 0, "how long the invocation may take")
-	flags.Var((*stringList)(&o.launchArgs), "launch-arg", "append an argument to the target's launch.args (repeatable)")
-	if o.command == "matrix" {
-		flags.StringVar(&o.out, "out", defaultMatrix, "the Markdown file to write")
-		flags.StringVar(&o.sequences, "sequences", "", "the directory holding one b<id>.json per seeded bug")
-	} else {
-		flags.StringVar(&o.out, "out", defaultOut, "where failing runs are written")
+	if o.command == "version" {
+		return flags
 	}
-	if o.command != "matrix" {
-		flags.StringVar(&o.junit, "junit", "", "a JUnit XML file to write each run's outcome to")
+	flags.StringVar(&o.target, "target", "", "Exercise the controller that this target.yaml `file` declares.")
+	flags.StringVar(&o.kubeconfig, "kubeconfig", "",
+		"Run against the cluster this kubeconfig `file` names, rather than an API server botbox starts.")
+	flags.DurationVar(&o.deadline, "deadline", 0,
+		"Stop the invocation after `duration`, such as 10m. Without it, botbox derives a deadline from the target's timeouts and prints it.")
+	flags.Var((*stringList)(&o.launchArgs), "launch-arg",
+		"Append `arg` to the target's launch.args. Repeat the flag to append more, and the target sees them in order.")
+	if o.command == "matrix" {
+		flags.StringVar(&o.out, "out", defaultMatrix, "Write the matrix to `file`.")
+		flags.StringVar(&o.sequences, "sequences", "", "Run the b<id>.json sequence of each seeded bug in `dir`.")
+	} else {
+		flags.StringVar(&o.out, "out", defaultOut,
+			"Write the invocation's summary, and each failing run's report and recordings, under `dir`.")
+		flags.StringVar(&o.junit, "junit", "", "Also write each run's outcome to `file` as JUnit XML.")
 	}
 	if o.command == "run" {
-		flags.IntVar(&o.runs, "runs", defaultRuns, "how many sequences to draw and run")
-		flags.Int64Var(&o.seed, "seed", 0, "the seed the first sequence is drawn from, which the output directory is named after")
+		flags.IntVar(&o.runs, "runs", defaultRuns, "Draw and run `n` sequences.")
+		flags.Int64Var(&o.seed, "seed", 0,
+			"Draw the first sequence from seed `n`, and each later one from the next seed. Without it, botbox picks a seed and prints it.")
 	}
 	return flags
 }
@@ -857,8 +910,8 @@ func openSession(opts options, t *target.Target) (session, error) {
 	return &clusterSession{Cluster: started}, nil
 }
 
-// vet refuses the kinds the cluster serves at cluster scope, which the target's
-// CRDs cannot show for a built-in kind.
+// vet judges the scopes that loading the target could not, such as that of a
+// kind whose CRD the target does not list.
 func (s *clusterSession) vet(t *target.Target) error {
 	mapper, err := cluster.NewRESTMapper(s.Config())
 	if err != nil {

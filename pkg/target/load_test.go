@@ -517,6 +517,48 @@ fixtures: [fixtures.yaml]
 	}
 }
 
+func TestLoadRefusesBuiltInClusterScopedKindsBesideThoseItsCRDsDefine(t *testing.T) {
+	path := writeTarget(t, minimalTarget+`crds: [crds/]
+manages: [v1/ConfigMap, rbac.authorization.k8s.io/v1/ClusterRole, example.com/v1/ClusterRole]
+fixtures: [webhook.yaml]
+`, map[string]string{
+		"widget.yaml":    sampleWidget,
+		"crds/toys.yaml": clusterScopedCRDs,
+		"webhook.yaml":   "apiVersion: admissionregistration.k8s.io/v1\nkind: ValidatingWebhookConfiguration\nmetadata:\n  name: widget-validator\n",
+	})
+
+	_, err := target.Load(path)
+
+	if err == nil {
+		t.Fatal("Load accepted cluster-scoped kinds.")
+	}
+	for _, want := range []string{"primary toy.botbox/v1/Widget", "managed rbac.authorization.k8s.io/v1/ClusterRole",
+		"fixture admissionregistration.k8s.io/v1/ValidatingWebhookConfiguration widget-validator"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load returned %q, which does not name %q.", err, want)
+		}
+	}
+	for _, namespaced := range []string{"ConfigMap", "example.com"} {
+		if strings.Contains(err.Error(), namespaced) {
+			t.Errorf("Load returned %q, which names %s.", err, namespaced)
+		}
+	}
+}
+
+func TestLoadRefusesAClusterScopedFixtureBeforeAnyFixtureNamespace(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"fixtures: [secret.yaml, role.yaml]\n", map[string]string{
+		"widget.yaml": sampleWidget,
+		"secret.yaml": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: ca\n  namespace: default\n",
+		"role.yaml":   "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: reader\n  namespace: default\n",
+	})
+
+	_, err := target.Load(path)
+
+	if err == nil || !strings.Contains(err.Error(), "cluster-scoped kinds: the fixture rbac.authorization.k8s.io/v1/ClusterRole reader") {
+		t.Errorf("Load returned %v, want it to refuse the cluster-scoped ClusterRole.", err)
+	}
+}
+
 func TestLoadReadsEveryManifestExtensionOfACRDDirectory(t *testing.T) {
 	for _, file := range []string{"crds/widget.json", "crds/widget.yml"} {
 		path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{
@@ -533,6 +575,18 @@ func TestLoadReadsEveryManifestExtensionOfACRDDirectory(t *testing.T) {
 	}
 }
 
+func TestLoadLeavesACRDWithoutAScopeToTheCluster(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{
+		"widget.yaml": sampleWidget,
+		"crds/widget.yaml": "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n" +
+			"spec:\n  group: toy.botbox\n  names: {kind: Widget, plural: widgets}\n",
+	})
+
+	if _, err := target.Load(path); err != nil {
+		t.Errorf("Load refused a kind whose CRD sets no scope: %v", err)
+	}
+}
+
 func TestLoadRejectsACRDFileThatIsNotYAML(t *testing.T) {
 	path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{
 		"widget.yaml":   sampleWidget,
@@ -546,21 +600,37 @@ func TestLoadRejectsACRDFileThatIsNotYAML(t *testing.T) {
 	}
 }
 
-func TestLoadRefusesAFixtureThatNamesANamespace(t *testing.T) {
-	path := writeTarget(t, minimalTarget+"fixtures: [issuer.yaml]\n", map[string]string{
+func TestLoadRefusesAFixtureOfANamespacedKindThatNamesANamespace(t *testing.T) {
+	for _, kind := range []struct{ apiVersion, kind string }{{"v1", "Secret"}, {"toy.botbox/v1", "Thing"}} {
+		path := writeTarget(t, minimalTarget+"crds: [crds/]\nfixtures: [config.yaml, issuer.yaml, more.yaml]\n", map[string]string{
+			"widget.yaml": sampleWidget,
+			"crds/thing.yaml": "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n" +
+				"spec:\n  group: toy.botbox\n  names: {kind: Thing, plural: things}\n  scope: Namespaced\n",
+			"config.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\n",
+			"more.yaml":   "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: more\n",
+			"issuer.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: other\n---\n" +
+				"apiVersion: " + kind.apiVersion + "\nkind: " + kind.kind + "\nmetadata:\n  name: ca\n  namespace: default\n",
+		})
+
+		_, err := target.Load(path)
+
+		want := "fixture " + filepath.Join(filepath.Dir(path), "issuer.yaml") + ": the fixture " + kind.apiVersion + "/" + kind.kind +
+			" ca sets metadata.namespace default; drop it," +
+			" because botbox creates fixtures in each run's own namespace, and the target may look for this one in default"
+		if err == nil || !strings.HasSuffix(err.Error(), want) {
+			t.Errorf("Load returned %v, want it to end %q.", err, want)
+		}
+	}
+}
+
+func TestLoadLeavesAFixtureOfAKindItDoesNotKnowToTheCluster(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"fixtures: [gadget.yaml]\n", map[string]string{
 		"widget.yaml": sampleWidget,
-		"issuer.yaml": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: ca\n  namespace: default\n",
+		"gadget.yaml": "apiVersion: toy.botbox/v1\nkind: Gadget\nmetadata:\n  name: shared\n  namespace: default\n",
 	})
 
-	_, err := target.Load(path)
-
-	if err == nil {
-		t.Fatal("Load accepted a fixture that names a namespace.")
-	}
-	for _, want := range []string{"issuer.yaml", "ca", "metadata.namespace", "drop it", "the target may look for this one in default"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("Load returned %q, which does not say %q.", err, want)
-		}
+	if _, err := target.Load(path); err != nil {
+		t.Errorf("Load refused a fixture whose scope only the cluster knows: %v", err)
 	}
 }
 

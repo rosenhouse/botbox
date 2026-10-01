@@ -109,7 +109,7 @@ func engineCheckpoints(checkpoints []Checkpoint) []invariant.Checkpoint {
 }
 
 func engineCheckpoint(checkpoint Checkpoint) invariant.Checkpoint {
-	return invariant.Checkpoint{Op: checkpoint.Op, Began: checkpoint.Began, Time: checkpoint.At, Settle: settleResult(checkpoint)}
+	return invariant.Checkpoint{Op: checkpoint.Op, Began: checkpoint.Began, Time: checkpoint.At, Settle: settleResult(checkpoint), Stayed: checkpoint.Stayed}
 }
 
 // settleResult reads a checkpoint's Converged. The teardown's checkpoint

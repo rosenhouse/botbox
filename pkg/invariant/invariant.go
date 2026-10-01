@@ -98,6 +98,9 @@ type Checkpoint struct {
 	Began  time.Time
 	Time   time.Time
 	Settle SettleResult
+	// Stayed marks a recreate's wait for its old CR to go, which ended with
+	// the CR still there. timeouts.delete bounds that wait.
+	Stayed bool
 }
 
 // FaultWindow is a period in which a fault was active (DESIGN.md §5.2). Every
@@ -364,6 +367,17 @@ func (in Input) opBy(t time.Time) Op {
 	var last Op
 	for _, op := range in.Ops {
 		if !op.Time.After(t) {
+			last = op
+		}
+	}
+	return last
+}
+
+// opBefore returns the last op applied before t.
+func (in Input) opBefore(t time.Time) Op {
+	var last Op
+	for _, op := range in.Ops {
+		if op.Time.Before(t) {
 			last = op
 		}
 	}

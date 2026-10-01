@@ -5,6 +5,29 @@ Botbox is a tool to find bugs in your Kubernetes controller.
 It fakes the API server, injecting various events (changes to resources, faults, restarts).  It then
 checks if certain expectations hold, including custom properties you can specify.
 
+## What botbox cannot test yet
+
+botbox runs your controller on your machine, not in a Pod. Your controller cannot reach a Pod
+or a Service from there, and no admission or conversion webhook of yours runs. Write in your
+[`sample`](docs/reference.md#targetyaml) what your webhooks would add. Keep generated CRs
+inside what they accept with `generate.mutate` and `generate.overlay`. Keep `primary` and your
+controller on the version your CRD stores.
+
+botbox generates sequences only for a primary kind your `crds` define. For a built-in kind,
+such as a Service, it runs only the [sequences you write](docs/reference.md#sequences).
+
+- botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
+  fixture when it loads the target, or before the first run where only the cluster knows a
+  kind's scope, and [exits 2](#when-botbox-exits-2). It watches only the namespace it
+  creates for each run. So it passes a controller that leaks a child in another
+  namespace, and it cannot supply an object your controller reads from another namespace
+  ([#38](https://github.com/rosenhouse/botbox/issues/38)).
+- botbox does not test your controller's RBAC. Its proxy sends your controller's requests with
+  botbox's own credentials, which are admin on envtest, so a rule your Role lacks goes
+  unnoticed ([#45](https://github.com/rosenhouse/botbox/issues/45)).
+- The sequences botbox generates inject no faults. Only a sequence you write carries one
+  ([#47](https://github.com/rosenhouse/botbox/issues/47)).
+
 ## Install
 
 ```sh
@@ -13,6 +36,51 @@ go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
 index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
 export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 ```
+
+botbox has no release yet, so `@latest` installs main as it is now. Name a commit in its place
+to install the same botbox every time, as [CI](#running-in-ci) should.
+
+Building botbox takes Go 1.26.0 or later. An older `go` command, from Go 1.21 on, downloads a
+newer Go itself, unless `GOTOOLCHAIN=local` is set, as many CI images set it. Then `go install`
+fails with `requires go >= 1.26.0`, and a `go` before 1.24 stops the tools module below with
+`flag provided but not defined: -tool`. Install a newer Go, or run the commands with
+`GOTOOLCHAIN=auto`.
+
+`botbox --help` lists the commands and the exit codes. `botbox run --help` lists each flag of
+`run` with its default.
+
+### Keep botbox out of your go.mod
+
+`go install` leaves your module alone. Requiring botbox in your operator's go.mod, with
+`go get -tool` or by importing one of its packages, raises your module to botbox's versions:
+
+```
+go: upgraded go 1.23.0 => 1.26.0
+go: upgraded k8s.io/api v0.32.0 => v0.37.0
+go: upgraded sigs.k8s.io/controller-runtime v0.20.0 => v0.25.1
+```
+
+botbox's Go packages make no compatibility promise yet. To pin botbox in your repository, give
+it a module of its own. Run this from your repository root:
+
+<!-- embed: examples/tools-module.sh -->
+```sh
+mkdir -p tools/botbox
+cd tools/botbox
+go mod init example.com/operator/tools/botbox
+go mod edit -go=1.26.0
+GOWORK=off go get -tool github.com/rosenhouse/botbox/cmd/botbox@latest
+cd ../..
+GOWORK=off go -C tools/botbox build -o ../../bin/botbox github.com/rosenhouse/botbox/cmd/botbox
+bin/botbox version
+```
+
+The go line comes first, so that a `go` before 1.24, which lacks `go get -tool`, switches to a
+newer Go before it needs the flag. `GOWORK=off` leaves out a go.work of yours, whose go line
+`go get` would raise. `tools/botbox/go.mod` then pins botbox. Your own go.mod and go.work, and
+any package of yours in `tools/`, stay as they were. Run `bin/botbox` as the last line does,
+not `go -C tools/botbox tool botbox`, which runs botbox in `tools/botbox/`, where your
+`launch.binary` does not resolve.
 
 ### Against kind
 
@@ -52,7 +120,38 @@ kind delete cluster --kubeconfig kind.kubeconfig
   just after botbox installs the owner's CRD. If that delete comes after `stable` of quiet,
   G2 fails. A wider `stable` avoids that.
 
-`make test-kind` runs the toy controller this way ([DESIGN.md §5.8](DESIGN.md#58-test-cluster)).
+`make test-kind` runs the toy controller this way.
+
+## A find in half a minute
+
+Every find this README shows is planted: a bug seeded into the toy controller, or a negative
+control that sets up a real controller to fail. In a clone of this repository, this replays a
+sequence against the toy's seeded bug B3, which leaves a ConfigMap without an ownerReference:
+
+```sh
+make build
+KUBEBUILDER_ASSETS="$(make --no-print-directory assets-path)" ./bin/botbox replay \
+  --target targets/toy-widget/target.yaml --launch-arg --bug=3 targets/toy-widget/sequences/b3.json
+```
+
+```
+the deadline is 2m12s: this run can take that long at the target's timeouts. --deadline sets another.
+run 1: seed 20260920, sequence targets/toy-widget/sequences/b3.json
+run 1: G3 the v1/ConfigMap widget-0 was still there 10s (timeouts.delete) after widget, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
+  at 2026-09-30T19:50:43.395112151Z; 1 version, the first v1/ConfigMap widget-0
+  the evidence is in botbox-out/20260930T195026Z-20260920/run-1
+```
+
+The toy converges, so nothing looks wrong until the sequence deletes the Widget and the
+ConfigMap stays. An envtest suite sees this only if it asserts each ownerReference itself:
+envtest runs no garbage collector, so the ConfigMap stays whether or not it carries one. botbox
+emulates the collector, and G3 fails. G3 judges every object of a kind your target manages, in
+every run, with no test code of yours. [docs/bug-matrix.md](docs/bug-matrix.md) lists each
+seeded bug and the check that catches it.
+
+In a fresh clone, the first `make assets-path` also installs setup-envtest and downloads the
+control plane, and the first `make build` compiles every dependency. After that, the replay
+takes about 25 seconds.
 
 ## Quickstart: cert-manager
 
@@ -64,13 +163,13 @@ clean checkout, this script is the whole run.
 <!-- embed: examples/cert-manager/quickstart.sh -->
 ```sh
 #!/bin/sh
-# Exercise cert-manager against the generic invariants of DESIGN.md §6. It
-# builds what it needs, so a clean checkout is enough. Arguments go to botbox:
-# --seed picks the sequences it draws, and a later --runs wins over the one here.
+# Exercise cert-manager with botbox. It builds what it needs, so a clean checkout
+# is enough. Arguments go to botbox: --seed picks the sequences it draws, and a
+# later --runs wins over the one here.
 set -eu
 cd "$(dirname "$0")/../.."
 
-# cert-manager's healthz port is fixed (DESIGN.md §15, D28), so runs collide.
+# cert-manager binds its healthz server to port 9403, so its runs collide.
 if ! command -v lsof >/dev/null; then
   echo "lsof is missing, so nothing checked whether port 9403 is free." >&2
 elif lsof -nP -iTCP:9403 -sTCP:LISTEN >/dev/null; then
@@ -122,7 +221,7 @@ examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 5m --launch-ar
 
 ```
 run 1: seed 23, generated
-run 1: G3 the v1/Secret example-tls was still there 1m0s after example, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
+run 1: G3 the v1/Secret example-tls was still there 1m0s (timeouts.delete) after example, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-21T05:59:08.980624165Z; 1 version, the first v1/Secret example-tls
   the evidence is in botbox-out/20260921T055744Z-23/run-1
   the sequence is 1 op, in botbox-out/20260921T055744Z-23/run-1/sequence.json
@@ -159,18 +258,18 @@ that control. It fails unless the control reports G3 and its evidence hides the 
 
 ```
 run 1: seed 20260922, sequence examples/external-secrets/sequences/orphan.json
-run 1: G3 the v1/Secret example-secret was still there 1m0s after example, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
+run 1: G3 the v1/Secret example-secret was still there 1m0s (timeouts.delete) after example, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-22T16:43:05.836050746Z; 1 version, the first v1/Secret example-secret
   the evidence is in botbox-out/external-secrets-control/20260922T164150Z-20260922/run-1
 ```
 
 ## Your own controller
 
-A target is one YAML file, here `examples/cert-manager/target.yaml` trimmed. Four keys are
+A target is one YAML file. This one is adapted from `examples/cert-manager/target.yaml`, and
+[docs/reference.md](docs/reference.md) lists every key with its default. Four keys are
 required: `name`, `primary`, `sample` and `launch.binary`. Everything else is optional. A target
 that declares no `ready` is judged by `has(status.observedGeneration) && status.observedGeneration
-== metadata.generation`, so declare one if your CR does not carry `observedGeneration`
-([DESIGN.md §8.1](DESIGN.md#81-targetyaml)).
+== metadata.generation`, so declare one if your CR does not carry `observedGeneration`.
 
 ```yaml
 name: cert-manager
@@ -189,6 +288,13 @@ ready: >-                                     # CEL over metadata, spec, status;
   has(status.conditions) && status.conditions.exists(c,
     c.type == "Ready" && c.status == "True"
     && has(c.observedGeneration) && c.observedGeneration == metadata.generation)
+properties:                                   # checks of your own, CEL over the CR and what it manages
+  - id: P1
+    description: A Ready Certificate's Secret exists.
+    cel: >-
+      !has(status.conditions)
+      || !status.conditions.exists(c, c.type == "Ready" && c.status == "True")
+      || managed.exists(o, o.kind == "Secret" && o.metadata.name == spec.secretName)
 generate:
   distinct:                                   # spec paths no two CRs may share, such as a child's name
     - spec.secretName
@@ -226,11 +332,6 @@ G6 fails a controller that repeats one failing request more than `errloop` times
 `settle`. controller-runtime's default backoff repeats one 11 times in its first 5.1s,
 which the default catches. A 5s `settle` holds only 10 of them, so it needs `errloop: 9`
 or less.
-
-botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
-fixture before the first run, and it refuses a fixture that sets `metadata.namespace`. It
-watches only the run namespace, so it does not see a child your controller creates in
-another namespace.
 
 Each run creates its own namespace, and the kubeconfig botbox hands your controller names
 that namespace. `launch.env` sets variables for your controller. In its values and in
@@ -332,12 +433,16 @@ so once the faults stop botbox gives it as long as they lasted, plus `settle`, t
 That includes a fault still active when the sequence ends, like the one above: botbox clears
 it and waits for the controller before it tears the run down. The proxy tries faults in op
 order, the first that applies to a request wins, and each runs out on its own `until`. A fault
-that matches no request changes nothing and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
+that matches no request changes nothing and hides nothing.
 `match.verb` is a Kubernetes verb such as `create` or `list`, and `match.resource` is the
 plural the API server serves, such as `configmaps`. botbox refuses any other value, because
-the fault would match nothing. A run notes each fault the proxy applied to no request.
+the fault would match nothing. It also refuses a value that would test something else, such
+as a `fraction` of 0 or 50, or an `until.count` of 0. A run notes each fault the proxy applied
+to no request.
 The deadline botbox derives allows for how long each fault can hold a run open, which for a
 few faults that stop one after another is hours. Give a sequence with faults `--deadline`.
+[docs/reference.md](docs/reference.md#sequences) lists every op and fault field, and its example
+sequence sets each one.
 
 Field values come from the CRD's own schema: its numeric ranges, enums, patterns, list
 lengths and map sizes. Every CR botbox draws also passes the CRD's validation rules, CEL
@@ -353,7 +458,7 @@ cannot draw from is a configuration error, not a silent skip. So is a path where
 refuses every value botbox draws for it into your sample. Without `generate.mutate`, botbox
 prints each spec path it leaves alone, and why. If the API server still refuses a CR, as a
 webhook or a status rule might, botbox exits 2 and names the `sequence.json` that holds the
-op ([DESIGN.md §8.3](DESIGN.md#83-generation-constraints-and-admission-webhooks)).
+op.
 
 G5 compares what your controller manages before and after a restart. It already skips what
 every restart moves, such as `metadata.resourceVersion`. If your controller stamps a field of
@@ -368,12 +473,11 @@ equalIgnore:
 
 Keep the list in block style, because YAML claims the brackets inside a one-line `[...]` list.
 botbox refuses a list index such as `[0]`, and a label or annotation key that the dots split,
-when it loads the target ([DESIGN.md §8.1](DESIGN.md#81-targetyaml)). A key names nothing
-inside a list, so a run notes a path such as `status.conditions.lastHeartbeatTime` and says
-where the `[*]` goes.
+when it loads the target. A key names nothing inside a list, so a run notes a path such as
+`status.conditions.lastHeartbeatTime` and says where the `[*]` goes.
 
 A sequence file runs as written and is never minimized. This is
-`examples/cert-manager/sequences/issue.json`, reflowed ([DESIGN.md §7](DESIGN.md#7-sequence-format)):
+`examples/cert-manager/sequences/issue.json`, reflowed:
 
 ```json
 {"seed": 20260920, "target": "cert-manager", "ops": [
@@ -390,7 +494,9 @@ a failure, and `make test-example` runs every pinned sequence so none can rot.
 A `create` names its CR in `obj`. An `update`, `delete` or `recreate` acts on the CR named as
 your sample unless it names another in `cr`, such as `{"i": 2, "t": "delete", "cr":
 "example-2"}`. botbox refuses an op on a CR that no op before it creates, and an `update` or
-`delete` of a CR deleted since it was last created.
+`delete` of a CR deleted since it was last created. It also refuses a `create` of a CR that a
+`noSettle` `delete` removed, unless an op between them settles, because a finalizer may still
+hold the old CR. A `recreate` waits for the old CR to go.
 
 In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
 before it settles. G5 compares the states the controller settled in on either side, and leaves a
@@ -409,7 +515,7 @@ was under way when botbox was killed reads `unfinished`, unless it had found a v
 that botbox was minimizing. Its directory then holds no report, and `summary.md` says
 whether it holds the run's evidence or a partial run of the minimized sequence.
 `summary.json` also holds each run's sequence, for a machine. Its `schema` changes when a
-field changes meaning or goes away ([DESIGN.md §11](DESIGN.md#11-repo-conventions)).
+field changes meaning or goes away.
 
 A run that violates an invariant prints the ID, what it saw and where the evidence is, then
 exits 1. A configuration or harness error exits 2, so your CI can tell a find from a broken
@@ -456,16 +562,22 @@ controller has `settle` to come back, and `settle` past its return to converge. 
 controller that crashes again within `stable` of each return never converges, even where
 it wrote its converged state first, so G4 reports it and quotes the last exit.
 A controller that exits during a fault, or while it recovers from one, has the same once
-botbox restarts it. G7 notes a `deleteManaged` after a restart that follows an exit as
-it does one after a `restart`, and notes one where your controller exited, or waited to
-restart, during the op or its settle wait.
+botbox restarts it. While a fault is active, only your controller's first such exit during
+each op gets that time. If it exits again during the op, the wait can end before it
+restarts, and botbox checks your properties there. botbox applies no op while your
+controller waits to restart after such an exit. An op that botbox applies before your
+controller has had that time after such an exit gives it that time too. A controller that
+keeps crashing under a fault therefore fails G4 once the fault stops, or once the teardown
+clears it. G7 notes a `deleteManaged` after a restart that follows an exit as it does one
+after a `restart`, and notes one where your controller exited, or waited to restart,
+during the op or its settle wait.
 The toy controller converges a count of 0 and then crashes under `--launch-arg --bug=12`,
 and `targets/toy-widget/sequences/b12.json` sets one:
 
 ```
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
-run 1: G4 the settle wait after op 1 (update) expired with no fault active: in 5.038s, ready held from 12ms on, but the target was waiting to restart; the target exited 2 times since it last converged, last with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
+run 1: G4 the settle wait after op 1 (update) expired with no fault active: in 5.038s (timeouts.settle is 5s), ready held from 12ms on, but the target was waiting to restart; the target exited 2 times since it last converged, last with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
   at 2026-09-24T00:57:57.490964784Z; 15 requests, the first get /api 200; 5 versions, the first toy.botbox/v1/Widget widget; the target managed 0 objects of the kinds it declares
 ```
 
@@ -483,24 +595,25 @@ A settle wait expired. What follows `expired with no fault active` says why:
   runs, so a CR that waits on a Deployment's replicas never becomes ready there. botbox
   warns of this when `manages` names such a kind. Run such a target
   [against kind](#against-kind).
-- `ready held from … on, but the namespace never held still for stable (2s)` means your
-  controller converged and kept writing. The Object versions table lists the writes. A
+- `ready held from … on, but the namespace never held still for 2s (timeouts.stable)` means
+  your controller converged and kept writing. The Object versions table lists the writes. A
   status field rewritten on every reconcile, such as a timestamp, does this.
 - `ready held until …` means `ready` held and then stopped holding.
-- A line that goes on `but the target was waiting to restart`, or `but the target
-  restarted in the last stable`, means your controller exited. The line counts the exits
+- A line that goes on `but the target was waiting to restart`, or `but the target restarted
+  in the last 2s (timeouts.stable)`, means your controller exited. The line counts the exits
   since it last converged and quotes the last.
 - A line that goes on `but the target had requested no resource outside leader election
   since …` means your controller had not come back from a restart, or had not started, when
-  the wait gave up. `until the last stable` means it came back too late to run for
-  `stable` before then. A controller slow to start needs a wider `settle`.
+  the wait gave up. `until the last 2s (timeouts.stable)` means it came back too late to run
+  for `stable` before then. A controller slow to start needs a wider `settle`.
 
 After a `delete`, the run waits up to `timeouts.delete` for the CR to go and then up to
 `settle` for the rest to settle, so a slow cleanup needs no wider `settle`. A `recreate`
 waits as long for the old CR to go before it creates the new one. A CR still there
 `timeouts.delete` after its deletion fails G3, which names the finalizers still on it.
 Where a fault reached into the deletion, G3 cannot judge it, and `the CR … was still being
-deleted, held by the finalizers …` names them instead. `no CR was left to be ready, but the
+deleted, held by the finalizers …` names them instead. Where the CR's deletion deadline
+held the wait open, that line gives `timeouts.delete`. `no CR was left to be ready, but the
 namespace never held still …` means something kept writing after the CR was gone.
 
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
@@ -629,27 +742,78 @@ CRD schema, `sample`, `generate` and `manages`. A botbox upgrade, or a pull requ
 of those, draws different sequences under the same seed. To tell whether a failure comes from the
 change under review, replay its `sequence.json` against the base branch's controller.
 
+### From go test
+
+A Go test can run botbox and fail on what it finds. This one runs it on the toy controller:
+
+<!-- embed: targets/toy-widget/botbox_test.go -->
+```go
+//go:build botbox
+
+package main
+
+import (
+	"os"
+	"os/exec"
+	"testing"
+	"time"
+)
+
+func TestBotbox(t *testing.T) {
+	botbox := exec.Command("bin/botbox", "run", "--target", "targets/toy-widget/target.yaml",
+		"--seed", "1", "--runs", "3")
+	if deadline, ok := t.Deadline(); ok {
+		// Stop botbox before go test's -timeout, which would leave its control plane running.
+		left := time.Until(deadline).Truncate(time.Second) - 30*time.Second
+		if left <= 0 {
+			t.Fatal("go test's -timeout leaves botbox no time")
+		}
+		botbox.Args = append(botbox.Args, "--deadline", left.String())
+	}
+	botbox.Dir = "../.." // launch.binary is relative to the repository root.
+	botbox.Stdout, botbox.Stderr = os.Stdout, os.Stderr
+	if err := botbox.Run(); err != nil {
+		t.Fatalf("botbox: %v", err)
+	}
+}
+```
+
+Build `bin/botbox`, as the [tools module](#keep-botbox-out-of-your-gomod) does, build your
+controller and set `KUBEBUILDER_ASSETS`. Then run `go test -count=1 -tags botbox ./...`.
+`go test` cannot see a change to your controller or `target.yaml`, so `-count=1` stops it from
+reusing a cached pass. The build tag keeps the test out of a plain `go test ./...`. Raise
+`go test`'s `-timeout` for more runs, because the test stops botbox before it.
+
+botbox has no Go API to call instead. A `ready: go:<name>` or `equal: go:<name>` hook takes
+effect only in a build of botbox that registers it, which takes a change to this repository.
+
 ## Invariants
 
-Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.
+Seven generic invariants apply to every target. [DESIGN.md](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.
 
 | ID | Checks |
 |---|---|
-| G1 | Bounded reconciliation. Under an unchanged spec, one quiet window holds no more requests than `quiet` allows, zero by default. |
+| G1 | Bounded reconciliation. Under an unchanged spec, one quiet window holds no more requests than `thresholds.quiet` allows, zero by default. |
 | G2 | No churn. Once converged, the managed objects and their resourceVersions stop changing. |
 | G3 | Clean deletion. Deleting a CR removes everything it manages and clears its finalizers. |
-| G4 | Convergence. `ready` holds on every CR within `T_settle` of every spec change, `updateFixture` or return of a deleted fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
+| G4 | Convergence. `ready` holds on every CR within `timeouts.settle` of every spec change, `updateFixture` or return of a deleted fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
 | G5 | Restart-stable. Restarting the target does not change converged state. |
-| G6 | No error loop. The target does not repeat one failing request more than `N_errloop` times. |
+| G6 | No error loop. The target does not repeat one failing request more than `thresholds.errloop` times. |
 | G7 | Self-healing. An object `deleteManaged` deletes exists again, by kind and name, once the run settles. |
 
-[docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs. Each bug's sequence also runs against the toy with no bug, and CI fails if a check fires there.
+[docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs. Each bug's sequence also runs against the toy with no bug, and CI fails if a check fires there.
 
 ## Development and internals
 
 - `make setup` installs the envtest control plane, and `make help` lists every target.
 - `make test`, `make test-envtest`, `make test-example` and `make test-example-external-secrets` are the tiers CI runs on every PR.
 - `make test-kind` runs the toy through `--kubeconfig` against a kind cluster that it creates and deletes. It needs Docker. The nightly workflow runs the same runs with `make test-kind-runs`.
+- `make hunt-cert-manager` and `make hunt-external-secrets` hunt for bugs in the pinned controllers
+  for `HUNT_MINUTES` (default 120). Each runs the families in `examples/<example>/sequences/hunt/`,
+  then up to `HUNT_RUNS` (default 1000) seeds from `HUNT_SEED` (default 1000) on. It keeps each
+  failing run's evidence in `botbox-out/hunt-<example>/`. A run that fails is a candidate to
+  triage, not yet a bug: see [DESIGN.md §11](DESIGN.md#11-repo-conventions). No pull request
+  runs a hunt.
 - A block after `<!-- embed: path -->` holds that file byte for byte, and `make test` enforces it.
 - [DESIGN.md](DESIGN.md) is the governing design. Code and docs must not contradict it.
 - [docs/journal.md](docs/journal.md) and [docs/spikes/](docs/spikes/) hold the milestone journal and the experiments behind DESIGN.md §15.

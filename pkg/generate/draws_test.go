@@ -6,11 +6,15 @@ import (
 	"flag"
 	"maps"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/rosenhouse/botbox/pkg/run"
+	"github.com/rosenhouse/botbox/pkg/target"
+	kinds "k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite "+goldenDraws+" from what the seeds draw now")
@@ -20,16 +24,58 @@ const (
 	goldenDraws           = "testdata/draws.golden.json"
 )
 
-// goldenSeeds are the seeds the repository runs by number: the Makefile's
-// EXAMPLE_SEED runs, the README's quickstarts and the envtest tier's B2
-// reproducer.
-var goldenSeeds = []struct {
-	path  string
-	seeds []int64
-}{
-	{toyTarget, seedRange(1, 10)},
-	{certManagerTarget, append(seedRange(1, 10), seedRange(23, 27)...)},
-	{externalSecretsTarget, seedRange(23, 27)},
+type goldenTarget struct {
+	name    string
+	declare declaration
+	seeds   []int64
+}
+
+// goldenSeeds are the seeds the Makefile and the envtest tier run by number.
+func goldenSeeds(t *testing.T) []goldenTarget {
+	example := makefileSeeds(t, "EXAMPLE")
+	return []goldenTarget{
+		{"toy-widget", file(toyTarget), append(seedRange(1, 10), makefileSeeds(t, "KIND")...)},
+		{"cert-manager", file(certManagerTarget), append(seedRange(1, 10), example...)},
+		{"external-secrets", file(externalSecretsTarget), example},
+		{"toy-widget with a label fixture", toyWithALabelFixture, seedRange(1, 60)},
+	}
+}
+
+// makefileSeeds are the seeds the Makefile's <tier>_SEED and <tier>_RUNS draw.
+func makefileSeeds(t *testing.T, tier string) []int64 {
+	t.Helper()
+	makefile, err := os.ReadFile("../../Makefile")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pin := func(name string) int64 {
+		m := regexp.MustCompile(`(?m)^` + name + ` \?= (\d+)$`).FindSubmatch(makefile)
+		if m == nil {
+			t.Fatalf("The Makefile sets no %s.", name)
+		}
+		value, _ := strconv.ParseInt(string(m[1]), 10, 64)
+		return value
+	}
+	first := pin(tier + "_SEED")
+	return seedRange(first, first+pin(tier+"_RUNS")-1)
+}
+
+type declaration func(*testing.T) *target.Target
+
+func file(path string) declaration {
+	return func(t *testing.T) *target.Target { return loadTarget(t, path) }
+}
+
+// toyWithALabelFixture is the toy as pkg/run's TestGeneratedFixtureOps
+// declares it. That test fails unless it draws what the golden file records.
+func toyWithALabelFixture(t *testing.T) *target.Target {
+	toy := loadTarget(t, toyTarget)
+	toy.Generate.Fixtures = []target.MutableFixture{{
+		GVK:    kinds.GroupVersionKind{Version: "v1", Kind: "ConfigMap"},
+		Name:   "widget-config",
+		Mutate: []target.Path{target.MustParsePath("data.label")},
+	}}
+	return toy
 }
 
 func seedRange(first, last int64) []int64 {
@@ -44,12 +90,11 @@ func seedRange(first, last int64) []int64 {
 // seed draws has to be deliberate: rerun with -update and say why.
 func TestSeedsDrawTheGoldenSequences(t *testing.T) {
 	drawn := map[string]map[string]json.RawMessage{}
-	for _, golden := range goldenSeeds {
-		loaded := loadTarget(t, golden.path)
-		g := newGenerator(t, loaded, Options{})
-		drawn[loaded.Name] = map[string]json.RawMessage{}
-		for _, seed := range golden.seeds {
-			drawn[loaded.Name][strconv.FormatInt(seed, 10)] = draw(t, g, seed)
+	for _, declared := range goldenSeeds(t) {
+		g := newGenerator(t, declared.declare(t), Options{})
+		drawn[declared.name] = map[string]json.RawMessage{}
+		for _, seed := range declared.seeds {
+			drawn[declared.name][strconv.FormatInt(seed, 10)] = draw(t, g, seed)
 		}
 	}
 	encoded, err := json.MarshalIndent(drawn, "", "  ")
@@ -75,30 +120,43 @@ func TestSeedsDrawTheGoldenSequences(t *testing.T) {
 	if err := json.Unmarshal(recorded, &golden); err != nil {
 		t.Fatalf("Reading %s failed: %v.", goldenDraws, err)
 	}
-	for _, name := range slices.Sorted(maps.Keys(drawn)) {
-		for _, seed := range slices.Sorted(maps.Keys(drawn[name])) {
+	var differ []string
+	for _, name := range keys(drawn, golden) {
+		for _, seed := range keys(drawn[name], golden[name]) {
 			if !equalJSON(golden[name][seed], drawn[name][seed]) {
-				t.Errorf("Seed %s draws a different sequence for %s:\n%s", seed, name, drawn[name][seed])
+				differ = append(differ, name+" seed "+seed)
 			}
 		}
 	}
-	t.Errorf("The draws differ from %s. If the change is deliberate, rerun with -update and say so in the commit.",
-		goldenDraws)
+	if len(differ) == 0 {
+		t.Fatalf("%s records every draw, but not as -update writes it. Rerun with -update.", goldenDraws)
+	}
+	t.Errorf("%s differs for %s. If the change is deliberate, rerun with -update, read its diff and say why in the commit.",
+		goldenDraws, strings.Join(differ, ", "))
 }
 
-func TestCertManagersSeed23DrawsOneCreate(t *testing.T) {
+// keys are the keys of either map, sorted.
+func keys[V any](a, b map[string]V) []string {
+	union := slices.AppendSeq(slices.Collect(maps.Keys(a)), maps.Keys(b))
+	slices.Sort(union)
+	return slices.Compact(union)
+}
+
+func TestCertManagersFirstExampleSeedDrawsOneCreate(t *testing.T) {
 	// The Makefile's negative control runs it alone, since one op costs no
 	// replay to minimize.
-	ops := drawOps(t, certManagerTarget, 23)
+	seed := makefileSeeds(t, "EXAMPLE")[0]
+	ops := drawOps(t, file(certManagerTarget), seed)
 	if len(ops) != 1 || ops[0].Type != run.OpCreate {
-		t.Errorf("Seed 23 draws %v, want a single create.", opTypes(ops))
+		t.Errorf("Seed %d draws %v, want a single create.", seed, opTypes(ops))
 	}
 }
 
-func TestCertManagersSeeds23To27DrawWhatTheMakefileSays(t *testing.T) {
+func TestCertManagersExampleSeedsDrawWhatTheMakefileSays(t *testing.T) {
+	seeds := makefileSeeds(t, "EXAMPLE")
 	drawn := map[string]bool{}
-	for seed := int64(23); seed <= 27; seed++ {
-		for _, op := range drawOps(t, certManagerTarget, seed) {
+	for _, seed := range seeds {
+		for _, op := range drawOps(t, file(certManagerTarget), seed) {
 			drawn[string(op.Type)] = true
 			if op.Type == run.OpCreate && op.Obj.GetName() != "example" {
 				drawn["a second Certificate"] = true
@@ -107,21 +165,71 @@ func TestCertManagersSeeds23To27DrawWhatTheMakefileSays(t *testing.T) {
 	}
 	for _, want := range []string{"a second Certificate", string(run.OpRecreate), string(run.OpRestart)} {
 		if !drawn[want] {
-			t.Errorf("Seeds 23 to 27 draw no %s, and the Makefile says they do.", want)
+			t.Errorf("Seeds %v draw no %s, and the Makefile says they do.", seeds, want)
 		}
 	}
 }
 
 func TestTheToysSeed2DrawsMoreThanTheShrunkB2Reproducer(t *testing.T) {
 	// The envtest tier shrinks what seed 2 draws to three ops or fewer.
-	if ops := drawOps(t, toyTarget, 2); len(ops) <= 3 {
+	if ops := drawOps(t, file(toyTarget), 2); len(ops) <= 3 {
 		t.Errorf("Seed 2 draws %v, which leaves the shrink pass nothing to do.", opTypes(ops))
 	}
 }
 
-func drawOps(t *testing.T, path string, seed int64) []run.Op {
+func TestTheToyWithALabelFixtureDrawsB14sReproducerAtSeed19(t *testing.T) {
+	// TestGeneratedFixtureOps finds B14 with it.
+	if ops := drawOps(t, toyWithALabelFixture, 19); !revealsB14(ops) {
+		t.Errorf("Seed 19 draws %v, want an updateFixture under a settled Widget, then only settles, then a restart.", opTypes(ops))
+	}
+}
+
+func TestOnlyARestartNextAfterTheLabelChangesUnderASettledWidgetRevealsB14(t *testing.T) {
+	create, unsettledCreate := run.Op{Type: run.OpCreate}, run.Op{Type: run.OpCreate, NoSettle: true}
+	label, settle, restart := run.Op{Type: run.OpUpdateFixture}, run.Op{Type: run.OpSettle}, run.Op{Type: run.OpRestart}
+	for _, test := range []struct {
+		name string
+		ops  []run.Op
+		want bool
+	}{
+		{"a settled create", []run.Op{create, label, settle, restart}, true},
+		{"a create a settle follows", []run.Op{unsettledCreate, settle, label, restart}, true},
+		{"a recreate", []run.Op{create, {Type: run.OpRecreate}, label, restart}, true},
+		{"an update after the label", []run.Op{create, label, {Type: run.OpUpdate}, restart}, false},
+		{"a deleteFixture after the label", []run.Op{create, label, {Type: run.OpDeleteFixture}, restart}, false},
+		{"a delete", []run.Op{create, {Type: run.OpDelete}, label, restart}, false},
+		{"no Widget", []run.Op{label, settle, restart}, false},
+		{"a create that has not settled", []run.Op{unsettledCreate, label, settle, restart}, false},
+		{"an update that has not settled", []run.Op{create, {Type: run.OpUpdate, NoSettle: true}, label, settle, restart}, false},
+	} {
+		if got := revealsB14(test.ops); got != test.want {
+			t.Errorf("With %s, revealsB14(%v) = %t, want %t.", test.name, opTypes(test.ops), got, test.want)
+		}
+	}
+}
+
+// revealsB14 says whether the label changes once the Widget's last CR op has
+// settled, and a restart is the next op to reconcile it.
+func revealsB14(ops []run.Op) bool {
+	var exists, unsettled bool
+	for i, op := range ops {
+		switch {
+		case op.Type.OnCR():
+			exists, unsettled = op.Type != run.OpDelete, op.NoSettle
+		case op.Type == run.OpSettle:
+			unsettled = false
+		}
+		next := slices.IndexFunc(ops[i+1:], func(op run.Op) bool { return op.Type != run.OpSettle })
+		if op.Type == run.OpUpdateFixture && exists && !unsettled && next >= 0 && ops[i+1+next].Type == run.OpRestart {
+			return true
+		}
+	}
+	return false
+}
+
+func drawOps(t *testing.T, declare declaration, seed int64) []run.Op {
 	t.Helper()
-	sequence, err := newGenerator(t, loadTarget(t, path), Options{}).Draw(seed)
+	sequence, err := newGenerator(t, declare(t), Options{}).Draw(seed)
 	if err != nil {
 		t.Fatalf("Draw(%d) failed: %v.", seed, err)
 	}

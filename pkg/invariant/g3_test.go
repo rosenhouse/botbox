@@ -205,6 +205,23 @@ func TestG3NamesNoOpForADeletionNoOpMade(t *testing.T) {
 	}
 }
 
+// A recreate of a CR that is already gone deletes nothing, though the Observer
+// still shows the gone CR's UID when the op acts.
+func TestG3NamesTheOpThatDeletedTheCRNotALaterOne(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup))).
+		op(invariant.OpDelete, 10*time.Second).
+		record(10*time.Second, widget("11", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
+		remove(10100*time.Millisecond, widget("12", spec(1), status(1, 1), deleting(10*time.Second))).
+		op(invariant.OpRecreate, 12*time.Second).
+		record(12500*time.Millisecond, widget("20", spec(1), status(1, 1), uid("uid-w2"), finalizers(cleanup))).
+		fault(10500*time.Millisecond, 40*time.Second).
+		through(35 * time.Second)
+
+	noted(t, invariant.CleanDeletion, in, "G3 is not evaluated for the deletion of w by op 1 (delete): a fault was active before its deadline")
+}
+
 func TestG3IgnoresACRTheRunRecreated(t *testing.T) {
 	in := deletedRun().
 		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).

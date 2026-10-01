@@ -760,7 +760,7 @@ func misplacedFlag(args, operands []string) (string, bool) {
 }
 
 func asksForHelp(arg string) bool {
-	return slices.Contains([]string{"help", "-h", "-help", "--help"}, arg)
+	return slices.Contains([]string{"help", "-h", "--h", "-help", "--help"}, arg)
 }
 
 // parseHelp reads the operands of botbox help.

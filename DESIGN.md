@@ -1163,10 +1163,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   commands, the exit codes, `KUBEBUILDER_ASSETS` and the README's URL, because
   `go install` ships no documentation. `botbox <command> --help` and
   `botbox help <command>` print the command's synopsis and each flag with its meaning and
-  default. `-h`, `-help` or `--help` after a sequence file asks for help too. Help goes to
-  stdout and exits 0. A bare `botbox` prints botbox's help to stderr and exits 2. A usage
-  error, such as an unknown flag, a missing required flag, another flag or `--` after a
-  sequence file or a wrong count of sequence files, exits 2 and prints the error and the
+  default. `-h`, `--h`, `-help` or `--help` after a sequence file asks for help too. Help
+  goes to stdout and exits 0. A bare `botbox` prints botbox's help to stderr and exits 2. A
+  usage error, such as an unknown flag, a missing required flag, another flag or `--` after
+  a sequence file or a wrong count of sequence files, exits 2 and prints the error and the
   command's synopsis to stderr. It spells a flag with two dashes, as the help does. No
   message botbox prints cites this document or uses its symbols, such as `T_settle`. A
   message names the target.yaml key and its value instead, as in `2s (timeouts.stable)`.

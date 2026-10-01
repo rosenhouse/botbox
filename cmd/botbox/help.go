@@ -126,7 +126,9 @@ func help(name string) string {
 	c, found := lookup(name)
 	if !found {
 		return intro + "\n" + usage("") + runExits + environment +
-			"\nThe README at https://github.com/rosenhouse/botbox has a quickstart.\ndocs/reference.md there lists every key of target.yaml and every op.\n"
+			"\nThe README at https://github.com/rosenhouse/botbox shows a first run.\n" +
+			"docs/reference.md there lists every key of target.yaml and every op.\n" +
+			"docs/failures.md there says what each file and message of a failure means.\n"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Usage:\n  %s\n\n%s\n", c.synopsis(), c.about)

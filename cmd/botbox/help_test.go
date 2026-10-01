@@ -164,7 +164,9 @@ func TestTheTopLevelHelpListsTheCommandsUsersRun(t *testing.T) {
 	for _, want := range []string{
 		"\n  run ", "\n  replay ", "\n  version ",
 		"\nRun 'botbox <command> --help' or 'botbox help <command>' for a command's flags.\n",
-		"https://github.com/rosenhouse/botbox", "\ndocs/reference.md there lists every key of target.yaml and every op.\n",
+		"\nThe README at https://github.com/rosenhouse/botbox shows a first run.\n",
+		"\ndocs/reference.md there lists every key of target.yaml and every op.\n",
+		"\ndocs/failures.md there says what each file and message of a failure means.\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("botbox --help lacks %q:\n%s", want, got)

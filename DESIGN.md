@@ -1209,8 +1209,8 @@ the proxy; the `Image` launcher. Separate design addendum.
 
   `botbox matrix` generates the toy's bug matrix for `make bug-matrix`, so the top-level
   help leaves it out. `botbox help` and `botbox --help` print what botbox does, its
-  commands, the exit codes, `KUBEBUILDER_ASSETS` and the README's URL, because
-  `go install` ships no documentation. `botbox <command> --help` and
+  commands, the exit codes, `KUBEBUILDER_ASSETS`, the README's URL and the pages that list
+  every key and explain a failure, because `go install` ships no documentation. `botbox <command> --help` and
   `botbox help <command>` print the command's synopsis and each flag with its meaning and
   default. `-h`, `--h`, `-help` or `--help` after a sequence file asks for help too. Help
   goes to stdout and exits 0. A bare `botbox` prints botbox's help to stderr and exits 2. A

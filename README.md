@@ -14,6 +14,42 @@ index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0
 export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 ```
 
+botbox has no release yet, so `@latest` installs main as it is now. Name a commit in its place
+to install the same botbox every time, as [CI](#running-in-ci) should.
+
+Building botbox takes Go 1.26.0 or later. An older `go` command, from Go 1.21 on, downloads a
+newer Go itself, unless `GOTOOLCHAIN=local` is set, as many CI images set it. There the build
+fails with `requires go >= 1.26.0`, so install that Go there, or run the command with
+`GOTOOLCHAIN=auto`.
+
+### Keep botbox out of your go.mod
+
+`go install` leaves your module alone. Requiring botbox in your operator's go.mod, with
+`go get -tool` or by importing one of its packages, raises your module to botbox's versions:
+
+```
+go: upgraded go 1.23.0 => 1.26.0
+go: upgraded k8s.io/api v0.32.0 => v0.37.0
+go: upgraded sigs.k8s.io/controller-runtime v0.20.0 => v0.25.1
+```
+
+botbox's Go packages make no compatibility promise yet. To pin botbox in your repository, give
+it a module of its own:
+
+```sh
+mkdir tools
+cd tools
+go mod init example.com/operator/tools
+go mod edit -go=1.26.0   # so that go before 1.24, which lacks get -tool, switches first
+go get -tool github.com/rosenhouse/botbox/cmd/botbox@latest
+cd ..
+go -C tools build -o ../bin/botbox github.com/rosenhouse/botbox/cmd/botbox
+```
+
+`tools/go.mod` then pins botbox, and your own go.mod stays as it was. Run `bin/botbox` from your
+repository root, because `launch.binary` is relative to the directory botbox runs in.
+`go -C tools tool botbox` would run it in `tools/`.
+
 ### Against kind
 
 botbox starts its own API server by default. That server runs no controller manager and no

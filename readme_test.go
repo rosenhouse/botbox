@@ -44,6 +44,44 @@ func TestTheREADMEShowsRunsOfTheMakefilesExampleSeeds(t *testing.T) {
 	}
 }
 
+// Requiring botbox raises a module to these versions, as go prints them.
+func TestTheREADMEInstallQuotesGoModsVersions(t *testing.T) {
+	readme, required := readFile(t, "README.md"), goModVersions(t)
+	install := section(t, readme, "## Install") + section(t, readme, "### Keep botbox out of your go.mod")
+	quoted := map[string]bool{}
+	check := func(text, module, version string) {
+		quoted[module] = true
+		if version != required[module] {
+			t.Errorf("README.md quotes %q, and go.mod requires %s %s.", text, module, required[module])
+		}
+	}
+	for _, m := range regexp.MustCompile(`(?:takes Go |requires go >= |go mod edit -go=|upgraded go \S+ => )([\d.]+)`).FindAllStringSubmatch(install, -1) {
+		check(m[0], "go", m[1])
+	}
+	for _, m := range regexp.MustCompile(`upgraded (\S+) v\S+ => (v[\w.-]+)`).FindAllStringSubmatch(install, -1) {
+		check(m[0], m[1], m[2])
+	}
+	for _, module := range []string{"go", "k8s.io/api", "sigs.k8s.io/controller-runtime"} {
+		if !quoted[module] {
+			t.Errorf("README.md's Install section quotes no version of %s.", module)
+		}
+	}
+}
+
+// goModVersions maps "go" to go.mod's go directive, and each module go.mod
+// requires to its version.
+func goModVersions(t *testing.T) map[string]string {
+	t.Helper()
+	versions := map[string]string{}
+	for _, m := range regexp.MustCompile(`(?m)^\t?(\S+) (v\S+|[\d.]+)(?: // indirect)?$`).FindAllStringSubmatch(readFile(t, "go.mod"), -1) {
+		versions[m[1]] = m[2]
+	}
+	if versions["go"] == "" || versions["k8s.io/api"] == "" {
+		t.Fatalf("goModVersions read %v from go.mod, with no go directive or no k8s.io/api.", versions)
+	}
+	return versions
+}
+
 func TestQuickstartSeedReadsEveryWayToPassTheSeed(t *testing.T) {
 	for _, command := range []string{
 		"examples/x/quickstart.sh --seed 24",

@@ -121,22 +121,22 @@ func TestSeedsDrawTheGoldenSequences(t *testing.T) {
 		t.Fatalf("Reading %s failed: %v.", goldenDraws, err)
 	}
 	var differ []string
-	var first json.RawMessage
-	for _, name := range slices.Sorted(maps.Keys(drawn)) {
-		for _, seed := range slices.Sorted(maps.Keys(drawn[name])) {
+	for _, name := range keys(drawn, golden) {
+		for _, seed := range keys(drawn[name], golden[name]) {
 			if !equalJSON(golden[name][seed], drawn[name][seed]) {
 				differ = append(differ, name+" seed "+seed)
-				if first == nil {
-					first = drawn[name][seed]
-				}
 			}
 		}
 	}
-	t.Errorf("The draws differ from %s for %s. If the change is deliberate, rerun with -update and say so in the commit.",
+	t.Errorf("%s differs for %s. If the change is deliberate, rerun with -update, read its diff and say why in the commit.",
 		goldenDraws, strings.Join(differ, ", "))
-	if first != nil {
-		t.Logf("%s now draws:\n%s", differ[0], first)
-	}
+}
+
+// keys are the keys of either map, sorted.
+func keys[V any](a, b map[string]V) []string {
+	union := slices.AppendSeq(slices.Collect(maps.Keys(a)), maps.Keys(b))
+	slices.Sort(union)
+	return slices.Compact(union)
 }
 
 func TestCertManagersFirstExampleSeedDrawsOneCreate(t *testing.T) {

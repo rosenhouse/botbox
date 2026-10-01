@@ -24,7 +24,8 @@ such as Eventually Stable Reconciliation (ESR), but requires rewriting the contr
    configuration, plus optional per-controller **properties**.
 5. Shrinking any failing sequence to a minimal reproducer and emitting a report.
 
-The controller is a black box. If it talks to an API server, it can be tested.
+The controller is a black box, which botbox sees only through the API server. The README
+lists what botbox cannot test yet.
 
 ## 2. Non-goals
 
@@ -106,9 +107,11 @@ type Launcher interface {
 Implementations:
 
 - `Binary` — the primary launcher and the only one required through M6. Exec a local
-  binary. botbox writes a kubeconfig whose server is the proxy URL and whose context names
-  the run namespace, and exports it as `KUBECONFIG`. It substitutes `$KUBECONFIG` and
-  `$NAMESPACE`, the run namespace, in `launch.args` and in the values of `launch.env`.
+  binary. It runs on botbox's host, which routes to no Pod and resolves no Service name of
+  the test cluster. botbox writes a kubeconfig whose server is the proxy URL and whose
+  context names the run namespace, and exports it as `KUBECONFIG`. It substitutes
+  `$KUBECONFIG` and `$NAMESPACE`, the run namespace, in `launch.args` and in the values of
+  `launch.env`.
   `launch.env` sets variables over the environment the target inherits from botbox, and
   may not set `KUBECONFIG`. The target's stdout and stderr go to `target.log` in the run
   directory. `Restart` sends SIGKILL, waits for the process to be reaped, then execs
@@ -445,7 +448,9 @@ Consequences:
   and no PersistentVolume carries `kubernetes.io/pv-protection`. On a kubeconfig cluster a
   Job or ReplicationController deleted without a policy orphans its Pods, and a claim
   keeps its finalizer until no Pod uses it.
-- **No admission webhooks.** See §8.3.
+- **No admission or conversion webhooks.** botbox installs no admission webhook (§8.3).
+  envtest removes a CRD's conversion webhook, so the API server converts a CR between
+  versions by `apiVersion` alone.
 
 ## 6. Generic invariants
 
@@ -1258,7 +1263,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   as a GitHub release asset, and are pinned.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
-  (five lines); install; quickstart against cert-manager, then what the second example
+  (five lines); what it cannot test yet, each limit a bullet that links the open issue
+  tracking it; install; quickstart against cert-manager, then what the second example
   adds; writing `target.yaml` for your own controller; reading a report; what to change
   when botbox exits 2; a CI recipe for adopters, embedded from `examples/ci/github-actions.yml`;
   a one-line-per-invariant table linking to §6; a closing "Development and internals"
@@ -1292,7 +1298,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   lists. A reviewer reads the diff against §6, §8 and §11, citing the section it applies,
   and it may run the code: start a cluster, drive the binary, mutate a function and check
   that a test dies. It flags any import of controller-runtime outside the two places §11
-  allows, a README embed block that differs from its file, a post whose first line is not
+  allows, a README embed block that differs from its file, a PR that lifts a limit the
+  README lists and keeps its bullet, a post whose first line is not
   `🤖 Created by Claude 🤖`, and a PR description that lacks the milestone, the IDs, or
   the "Design change" section when this document changed. Reviewers never merge.
 - **Journal:** `docs/journal.md`, one entry per milestone, recording what the agents
@@ -2088,3 +2095,9 @@ built from source and run as a black-box binary.
   command's flags. botbox shrinks with its own pass, because rapid shrinks only inside
   `rapid.Check` and shrinks the choices a sequence is drawn from rather than its ops.
   Hand-written generators wait for a target that needs one.
+- **D@60 The README lists what botbox cannot test yet.** An adopter found each limit only
+  by trying, after the control plane had started. A section before Install lists them. Each
+  bullet links the open issue that tracks it, so the PR that lifts a limit deletes its
+  bullet (§12). A test holds the section before Install and each bullet to a link. No open
+  issue tracks a target on the host or its webhooks, so the section's opening states them.
+  A fixed port stays with the message botbox prints, which names `launch.args`.

@@ -5,6 +5,23 @@ Botbox is a tool to find bugs in your Kubernetes controller.
 It fakes the API server, injecting various events (changes to resources, faults, restarts).  It then
 checks if certain expectations hold, including custom properties you can specify.
 
+## What botbox cannot test yet
+
+botbox runs your controller on your machine, not in a Pod. Your controller cannot reach a Pod
+or a Service from there, and no admission or conversion webhook of yours runs. Write in your
+`sample` what your webhooks would add, and keep generated CRs inside what they accept with
+`generate.mutate` and `generate.overlay`.
+
+- botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
+  fixture before the first run, and exits 2. It watches only the namespace it creates for each
+  run, so it passes a controller that leaks a child in another namespace
+  ([#38](https://github.com/rosenhouse/botbox/issues/38)).
+- botbox does not test your controller's RBAC. Its proxy sends your controller's requests with
+  botbox's own credentials, which are admin on envtest, so a rule your Role lacks goes
+  unnoticed ([#45](https://github.com/rosenhouse/botbox/issues/45)).
+- The sequences botbox generates inject no faults. Only a sequence you write carries one
+  ([#47](https://github.com/rosenhouse/botbox/issues/47)).
+
 ## Install
 
 ```sh
@@ -236,11 +253,6 @@ G6 fails a controller that repeats one failing request more than `errloop` times
 `settle`. controller-runtime's default backoff repeats one 11 times in its first 5.1s,
 which the default catches. A 5s `settle` holds only 10 of them, so it needs `errloop: 9`
 or less.
-
-botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
-fixture before the first run, and it refuses a fixture that sets `metadata.namespace`. It
-watches only the run namespace, so it does not see a child your controller creates in
-another namespace.
 
 Each run creates its own namespace, and the kubeconfig botbox hands your controller names
 that namespace. `launch.env` sets variables for your controller. In its values and in

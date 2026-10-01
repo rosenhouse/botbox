@@ -98,6 +98,9 @@ type Checkpoint struct {
 	Began  time.Time
 	Time   time.Time
 	Settle SettleResult
+	// Stayed marks a recreate's wait for its old CR to go, which ended with
+	// the CR still there. timeouts.delete bounds that wait.
+	Stayed bool
 }
 
 // FaultWindow is a period in which a fault was active (DESIGN.md §5.2). Every

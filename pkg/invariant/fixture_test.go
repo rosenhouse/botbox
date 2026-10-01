@@ -173,6 +173,13 @@ func (r *run) waitBegan(when time.Duration) *run {
 	return r
 }
 
+// stayed makes the last wait a recreate's for its old CR to go, which ended
+// with the CR still there.
+func (r *run) stayed() *run {
+	r.in.Checkpoints[len(r.in.Checkpoints)-1].Stayed = true
+	return r
+}
+
 // settled ends the last op's settle wait at when, which is where §6's quiet
 // window opens. The teardown follows one T_stable later, because §5.5 step 4
 // waits that long before it deletes.

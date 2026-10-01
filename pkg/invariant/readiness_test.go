@@ -79,14 +79,37 @@ func TestAnExpiredWaitSaysReadyNeverHeld(t *testing.T) {
 	requireEnding(t, violation, "the settle wait after op 0 (create) expired with no fault active: in 5s (timeouts.settle is 5s), ready never held: it evaluated to false")
 }
 
-// A settle wait runs past timeouts.settle while the target is owed time to
-// recover.
-func TestAnExpiredWaitNamesTimeoutsSettle(t *testing.T) {
-	in := unreadyCreate(0, 1).checkpoint(7*time.Second, invariant.Expired).through(8 * time.Second)
+// A wait runs past its timeout while the target is owed time, so the statement
+// gives the timeout beside how long the wait ran.
+func TestAnExpiredWaitNamesItsTimeout(t *testing.T) {
+	recreated := func() *run {
+		return newRun().
+			running(100*time.Millisecond).
+			record(time.Second, widget("10", spec(3), finalizers("example.com/stuck"), status(3, 1))).
+			op(invariant.OpRecreate, 2*time.Second).
+			record(2050*time.Millisecond, widget("11", spec(3), finalizers("example.com/stuck"), deleting(2*time.Second), status(3, 1)))
+	}
+	for _, test := range []struct {
+		name string
+		run  *run
+		want string
+	}{
+		{"a settle wait", unreadyCreate(0, 1).checkpoint(7*time.Second, invariant.Expired),
+			"expired with no fault active: in 7s (timeouts.settle is 5s), ready never held"},
+		{"a recreate's wait for its old CR", recreated().checkpoint(12*time.Second, invariant.Expired).stayed(),
+			"expired with no fault active: in 10s (timeouts.delete is 10s), the CR w was still being deleted"},
+		{"a recreate's settle wait", recreated().
+			remove(3*time.Second, widget("12", spec(3), finalizers("example.com/stuck"), deleting(2*time.Second), status(3, 1))).
+			record(3100*time.Millisecond, widget("13", uid("uid-w2"), spec(3))).
+			checkpoint(8*time.Second, invariant.Expired).waitBegan(3100 * time.Millisecond),
+			"expired with no fault active: in 4.9s (timeouts.settle is 5s), ready never held"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			violation := expiredWait(t, test.run.through(14*time.Second))
 
-	violation := expiredWait(t, in)
-
-	requireStatement(t, violation, "expired with no fault active: in 7s (timeouts.settle is 5s), ready never held")
+			requireStatement(t, violation, test.want)
+		})
+	}
 }
 
 func TestAnExpiredWaitQuotesWhyReadyCouldNotBeEvaluated(t *testing.T) {

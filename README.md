@@ -513,7 +513,8 @@ After a `delete`, the run waits up to `timeouts.delete` for the CR to go and the
 waits as long for the old CR to go before it creates the new one. A CR still there
 `timeouts.delete` after its deletion fails G3, which names the finalizers still on it.
 Where a fault reached into the deletion, G3 cannot judge it, and `the CR … was still being
-deleted, held by the finalizers …` names them instead. `no CR was left to be ready, but the
+deleted, held by the finalizers …` names them instead. After a `recreate`, that line gives
+`timeouts.delete`, which bounds the wait for the old CR. `no CR was left to be ready, but the
 namespace never held still …` means something kept writing after the CR was gone.
 
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider

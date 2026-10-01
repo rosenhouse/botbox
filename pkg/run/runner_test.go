@@ -1378,12 +1378,13 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 		fault   func(deleted time.Time) proxy.FaultWindow
 		found   []Violation
 		want    string
+		says    string
 		wantErr string
 	}{
 		{name: "a check reports it", found: []Violation{{ID: "G3"}}, want: "G3"},
 		{name: "a fault reached into its deletion", fault: func(deleted time.Time) proxy.FaultWindow {
 			return proxy.FaultWindow{First: deleted.Add(time.Second), Retired: deleted.Add(2 * time.Second)}
-		}, want: "G4"},
+		}, want: "G4", says: fmt.Sprintf("(timeouts.delete is %s)", testTimeouts.Delete)},
 		{name: "a fault is still active", fault: func(deleted time.Time) proxy.FaultWindow {
 			return proxy.FaultWindow{First: deleted.Add(time.Second)}
 		}, wantErr: "op 2 (recreate): the CR widget was still there"},
@@ -1413,11 +1414,14 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 			if test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)) {
 				t.Fatalf("The run returned %v, want %q.", err, test.wantErr)
 			}
-			if got := result.Violation; test.want != "" && (got == nil || got.ID != test.want) {
-				t.Errorf("The run reported %v, want %s.", got, test.want)
+			if got := result.Violation; test.want != "" && (got == nil || got.ID != test.want || !strings.Contains(got.Statement, test.says)) {
+				t.Errorf("The run reported %v, want %s saying %q.", got, test.want, test.says)
 			}
 			if got, want := checkpointsAt(result.Timeline), []int{1, 2}; !slices.Equal(got, want) {
 				t.Fatalf("The run checkpointed at %v, want %v.", got, want)
+			}
+			if settled, stayed := result.Timeline.Checkpoints[0], result.Timeline.Checkpoints[1]; settled.Stayed || !stayed.Stayed {
+				t.Errorf("The checkpoints are %+v and %+v, want the second alone marked as a recreate's whose CR stayed.", settled, stayed)
 			}
 			deleteReturned := result.Timeline.Ops[2].At.Add(h.deleteCRDelay)
 			if stayed := result.Timeline.Checkpoints[1]; stayed.Began.Before(deleteReturned) || stayed.At.Before(stayed.Began) || stayed.At.After(ended) {

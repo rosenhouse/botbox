@@ -2069,10 +2069,11 @@ built from source and run as a black-box binary.
   DESIGN.md. Each command's help is generated from its flags and gives each flag's
   default, and botbox's help gives the exit codes and `KUBEBUILDER_ASSETS`. A usage error
   prints the command's synopsis. A message names the target.yaml key and its value rather
-  than a symbol of this document. G4 gives `timeouts.settle` beside how long an expired
-  wait ran, since a wait can run longer. A G3 note names what deleted the CR where botbox
-  can tell, because a run may delete one CR twice. It names the first op that found the
-  CR, because a lagging Observer shows the CR to the op after the one that deleted it.
+  than a symbol of this document. G4 gives how long an expired wait ran beside the key
+  that bounds it, since a wait can run longer: `timeouts.delete` for a recreate's wait for
+  its old CR, and `timeouts.settle` for the rest. A G3 note names what deleted the CR where
+  botbox can tell, because a run may delete one CR twice. It names the first op that found
+  the CR, because a lagging Observer shows the CR to the op after the one that deleted it.
   Splitting this document was rejected, because the hourly Routine reads it whole.
 - **D@65 This document gives intent where a listing would drift.** §8.2 names `go doc`
   rather than listing `Target`'s fields, and a test holds §11's synopsis to each

@@ -711,11 +711,16 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 )
 
 func TestBotbox(t *testing.T) {
-	botbox := exec.Command("botbox", "run", "--target", "targets/toy-widget/target.yaml",
-		"--seed", "1", "--runs", "3", "--deadline", "5m")
+	botbox := exec.Command("bin/botbox", "run", "--target", "targets/toy-widget/target.yaml",
+		"--seed", "1", "--runs", "3")
+	if deadline, ok := t.Deadline(); ok {
+		// Stop botbox before go test's -timeout, which would leave its control plane running.
+		botbox.Args = append(botbox.Args, "--deadline", (time.Until(deadline) - 30*time.Second).String())
+	}
 	botbox.Dir = "../.." // launch.binary is relative to the repository root.
 	botbox.Stdout, botbox.Stderr = os.Stdout, os.Stderr
 	if err := botbox.Run(); err != nil {
@@ -724,11 +729,11 @@ func TestBotbox(t *testing.T) {
 }
 ```
 
-Install botbox on your PATH, build your controller and set `KUBEBUILDER_ASSETS`, then run
-`go test -count=1 -tags botbox ./...`. `go test` cannot see a change to your controller or
-`target.yaml`, so `-count=1` stops it from reusing a cached pass. The build tag keeps the test
-out of a plain `go test ./...` where botbox is not installed. Keep `--deadline` inside `go test`'s `-timeout`, 10 minutes by
-default, so that botbox stops first.
+Build `bin/botbox`, as the [tools module](#keep-botbox-out-of-your-gomod) does, build your
+controller and set `KUBEBUILDER_ASSETS`. Then run `go test -count=1 -tags botbox ./...`.
+`go test` cannot see a change to your controller or `target.yaml`, so `-count=1` stops it from
+reusing a cached pass. The build tag keeps the test out of a plain `go test ./...`. Raise
+`go test`'s `-timeout` for more runs, because the test stops botbox before it.
 
 botbox has no Go API to call instead. A `ready: go:<name>` or `equal: go:<name>` hook takes
 effect only in a build of botbox that registers it, which takes a change to this repository.

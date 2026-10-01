@@ -24,16 +24,21 @@ var citesDesign = map[string]string{
 }
 
 // Every string botbox prints comes from a literal, so no literal may need
-// DESIGN.md to be understood.
+// DESIGN.md to be understood. Nor may the command's doc, which go doc prints.
 func TestNoStringLiteralUsesTheDesignsVocabulary(t *testing.T) {
 	files := productionGoFiles(t)
 	if !slices.Contains(files, "pkg/invariant/g2.go") {
 		t.Fatalf("The scan listed %v, which skips the checks.", files)
 	}
 	for _, path := range files {
-		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments|parser.SkipObjectResolution)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if strings.HasPrefix(path, "cmd/") && parsed.Doc != nil {
+			if found := designVocabulary.FindString(parsed.Doc.Text()); found != "" {
+				t.Errorf("%s: the command's doc uses %q, which only DESIGN.md explains.", path, found)
+			}
 		}
 		ast.Inspect(parsed, func(node ast.Node) bool {
 			literal, ok := node.(*ast.BasicLit)

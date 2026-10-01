@@ -16,6 +16,8 @@ var helpForms = []struct {
 	{args: []string{"--help"}},
 	{args: []string{"-help"}},
 	{args: []string{"-h"}},
+	{args: []string{"help", "help"}},
+	{args: []string{"help", "--help"}},
 	{args: []string{"run", "--help"}, command: "run"},
 	{args: []string{"run", "-h"}, command: "run"},
 	{args: []string{"help", "run"}, command: "run"},
@@ -77,8 +79,13 @@ func TestACommandsHelpDescribesEachFlagWithItsDefault(t *testing.T) {
 			t.Errorf("botbox run --help lacks %q:\n%s", want, run)
 		}
 	}
-	if strings.Contains(run, "(default 0") || strings.Contains(run, `(default "")`) {
+	if strings.Contains(run, "(default 0") || strings.Contains(run, "(default )") {
 		t.Errorf("botbox run --help gives a default to a flag that has none:\n%s", run)
+	}
+	for _, c := range commands {
+		if got := strings.Count(help(c.name), "(required)"); got != len(c.required) {
+			t.Errorf("botbox %s --help marks %d flags required, want %d: %v.", c.name, got, len(c.required), c.required)
+		}
 	}
 }
 
@@ -129,7 +136,10 @@ func TestAUsageErrorPrintsTheUsage(t *testing.T) {
 			error: "the --sequences flag is required", says: usage("matrix")},
 		{name: "version with an argument", args: []string{"version", "extra"},
 			error: "botbox version takes no argument: extra", says: usage("version")},
-		{name: "no command", error: "no command", says: usage("")},
+		{name: "a flag after a sequence file", args: []string{"run", "s.json", "--target", toyTargetYAML},
+			error: "--target follows a sequence file, and flags go before them", says: usage("run")},
+		{name: "help after a sequence file", args: []string{"replay", "s.json", "--help"},
+			error: "--help follows a sequence file, and flags go before them", says: usage("replay")},
 		{name: "an unknown command", args: []string{"frobnicate"}, error: `"frobnicate" is not a botbox command`, says: usage("")},
 		{name: "help on an unknown command", args: []string{"help", "frobnicate"}, error: `"frobnicate" is not a botbox command`, says: usage("")},
 		{name: "help on two commands", args: []string{"help", "run", "replay"}, error: "botbox help takes one command, and 2 were given", says: usage("")},
@@ -147,7 +157,18 @@ func TestAUsageErrorPrintsTheUsage(t *testing.T) {
 	}
 }
 
+func TestABareBotboxPrintsItsHelpAndExitsTwo(t *testing.T) {
+	code, stdout, stderr := invoke(t, &fakeSession{})
+
+	if code != exitError || stdout != "" || stderr != help("") {
+		t.Errorf("botbox exited %d and wrote %q to stdout and\n%s\nto stderr, want %d, nothing and its help.", code, stdout, stderr, exitError)
+	}
+}
+
 func TestTheUsageOfACommandIsItsSynopsis(t *testing.T) {
+	if got, want := usage("version"), "Usage:\n  botbox version\n"; got != want {
+		t.Errorf("The usage of botbox version is\n%s\nwant\n%s", got, want)
+	}
 	if got, want := usage("replay"), "Usage:\n  "+replaySynopsis(t)+"\nRun 'botbox replay --help' for its flags.\n"; got != want {
 		t.Errorf("The usage of botbox replay is\n%s\nwant\n%s", got, want)
 	}

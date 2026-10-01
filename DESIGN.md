@@ -324,14 +324,15 @@ sequence many times and starting a control plane costs seconds.
 
 **Shrinking** is sequence-level, and botbox's own pass does all of it. It removes one op at
 a time and replays what is left from clean state. Where an op stays and carries a fault,
-it halves `until.count`, `until.for` and `action.delay` in turn, each as far as it goes.
-It keeps a candidate that fails the same check, by ID, and passes over the sequence again
-until nothing simplifies. A candidate the sequence format refuses is not replayed. Field
-values are not shrunk. The pass stops at the deadline (§11) and keeps the smallest
-failing sequence it found. rapid only draws sequences (§5.4). Its own shrinker would
-minimize rapid's stream of choices, which draws a different sequence on each replay, while
-the pass shrinks the replayable JSON sequence that the report carries. Each replay costs a
-whole run against the cluster, so the pass makes as few as it can.
+it halves `until.count` down to 1, and `until.for` and `action.delay` down to 10 ms, one
+field at a time. A candidate replaces the sequence where its replay fails the same check,
+by ID. One whose replay errs does not, and one the sequence format refuses is not
+replayed. The pass goes over the sequence again until nothing simplifies. Field values
+are not shrunk. The pass stops at the deadline (§11) and keeps the smallest failing
+sequence it found. rapid only draws sequences (§5.4). Its own shrinker minimizes rapid's
+stream of choices, which draws a different sequence on each replay, while the pass
+shrinks the replayable JSON sequence that the report carries. Each replay is a whole run
+against the cluster.
 
 ### 5.6 Invariant engine
 
@@ -908,7 +909,8 @@ server does take a supported flag, and the ephemeral port above keeps it out of 
 `go doc github.com/rosenhouse/botbox/pkg/target Target` lists its fields, so this document
 gives only the intent. `Ready` returns an error beside its verdict, and an error means not
 ready (§8.4). A property's error is a configuration error. A nil `Equal` means the §6
-default with the `equalIgnore` paths, and a hook named in target.yaml replaces both. The
+default with the `equalIgnore` paths. An `equal` hook replaces the default and takes no
+`equalIgnore` (§8.1). The
 Runner keys snapshots by kind and name, never by UID, so a recreated object compares
 against its predecessor.
 
@@ -1155,16 +1157,16 @@ the proxy; the `Image` launcher. Separate design addendum.
   ```
 
   `botbox matrix` generates the toy's bug matrix for `make bug-matrix`, so the top-level
-  help leaves it out. `botbox`, `botbox help` and `botbox --help` print what botbox does,
-  its commands, the exit codes, `KUBEBUILDER_ASSETS` and the README's URL, because
-  `go install` ships no documentation. `botbox <command> --help` and `botbox help
-  <command>` print the command's synopsis and each flag with its meaning and default. Help
-  goes to stdout and exits 0. A usage error, such as an unknown flag, a missing required
-  flag, a wrong count of sequence files or a bare `botbox`, prints the error and the
-  command's synopsis to stderr and exits 2. No message botbox prints cites this document
-  or uses its symbols, such as `T_settle`. A message names the target.yaml key and its
-  value instead, as in `2s (timeouts.stable)`. A test scans the code's string literals
-  for them.
+  help leaves it out. `botbox help` and `botbox --help` print what botbox does, its
+  commands, the exit codes, `KUBEBUILDER_ASSETS` and the README's URL, because `go install`
+  ships no documentation. `botbox <command> --help` and `botbox help <command>` print the
+  command's synopsis and each flag with its meaning and default. Help goes to stdout and
+  exits 0. A bare `botbox` prints botbox's help to stderr and exits 2. A usage error, such
+  as an unknown flag, a missing required flag, a flag after a sequence file or a wrong
+  count of sequence files, exits 2 and prints the error and the command's synopsis to
+  stderr. No message botbox prints cites this document or uses its symbols, such as
+  `T_settle`. A message names the target.yaml key and its value instead, as in
+  `2s (timeouts.stable)`. A test scans the code's string literals for them.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. The deadline abandons the run under way (§5.5), and the
   shrinker stops there and reports the smallest failing sequence it found. Without
@@ -1175,7 +1177,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
   CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
-  harness error, or a deadline that stopped the invocation before its last run.
+  harness error, or the deadline.
   SIGINT, SIGTERM and SIGHUP interrupt the invocation. No further run starts, and the run
   under way is abandoned (§5.5). `botbox run` and `botbox replay` name its directory, and
   `botbox matrix` names its row. A run that failed before the interrupt reports its own
@@ -1251,9 +1253,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   adds; writing `target.yaml` for your own controller; reading a report; what to change
   when botbox exits 2; a CI recipe for adopters, embedded from `examples/ci/github-actions.yml`;
   a one-line-per-invariant table linking to §6; a closing "Development and internals"
-  section that links to this document and to `docs/bug-matrix.md`. Only the invariant
-  table and that section link here, and only that section cites a section or a decision.
-  The README names no milestone. `make test` enforces both. A fenced block preceded by `<!-- embed: <path> -->` has content,
+  section that links to this document and to `docs/bug-matrix.md`. Only the Invariants
+  section and that closing section link here, and only the closing section cites a
+  section, a decision or a symbol of this document. The README names no milestone. `make
+  test` enforces these rules. A fenced block preceded by `<!-- embed: <path> -->` has content,
   excluding the two fence lines, byte-identical to that file including its trailing
   newline; `<path>` is relative to the repository root; `make test` enforces it.
 - **PRs.** Every PR description, issue, review and comment a Claude session posts begins
@@ -2058,16 +2061,14 @@ built from source and run as a black-box binary.
   or before the fault's own op. Keeping the reference in DESIGN.md was rejected, because
   DESIGN.md mixes the contract with internals, milestones and decisions.
 - **D@62 botbox's help and messages need no design document.** `go install` ships no
-  DESIGN.md, and the help opened with "the generic invariants of DESIGN.md §6". Every help
-  form printed the same five lines, which hid each flag's meaning and default, the exit
-  codes and `KUBEBUILDER_ASSETS`. An unknown flag printed only Go's error. G2 said "where
-  §6 requires none". Each command's help is now generated from its flags, a usage error
-  prints the command's synopsis, and a message names the target.yaml key and its value. A
-  run that deleted one CR twice printed two identical G3 notes, so a note names what
-  deleted the CR. Splitting DESIGN.md was rejected, because the hourly Routine reads it
-  whole.
-- **D@65 DESIGN.md describes the code that exists.** §5.5 said rapid drives shrinking,
-  while botbox's own pass does all of it and rapid only draws. §5.4 promised hand-written
-  generators, which no target has. §8.2 listed a Go form that had drifted from
-  `pkg/target`, so it gives the intent and names `go doc`, which cannot drift. §11's
-  synopsis lacked `matrix` and several flags, so a test holds it to each command's flags.
+  DESIGN.md. Each command's help is generated from its flags and gives each flag's
+  default, and botbox's help gives the exit codes and `KUBEBUILDER_ASSETS`. A usage error
+  prints the command's synopsis. A message names the target.yaml key and its value rather
+  than a symbol of this document. A G3 note names what deleted the CR, because a run may
+  delete one CR twice. Splitting this document was rejected, because the hourly Routine
+  reads it whole.
+- **D@65 This document gives intent where a listing would drift.** §8.2 names `go doc`
+  rather than listing `Target`'s fields, and a test holds §11's synopsis to each
+  command's flags. botbox shrinks with its own pass, because rapid's shrinker draws a
+  different sequence on each replay. Hand-written generators wait for a target that needs
+  one.

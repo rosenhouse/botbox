@@ -25,15 +25,15 @@ Exit codes:
   0      Every run passed.
   1      A check failed. The run's directory holds its report.
   2      botbox could not test the controller. A configuration or harness error
-         stopped it, or the deadline stopped the invocation before its last run.
+         stopped it, or the deadline did.
   128+N  Signal N stopped botbox. Ctrl-C exits 130.
 `
 
 const environment = `
 Environment:
-  KUBEBUILDER_ASSETS  The directory that holds etcd and kube-apiserver. botbox
-                      starts them as the test API server, unless --kubeconfig
-                      names a cluster. The README's Install section sets it.
+  KUBEBUILDER_ASSETS names the directory that holds etcd and kube-apiserver.
+  botbox starts them as the test API server, unless --kubeconfig names a
+  cluster. The README's Install section shows how to set it.
 `
 
 var commands = []command{{
@@ -126,7 +126,7 @@ func help(name string) string {
 	c, found := lookup(name)
 	if !found {
 		return intro + "\n" + usage("") + runExits + environment +
-			"\nThe README at https://github.com/rosenhouse/botbox has a quickstart, and its\ndocs/reference.md lists every key of target.yaml and every op.\n"
+			"\nThe README at https://github.com/rosenhouse/botbox has a quickstart.\ndocs/reference.md there lists every key of target.yaml and every op.\n"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Usage:\n  %s\n\n%s\n", c.synopsis(), c.about)
@@ -164,7 +164,11 @@ func (c command) annotation(f *flag.Flag) string {
 // botbox's commands where name is no command.
 func usage(name string) string {
 	if c, found := lookup(name); found {
-		return fmt.Sprintf("Usage:\n  %s\nRun 'botbox %s --help' for its flags.\n", c.synopsis(), c.name)
+		usage := "Usage:\n  " + c.synopsis() + "\n"
+		if len(c.flags()) > 0 {
+			usage += "Run 'botbox " + c.name + " --help' for its flags.\n"
+		}
+		return usage
 	}
 	var b strings.Builder
 	b.WriteString("Usage:\n  botbox <command> [flags]\n\nCommands:\n")

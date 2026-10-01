@@ -1495,6 +1495,14 @@ func TestParseReadsTheSequenceFiles(t *testing.T) {
 	}
 }
 
+func TestParseReadsASequenceFileThatReadsAsAFlagAfterTwoDashes(t *testing.T) {
+	_, sequences, err := parse([]string{"replay", "--target", "t.yaml", "--", "-s.json"})
+
+	if err != nil || !slices.Equal(sequences, []string{"-s.json"}) {
+		t.Errorf("parse read the sequences %v and returned %v, want [-s.json].", sequences, err)
+	}
+}
+
 func TestParseDefaultsTheOutputDirectoryAndLeavesTheDeadlineToDerive(t *testing.T) {
 	opts, _, err := parse([]string{"replay", "--target", "t.yaml", "a.json"})
 

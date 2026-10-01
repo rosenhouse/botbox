@@ -125,6 +125,10 @@ func exitStatus(ctx context.Context, code int) int {
 }
 
 func (c *cli) dispatch(ctx context.Context, args []string) int {
+	if len(args) == 0 {
+		fmt.Fprint(c.stderr, help(""))
+		return exitError
+	}
 	opts, paths, err := parse(args)
 	if errors.Is(err, flag.ErrHelp) {
 		fmt.Fprint(c.stdout, help(opts.command))
@@ -676,11 +680,7 @@ func (o options) invocationSeed(first run.Sequence) int64 {
 // parse reads an invocation. Its errors are usage errors, and opts.command
 // names the command whose usage they need, if any.
 func parse(args []string) (options, []string, error) {
-	if len(args) == 0 {
-		return options{}, nil, errors.New("no command")
-	}
-	switch args[0] {
-	case "help", "-h", "-help", "--help":
+	if asksForHelp(args[0]) {
 		return parseHelp(args[1:])
 	}
 	opts := options{command: args[0]}
@@ -700,6 +700,12 @@ func parse(args []string) (options, []string, error) {
 	})
 
 	sequences := flags.Args()
+	// Parsing stops at the first sequence file, so a dash before it was a "--".
+	for _, later := range sequences[min(1, len(sequences)):] {
+		if strings.HasPrefix(later, "-") {
+			return opts, nil, fmt.Errorf("%s follows a sequence file, and flags go before them", later)
+		}
+	}
 	for _, name := range c.required {
 		if flags.Lookup(name).Value.String() == "" {
 			return opts, nil, fmt.Errorf("the --%s flag is required", name)
@@ -725,10 +731,14 @@ func parse(args []string) (options, []string, error) {
 	return opts, sequences, nil
 }
 
+func asksForHelp(arg string) bool {
+	return slices.Contains([]string{"help", "-h", "-help", "--help"}, arg)
+}
+
 // parseHelp reads the operands of botbox help.
 func parseHelp(operands []string) (options, []string, error) {
 	switch {
-	case len(operands) == 0:
+	case len(operands) == 0 || len(operands) == 1 && asksForHelp(operands[0]):
 		return options{}, nil, flag.ErrHelp
 	case len(operands) > 1:
 		return options{}, nil, fmt.Errorf("botbox help takes one command, and %d were given", len(operands))

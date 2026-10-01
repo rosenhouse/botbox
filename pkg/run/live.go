@@ -92,6 +92,8 @@ func (l *liveRun) clearFaults() { l.h.Proxy.ClearFaults() }
 
 func (l *liveRun) faultWindow(id proxy.FaultID) proxy.FaultWindow { return l.h.Proxy.Window(id) }
 
+func (l *liveRun) held(before time.Time) (bool, time.Time) { return l.h.Proxy.Held(before) }
+
 func (l *liveRun) servedResources() ([]metav1.APIResource, error) {
 	return cluster.ServedResources(l.h.Config)
 }

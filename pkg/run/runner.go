@@ -222,6 +222,8 @@ type Checkpoint struct {
 	// Stayed marks a recreate's wait for its old CR to go, which ended with
 	// the CR still there.
 	Stayed bool
+	// Held is whether the proxy held a request of the target's at At.
+	Held bool
 }
 
 // Window is a stretch of a run's time.
@@ -290,6 +292,9 @@ type harness interface {
 	clearFaults()
 	// faultWindow is what the proxy has done with the fault.
 	faultWindow(id proxy.FaultID) proxy.FaultWindow
+	// held reports, of the target's requests that reached the proxy before
+	// then, whether the proxy holds one and when it last released one.
+	held(before time.Time) (holding bool, released time.Time)
 	// servedResources is what the API server serves now, which includes the
 	// CRDs a target installed.
 	servedResources() ([]metav1.APIResource, error)
@@ -805,6 +810,8 @@ func (r *runner) checkpoint(checkpoint Checkpoint, expired bool) error {
 	if count := r.h.managedCount(); count > r.limit {
 		return fmt.Errorf("the run namespace holds %d managed objects, over the harness limit of %d", count, r.limit)
 	}
+	holding, released := r.h.held(checkpoint.At)
+	checkpoint.Held = holding || released.After(checkpoint.At)
 	r.timeline.Checkpoints = append(r.timeline.Checkpoints, checkpoint)
 	r.readExits()
 	if expired {

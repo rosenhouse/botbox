@@ -3,6 +3,7 @@ package run
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -595,6 +596,25 @@ func TestTheChecksReportAPropertyThatCannotBeEvaluated(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "P1") {
 		t.Errorf("The checks returned %q, want the property named.", err)
+	}
+}
+
+func TestTheChecksKnowWhereTheProxyHeldARequest(t *testing.T) {
+	in := convergedRun()
+	in.Timeline.Checkpoints[0].Held = true
+	in.Target.Properties = []target.Property{{
+		ID:   "P1",
+		Eval: func(*unstructured.Unstructured, []*unstructured.Unstructured) (bool, error) { return false, nil },
+	}}
+
+	found, err := Engine{}.Check(in)
+
+	if err != nil || len(found.Violations) > 0 {
+		t.Fatalf("The checks returned (%v, %v), want no violation: the proxy held a request at the one checkpoint.", ids(found.Violations), err)
+	}
+	const want = "P1 is not evaluated at the checkpoint after op 0"
+	if !slices.ContainsFunc(found.Notes, func(note string) bool { return strings.HasPrefix(note, want) }) {
+		t.Errorf("The checks noted %q, want one beginning %q.", found.Notes, want)
 	}
 }
 

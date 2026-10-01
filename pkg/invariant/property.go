@@ -16,7 +16,12 @@ import (
 func Property(declared target.Property) Check {
 	return func(in Input) (Result, error) {
 		out := Result{ID: declared.ID}
-		for _, s := range in.statesAt(in.evaluationPoints(declared.When)) {
+		points, held := in.evaluationPoints(declared.When)
+		for _, checkpoint := range held {
+			out.note("at the checkpoint after %s: the proxy still held a request of the target's there, which may have been about to change what %s reads",
+				in.describeOp(checkpoint.Op), declared.ID)
+		}
+		for _, s := range in.statesAt(points) {
 			managed := s.managed(in)
 			crs := s.crs(in.Target.Primary)
 			if len(crs) == 0 {
@@ -50,11 +55,12 @@ func Property(declared target.Property) Check {
 	}
 }
 
-// evaluationPoints are the instants a property is evaluated at, in order.
+// evaluationPoints are the instants a property is evaluated at, in order, and
+// the checkpoints it is not, where the proxy held a request of the target's.
 // DESIGN.md §4 counts the teardown's checkpoint, so `checkpoint` and `end`
 // keep it; the events the teardown itself caused are botbox's own doing.
-func (in Input) evaluationPoints(when target.PropertyWhen) []time.Time {
-	var points []time.Time
+func (in Input) evaluationPoints(when target.PropertyWhen) (points []time.Time, held []Checkpoint) {
+	checkpoints := in.Checkpoints
 	switch when {
 	case target.Always:
 		for _, v := range in.versions() {
@@ -63,14 +69,17 @@ func (in Input) evaluationPoints(when target.PropertyWhen) []time.Time {
 			}
 			points = append(points, v.Time)
 		}
+		return points, nil
 	case target.End:
-		if n := len(in.Checkpoints); n > 0 {
-			points = append(points, in.Checkpoints[n-1].Time)
-		}
-	default: // The loader reads an unset `when` as checkpoint (DESIGN.md §8.1).
-		for _, checkpoint := range in.Checkpoints {
-			points = append(points, checkpoint.Time)
-		}
+		checkpoints = checkpoints[max(len(checkpoints)-1, 0):]
 	}
-	return points
+	// The loader reads an unset `when` as checkpoint (DESIGN.md §8.1).
+	for _, checkpoint := range checkpoints {
+		if checkpoint.Held {
+			held = append(held, checkpoint)
+			continue
+		}
+		points = append(points, checkpoint.Time)
+	}
+	return points, held
 }

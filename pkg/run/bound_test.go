@@ -34,10 +34,10 @@ type waitingHarness struct {
 	// each restart, at back.
 	returnsLate bool
 	back        time.Time
-	// goesLate has held, the CR botbox deleted last, go just before the wait
-	// for it ends.
+	// goesLate has deleting, the CR botbox deleted last, go just before the
+	// wait for it ends.
 	goesLate bool
-	held     *unstructured.Unstructured
+	deleting *unstructured.Unstructured
 	// delay has the proxy hold a request for that long from just before each
 	// wait's time runs out, once a fault op has run, and one from just before
 	// each fault retires.
@@ -141,13 +141,13 @@ func (w *waitingHarness) sleep(ctx context.Context, d time.Duration) error {
 
 // deleteCR leaves the CR under deletion, as a finalizer would hold it.
 func (w *waitingHarness) deleteCR(ctx context.Context, name string) error {
-	w.held = widget(name)
-	w.held.SetNamespace(fakeNamespace)
-	w.held.SetResourceVersion(w.at.Format(time.RFC3339Nano))
-	w.held.SetUID(types.UID(w.held.GetResourceVersion()))
-	w.held.SetFinalizers([]string{"toy.botbox/cleanup"})
-	w.held.SetDeletionTimestamp(&metav1.Time{Time: w.at})
-	w.store.Record(widgetKind, w.held, w.at)
+	w.deleting = widget(name)
+	w.deleting.SetNamespace(fakeNamespace)
+	w.deleting.SetResourceVersion(w.at.Format(time.RFC3339Nano))
+	w.deleting.SetUID(types.UID(w.deleting.GetResourceVersion()))
+	w.deleting.SetFinalizers([]string{"toy.botbox/cleanup"})
+	w.deleting.SetDeletionTimestamp(&metav1.Time{Time: w.at})
+	w.store.Record(widgetKind, w.deleting, w.at)
 	return w.fakeHarness.deleteCR(ctx, name)
 }
 
@@ -164,7 +164,7 @@ func (w *waitingHarness) awaitCRGone(ctx context.Context, name string, until fun
 		}
 	}
 	if w.goesLate {
-		w.store.RecordDeletion(widgetKind, w.held, w.at)
+		w.store.RecordDeletion(widgetKind, w.deleting, w.at)
 	}
 	return w.fakeHarness.awaitCRGone(ctx, name, until)
 }

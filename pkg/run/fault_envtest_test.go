@@ -335,6 +335,51 @@ func TestASettleWaitOutlastsTheRequestsTheProxyHolds(t *testing.T) {
 	}
 }
 
+// heldDeletes has the proxy hold each of the toy's ConfigMap requests for
+// longer than timeouts.settle, then deletes the Widget. The toy deletes its
+// children one held request after another, so the wait after the delete ends
+// with one held.
+const heldDeletes = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"resource": "configmaps"}, "action": {"delay": "6s"}}},
+    {"i": 2, "t": "delete"}
+  ]
+}`
+
+// The correct toy passes where a wait ends with a request still held.
+func TestTheCorrectToyPassesWhereAWaitEndsWithARequestHeld(t *testing.T) {
+	t.Parallel()
+	binary := buildToy(t)
+	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
+	for _, test := range []struct {
+		name, sequence string
+		// noted is what the run notes, if anything.
+		noted string
+	}{
+		{"a delete's wait", heldDeletes, "P1 is not evaluated at the checkpoint after op 2 (delete)"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := run.Run(t.Context(), loadTarget(t, binary), readSequence(t, test.sequence),
+				run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if result.Violation != nil {
+				t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+			}
+			if test.noted != "" && !slices.ContainsFunc(result.Notes, func(note string) bool { return strings.HasPrefix(note, test.noted) }) {
+				t.Errorf("The run noted %q, want one beginning %q.", result.Notes, test.noted)
+			}
+		})
+	}
+}
+
 // requireQuietAfterHolds requires a wait that converged T_stable after the
 // proxy released each request it held for delay that arrived before the end.
 func requireQuietAfterHolds(t *testing.T, op int, wait run.Wait, log []proxy.Request, delay, stable time.Duration) {

@@ -101,6 +101,9 @@ type Checkpoint struct {
 	// Stayed marks a recreate's wait for its old CR to go, which ended with
 	// the CR still there. timeouts.delete bounds that wait.
 	Stayed bool
+	// Held marks a checkpoint where the proxy held a request of the
+	// target's, which was about to change what the checks read.
+	Held bool
 }
 
 // FaultWindow is a period in which a fault was active (DESIGN.md §5.2). Every

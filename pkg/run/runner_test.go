@@ -120,6 +120,8 @@ type fakeHarness struct {
 	cancelled     []string
 	// clock is the run's clock. Nil is the wall clock.
 	clock func() time.Time
+	// holds answers for the proxy what it held. Nil holds nothing.
+	holds func(before time.Time) (bool, time.Time)
 }
 
 func newFakeHarness() *fakeHarness {
@@ -283,6 +285,13 @@ var fakeServed = []metav1.APIResource{
 
 func (f *fakeHarness) servedResources() ([]metav1.APIResource, error) {
 	return fakeServed, f.fail["servedResources"]
+}
+
+func (f *fakeHarness) held(before time.Time) (bool, time.Time) {
+	if f.holds == nil {
+		return false, time.Time{}
+	}
+	return f.holds(before)
 }
 
 // faultWindow answers as the proxy does. A test either says what the proxy
@@ -1335,6 +1344,47 @@ func TestRunLeavesToG3AWaitThatEndedOnACRPastItsDeletionDeadline(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A request the proxy held where a wait ended was about to change what the
+// checks read there.
+func TestRunMarksEachCheckpointWhereTheProxyHeldARequest(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		holds func(before time.Time) (bool, time.Time)
+		want  bool
+	}{
+		{"none", nil, false},
+		{"one it still holds", func(time.Time) (bool, time.Time) { return true, time.Time{} }, true},
+		{"one it released after", func(before time.Time) (bool, time.Time) { return false, before.Add(time.Millisecond) }, true},
+		{"one it released by then", func(before time.Time) (bool, time.Time) { return false, before }, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newFakeHarness()
+			h.holds = test.holds
+			check := &heldChecker{}
+
+			result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if got, want := checkpointsAt(result.Timeline), []int{0, Teardown}; !slices.Equal(got, want) {
+				t.Fatalf("The run checkpointed at %v, want %v.", got, want)
+			}
+			if want := []bool{test.want, test.want}; !slices.Equal(check.read, want) {
+				t.Errorf("The checks read the checkpoints as held %v, want %v.", check.read, want)
+			}
+		})
+	}
+}
+
+// heldChecker records whether the checks read each checkpoint as held.
+type heldChecker struct{ read []bool }
+
+func (c *heldChecker) Check(in Input) (Findings, error) {
+	c.read = append(c.read, in.Timeline.Checkpoints[len(in.Timeline.Checkpoints)-1].Held)
+	return Findings{}, nil
 }
 
 func TestRunGivesTheCRARecreateDeletesUntilItsDeadline(t *testing.T) {

@@ -76,6 +76,71 @@ func TestPropertyFiresAtACheckpointThatStillBreaksIt(t *testing.T) {
 	}
 }
 
+// A request the proxy held where the wait ended was about to change what the
+// property reads.
+func TestPropertyIsNotEvaluatedWhereTheProxyHeldARequest(t *testing.T) {
+	for _, when := range []target.PropertyWhen{target.Checkpoint, target.End} {
+		t.Run(string(when), func(t *testing.T) {
+			in := newRun().
+				op(invariant.OpDelete, 0).
+				record(time.Second, widget("10", spec(2), status(2, 1)), child("w-0", "11")).
+				checkpoint(4*time.Second, invariant.Expired).held().
+				through(8 * time.Second)
+			in.Target.Properties = []target.Property{property(when, readyCountsChildren)}
+
+			noted(t, invariant.Property(in.Target.Properties[0]), in,
+				"P1 is not evaluated at the checkpoint after op 0 (delete): the proxy still held a request of the target's there")
+		})
+	}
+}
+
+// A property evaluated on every event reads no checkpoint.
+func TestPropertyEvaluatedAlwaysIgnoresWhereTheProxyHeldARequest(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1))).
+		record(3*time.Second, child("w-0", "11"), child("w-1", "12")).
+		checkpoint(4*time.Second, invariant.Expired).held().
+		through(8 * time.Second)
+	in.Target.Properties = []target.Property{property(target.Always, readyCountsChildren)}
+
+	result := evaluate(t, invariant.Property(in.Target.Properties[0]), in)
+
+	if len(result.Violations) != 1 || !result.Violations[0].At.Equal(at(time.Second)) || len(result.Notes) > 0 {
+		t.Errorf("P1 reported %v and noted %q, want the event at 1s alone.", statements(result), result.Notes)
+	}
+}
+
+func TestPropertyEvaluatedAtTheEndOfARunWithNoCheckpointJudgesNothing(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1))).
+		through(8 * time.Second)
+	in.Target.Properties = []target.Property{property(target.End, readyCountsChildren)}
+
+	if result := silent(t, invariant.Property(in.Target.Properties[0]), in); len(result.Notes) > 0 {
+		t.Errorf("P1 noted %q, want nothing.", result.Notes)
+	}
+}
+
+// One held request leaves the property to the other checkpoints.
+func TestPropertyFiresAtACheckpointAfterOneWhereTheProxyHeldARequest(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(time.Second, widget("10", spec(2), status(2, 1))).
+		checkpoint(2*time.Second, invariant.Expired).held().
+		op(invariant.OpUpdate, 3*time.Second).
+		checkpoint(4*time.Second, invariant.Converged).
+		through(8 * time.Second)
+	in.Target.Properties = []target.Property{property(target.Checkpoint, readyCountsChildren)}
+
+	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
+
+	if !violation.At.Equal(at(4 * time.Second)) {
+		t.Errorf("The violation is timestamped %v, want the checkpoint at 4s.", violation.At)
+	}
+}
+
 func TestPropertyEvaluatedAtTheEndReadsTheLastCheckpointOnly(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).

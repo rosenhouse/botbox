@@ -141,12 +141,15 @@ func (out *Result) reportLeftovers(in Input, deleted deletion, deadline time.Tim
 	}
 }
 
-// describeDeletion names the CR and what deleted it: the last op that deleted
-// it by then, or the teardown.
+// describeDeletion names the CR and what deleted it: an op that deleted the CR
+// with this UID, or the teardown.
 func (in Input) describeDeletion(deleted deletion) string {
 	var by string
 	for _, op := range in.Ops {
-		if (op.Type == OpDelete || op.Type == OpRecreate) && op.CR == deleted.key && !op.Time.After(deleted.at) {
+		if op.Type != OpDelete && op.Type != OpRecreate || op.CR != deleted.key {
+			continue
+		}
+		if was, found := in.versionAt(deleted.key, op.Time); found && was.UID == deleted.uid {
 			by = " by " + describe(op)
 		}
 	}

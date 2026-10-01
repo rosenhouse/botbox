@@ -177,6 +177,34 @@ func TestG3NamesWhatDeletedTheCRInEachNote(t *testing.T) {
 	}
 }
 
+// An op names only the CR it deleted, not a later one of the same name that
+// something else deleted.
+func TestG3NamesNoOpForADeletionNoOpMade(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup))).
+		op(invariant.OpDelete, 10*time.Second).
+		record(10*time.Second, widget("11", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
+		remove(11*time.Second, widget("12", spec(1), status(1, 1), deleting(10*time.Second))).
+		op(invariant.OpCreate, 12*time.Second).
+		record(12*time.Second, widget("20", spec(1), status(1, 1), uid("uid-w2"), finalizers(cleanup))).
+		op(invariant.OpUpdate, 15*time.Second).
+		record(15*time.Second, widget("21", spec(2), status(1, 1), uid("uid-w2"), finalizers(cleanup))).
+		record(20*time.Second, widget("22", spec(2), status(1, 1), uid("uid-w2"), finalizers(cleanup), deleting(20*time.Second))).
+		fault(10500*time.Millisecond, 40*time.Second).
+		through(35 * time.Second)
+
+	result := silent(t, invariant.CleanDeletion, in)
+
+	want := []string{
+		"G3 is not evaluated for the deletion of w by op 1 (delete): a fault was active before its deadline",
+		"G3 is not evaluated for the deletion of w: a fault was active before its deadline",
+	}
+	if !slices.Equal(result.Notes, want) {
+		t.Errorf("G3 noted %q, want %q.", result.Notes, want)
+	}
+}
+
 func TestG3IgnoresACRTheRunRecreated(t *testing.T) {
 	in := deletedRun().
 		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).

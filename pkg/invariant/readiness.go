@@ -27,8 +27,8 @@ func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 	changes := in.versionsIn(at.Add(-stable), at)
 	violation := Violation{
 		ID: "G4",
-		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active: in %s, %s%s%s",
-			in.describeOp(checkpoint.Op), at.Sub(began).Round(time.Millisecond),
+		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active: in %s (timeouts.settle is %s), %s%s%s",
+			in.describeOp(checkpoint.Op), at.Sub(began).Round(time.Millisecond), in.timeouts().Settle,
 			walk.why(began, in.starting(at, stable), churn(stable, changes)),
 			in.repeated(began, at), in.exited(at)),
 		At: at,

@@ -1590,7 +1590,8 @@ func TestRunRecordsG4WhenTheRecoveryExpires(t *testing.T) {
 	if recovery == nil || recovery.Converged || !violation.At.Equal(recovery.Window.End) {
 		t.Errorf("The violation is stamped %v, want the end of a recovery that expired: %+v.", violation.At, recovery)
 	}
-	if want := fmt.Sprintf("with no fault active: in %v,", recovery.Window.End.Sub(recovery.Window.Start).Round(time.Millisecond)); !strings.Contains(violation.Statement, want) {
+	if want := fmt.Sprintf("with no fault active: in %v (timeouts.settle is %v),",
+		recovery.Window.End.Sub(recovery.Window.Start).Round(time.Millisecond), toyTarget.Timeouts.Settle); !strings.Contains(violation.Statement, want) {
 		t.Errorf("The statement is %q, want it to say how long the wait ran: %q.", violation.Statement, want)
 	}
 	if got := checkpointsAt(result.Timeline); !slices.Equal(got, []int{1, Recovery}) {

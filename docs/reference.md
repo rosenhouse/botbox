@@ -115,8 +115,8 @@ lacks. Reading a key a map lacks is an error, so guard an optional field with `h
 error while evaluating `ready` means not ready. A property also binds `managed`: the managed
 objects whose ownerReferences name that CR or no CR. Where no CR exists, a property runs once,
 with empty `metadata`, `spec` and `status`, over every managed object, and a violation there
-says that no CR existed. The string extensions are available. An expression that yields no bool, and an error while evaluating a property,
-end the run as a configuration error.
+says that no CR existed. The string extensions are available. An expression that yields no
+bool, and an error while evaluating a property, end the run as a configuration error.
 
 `go:<name>` names a function registered with `target.RegisterReady` or `target.RegisterEqual`.
 Only a botbox built with that function can load the target.

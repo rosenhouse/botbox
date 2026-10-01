@@ -1272,9 +1272,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   (five lines); install; quickstart against cert-manager, then what the second example
   adds; writing `target.yaml` for your own controller; reading a report; what to change
   when botbox exits 2; a CI recipe for adopters, embedded from `examples/ci/github-actions.yml`;
-  a one-line-per-invariant table linking to §6; a closing "Design and
-  internals" link to this document and to
-  `docs/bug-matrix.md`. A fenced block preceded by `<!-- embed: <path> -->` has content,
+  a one-line-per-invariant table linking to §6; a closing "Development and internals"
+  section that links to this document and to `docs/bug-matrix.md`. Only the invariant
+  table and that section link here, and only that section cites a section or a decision.
+  The README names no milestone. `make test` enforces both. A fenced block preceded by `<!-- embed: <path> -->` has content,
   excluding the two fence lines, byte-identical to that file including its trailing
   newline; `<path>` is relative to the repository root; `make test` enforces it.
 - **PRs.** Every PR description, issue, review and comment a Claude session posts begins

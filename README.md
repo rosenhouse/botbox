@@ -55,7 +55,7 @@ kind delete cluster --kubeconfig kind.kubeconfig
   just after botbox installs the owner's CRD. If that delete comes after `stable` of quiet,
   G2 fails. A wider `stable` avoids that.
 
-`make test-kind` runs the toy controller this way ([DESIGN.md §5.8](DESIGN.md#58-test-cluster)).
+`make test-kind` runs the toy controller this way.
 
 ## Quickstart: cert-manager
 
@@ -67,13 +67,13 @@ clean checkout, this script is the whole run.
 <!-- embed: examples/cert-manager/quickstart.sh -->
 ```sh
 #!/bin/sh
-# Exercise cert-manager against the generic invariants of DESIGN.md §6. It
-# builds what it needs, so a clean checkout is enough. Arguments go to botbox:
-# --seed picks the sequences it draws, and a later --runs wins over the one here.
+# Exercise cert-manager with botbox. It builds what it needs, so a clean checkout
+# is enough. Arguments go to botbox: --seed picks the sequences it draws, and a
+# later --runs wins over the one here.
 set -eu
 cd "$(dirname "$0")/../.."
 
-# cert-manager's healthz port is fixed (DESIGN.md §15, D28), so runs collide.
+# cert-manager binds its healthz server to port 9403, so its runs collide.
 if ! command -v lsof >/dev/null; then
   echo "lsof is missing, so nothing checked whether port 9403 is free." >&2
 elif lsof -nP -iTCP:9403 -sTCP:LISTEN >/dev/null; then
@@ -342,7 +342,7 @@ so once the faults stop botbox gives it as long as they lasted, plus `settle`, t
 That includes a fault still active when the sequence ends, like the one above: botbox clears
 it and waits for the controller before it tears the run down. The proxy tries faults in op
 order, the first that applies to a request wins, and each runs out on its own `until`. A fault
-that matches no request changes nothing and hides nothing ([DESIGN.md §5.2](DESIGN.md#52-proxy)).
+that matches no request changes nothing and hides nothing.
 `match.verb` is a Kubernetes verb such as `create` or `list`, and `match.resource` is the
 plural the API server serves, such as `configmaps`. botbox refuses any other value, because
 the fault would match nothing. It also refuses a value that would test something else, such
@@ -367,7 +367,7 @@ cannot draw from is a configuration error, not a silent skip. So is a path where
 refuses every value botbox draws for it into your sample. Without `generate.mutate`, botbox
 prints each spec path it leaves alone, and why. If the API server still refuses a CR, as a
 webhook or a status rule might, botbox exits 2 and names the `sequence.json` that holds the
-op ([DESIGN.md §8.3](DESIGN.md#83-generation-constraints-and-admission-webhooks)).
+op.
 
 G5 compares what your controller manages before and after a restart. It already skips what
 every restart moves, such as `metadata.resourceVersion`. If your controller stamps a field of
@@ -382,9 +382,8 @@ equalIgnore:
 
 Keep the list in block style, because YAML claims the brackets inside a one-line `[...]` list.
 botbox refuses a list index such as `[0]`, and a label or annotation key that the dots split,
-when it loads the target ([DESIGN.md §8.1](DESIGN.md#81-targetyaml)). A key names nothing
-inside a list, so a run notes a path such as `status.conditions.lastHeartbeatTime` and says
-where the `[*]` goes.
+when it loads the target. A key names nothing inside a list, so a run notes a path such as
+`status.conditions.lastHeartbeatTime` and says where the `[*]` goes.
 
 A sequence file runs as written and is never minimized. This is
 `examples/cert-manager/sequences/issue.json`, reflowed:
@@ -423,7 +422,7 @@ was under way when botbox was killed reads `unfinished`, unless it had found a v
 that botbox was minimizing. Its directory then holds no report, and `summary.md` says
 whether it holds the run's evidence or a partial run of the minimized sequence.
 `summary.json` also holds each run's sequence, for a machine. Its `schema` changes when a
-field changes meaning or goes away ([DESIGN.md §11](DESIGN.md#11-repo-conventions)).
+field changes meaning or goes away.
 
 A run that violates an invariant prints the ID, what it saw and where the evidence is, then
 exits 1. A configuration or harness error exits 2, so your CI can tell a find from a broken
@@ -645,7 +644,7 @@ change under review, replay its `sequence.json` against the base branch's contro
 
 ## Invariants
 
-Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.
+Seven generic invariants apply to every target. [DESIGN.md](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.
 
 | ID | Checks |
 |---|---|
@@ -657,7 +656,7 @@ Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-gene
 | G6 | No error loop. The target does not repeat one failing request more than `thresholds.errloop` times. |
 | G7 | Self-healing. An object `deleteManaged` deletes exists again, by kind and name, once the run settles. |
 
-[docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md §9](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs. Each bug's sequence also runs against the toy with no bug, and CI fails if a check fires there.
+[docs/bug-matrix.md](docs/bug-matrix.md) shows which check catches each bug seeded into the toy controller of [DESIGN.md](DESIGN.md#9-toy-target-widget), and CI regenerates it from real runs. Each bug's sequence also runs against the toy with no bug, and CI fails if a check fires there.
 
 ## Development and internals
 

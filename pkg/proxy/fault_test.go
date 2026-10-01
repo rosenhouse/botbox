@@ -233,15 +233,23 @@ func TestHeldReleasesARequestTheTargetGaveUpOn(t *testing.T) {
 // A fault lasts until the proxy releases what it held, though it applies to
 // no request after the one it holds.
 func TestAFaultsWindowLastsWhileItHoldsARequest(t *testing.T) {
-	const delay = 200 * time.Millisecond
-	for name, retire := range map[string]func(*proxy.Proxy, proxy.FaultID){
-		"a count spent on the request": func(*proxy.Proxy, proxy.FaultID) {},
-		"RemoveFault":                  (*proxy.Proxy).RemoveFault,
-		"ClearFaults":                  func(p *proxy.Proxy, _ proxy.FaultID) { p.ClearFaults() },
+	const delay, runsFor = time.Second, 500 * time.Millisecond
+	for _, test := range []struct {
+		name   string
+		until  proxy.Trigger
+		retire func(p *proxy.Proxy, id proxy.FaultID, added time.Time)
+	}{
+		{"a count spent on the request", proxy.Trigger{Count: 1}, func(*proxy.Proxy, proxy.FaultID, time.Time) {}},
+		{"a duration that runs out", proxy.Trigger{For: runsFor},
+			func(_ *proxy.Proxy, _ proxy.FaultID, added time.Time) { time.Sleep(time.Until(added.Add(runsFor))) }},
+		{"RemoveFault", proxy.Trigger{}, func(p *proxy.Proxy, id proxy.FaultID, _ time.Time) { p.RemoveFault(id) }},
+		{"ClearFaults", proxy.Trigger{}, func(p *proxy.Proxy, _ proxy.FaultID, _ time.Time) { p.ClearFaults() }},
 	} {
-		t.Run(name, func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
 			p := faultedProxy(t, 0)
-			id := p.AddFault(proxy.FaultSpec{Action: proxy.Delay{For: delay}, Until: proxy.Trigger{Count: 1}})
+			id := p.AddFault(proxy.FaultSpec{Action: proxy.Delay{For: delay}, Until: test.until})
+			added := time.Now()
 
 			answered := make(chan struct{})
 			go func() {
@@ -251,7 +259,7 @@ func TestAFaultsWindowLastsWhileItHoldsARequest(t *testing.T) {
 				}
 			}()
 			arrived := arrival(t, p)
-			retire(p, id)
+			test.retire(p, id, added)
 			whileHeld := p.Window(id)
 			<-answered
 			afterward := p.Window(id)
@@ -263,6 +271,30 @@ func TestAFaultsWindowLastsWhileItHoldsARequest(t *testing.T) {
 				t.Errorf("The fault retired at %v, want no sooner than the release %v after %v.", afterward.Retired, delay, arrived)
 			}
 		})
+	}
+}
+
+// Faults hold requests apart, and the one that releases last need not be the
+// first fault.
+func TestHeldReportsTheLastReleaseOfAnyFault(t *testing.T) {
+	const longer, shorter = 600 * time.Millisecond, 100 * time.Millisecond
+	p := faultedProxy(t, 0,
+		proxy.FaultSpec{Match: proxy.RequestMatcher{Resource: "configmaps"}, Action: proxy.Delay{For: longer}},
+		proxy.FaultSpec{Match: proxy.RequestMatcher{Resource: "secrets"}, Action: proxy.Delay{For: shorter}})
+
+	answered := make(chan struct{})
+	go func() {
+		defer close(answered)
+		if resp, err := http.Get(p.URL() + "/api/v1/namespaces/ns1/configmaps"); err == nil {
+			resp.Body.Close()
+		}
+	}()
+	arrived := arrival(t, p)
+	do(t, p, "GET", "/api/v1/namespaces/ns1/secrets", nil)
+	<-answered
+
+	if holding, released := p.Held(time.Now()); holding || released.Before(arrived.Add(longer)) {
+		t.Errorf("The proxy reports (%t, %v), want no request held and a release %v after %v.", holding, released, longer, arrived)
 	}
 }
 

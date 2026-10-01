@@ -218,7 +218,7 @@ func (l *liveRun) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind
 	case err != nil:
 		return fmt.Errorf("waiting for the fixture %s %s to go: %w", kindName(gvk), name, err)
 	case !gone:
-		return fmt.Errorf("the fixture %s %s was still there %v after botbox deleted it, held by the finalizers %v",
+		return fmt.Errorf("the fixture %s %s was still there %v (timeouts.delete) after botbox deleted it, held by the finalizers %v",
 			kindName(gvk), name, l.target.Timeouts.Delete, held)
 	}
 	return nil

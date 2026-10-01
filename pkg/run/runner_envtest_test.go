@@ -680,7 +680,7 @@ func TestRunner(t *testing.T) {
 			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
 		})
 
-		want := "op 1 (deleteFixture): the fixture v1/ConfigMap fixture was still there 2s after botbox deleted it, held by the finalizers [example.com/hold]"
+		want := "op 1 (deleteFixture): the fixture v1/ConfigMap fixture was still there 2s (timeouts.delete) after botbox deleted it, held by the finalizers [example.com/hold]"
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("The run returned %v, want an error saying %q.", err, want)
 		}

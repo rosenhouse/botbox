@@ -14,7 +14,7 @@ set -eu
 target=$1
 families=$2
 out=$3
-# The evidence keeps the botbox that found it, whatever rebuilds bin/botbox.
+# A rebuild of bin/botbox during the hunt changes nothing.
 botbox=$out/botbox
 mkdir -p "$out"
 cp bin/botbox "$botbox"

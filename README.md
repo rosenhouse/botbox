@@ -143,9 +143,10 @@ run 1: G3 the v1/ConfigMap widget-0 was still there 10s (timeouts.delete) after 
 ```
 
 The toy converges, so nothing looks wrong until the sequence deletes the Widget and the
-ConfigMap stays. An envtest suite would not see this: envtest runs no garbage collector, so the
-ConfigMap stays whether or not it carries an ownerReference. botbox emulates the collector, and
-G3 fails. [docs/bug-matrix.md](docs/bug-matrix.md) lists each seeded bug and the check that
+ConfigMap stays. An envtest suite sees this only if it asserts each ownerReference itself:
+envtest runs no garbage collector, so the ConfigMap stays whether or not it carries one. botbox
+emulates the collector, and G3 fails. G3 judges every object of a kind your target manages, in
+every run, with no test code of yours. [docs/bug-matrix.md](docs/bug-matrix.md) lists each seeded bug and the check that
 catches it.
 
 In a fresh clone, the first `make assets-path` also installs setup-envtest and downloads the
@@ -810,7 +811,7 @@ Seven generic invariants apply to every target. [DESIGN.md](DESIGN.md#6-generic-
 - `make hunt-cert-manager` and `make hunt-external-secrets` hunt for bugs in the pinned controllers
   for `HUNT_MINUTES` (default 120). Each runs the families in `examples/<example>/sequences/hunt/`,
   then up to `HUNT_RUNS` (default 1000) seeds from `HUNT_SEED` (default 1000) on. It keeps each
-  failing run's evidence, and the botbox that found it, in `botbox-out/hunt-<example>/`. A run
+  failing run's evidence in `botbox-out/hunt-<example>/`. A run
   that fails is a candidate to triage, not yet a bug: see
   [DESIGN.md §11](DESIGN.md#11-repo-conventions). No pull request runs a hunt.
 - A block after `<!-- embed: path -->` holds that file byte for byte, and `make test` enforces it.

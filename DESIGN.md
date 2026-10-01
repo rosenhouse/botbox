@@ -1291,15 +1291,15 @@ the proxy; the `Image` launcher. Separate design addendum.
   `make hunt-external-secrets` hunt for bugs in the adopted examples, on demand and on no
   pull request. Each runs every family in `examples/<example>/sequences/hunt/`, then up to
   `HUNT_RUNS` seeds drawn from `HUNT_SEED` on, each in an invocation of its own, until
-  `HUNT_MINUTES` runs out. Each invocation writes under `botbox-out/hunt-<example>/`,
-  beside the copy of `bin/botbox` the hunt runs. A family is checked in only once it
-  passes the pinned controller.
+  `HUNT_MINUTES` runs out. Each invocation writes under `botbox-out/hunt-<example>/`. A
+  family is checked in only once it passes the pinned controller.
 - **Triage.** A hunt run that fails is a candidate, not a bug. Triage replays it three
-  times, reproduces it by hand against envtest, reads upstream's code path and searches
-  upstream's tracker. A candidate that breaks a botbox rule and no upstream contract is a
-  botbox false positive, and becomes a botbox issue. A candidate that fails on every replay
-  and breaks an upstream contract becomes a draft under `docs/findings/`, with its
-  sequence, for the maintainer to file upstream.
+  times, reproduces it by hand against envtest unless only botbox's proxy can inject its
+  faults, reads upstream's code path and searches upstream's tracker. A candidate that no
+  replay reproduces, or that breaks a botbox rule and no upstream contract, becomes a
+  botbox issue. A candidate that breaks an upstream contract becomes a draft under
+  `docs/findings/`, with its sequence and how many replays failed, for botbox's
+  maintainer to file upstream. One that upstream's tracker already holds needs no draft.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
@@ -2210,22 +2210,22 @@ built from source and run as a black-box binary.
   rejected, because the first check refuses before botbox installs CRDs on a
   `--kubeconfig` cluster.
 - **D79 The README's first find is a seeded bug, and a hunt looks for real ones.** Every
-  find the README shows is planted, and a real controller's needs a build of minutes. So
-  the README says so, and its first find, after Install, replays the toy's B3. An envtest
-  test runs that command as written and matches what it prints. A real controller may
-  break under API faults, restarts mid-reconcile, changed or missing fixtures and several
-  CRs, and generation draws no fault. So each adopted example carries hand-written
-  families under `sequences/hunt/`, and `make hunt-<example>` runs them and then drawn
-  seeds until a time box runs out. Each family and seed runs in an invocation of its own,
-  because an invocation stops at its first failing run and a hunt keeps every failure. A
-  run the time box cut is no failure, but a find reported after the box's end is one. The
-  hunt runs a copy of `bin/botbox`, so a rebuild during a hunt changes nothing. A family
-  is checked in only once it passes the pinned controller. A run that fails is a
-  candidate until triage keeps it (§11). No agent files a candidate upstream, because an
-  issue there speaks for the maintainer. No pull request runs a hunt, because one takes
-  hours. A `create` of a CR that a `noSettle` `delete` removed, with no op since that
-  settles, is a configuration error (§7), because a finalizer may still hold the old CR.
-  Letting that create wait for the old CR was rejected, because a `recreate` already
+  find the README shows is planted, and a find in a real controller needs a build of
+  minutes. So the README says so, and its first find, after Install, replays the toy's B3.
+  An envtest test runs that command as written and matches what it prints. A real
+  controller may break under API faults, restarts mid-reconcile, changed or missing
+  fixtures and several CRs, and generation draws no fault. So each adopted example carries
+  hand-written families under `sequences/hunt/`, and `make hunt-<example>` runs them and
+  then drawn seeds until a time box runs out. Each family and seed runs in an invocation
+  of its own, because an invocation stops at its first failing run and a hunt keeps every
+  failure. A run the time box cut is no failure, but a find reported after the box's end
+  is one. The hunt runs a copy of `bin/botbox`, so a rebuild during a hunt changes
+  nothing. A family is checked in only once it passes the pinned controller. A run that
+  fails is a candidate until triage keeps it (§11). No agent files a candidate upstream,
+  because an issue there speaks for the maintainer. No pull request runs a hunt, because
+  one takes hours. A `create` of a CR that a `noSettle` `delete` removed, with no op since
+  that settles, is a configuration error (§7), because a finalizer may still hold the old
+  CR. Letting that create wait for the old CR was rejected, because a `recreate` already
   does.
 - **D80 The README keeps botbox out of an operator's go.mod.** Minimal version selection
   works on the whole module graph, so requiring botbox, or importing any of its packages,

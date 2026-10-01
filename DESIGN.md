@@ -871,8 +871,8 @@ the target creates in another.
 botbox creates the CR and each fixture in the run namespace. A fixture sets no
 `metadata.namespace`, because the target may look for it in the namespace it names. A
 check refuses such a fixture only if it found no cluster-scoped kind and knows the
-fixture's kind is namespaced. The CR may set one, which botbox replaces, because the
-target finds a CR by watching.
+fixture's kind is namespaced. The run refuses the rest. The CR may set one, which botbox
+replaces, because the target finds a CR by watching.
 
 `equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
 holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
@@ -2100,6 +2100,7 @@ built from source and run as a black-box binary.
   first run, judges the rest: a CRD that `crds` does not list, an aggregated API, or a
   kind newer than the list. Each check refuses every cluster-scoped kind it knows in one
   error. Only then does it refuse a fixture of a kind it knows to be namespaced that sets
-  a namespace. A target with kinds of both sorts hears of them in two errors. Merging
-  them into one was rejected, because the first check refuses before botbox installs CRDs
-  on a `--kubeconfig` cluster.
+  a namespace. The run refuses such a fixture of any other kind rather than move it. A
+  target with kinds of both sorts hears of them in two errors. Merging them into one was
+  rejected, because the first check refuses before botbox installs CRDs on a
+  `--kubeconfig` cluster.

@@ -2241,7 +2241,8 @@ built from source and run as a black-box binary.
   where `launch.binary` does not resolve. The envtest tier runs the script in a fresh
   operator module with a `tools/` package and a go.work, as the oldest `go` the README
   names, with botbox replaced by the checkout. It also checks that the `go` before that
-  one fails.
+  one fails. The unit tier runs the script with `go` stubbed, and checks that it leaves
+  its shell's variables as they were.
 - **D81 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
   the README's `go test` recipe runs `bin/botbox`, which the tools module of D80 builds,
   and fails the test on a non-zero exit. A build tag keeps it out of a plain

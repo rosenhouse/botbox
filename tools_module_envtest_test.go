@@ -15,8 +15,6 @@ import (
 	"testing"
 )
 
-const toolsRecipe = "examples/tools-module.sh"
-
 // The README's recipe pins botbox in a module of its own. This runs it in a
 // fresh operator module, on the oldest go that the README says fetches a newer
 // one, and on the go before it.
@@ -39,9 +37,6 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 	lines := strings.Split(strings.TrimSpace(script), "\n")
 	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "bin/botbox ") {
 		t.Errorf("%s ends with %q, and README.md says its last line runs bin/botbox.", toolsRecipe, last)
-	}
-	if set := regexp.MustCompile(`(?m)^(?:export\b.*|\w+=\S*)$`).FindString(script); set != "" {
-		t.Errorf("%s runs %q, and a reader who pastes it into a shell would keep that variable.", toolsRecipe, set)
 	}
 	toolsDir := regexp.MustCompile(`(?m)^(?:\S+=\S+ )*go -C (\S+) build `).FindStringSubmatch(script)
 	if toolsDir == nil {

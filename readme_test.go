@@ -39,7 +39,7 @@ func TestTheREADMEShowsRunsOfTheMakefilesExampleSeeds(t *testing.T) {
 	for _, run := range runs {
 		n, _ := strconv.Atoi(run[1])
 		if want := strconv.Itoa(first + n - 1); run[2] != want {
-			t.Errorf("README.md shows %q, and run %d of the Makefile's example seeds draws seed %s.", run[0], n, want)
+			t.Errorf("README.md shows %q, and from the Makefile's EXAMPLE_SEED run %d draws seed %s.", run[0], n, want)
 		}
 	}
 }

@@ -116,7 +116,7 @@ func TestAnExpiredWaitSaysWhatKeptTheNamespaceFromHoldingStill(t *testing.T) {
 
 	violation := fired(t, invariant.Convergence, in)
 
-	requireStatement(t, violation, "in 5s, ready held from 500ms on, but the namespace never held still for stable (2s): "+
+	requireStatement(t, violation, "in 5s, ready held from 500ms on, but the namespace never held still for 2s (timeouts.stable): "+
 		"3 changes in the last 2s, the last to v1/ConfigMap w-0")
 	if got := quoted(violation); strings.Join(got, ",") != "w@12,w-0@13,w-0@14" {
 		t.Errorf("The timeline holds %v, want the 3 changes that broke the quiet.", got)
@@ -161,13 +161,13 @@ func TestAnExpiredWaitSaysARestartKeptItFromConverging(t *testing.T) {
 		{"waiting to restart, where ready never held", 0, 5 * time.Second, 15 * time.Second,
 			"in 5s, ready never held: it evaluated to false, but the target was waiting to restart; the target exited 1 time"},
 		{"restarted in the last stable", 1, 5 * time.Second, 8 * time.Second,
-			"in 5s, ready held from 0s on, but the target restarted in the last stable (2s); the target exited 1 time"},
+			"in 5s, ready held from 0s on, but the target restarted in the last 2s (timeouts.stable); the target exited 1 time"},
 		{"restarted in the last stable, where ready never held", 0, 5 * time.Second, 8 * time.Second,
-			"in 5s, ready never held: it evaluated to false, but the target restarted in the last stable (2s); the target exited 1 time"},
+			"in 5s, ready never held: it evaluated to false, but the target restarted in the last 2s (timeouts.stable); the target exited 1 time"},
 		{"restarted before the last stable", 1, 5 * time.Second, 6 * time.Second,
-			"in 5s, ready held from 0s on, and nothing changed in the last stable (2s); the target exited 1 time"},
+			"in 5s, ready held from 0s on, and nothing changed in the last 2s (timeouts.stable); the target exited 1 time"},
 		{"exited after the wait", 1, 10 * time.Second, 20 * time.Second,
-			"in 5s, ready held from 0s on, and nothing changed in the last stable (2s)"},
+			"in 5s, ready held from 0s on, and nothing changed in the last 2s (timeouts.stable)"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			in := newRun().
@@ -215,7 +215,7 @@ func TestAnExpiredWaitSaysTheTargetHadNotShownItRuns(t *testing.T) {
 		{"since it first started, where ready never held", unreadySettle(),
 			"in 5s, ready never held: it evaluated to false, but the target had requested no resource outside leader election since it started"},
 		{"since it first started until the last stable, where ready never held", unreadySettle().running(6500 * time.Millisecond),
-			"in 5s, ready never held: it evaluated to false, but the target had requested no resource outside leader election since it started until the last stable (2s)"},
+			"in 5s, ready never held: it evaluated to false, but the target had requested no resource outside leader election since it started until the last 2s (timeouts.stable)"},
 		{"where ready never held", readyCR().running(1100*time.Millisecond).op(invariant.OpRestart, 3*time.Second).
 			op(invariant.OpUpdate, 3*time.Second).record(3100*time.Millisecond, widget("11", spec(2), generation(2), status(1, 1))),
 			"in 5s, ready never held: it evaluated to false, but the target had requested no resource outside leader election since op 0 (restart)"},
@@ -224,8 +224,8 @@ func TestAnExpiredWaitSaysTheTargetHadNotShownItRuns(t *testing.T) {
 		{"where no CR was left", readyCR().running(1100*time.Millisecond).op(invariant.OpRestart, 3*time.Second).
 			op(invariant.OpDelete, 3*time.Second).remove(3100*time.Millisecond, widget("11", spec(1), status(1, 1))),
 			"in 5s, no CR was left to be ready, but the target had requested no resource outside leader election since op 0 (restart)"},
-		{"until the last stable", restarted().running(6500 * time.Millisecond), sinceTheRestart + " until the last stable (2s)"},
-		{"until the last stable began", restarted().running(6 * time.Second), "in 5s, ready held from 0s on, and nothing changed in the last stable (2s)"},
+		{"until the last stable", restarted().running(6500 * time.Millisecond), sinceTheRestart + " until the last 2s (timeouts.stable)"},
+		{"until the last stable began", restarted().running(6 * time.Second), "in 5s, ready held from 0s on, and nothing changed in the last 2s (timeouts.stable)"},
 		// A recreate's wait lasts T_delete, which can be shorter than stable.
 		{"in a wait shorter than stable", readyCR().running(1100*time.Millisecond).op(invariant.OpRestart, 7*time.Second).op(invariant.OpRecreate, 7*time.Second),
 			"but the target had requested no resource outside leader election since op 0 (restart)"},
@@ -252,7 +252,7 @@ func TestAnExpiredWaitIgnoresARestartAtItsEnd(t *testing.T) {
 
 	violation := expiredWait(t, in)
 
-	requireEnding(t, violation, "and nothing changed in the last stable (2s)")
+	requireEnding(t, violation, "and nothing changed in the last 2s (timeouts.stable)")
 }
 
 // Ready holds on the CR as it was when the wait began, which the Observer
@@ -268,7 +268,7 @@ func TestAnExpiredWaitReadsTheCRAsTheWaitFoundIt(t *testing.T) {
 
 	violation := fired(t, invariant.Convergence, in)
 
-	requireStatement(t, violation, "in 5s, ready held from 0s on, but the namespace never held still for stable (2s): 1 change")
+	requireStatement(t, violation, "in 5s, ready held from 0s on, but the namespace never held still for 2s (timeouts.stable): 1 change")
 }
 
 // A wait can begin before the Observer sees the op's write, and the CR it
@@ -479,7 +479,7 @@ func TestAnExpiredWaitSaysWhereNothingChanged(t *testing.T) {
 
 	violation := fired(t, invariant.Convergence, in)
 
-	requireStatement(t, violation, "in 5s, ready held from 1s on, and nothing changed in the last stable (2s)")
+	requireStatement(t, violation, "in 5s, ready held from 1s on, and nothing changed in the last 2s (timeouts.stable)")
 	if got := quoted(violation); strings.Join(got, ",") != "w@10" || violation.Ready == nil || violation.Ready.CR != widgetName {
 		t.Errorf("The violation quotes the timeline %v and the ready of %+v, want the CR's.", got, violation.Ready)
 	}
@@ -497,7 +497,7 @@ func TestAnExpiredWaitSaysNoCRWasLeft(t *testing.T) {
 
 	violation := fired(t, invariant.Convergence, in)
 
-	requireStatement(t, violation, "in 5s, no CR was left to be ready, but the namespace never held still for stable (2s): 1 change")
+	requireStatement(t, violation, "in 5s, no CR was left to be ready, but the namespace never held still for 2s (timeouts.stable): 1 change")
 	if got := quoted(violation); strings.Join(got, ",") != "w-1@13" {
 		t.Errorf("The timeline holds %v, want the change that broke the quiet.", got)
 	}

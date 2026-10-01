@@ -62,7 +62,7 @@ func TestAnExpiredWaitSaysWhy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("The run failed: %v", err)
 		}
-		want := "but the namespace never held still for stable (2s)"
+		want := "but the namespace never held still for 2s (timeouts.stable)"
 		if result.Violation == nil || result.Violation.ID != "G4" ||
 			!strings.Contains(result.Violation.Statement, "ready held from") || !strings.Contains(result.Violation.Statement, want) {
 			t.Errorf("The run reported %v, want a G4 saying ready held and %q.", result.Violation, want)

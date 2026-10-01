@@ -496,17 +496,17 @@ A settle wait expired. What follows `expired with no fault active` says why:
   runs, so a CR that waits on a Deployment's replicas never becomes ready there. botbox
   warns of this when `manages` names such a kind. Run such a target
   [against kind](#against-kind).
-- `ready held from … on, but the namespace never held still for stable (2s)` means your
-  controller converged and kept writing. The Object versions table lists the writes. A
+- `ready held from … on, but the namespace never held still for 2s (timeouts.stable)` means
+  your controller converged and kept writing. The Object versions table lists the writes. A
   status field rewritten on every reconcile, such as a timestamp, does this.
 - `ready held until …` means `ready` held and then stopped holding.
-- A line that goes on `but the target was waiting to restart`, or `but the target
-  restarted in the last stable`, means your controller exited. The line counts the exits
+- A line that goes on `but the target was waiting to restart`, or `but the target restarted
+  in the last 2s (timeouts.stable)`, means your controller exited. The line counts the exits
   since it last converged and quotes the last.
 - A line that goes on `but the target had requested no resource outside leader election
   since …` means your controller had not come back from a restart, or had not started, when
-  the wait gave up. `until the last stable` means it came back too late to run for
-  `stable` before then. A controller slow to start needs a wider `settle`.
+  the wait gave up. `until the last 2s (timeouts.stable)` means it came back too late to run
+  for `stable` before then. A controller slow to start needs a wider `settle`.
 
 After a `delete`, the run waits up to `timeouts.delete` for the CR to go and then up to
 `settle` for the rest to settle, so a slow cleanup needs no wider `settle`. A `recreate`

@@ -3,6 +3,7 @@
 package botbox_test
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +18,7 @@ const toolsRecipe = "examples/tools-module.sh"
 
 // The README's recipe pins botbox in a module of its own. This runs it in a
 // fresh operator module, on the oldest go that the README says fetches a newer
-// one.
+// one, and on the go before it.
 func TestTheToolsModuleRecipe(t *testing.T) {
 	install := section(t, readFile(t, "README.md"), "## Install")
 	oldest := regexp.MustCompile(`from Go (1\.\d+) on`).FindStringSubmatch(install)
@@ -27,12 +28,7 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 		t.Fatalf("README.md's Install section names no oldest go, no GOTOOLCHAIN to run the commands with, or no error that stops the tools module:\n%s", install)
 	}
 	oldGo := oldest[1] + ".0"
-	lookup := exec.Command("go", "env", "GOROOT")
-	lookup.Env = goEnv("", "go"+oldGo)
-	goroot, err := lookup.Output()
-	if err != nil {
-		t.Fatalf("Finding go%s failed: %v", oldGo, err)
-	}
+	goroot := gorootOf(t, "go"+oldGo)
 	checkout, err := os.Getwd()
 	if err != nil {
 		t.Fatal(err)
@@ -46,20 +42,20 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 	operatorGoMod := "module example.com/operator\n\ngo " + oldGo + "\n"
 
 	// The operator pins its own tools in tools/tools.go, a common place for them.
-	run := func(t *testing.T, gotoolchain string) (operator string, env []string, output string, err error) {
+	run := func(t *testing.T, goroot, gotoolchain string) (operator string, env []string, output string, err error) {
 		operator = t.TempDir()
 		writeFile(t, filepath.Join(operator, "go.mod"), operatorGoMod)
 		writeFile(t, filepath.Join(operator, "go.sum"), "")
 		writeFile(t, filepath.Join(operator, "tools", "tools.go"), "//go:build tools\n\npackage tools\n")
 		cmd := exec.Command("sh", "-e", "-c", recipe)
 		cmd.Dir = operator
-		cmd.Env = goEnv(strings.TrimSpace(string(goroot)), gotoolchain)
+		cmd.Env = goEnv(goroot, gotoolchain)
 		out, err := cmd.CombinedOutput()
 		return operator, cmd.Env, string(out), err
 	}
 
 	t.Run("builds bin/botbox and leaves the operator's module alone", func(t *testing.T) {
-		operator, env, out, err := run(t, remedy[1])
+		operator, env, out, err := run(t, goroot, remedy[1])
 		if err != nil {
 			t.Fatalf("The recipe returned %v:\n%s", err, out)
 		}
@@ -87,11 +83,38 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 	})
 
 	t.Run("fails under GOTOOLCHAIN=local as the README says", func(t *testing.T) {
-		_, _, out, err := run(t, "local")
+		_, _, out, err := run(t, goroot, "local")
 		if err == nil || !strings.Contains(out, stopped[1]) {
 			t.Errorf("The recipe returned %v, and must fail with %q:\n%s", err, stopped[1], out)
 		}
 	})
+
+	t.Run("fails on the go before the oldest that README.md names", func(t *testing.T) {
+		minor, err := strconv.Atoi(strings.TrimPrefix(oldest[1], "1."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		before := fmt.Sprintf("go1.%d", minor-1)
+		if minor-1 >= 21 {
+			before += ".0" // From Go 1.21 on, a minor's first release ends in .0.
+		}
+		_, _, out, err := run(t, gorootOf(t, before), remedy[1])
+		if err == nil {
+			t.Errorf("The recipe ran on %s, which README.md must then name as the oldest go:\n%s", before, out)
+		}
+	})
+}
+
+// gorootOf finds a toolchain, such as go1.21.0, which go downloads.
+func gorootOf(t *testing.T, toolchain string) string {
+	t.Helper()
+	lookup := exec.Command("go", "env", "GOROOT")
+	lookup.Env = goEnv("", toolchain)
+	goroot, err := lookup.Output()
+	if err != nil {
+		t.Fatalf("Finding %s failed: %v", toolchain, err)
+	}
+	return strings.TrimSpace(string(goroot))
 }
 
 // replacingBotbox has the tools module build this checkout's botbox.

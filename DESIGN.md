@@ -2099,7 +2099,7 @@ built from source and run as a black-box binary.
   `go -C tools/botbox tool botbox` runs botbox in `tools/botbox/`, where `launch.binary`
   does not resolve. The envtest tier runs the script in a fresh operator module with a
   `tools/` package, as the oldest `go` the README names, with botbox replaced by the
-  checkout.
+  checkout. It also checks that the `go` before that one fails.
 - **D@59 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
   the README's `go test` recipe runs `bin/botbox`, which the tools module of D@58 builds,
   and fails the test on a non-zero exit. A build tag keeps it out of a plain

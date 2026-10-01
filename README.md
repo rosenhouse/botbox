@@ -697,6 +697,41 @@ CRD schema, `sample`, `generate` and `manages`. A botbox upgrade, or a pull requ
 of those, draws different sequences under the same seed. To tell whether a failure comes from the
 change under review, replay its `sequence.json` against the base branch's controller.
 
+### From go test
+
+A Go test can run botbox and fail on what it finds. This one runs it on the toy controller:
+
+<!-- embed: targets/toy-widget/botbox_test.go -->
+```go
+//go:build botbox
+
+package main
+
+import (
+	"os"
+	"os/exec"
+	"testing"
+)
+
+func TestBotbox(t *testing.T) {
+	botbox := exec.Command("botbox", "run", "--target", "targets/toy-widget/target.yaml",
+		"--seed", "1", "--runs", "3", "--deadline", "5m")
+	botbox.Dir = "../.." // launch.binary is relative to the repository root.
+	botbox.Stdout, botbox.Stderr = os.Stdout, os.Stderr
+	if err := botbox.Run(); err != nil {
+		t.Fatalf("botbox: %v", err)
+	}
+}
+```
+
+Install botbox on your PATH, build your controller and set `KUBEBUILDER_ASSETS`, then run
+`go test -tags botbox ./...`. The build tag keeps the test out of a plain `go test ./...` where
+botbox is not installed. Keep `--deadline` inside `go test`'s `-timeout`, 10 minutes by
+default, so that botbox stops first.
+
+botbox has no Go API to call instead. A `ready: go:<name>` or `equal: go:<name>` hook takes
+effect only in a build of botbox that registers it, which takes a change to this repository.
+
 ## Invariants
 
 Seven generic invariants apply to every target. [DESIGN.md §6](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.

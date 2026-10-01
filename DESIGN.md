@@ -967,7 +967,8 @@ expression and the CR's status beside it (§5.7). An evaluation error in a prope
 configuration error.
 
 A Go hook is a function registered under a name in `pkg/target` and referenced as
-`ready: go:<name>` or `equal: go:<name>`. Hooks exist for in-repo targets only.
+`ready: go:<name>` or `equal: go:<name>`. Hooks exist for in-repo targets only. botbox
+has no Go API, and its packages make no compatibility promise (D@59).
 
 ## 9. Toy target: `Widget`
 
@@ -1262,7 +1263,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   which says that every find the README shows is seeded or a negative control and whose
   command an envtest test runs as written; quickstart against cert-manager, then what the
   second example adds; writing `target.yaml` for your own controller; reading a report;
-  what to change when botbox exits 2; a CI recipe for adopters, embedded from `examples/ci/github-actions.yml`;
+  what to change when botbox exits 2; a CI recipe for adopters, embedded from `examples/ci/github-actions.yml`,
+  and a test that runs botbox from `go test`, embedded from
+  `targets/toy-widget/botbox_test.go`, which the envtest tier runs on the toy with no bug
+  and under B4 (D@59);
   a one-line-per-invariant table linking to §6; a closing "Design and
   internals" link to this document and to
   `docs/bug-matrix.md`. A fenced block preceded by `<!-- embed: <path> -->` has content,
@@ -2094,3 +2098,8 @@ built from source and run as a black-box binary.
   runs botbox in `tools/`, and `launch.binary` is relative to where botbox runs. A lower
   dependency floor, a smaller module for importers and release binaries are the
   maintainer's to decide.
+- **D@59 A Go test runs botbox as a binary.** botbox has no Go API, so the README's
+  `go test` recipe runs the installed `botbox` and fails the test on a non-zero exit. A
+  build tag keeps it out of a plain `go test ./...`. The envtest tier runs the recipe from
+  a copy of the repository's layout, on the toy with no bug and under B4, so a recipe
+  that ignored the exit code fails there. Hooks stay in-repo (D2).

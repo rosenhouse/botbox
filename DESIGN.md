@@ -1742,10 +1742,11 @@ built from source and run as a black-box binary.
   `Example(seed)`, which rapid documents as fit only for examples and which promises nothing
   across versions. A draw also depends on the CRD schema, the sample, `generate` and
   `manages`. The Makefile, the README and the envtest tier rely on what particular seeds
-  draw. `pkg/generate` records the draws of those seeds for the toy, cert-manager and
-  external-secrets. A change to generation or to rapid that moves a draw fails until the
-  test is rerun with `-update`. The README tells CI to pin botbox to a commit and to replay
-  a failing `sequence.json` against the base branch.
+  draw. `pkg/generate` records the draws of those seeds for the toy, the toy with a
+  fixture generation may change, cert-manager and external-secrets. A change to generation
+  or to rapid that moves a draw fails until the test is rerun with `-update`. The README
+  tells CI to pin botbox to a commit and to replay a failing `sequence.json` against the
+  base branch.
 - **D55 Generation keeps the CRD's own rules, judged by the API server's code.** The
   generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
   rule `self.maxUnavailable <= self.count`, 15 of 100 drawn sequences broke it, and the

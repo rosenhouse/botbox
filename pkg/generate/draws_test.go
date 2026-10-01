@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/rosenhouse/botbox/pkg/run"
+	"github.com/rosenhouse/botbox/pkg/target"
+	kinds "k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite "+goldenDraws+" from what the seeds draw now")
@@ -21,15 +23,35 @@ const (
 )
 
 // goldenSeeds are the seeds the repository runs by number: the Makefile's
-// EXAMPLE_SEED runs, the README's quickstarts and the envtest tier's B2
-// reproducer.
+// EXAMPLE_SEED runs, the README's quickstarts and the envtest tier's B2 and
+// fixture runs.
 var goldenSeeds = []struct {
-	path  string
-	seeds []int64
+	name    string
+	declare declaration
+	seeds   []int64
 }{
-	{toyTarget, seedRange(1, 10)},
-	{certManagerTarget, append(seedRange(1, 10), seedRange(23, 27)...)},
-	{externalSecretsTarget, seedRange(23, 27)},
+	{"toy-widget", file(toyTarget), seedRange(1, 10)},
+	{"cert-manager", file(certManagerTarget), append(seedRange(1, 10), seedRange(23, 27)...)},
+	{"external-secrets", file(externalSecretsTarget), seedRange(23, 27)},
+	{"toy-widget with a label fixture", toyWithALabelFixture, seedRange(1, 60)},
+}
+
+type declaration func(*testing.T) *target.Target
+
+func file(path string) declaration {
+	return func(t *testing.T) *target.Target { return loadTarget(t, path) }
+}
+
+// toyWithALabelFixture is the toy as pkg/run's TestGeneratedFixtureOps
+// declares it.
+func toyWithALabelFixture(t *testing.T) *target.Target {
+	toy := loadTarget(t, toyTarget)
+	toy.Generate.Fixtures = []target.MutableFixture{{
+		GVK:    kinds.GroupVersionKind{Version: "v1", Kind: "ConfigMap"},
+		Name:   "widget-config",
+		Mutate: []target.Path{target.MustParsePath("data.label")},
+	}}
+	return toy
 }
 
 func seedRange(first, last int64) []int64 {
@@ -45,11 +67,10 @@ func seedRange(first, last int64) []int64 {
 func TestSeedsDrawTheGoldenSequences(t *testing.T) {
 	drawn := map[string]map[string]json.RawMessage{}
 	for _, golden := range goldenSeeds {
-		loaded := loadTarget(t, golden.path)
-		g := newGenerator(t, loaded, Options{})
-		drawn[loaded.Name] = map[string]json.RawMessage{}
+		g := newGenerator(t, golden.declare(t), Options{})
+		drawn[golden.name] = map[string]json.RawMessage{}
 		for _, seed := range golden.seeds {
-			drawn[loaded.Name][strconv.FormatInt(seed, 10)] = draw(t, g, seed)
+			drawn[golden.name][strconv.FormatInt(seed, 10)] = draw(t, g, seed)
 		}
 	}
 	encoded, err := json.MarshalIndent(drawn, "", "  ")
@@ -89,7 +110,7 @@ func TestSeedsDrawTheGoldenSequences(t *testing.T) {
 func TestCertManagersSeed23DrawsOneCreate(t *testing.T) {
 	// The Makefile's negative control runs it alone, since one op costs no
 	// replay to minimize.
-	ops := drawOps(t, certManagerTarget, 23)
+	ops := drawOps(t, file(certManagerTarget), 23)
 	if len(ops) != 1 || ops[0].Type != run.OpCreate {
 		t.Errorf("Seed 23 draws %v, want a single create.", opTypes(ops))
 	}
@@ -98,7 +119,7 @@ func TestCertManagersSeed23DrawsOneCreate(t *testing.T) {
 func TestCertManagersSeeds23To27DrawWhatTheMakefileSays(t *testing.T) {
 	drawn := map[string]bool{}
 	for seed := int64(23); seed <= 27; seed++ {
-		for _, op := range drawOps(t, certManagerTarget, seed) {
+		for _, op := range drawOps(t, file(certManagerTarget), seed) {
 			drawn[string(op.Type)] = true
 			if op.Type == run.OpCreate && op.Obj.GetName() != "example" {
 				drawn["a second Certificate"] = true
@@ -114,14 +135,24 @@ func TestCertManagersSeeds23To27DrawWhatTheMakefileSays(t *testing.T) {
 
 func TestTheToysSeed2DrawsMoreThanTheShrunkB2Reproducer(t *testing.T) {
 	// The envtest tier shrinks what seed 2 draws to three ops or fewer.
-	if ops := drawOps(t, toyTarget, 2); len(ops) <= 3 {
+	if ops := drawOps(t, file(toyTarget), 2); len(ops) <= 3 {
 		t.Errorf("Seed 2 draws %v, which leaves the shrink pass nothing to do.", opTypes(ops))
 	}
 }
 
-func drawOps(t *testing.T, path string, seed int64) []run.Op {
+func TestTheToyWithALabelFixtureDrawsB14sReproducerAtSeed19(t *testing.T) {
+	// TestGeneratedFixtureOps finds B14 with it: a restart after the label
+	// changes reconciles the Widget.
+	ops := drawOps(t, toyWithALabelFixture, 19)
+	update := slices.IndexFunc(ops, func(op run.Op) bool { return op.Type == run.OpUpdateFixture })
+	if update < 0 || !slices.ContainsFunc(ops[update+1:], func(op run.Op) bool { return op.Type == run.OpRestart }) {
+		t.Errorf("Seed 19 draws %v, want an updateFixture and then a restart.", opTypes(ops))
+	}
+}
+
+func drawOps(t *testing.T, declare declaration, seed int64) []run.Op {
 	t.Helper()
-	sequence, err := newGenerator(t, loadTarget(t, path), Options{}).Draw(seed)
+	sequence, err := newGenerator(t, declare(t), Options{}).Draw(seed)
 	if err != nil {
 		t.Fatalf("Draw(%d) failed: %v.", seed, err)
 	}

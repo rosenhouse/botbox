@@ -69,49 +69,58 @@ func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
 	}
 }
 
-// listItem starts a list item of any kind at the margin.
-var listItem = regexp.MustCompile(`^(?:[-*+]|[0-9]+[.)])(?:\s|$)`)
+// Each line of the limits section begins its text with a letter, a link or a
+// parenthesis, which opens no block that could hide a limit.
+var (
+	openingLine = regexp.MustCompile(`^[A-Za-z\[(]`)
+	bulletLine  = regexp.MustCompile(`^- [A-Za-z\[(]`)
+	bulletMore  = regexp.MustCompile(`^  [A-Za-z\[(]`)
+)
 
 // limitParts splits the limits section into its opening paragraphs and its
-// "- " bullets. It refuses any other shape, such as a lazy line or a paragraph
-// after the list, because Markdown could then hold a limit this test misses.
+// "- " bullets, and refuses any other line.
 func limitParts(section string) (opening string, bullets []string, err error) {
 	for _, line := range strings.Split(section, "\n") {
 		switch {
-		case strings.HasPrefix(line, "- "):
-			bullets = append(bullets, line)
 		case strings.TrimSpace(line) == "":
-		case bullets == nil && !listItem.MatchString(line) && strings.TrimLeft(line, " \t") == line:
+		case bulletLine.MatchString(line):
+			bullets = append(bullets, strings.TrimPrefix(line, "- "))
+		case bullets == nil && openingLine.MatchString(line):
 			opening += " " + line
-		case bullets != nil && strings.HasPrefix(line, "  "):
+		case bullets != nil && bulletMore.MatchString(line):
 			bullets[len(bullets)-1] += " " + line
 		default:
-			return "", nil, fmt.Errorf("the limits section is paragraphs, then \"- \" bullets whose other lines are indented two spaces, and this line is neither: %q", line)
+			return "", nil, fmt.Errorf("the limits section is paragraphs, then \"- \" bullets whose other lines are indented two spaces, "+
+				"and nothing follows the list. Each line's text begins with a letter, a link or a parenthesis. This line does not fit: %q", line)
 		}
 	}
 	for i, bullet := range bullets {
-		bullets[i] = oneLine(strings.TrimPrefix(bullet, "- "))
+		bullets[i] = oneLine(bullet)
 	}
 	return oneLine(opening), bullets, nil
 }
 
 func TestLimitPartsSplitsTheOpeningAndTheBullets(t *testing.T) {
-	opening, bullets, err := limitParts("\nOpening one.\n\nOpening two.\n\n- First\n  bullet.\n\n  First's paragraph.\n      Its code.\n- Second.\n  \n")
+	opening, bullets, err := limitParts("\nOpening one.\n[Link](u) two.\n   \n(Three.)\n\n- First\n  bullet.\n\n  First's paragraph.\n- [Second](u)\n  (#1).\n- (Third)\n  [#2](u).\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "Opening one. Opening two."; opening != want {
+	if want := "Opening one. [Link](u) two. (Three.)"; opening != want {
 		t.Errorf("limitParts gave the opening %q, want %q.", opening, want)
 	}
-	if want := []string{"First bullet. First's paragraph. Its code.", "Second."}; !slices.Equal(bullets, want) {
+	if want := []string{"First bullet. First's paragraph.", "[Second](u) (#1).", "(Third) [#2](u)."}; !slices.Equal(bullets, want) {
 		t.Errorf("limitParts gave the bullets %q, want %q.", bullets, want)
 	}
 }
 
+// Each refused line could open a block that hides a limit, or puts one outside
+// the bullets.
 func TestLimitPartsRefusesAnyOtherShape(t *testing.T) {
 	for _, section := range []string{
-		"\n- Item.\nLazy.\n", "\n- Item.\n Inside.\n", "\n- Item.\n\tInside.\n", "\n- Item.\n\nAfter.\n", "\n- Item.\n<p>HTML</p>\n",
-		"\n- Item.\n* Other.\n", "\n-\n", "\n* Other.\n", "\n+ Other.\n", "\n1. Other.\n", "\n2) Other.\n", "\n - Indented.\n", "\n\tIndented.\n",
+		"\n<!--\n- Item.\n", "\n```\n- Item.\n", "\n~~~\n", "\n> Quote.\n", "\n# Heading\n", "\n| Table |\n", "\n**Bold**.\n", "\n1. Other.\n",
+		"\n Indented.\n", "\n  Indented.\n", "\n\tIndented.\n", "\n-  Item.\n", "\n- \n\n  Item.\n", "\n- - -\n", "\n- `Code`.\n", "\n* Other.\n",
+		"\n- Item.\nLazy.\n", "\n- Item.\n\nAfter.\n", "\n- Item.\n Inside.\n", "\n- Item.\n   Inside.\n", "\n- Item.\n\tInside.\n",
+		"\n- Item.\n  <!-- Comment -->\n", "\n- Item.\n  ```\n",
 	} {
 		if _, _, err := limitParts(section); err == nil {
 			t.Errorf("limitParts accepted %q.", section)
@@ -119,9 +128,25 @@ func TestLimitPartsRefusesAnyOtherShape(t *testing.T) {
 	}
 }
 
+func TestABulletSaysALimitWithItsWordsAndALinkOutsideCode(t *testing.T) {
+	l := limit{says: "botbox cannot", issue: 45}
+	link := "([#45](https://github.com/rosenhouse/botbox/issues/45))"
+	if !l.isIn("botbox cannot " + link) {
+		t.Errorf("isIn misses the limit in %q.", "botbox cannot "+link)
+	}
+	for _, bullet := range []string{"botbox can " + link, "botbox cannot `" + link + "`"} {
+		if l.isIn(bullet) {
+			t.Errorf("isIn finds %q in %q.", l.says, bullet)
+		}
+	}
+}
+
+// codeSpan is inline code, where a link is only text.
+var codeSpan = regexp.MustCompile("`[^`]*`")
+
 func (l limit) isIn(bullet string) bool {
 	link := fmt.Sprintf("](https://github.com/rosenhouse/botbox/issues/%d)", l.issue)
-	return strings.Contains(bullet, l.says) && strings.Contains(bullet, link)
+	return strings.Contains(bullet, l.says) && strings.Contains(codeSpan.ReplaceAllString(bullet, ""), link)
 }
 
 func oneLine(text string) string {

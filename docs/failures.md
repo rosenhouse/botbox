@@ -66,8 +66,9 @@ A property runs where its `when` says, at each checkpoint by default, once for e
 that CR's `metadata`, `spec` and `status`, and `managed`: the objects whose ownerReferences name
 that CR, and those that name no CR. Where no CR exists, it runs once with empty `metadata`,
 `spec` and `status` over every managed object, and the report says that no CR existed. Each run
-ends by deleting every CR and checking once more, so every property runs where no CR exists.
-Guard it with `has()`, or begin it with `!has(metadata.name) ||`, which holds there.
+ends by deleting every CR and checking once more. So a property whose `when` is `checkpoint` or
+`end` always runs where no CR exists. Guard it with `has()`, or begin it with
+`!has(metadata.name) ||`, which holds there.
 
 The report quotes the property's description, the versions of the CR it failed on, and the
 managed objects' metadata. Read the values the property judged from `objects.jsonl`.
@@ -111,8 +112,9 @@ creates the new one. A CR still there `timeouts.delete` after its deletion fails
 the finalizers still on it.
 
 Where a fault reached into the deletion, G3 cannot judge it. The settle wait's G4 then says
-`the CR … was still being deleted, held by the finalizers …`. It gives `timeouts.delete is …`
-in place of `timeouts.settle is …`, because the deletion held the wait open.
+`the CR … was still being deleted, held by the finalizers …`. Where the CR's deletion deadline
+held the wait open past `settle`, the line gives `timeouts.delete is …` in place of
+`timeouts.settle is …`.
 
 ## Restarts and crash loops
 

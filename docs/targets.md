@@ -6,9 +6,9 @@ the keys, and how to choose their values.
 
 ## Timeouts
 
-A settle wait follows each op that changes something. It ends once `ready` holds on every CR
-and nothing has changed for `timeouts.stable`, or once `timeouts.settle` runs out. G4 fails a
-wait that runs out.
+A settle wait follows each op that [settles](reference.md#ops). It ends once `ready` holds on
+every CR and nothing has changed for `timeouts.stable`, or once `timeouts.settle` runs out. G4
+fails a wait that runs out with no fault active.
 
 - A slow controller needs a wider `settle`. The quiet window sits inside `settle`, so your
   controller has `settle - stable` to stop writing.
@@ -71,9 +71,9 @@ It deletes an object once every owner the object names is gone. It treats a fore
 orphan delete as a background one. It finds an owner by group, kind and name, at any version
 the API server serves, and then compares the UID.
 
-botbox never deletes an object whose owner it cannot find. That owner may be of a kind your
-target does not declare, or named at a version the API server does not serve. The run prints a
-note for each such object and owner, and the report carries it. A real garbage collector cannot
+botbox counts as live an owner it cannot resolve: one of a kind your target does not declare,
+or one named at a version the API server does not serve. It never deletes an object that names
+such an owner. The run prints a note for each such object and owner, and the report carries it. A real garbage collector cannot
 resolve an unserved version either, so fix that reference in your controller. If your
 controller creates an owner of an undeclared kind, add the kind to `manages`. Otherwise, run
 botbox [against a cluster](#against-a-cluster), whose garbage collector resolves every kind.

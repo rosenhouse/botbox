@@ -188,22 +188,31 @@ botbox run --target target.yaml --runs 5
 ```
 
 Each run draws a sequence of ops from `create`, `update`, `delete`, `recreate`, `settle`,
-`restart` and `deleteManaged`. A drawn `create` adds a second or a third CR beside your sample.
-Without `--seed`, botbox draws a seed and prints it. `--seed` draws the same sequences again.
+`restart` and `deleteManaged`, and from the [fixture ops](docs/targets.md#fixtures) where
+`generate.fixtures` names a fixture. A drawn `create` adds a second or a third CR beside your
+sample. Without `--seed`, botbox draws a seed and prints it. `--seed` draws the same sequences
+again.
 
-### Pin a sequence per managed kind
+### Pin sequences
 
-`deleteManaged` deletes an object behind your controller's back, and G7 requires your
-controller to recreate it. Drawn sequences hold few `deleteManaged` ops, so a few drawn runs
-can pass a controller that does not watch a kind it manages. Write one sequence per managed kind
-that creates your sample, deletes its first object of that kind, and settles:
+Drawn sequences hold few `deleteManaged` ops, and few updates after a CR has settled. So a few
+drawn runs can pass a controller that does not watch a kind it manages, or one that ignores a
+spec change. Pin a sequence for each:
+
+- For each managed kind, create your sample and delete its first object of that kind with
+  `deleteManaged`. G7 requires your controller to recreate it.
+- For each property, create your sample and update a spec field that changes what the
+  property reads.
+
+Each of these ops settles before the next begins. This sequence does both for the toy, whose
+P1 reads the ConfigMaps that `spec.count` sets:
 
 ```json
 {"seed": 1, "target": "toy-widget", "ops": [
   {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
-    "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    "metadata": {"name": "widget"}, "spec": {"count": 3}}},
   {"i": 1, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
-  {"i": 2, "t": "settle"}]}
+  {"i": 2, "t": "update", "patch": {"spec": {"count": 2}}}]}
 ```
 
 `botbox run --target target.yaml sequences/*.json` runs the sequences you write, as written.

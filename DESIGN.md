@@ -1323,8 +1323,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   every find the README shows is seeded, and run as written in an envtest test, with the
   botbox and the control plane that install leaves; writing `target.yaml` for your own
   controller, around the toy's `target.yaml` embedded as the worked example, with how to
-  run it and a sequence to pin per managed kind; reading a failure, with the usual cause
-  of each check and what to change when botbox exits 2; a CI recipe for adopters,
+  run it and a sequence to pin per managed kind and per property, which the envtest tier
+  runs; reading a failure, with the usual cause of each check and what to change when
+  botbox exits 2; a CI recipe for adopters,
   embedded from `examples/ci/github-actions.yml`, a tools module that keeps botbox out of
   an operator's go.mod, embedded from `examples/tools-module.sh`, which the envtest tier
   runs (D80), and a test that runs botbox from `go test`, embedded from
@@ -2282,21 +2283,23 @@ built from source and run as a black-box binary.
   twice, because the first find did not use what Install had set up. Both left the README
   for `docs/reference.md` to learn that a property runs where no CR exists, and which
   fields a `deleteManaged` takes. Neither drew a `deleteManaged` in a dozen runs, so a
-  controller with no watch on its children passed. The README now follows the order a
-  newcomer needs: what botbox is, what it cannot test, install, a first run and a first
-  find with Install's botbox, the toy's `target.yaml` as the worked example, reading a
-  failure, and CI. It tells a reader to pin a `create`, `deleteManaged` and `settle`
-  sequence per managed kind. The examples, the kind caveats, generation, faults, crash
-  loops and every message move to `docs/targets.md`, `docs/failures.md` and
-  `docs/examples.md`. Those pages keep the README's rule against this document's
-  vocabulary, and the tests that held the README to the examples' seeds and output now
-  hold `docs/examples.md`. The worked example is embedded, so it cannot drift from a
-  target the envtest tier runs. Keeping the cert-manager quickstart in the README was
-  rejected, because it builds cert-manager from source and a newcomer needs the toy
-  first. The walks also changed three messages. A property's violation where no CR
-  existed now says so. An op that carries a field it does not take names the fields it
-  needs. A target that stops on a bad flag has the line above its usage text quoted,
-  since Go's flag package prints the error first. A walker also waited eight silent
-  minutes for a find, twice the 4m the derived deadline's line seemed to promise. That
-  line now says minimizing gets the rest of the deadline, and botbox prints the failed
-  check before it minimizes.
+  controller with no watch on its children passed. A third walker's 13 drawn runs passed a
+  controller that never rewrote a child after a spec change, since none updated a CR that
+  had settled. The README now follows the order a newcomer needs: what botbox is, what it
+  cannot test, install, a first run and a first find with Install's botbox, the toy's
+  `target.yaml` as the worked example, reading a failure, and CI. It tells a reader to pin
+  a sequence per managed kind that deletes one of its objects, and one per property that
+  updates what the property reads. An envtest test runs the README's example against the
+  toy, with B7 and B8. The examples, the kind caveats, generation, faults, crash loops and
+  every message move to `docs/targets.md`, `docs/failures.md` and `docs/examples.md`.
+  Those pages keep the README's rule against this document's vocabulary, and the tests
+  that held the README to the examples' seeds and output now hold `docs/examples.md`. The
+  worked example is embedded, so it cannot drift from a target the envtest tier runs.
+  Keeping the cert-manager quickstart in the README was rejected, because it builds
+  cert-manager from source and a newcomer needs the toy first. The walks also changed
+  three messages. A property's violation where no CR existed now says so. An op that
+  carries a field it does not take names the fields it needs. A target that stops on a bad
+  flag has the line above its usage text quoted, since Go's flag package prints the error
+  first. A walker also waited eight silent minutes for a find, twice the 4m the derived
+  deadline's line seemed to promise. That line now says minimizing gets the rest of the
+  deadline, and botbox prints the failed check before it minimizes.

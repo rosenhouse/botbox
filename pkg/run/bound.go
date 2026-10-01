@@ -32,6 +32,9 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 	settle, deletion := float64(timeouts.Settle), float64(timeouts.Delete)
 	waits := float64(defaultNamespaceDefaultsWithin)
 	faults, stops, exits, untriggered := 0, 0, 0, false
+	// delay is the longest a fault so far holds a request. A request held as
+	// a wait's time runs out holds the wait open for hold more.
+	var delay, hold float64
 	for _, op := range s.Ops {
 		if faults > 0 {
 			// The op may first wait for the target to restart. The target is
@@ -52,6 +55,10 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 			waits += float64(launch.RestartWithin) + settle
 		case OpFault:
 			faults++
+			if op.Fault.Action.Delay > 0 {
+				delay = max(delay, float64(op.Fault.Action.Delay))
+				hold = delay + settle
+			}
 			if op.Fault.Until == (Trigger{}) {
 				untriggered = true
 			} else {
@@ -62,7 +69,7 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 			exits++
 		}
 		if op.Settles() {
-			waits += settle
+			waits += settle + hold
 		}
 	}
 	// Faults with no trigger stop together, at the teardown.
@@ -71,12 +78,13 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 	}
 	// From the first fault on, each op allows an exit, owed T_settle past a
 	// return that can come T_settle after a restart that can take MaxBackoff.
-	// Faults that stop are owed as long as they lasted and T_settle, and allow
-	// another exit.
+	// Faults that stop are owed as long as they lasted and T_settle, a hold
+	// past that, and another exit. A fault lasts until the proxy releases what
+	// it held, up to the delay past its trigger.
 	exit := float64(launch.MaxBackoff) + 2*settle
 	waits += float64(exits) * exit
 	for range stops {
-		waits = 2*waits + settle + exit
+		waits = 2*(waits+delay) + settle + hold + exit
 	}
 	teardown := float64(timeouts.Stable) + deletion + float64(teardownMargin)
 	return waits + teardown + float64(stopBudget)

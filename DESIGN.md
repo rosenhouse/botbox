@@ -277,10 +277,12 @@ The Runner executes one sequence:
    target that stopped then ends the run as a harness error naming the op it was at (§11):
    a bad flag or a taken port reads the same way, and the ops behind it would run against
    nothing. The error quotes the line in `target.log` that says why: the line the last Go
-   panic opens with, or else the last line above any stack trace, since a logger's trace
-   ends in a frame. The log holds every process a `restart` started, and the last one is
-   the one that stopped. Where botbox had created the CR and the target had requested a
-   resource, the error says the CR may have crashed the target and names the run's
+   panic opens with, or else the last line above the last usage text, which Go's flag
+   package and cobra print below a flag error, or else the last line above any stack
+   trace, since a logger's trace ends in a frame. The log holds every process a `restart`
+   started, and the last one is the one that stopped. Where botbox had created the CR and
+   the target had requested a resource, the error says the CR may have crashed the target
+   and names the run's
    `sequence.json`, unless the target wrote that its port was taken. Once a wait has
    converged, the target has shown it runs, and the Launcher supervises it (§5.1). The run
    notes each exit and the line the target wrote as it stopped. A wait does not converge
@@ -754,11 +756,11 @@ Details the example does not show:
   converged since botbox last changed something (§6), so put a `settle` op between a
   `noSettle` op and a `deleteManaged`.
 
-`botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
-embed the minimized sequence in this format. `docs/reference.md` lists every field, op and
 botbox refuses an op that lacks a field its type needs, or carries one it does not take.
 The error names the fields the type needs.
 
+`botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
+embed the minimized sequence in this format. `docs/reference.md` lists every field, op and
 fault field, and its example sequence sets each one (§11).
 
 ## 8. Target contract

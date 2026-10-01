@@ -83,7 +83,7 @@ func limitParts(section string) (opening string, bullets []string, after string)
 	items := listItem.Split(section, -1)
 	for i, marker := range listItem.FindAllString(section, -1) {
 		column := len(marker) - len("\n") // where the item's text starts
-		end := regexp.MustCompile(fmt.Sprintf(`(?m)\n\s*\n {0,%[1]d}\S|\n {0,%[1]d}%[2]s`, column-1, opensBlock))
+		end := regexp.MustCompile(fmt.Sprintf(`(?m)\n\s*\n {0,%d}\S|\n {0,%d}%s`, column-1, min(column-1, 3), opensBlock))
 		item := items[i+1]
 		if at := end.FindStringIndex(item); at != nil {
 			item, after = item[:at[0]], after+item[at[0]:]
@@ -131,7 +131,7 @@ func TestLimitPartsEndsAnItemWhereCommonMarkDoes(t *testing.T) {
 		next string
 		ends bool
 	}{
-		{"lazy.", false}, {" lazy.", false}, {"#lazy.", false}, {"\n  Inside.", false}, {"\n\tInside.", false}, {"\t# Inside.", false},
+		{"lazy.", false}, {" lazy.", false}, {"#lazy.", false}, {"\n  Inside.", false}, {"\n\tInside.", false}, {"\t# Inside.", false}, {"  > Inside.", false},
 		{"\n After.", true}, {" \nAfter.", true}, {"# Heading", true}, {"```", true}, {"~~~", true}, {" > Quote", true},
 		{"***", true}, {"---", true}, {"_ _ _", true}, {"<p>HTML</p>", true},
 	} {
@@ -145,10 +145,11 @@ func TestLimitPartsEndsAnItemWhereCommonMarkDoes(t *testing.T) {
 	}
 }
 
-// "10.  " starts an item's text at column 5, and a tab indents a line to 4.
+// "10.  " starts an item's text at column 5. A tab indents a line to 4, and 4
+// spaces open no block.
 func TestLimitPartsEndsAWideItemWhereCommonMarkDoes(t *testing.T) {
-	_, bullets, after := limitParts("\n10.  Item.\n\n\tAfter.\n")
-	if want := []string{"Item."}; !slices.Equal(bullets, want) || after != "After." {
+	_, bullets, after := limitParts("\n10.  Item.\n    # Lazy.\n\n\tAfter.\n")
+	if want := []string{"Item. # Lazy."}; !slices.Equal(bullets, want) || after != "After." {
 		t.Errorf("limitParts gave the bullets %q and then %q, want %q and then %q.", bullets, after, want, "After.")
 	}
 }

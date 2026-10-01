@@ -16,6 +16,19 @@ func TestTheReferenceNamesEveryOverlayKeyword(t *testing.T) {
 	}
 }
 
+// The rules target's schema describes spec paths that generation cannot draw a
+// value for.
+func TestTheReferenceGivesTheDefaultMutate(t *testing.T) {
+	documented := reference.Row(t, "## target.yaml", "generate.mutate")[0]
+
+	if want := "each spec path generation can draw a value for"; documented != want {
+		t.Errorf("The reference gives generate.mutate the default %q, want %q.", documented, want)
+	}
+	if leftAlone := newGenerator(t, loadTarget(t, rulesTarget), Options{}).LeftAlone(); len(leftAlone) == 0 {
+		t.Errorf("Generation for %s changes every spec path its schema describes, want some left alone.", rulesTarget)
+	}
+}
+
 func TestTheReferenceGivesTheDefaultMaxCRs(t *testing.T) {
 	documented := reference.Row(t, "## target.yaml", "generate.maxCRs")[0]
 

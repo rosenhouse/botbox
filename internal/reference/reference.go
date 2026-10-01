@@ -49,23 +49,40 @@ func Spans(cell string) []string {
 	return spans
 }
 
-// rows are the cells of each row under heading, up to the next heading, whose
-// first cell is a code span. That cell is given without its backquotes.
-func rows(t testing.TB, heading string) [][]string {
+// Says reports whether the text under heading holds sentence, wherever its
+// lines break.
+func Says(t testing.TB, heading, sentence string) bool {
+	t.Helper()
+	words := strings.Fields(strings.Join(section(t, heading), " "))
+	return strings.Contains(strings.Join(words, " "), sentence)
+}
+
+// section is the lines under heading, up to the next heading.
+func section(t testing.TB, heading string) []string {
 	t.Helper()
 	page, err := os.ReadFile(Path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, section, found := strings.Cut(string(page), "\n"+heading+"\n")
+	_, after, found := strings.Cut(string(page), "\n"+heading+"\n")
 	if !found {
 		t.Fatalf("%s has no heading %q.", Path, heading)
 	}
-	var rows [][]string
-	for _, line := range strings.Split(section, "\n") {
+	lines := strings.Split(after, "\n")
+	for i, line := range lines {
 		if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "### ") {
-			break
+			return lines[:i]
 		}
+	}
+	return lines
+}
+
+// rows are the cells of each row under heading whose first cell is a code
+// span. That cell is given without its backquotes.
+func rows(t testing.TB, heading string) [][]string {
+	t.Helper()
+	var rows [][]string
+	for _, line := range section(t, heading) {
 		if !strings.HasPrefix(line, "| `") {
 			continue
 		}

@@ -1258,8 +1258,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   as a GitHub release asset, and are pinned.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
-  (five lines); install, and how to keep botbox out of an operator's go.mod (D@58); a
-  find in half a minute, a replay of a bug seeded into the toy,
+  (five lines); install, and a tools module that keeps botbox out of an operator's go.mod,
+  embedded from `examples/tools-module.sh`, which the envtest tier runs (D@58); a find in
+  half a minute, a replay of a bug seeded into the toy,
   which says that every find the README shows is seeded or a negative control and whose
   command an envtest test runs as written; quickstart against cert-manager, then what the
   second example adds; writing `target.yaml` for your own controller; reading a report;
@@ -2090,13 +2091,13 @@ built from source and run as a black-box binary.
 - **D@58 The README keeps botbox out of an operator's go.mod.** Minimal version selection
   works on the whole module graph, so requiring botbox, or importing any of its packages,
   raises a module to botbox's Go, Kubernetes and controller-runtime versions (D11). The
-  README installs botbox with `go install`, or into a module of its own under `tools/`,
-  and quotes what `go get -tool` does to an operator's go.mod. That module sets its go
-  line before `go get -tool`, so that a `go` command before 1.24, which lacks the flag,
-  switches to Go 1.26 first. It builds `bin/botbox`, because `go -C tools tool botbox`
-  runs botbox in `tools/`, and `launch.binary` is relative to where botbox runs. A lower
-  dependency floor, a smaller module for importers and release binaries are the
-  maintainer's to decide.
+  README installs botbox with `go install`, or with `examples/tools-module.sh`, which
+  pins it in a module of its own under `tools/`. The script sets the tools module's go
+  line before `go get -tool`, so that a `go` before 1.24, which lacks the flag, switches
+  first. It builds `bin/botbox`, because `go -C tools tool botbox` runs botbox in
+  `tools/`, where `launch.binary` does not resolve. The envtest tier runs the script in a
+  fresh operator module, as the oldest `go` the README names, with botbox replaced by the
+  checkout.
 - **D@59 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
   the README's `go test` recipe runs `bin/botbox`, which the tools module of D@58 builds,
   and fails the test on a non-zero exit. A build tag keeps it out of a plain

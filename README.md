@@ -18,8 +18,9 @@ botbox has no release yet, so `@latest` installs main as it is now. Name a commi
 to install the same botbox every time, as [CI](#running-in-ci) should.
 
 Building botbox takes Go 1.26.0 or later. An older `go` command, from Go 1.21 on, downloads a
-newer Go itself, unless `GOTOOLCHAIN=local` is set, as many CI images set it. There the build
-fails with `requires go >= 1.26.0`, so install that Go there, or run the command with
+newer Go itself, unless `GOTOOLCHAIN=local` is set, as many CI images set it. Then `go install`
+fails with `requires go >= 1.26.0`, and a `go` before 1.24 stops the tools module below with
+`flag provided but not defined: -tool`. Install a newer Go, or run the commands with
 `GOTOOLCHAIN=auto`.
 
 ### Keep botbox out of your go.mod
@@ -34,21 +35,24 @@ go: upgraded sigs.k8s.io/controller-runtime v0.20.0 => v0.25.1
 ```
 
 botbox's Go packages make no compatibility promise yet. To pin botbox in your repository, give
-it a module of its own:
+it a module of its own. Run this from your repository root:
 
+<!-- embed: examples/tools-module.sh -->
 ```sh
 mkdir tools
 cd tools
 go mod init example.com/operator/tools
-go mod edit -go=1.26.0   # so that go before 1.24, which lacks get -tool, switches first
+go mod edit -go=1.26.0
 go get -tool github.com/rosenhouse/botbox/cmd/botbox@latest
 cd ..
 go -C tools build -o ../bin/botbox github.com/rosenhouse/botbox/cmd/botbox
+bin/botbox version
 ```
 
-`tools/go.mod` then pins botbox, and your own go.mod stays as it was. Run `bin/botbox` from your
-repository root, because `launch.binary` is relative to the directory botbox runs in.
-`go -C tools tool botbox` would run it in `tools/`.
+The go line comes first, so that a `go` before 1.24, which lacks `go get -tool`, switches to a
+newer Go before it needs the flag. `tools/go.mod` then pins botbox, and your own go.mod stays as
+it was. Run `bin/botbox` as the last line does, not `go -C tools tool botbox`, which runs botbox
+in `tools/`, where your `launch.binary` does not resolve.
 
 ### Against kind
 

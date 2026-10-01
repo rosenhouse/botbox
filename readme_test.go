@@ -76,7 +76,7 @@ var (
 func limitParts(section string) (opening string, parts []string) {
 	items := listItem.Split(section, -1)
 	for i, marker := range listItem.FindAllString(section, -1) {
-		// A line indented less than the item's text ends the list.
+		// A line indented less than the item's text ends the item.
 		end := regexp.MustCompile(fmt.Sprintf(`\n {0,%d}\S`, column(strings.TrimPrefix(marker, "\n"))-1))
 		item, after := items[i+1], ""
 		if at := end.FindStringIndex(item); at != nil {

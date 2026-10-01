@@ -353,24 +353,29 @@ under a key of their versions. A Go repository may instead read Go's version fro
 and turn setup-go's cache on.
 
 A pull request runs fixed seeds, so its runs repeat from one commit to the next. The nightly run
-draws fresh seeds. A seed names a sequence only for one build of botbox and one `target.yaml`,
-so upgrading botbox, or editing your CRD or `target.yaml`, can draw other sequences. To tell
-whether a failure comes from the change under review, replay its `sequence.json` against the
-base branch's controller.
+draws fresh seeds. GitHub tells only whoever last edited the schedule when a nightly run fails.
+botbox's own [nightly.yml](.github/workflows/nightly.yml) also files an issue. A seed names a
+sequence only for one build of botbox and one `target.yaml`, so upgrading botbox, or editing
+your CRD or `target.yaml`, can draw other sequences. To tell whether a failure comes from the
+change under review, replay its `sequence.json` against the base branch's controller.
 
 Add a step that runs your pinned sequences, such as
 `exec botbox run --target target.yaml --deadline 10m --out botbox-out sequences/*.json`.
 
 `--deadline` caps each botbox invocation, and botbox stops within seconds of it. When the
 deadline ends a run, or stops botbox before its last run, botbox exits 2 rather than reporting
-a find. So give it room for your controller. Run the pull request's command once without
-`--deadline`, and botbox prints the deadline it derives. Use that, or fewer `--runs`.
+a find. When it ends minimizing, botbox still exits 1 and reports the smallest failing
+sequence it found. Without `--deadline`, botbox derives a deadline from the longest the runs'
+waits can take at your target's timeouts, plus 4m to minimize a failure. That is the worst
+case, and a fast controller finishes far sooner. To size a deadline, time the pull request's
+command once and add at least 4m to minimize. Or shorten `timeouts`, as the toy does.
 
 The job uploads `botbox-out/`, which holds each run's sequence and a failing run's evidence.
 Anyone who can read the repository can download it, and botbox hides only the values of a
 Secret's `data` and annotations. Download it with the command in the workflow's last comment,
 and build your controller. The replay command in `report.md` then runs as written from the
-repository root. On GitLab or Jenkins, `--junit botbox.xml` writes the runs as JUnit XML.
+repository root. On GitLab or Jenkins, `--junit botbox.xml` writes the runs as JUnit XML for
+`artifacts:reports:junit` or the `junit` step.
 
 ### Keep botbox out of your go.mod
 

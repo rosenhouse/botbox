@@ -2302,4 +2302,5 @@ built from source and run as a black-box binary.
   flag has the line above its usage text quoted, since Go's flag package prints the error
   first. A walker also waited eight silent minutes for a find, twice the 4m the derived
   deadline's line seemed to promise. That line now says minimizing gets the rest of the
-  deadline, and botbox prints the failed check before it minimizes.
+  deadline, and botbox prints the failed check before it minimizes. The README says the
+  derived deadline is a worst case, and how to size a shorter one.

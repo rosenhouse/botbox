@@ -36,8 +36,8 @@ func TestG6FiresPastTheThreshold(t *testing.T) {
 	if !strings.Contains(violation.Statement, "get") || !strings.Contains(violation.Statement, "w-0") {
 		t.Errorf("The statement is %q, want it to name the request the target repeated.", violation.Statement)
 	}
-	if want := "thresholds.errloop allows 5"; !strings.Contains(violation.Statement, want) {
-		t.Errorf("The statement is %q, want it to name the threshold: %q.", violation.Statement, want)
+	if want := "6 times within 5s (timeouts.settle), where thresholds.errloop allows 5"; !strings.HasSuffix(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to end %q.", violation.Statement, want)
 	}
 	if len(violation.Requests) != errLoop+1 {
 		t.Fatalf("The evidence holds %d requests, want all %d of the loop.", len(violation.Requests), errLoop+1)

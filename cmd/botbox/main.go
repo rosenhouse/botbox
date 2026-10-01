@@ -1,5 +1,5 @@
-// Command botbox exercises a Kubernetes controller against the generic
-// invariants of DESIGN.md §6.
+// Command botbox finds bugs in a Kubernetes controller. botbox --help lists its
+// commands.
 package main
 
 import (

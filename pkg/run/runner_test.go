@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -1377,12 +1378,13 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 		fault   func(deleted time.Time) proxy.FaultWindow
 		found   []Violation
 		want    string
+		says    string
 		wantErr string
 	}{
 		{name: "a check reports it", found: []Violation{{ID: "G3"}}, want: "G3"},
 		{name: "a fault reached into its deletion", fault: func(deleted time.Time) proxy.FaultWindow {
 			return proxy.FaultWindow{First: deleted.Add(time.Second), Retired: deleted.Add(2 * time.Second)}
-		}, want: "G4"},
+		}, want: "G4", says: fmt.Sprintf("(timeouts.delete is %s)", testTimeouts.Delete)},
 		{name: "a fault is still active", fault: func(deleted time.Time) proxy.FaultWindow {
 			return proxy.FaultWindow{First: deleted.Add(time.Second)}
 		}, wantErr: "op 2 (recreate): the CR widget was still there"},
@@ -1412,11 +1414,14 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 			if test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)) {
 				t.Fatalf("The run returned %v, want %q.", err, test.wantErr)
 			}
-			if got := result.Violation; test.want != "" && (got == nil || got.ID != test.want) {
-				t.Errorf("The run reported %v, want %s.", got, test.want)
+			if got := result.Violation; test.want != "" && (got == nil || got.ID != test.want || !strings.Contains(got.Statement, test.says)) {
+				t.Errorf("The run reported %v, want %s saying %q.", got, test.want, test.says)
 			}
 			if got, want := checkpointsAt(result.Timeline), []int{1, 2}; !slices.Equal(got, want) {
 				t.Fatalf("The run checkpointed at %v, want %v.", got, want)
+			}
+			if settled, stayed := result.Timeline.Checkpoints[0], result.Timeline.Checkpoints[1]; settled.Stayed || !stayed.Stayed {
+				t.Errorf("The checkpoints are %+v and %+v, want the second alone marked as a recreate's whose CR stayed.", settled, stayed)
 			}
 			deleteReturned := result.Timeline.Ops[2].At.Add(h.deleteCRDelay)
 			if stayed := result.Timeline.Checkpoints[1]; stayed.Began.Before(deleteReturned) || stayed.At.Before(stayed.Began) || stayed.At.After(ended) {
@@ -1589,7 +1594,8 @@ func TestRunRecordsG4WhenTheRecoveryExpires(t *testing.T) {
 	if recovery == nil || recovery.Converged || !violation.At.Equal(recovery.Window.End) {
 		t.Errorf("The violation is stamped %v, want the end of a recovery that expired: %+v.", violation.At, recovery)
 	}
-	if want := fmt.Sprintf("with no fault active: in %v,", recovery.Window.End.Sub(recovery.Window.Start).Round(time.Millisecond)); !strings.Contains(violation.Statement, want) {
+	if want := fmt.Sprintf("with no fault active: in %v (timeouts.settle is %v),",
+		recovery.Window.End.Sub(recovery.Window.Start).Round(time.Millisecond), toyTarget.Timeouts.Settle); !strings.Contains(violation.Statement, want) {
 		t.Errorf("The statement is %q, want it to say how long the wait ran: %q.", violation.Statement, want)
 	}
 	if got := checkpointsAt(result.Timeline); !slices.Equal(got, []int{1, Recovery}) {
@@ -2247,24 +2253,6 @@ func TestRunRecordsTheWindowEachFaultWasActiveIn(t *testing.T) {
 	}
 	want := []string{"addFault 0", "addFault 1", "removeFault 0", "settle", "supervise", "settle"}
 	if got := h.opCalls(); !slices.Equal(got, want) {
-		t.Errorf("The run did %v, want %v.", got, want)
-	}
-}
-
-// A fault whose op trigger names its own op ends at the next one.
-func TestRunEndsAFaultWhoseOpTriggerNamesItsOwnOp(t *testing.T) {
-	h := newFakeHarness()
-	sequence := sequenceOf(
-		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: nth(0)}}},
-		Op{Type: OpSettle},
-	)
-
-	_, err := runFake(t, h, nil, sequence)
-
-	if err != nil {
-		t.Fatalf("The run failed: %v", err)
-	}
-	if got, want := h.opCalls(), []string{"addFault 0", "removeFault 0", "settle", "supervise"}; !slices.Equal(got, want) {
 		t.Errorf("The run did %v, want %v.", got, want)
 	}
 }
@@ -3200,5 +3188,35 @@ func TestAnExitDuringTheTeardownIsNotedAsSuch(t *testing.T) {
 				t.Errorf("The teardown's checks read the exits %+v; want the exit read: %t.", check.inputs[1].Timeline.Exits, exit.judged)
 			}
 		})
+	}
+}
+
+func TestTheProxyGetsTheFaultAsWritten(t *testing.T) {
+	for _, test := range []struct {
+		spec string
+		want proxy.FaultSpec
+	}{
+		{
+			spec: `{"match": {"verb": "patch", "resource": "widgets", "name": "widget-*", "fraction": 0.25},
+				"action": {"delay": "500ms"}, "until": {"count": 2, "for": "3s"}}`,
+			want: proxy.FaultSpec{
+				Match:  proxy.RequestMatcher{Verb: "patch", Resource: "widgets", Name: "widget-*", Fraction: 0.25},
+				Action: proxy.Delay{For: 500 * time.Millisecond},
+				Until:  proxy.Trigger{Count: 2, For: 3 * time.Second},
+			},
+		},
+		{
+			spec: `{"action": {"error": 503}}`,
+			want: proxy.FaultSpec{Action: proxy.Error{Code: 503}},
+		},
+	} {
+		var fault Fault
+		if err := json.Unmarshal([]byte(test.spec), &fault); err != nil {
+			t.Fatal(err)
+		}
+
+		if got := fault.spec(); !reflect.DeepEqual(got, test.want) {
+			t.Errorf("The fault %s reached the proxy as %+v, want %+v.", test.spec, got, test.want)
+		}
 	}
 }

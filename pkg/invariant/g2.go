@@ -18,15 +18,15 @@ func NoChurn(in Input) (Result, error) {
 	for _, window := range in.quietWindows() {
 		if moved := in.changesIn(window); len(moved) > 0 {
 			out.violate(Violation{
-				Statement: fmt.Sprintf("the target changed %d objects in %s, where §6 requires none",
-					len(moved), window),
+				Statement: fmt.Sprintf("the target changed %s in %s, where a converged target changes nothing",
+					count(len(moved), "object"), window),
 				At: moved[0].Time,
 			}.quotingVersions(Recent(moved)))
 		}
 		if written := in.requestsIn(window, writesStatus); len(written) > allowed {
 			out.violate(Violation{
-				Statement: fmt.Sprintf("the target made %d status writes in %s, where thresholds.quiet allows %d",
-					len(written), window, allowed),
+				Statement: fmt.Sprintf("the target made %s in %s, where thresholds.quiet allows %d",
+					count(len(written), "status write"), window, allowed),
 				At: written[allowed].Start,
 			}.quotingRequests(Recent(written)))
 		}

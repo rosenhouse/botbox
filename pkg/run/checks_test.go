@@ -147,7 +147,7 @@ func TestTheChecksMeasureAnExpiredWaitFromWhereItBegan(t *testing.T) {
 
 	violations := checked(t, in)
 
-	if len(violations) != 1 || !strings.Contains(violations[0].Statement, "expired with no fault active: in 5s, ready held from 0s on") {
+	if len(violations) != 1 || !strings.Contains(violations[0].Statement, "expired with no fault active: in 5s (timeouts.settle is 5s), ready held from 0s on") {
 		t.Errorf("The checks reported %v, want the G4 of a wait that ran 5s on a ready CR.", violations)
 	}
 }

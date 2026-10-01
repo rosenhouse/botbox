@@ -25,10 +25,14 @@ func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 	}
 	stable := in.timeouts().Stable
 	changes := in.versionsIn(at.Add(-stable), at)
+	timeout := fmt.Sprintf("timeouts.settle is %s", in.timeouts().Settle)
+	if checkpoint.Stayed {
+		timeout = fmt.Sprintf("timeouts.delete is %s", in.timeouts().Delete)
+	}
 	violation := Violation{
 		ID: "G4",
-		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active: in %s, %s%s%s",
-			in.describeOp(checkpoint.Op), at.Sub(began).Round(time.Millisecond),
+		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active: in %s (%s), %s%s%s",
+			in.describeOp(checkpoint.Op), at.Sub(began).Round(time.Millisecond), timeout,
 			walk.why(began, in.starting(at, stable), churn(stable, changes)),
 			in.repeated(began, at), in.exited(at)),
 		At: at,
@@ -163,7 +167,7 @@ func (in Input) starting(at time.Time, stable time.Duration) string {
 	}
 	for _, exit := range in.Exits {
 		if exit.Restart.After(at.Add(-stable)) && !exit.Restart.After(at) {
-			return fmt.Sprintf("but the target restarted in the last stable (%s)", stable)
+			return fmt.Sprintf("but the target restarted in the last %s (timeouts.stable)", stable)
 		}
 	}
 	start, named := in.lastRestart(at)
@@ -174,7 +178,7 @@ func (in Input) starting(at time.Time, stable time.Duration) string {
 	case !found:
 		return "but the target had requested no resource outside leader election since " + named
 	case back.After(at.Add(-stable)):
-		return fmt.Sprintf("but the target had requested no resource outside leader election since %s until the last stable (%s)", named, stable)
+		return fmt.Sprintf("but the target had requested no resource outside leader election since %s until the last %s (timeouts.stable)", named, stable)
 	}
 	return ""
 }
@@ -182,10 +186,10 @@ func (in Input) starting(at time.Time, stable time.Duration) string {
 // churn says what changed in the last stable, which a wait needs quiet.
 func churn(stable time.Duration, changes []observe.Version) string {
 	if len(changes) == 0 {
-		return fmt.Sprintf("and nothing changed in the last stable (%s)", stable)
+		return fmt.Sprintf("and nothing changed in the last %s (timeouts.stable)", stable)
 	}
 	last := changes[len(changes)-1]
-	return fmt.Sprintf("but the namespace never held still for stable (%s): %s in the last %s, the last to %s %s",
+	return fmt.Sprintf("but the namespace never held still for %s (timeouts.stable): %s in the last %s, the last to %s %s",
 		stable, count(len(changes), "change"), stable, kindName(last.GVK), last.Name)
 }
 

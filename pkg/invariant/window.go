@@ -37,7 +37,7 @@ func (in Input) quietWindows() []quiet {
 			continue
 		}
 		w := quiet{
-			what:  fmt.Sprintf("the quiet window after op %d (%s)", op.Index, op.Type),
+			what:  fmt.Sprintf("the %s (timeouts.stable) after op %d (%s) settled", stable, op.Index, op.Type),
 			start: settled,
 			end:   settled.Add(stable),
 		}
@@ -60,7 +60,11 @@ func (in Input) quietWindows() []quiet {
 // last op never settles has no other. The teardown clears every fault before
 // the window opens, so a fault it cleared did not reach into it.
 func (in Input) teardownWindow() (quiet, bool) {
-	w := quiet{what: "the quiet window the teardown waited before deleting", start: in.Quiet, end: in.Teardown}
+	w := quiet{
+		what:  fmt.Sprintf("the %s (timeouts.stable) the teardown waited before deleting", in.timeouts().Stable),
+		start: in.Quiet,
+		end:   in.Teardown,
+	}
 	if w.start.IsZero() || w.end.IsZero() || !in.observed(w.end) || in.faulted(w.start, w.end) {
 		return quiet{}, false
 	}

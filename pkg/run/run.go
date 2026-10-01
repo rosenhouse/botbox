@@ -1,7 +1,10 @@
-// Package run brings the machinery of one run up and down (DESIGN.md §5.5): a
-// test cluster, a namespace private to the run, the proxy the target talks to,
-// the Observer, the garbage-collector emulation and the target process. The
-// Runner drives it; ops, invariants and shrinking are not here.
+// Package run executes sequences of ops against a test cluster. Run executes
+// one sequence: Start brings up its Harness, which is a namespace private to
+// the run, the proxy the target talks to, the Observer, the garbage-collector
+// emulation and the target process. Run then applies each op, waits for it to
+// settle, has a Checker judge each checkpoint and tears the run down.
+// Shrink minimizes a failing sequence by replaying simpler ones. A Sequence is
+// the JSON that botbox draws, replays and reports.
 package run
 
 import (

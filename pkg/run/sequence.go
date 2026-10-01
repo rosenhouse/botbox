@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -93,10 +94,10 @@ type Fault struct {
 // Match selects the requests a fault applies to. An unset field matches every
 // request.
 type Match struct {
-	Verb     string  `json:"verb,omitempty"`
-	Resource string  `json:"resource,omitempty"`
-	Name     string  `json:"name,omitempty"`
-	Fraction float64 `json:"fraction,omitempty"`
+	Verb     string   `json:"verb,omitempty"`
+	Resource string   `json:"resource,omitempty"`
+	Name     string   `json:"name,omitempty"`
+	Fraction *float64 `json:"fraction,omitempty"`
 }
 
 // Action is what the proxy does to a matched request. Exactly one field is set.
@@ -180,10 +181,39 @@ func UnmarshalSequence(data []byte) (Sequence, error) {
 	if err := decoder.Decode(&sequence); err != nil {
 		return Sequence{}, fmt.Errorf("the sequence does not parse: %w", err)
 	}
+	if err := refuseZeroTriggers(data); err != nil {
+		return Sequence{}, err
+	}
 	if err := sequence.Validate(); err != nil {
 		return Sequence{}, err
 	}
 	return sequence, nil
+}
+
+// refuseZeroTriggers reports an until.count or until.for written as 0, which a
+// Trigger reads as no trigger.
+func refuseZeroTriggers(data []byte) error {
+	var written struct {
+		Ops []struct {
+			Spec struct {
+				Until struct {
+					Count *int      `json:"count"`
+					For   *Duration `json:"for"`
+				} `json:"until"`
+			} `json:"spec"`
+		} `json:"ops"`
+	}
+	// data decoded as a Sequence, so it decodes here too.
+	_ = json.NewDecoder(bytes.NewReader(data)).Decode(&written)
+	for i, op := range written.Ops {
+		switch until := op.Spec.Until; {
+		case until.Count != nil && *until.Count == 0:
+			return fmt.Errorf("op %d: until.count is 0; give a count above 0, or leave it out", i)
+		case until.For != nil && *until.For == 0:
+			return fmt.Errorf("op %d: until.for is 0s; give a duration above 0, or leave it out", i)
+		}
+	}
+	return nil
 }
 
 // Marshal returns the sequence's canonical form: the JSON of DESIGN.md §7,
@@ -256,7 +286,7 @@ func (o Op) validate(position int) error {
 		return err
 	}
 	if o.Type == OpFault {
-		return o.Fault.validate()
+		return o.Fault.validate(position)
 	}
 	return nil
 }
@@ -369,7 +399,7 @@ func fieldsOf(opType OpType) map[string]bool {
 	return fields
 }
 
-func (f *Fault) validate() error {
+func (f *Fault) validate(position int) error {
 	actions := 0
 	for _, set := range []bool{f.Action.Error != 0, f.Action.Delay != 0, f.Action.Drop} {
 		if set {
@@ -387,6 +417,25 @@ func (f *Fault) validate() error {
 	if strings.Contains(f.Match.Resource, "/") {
 		return fmt.Errorf("match.resource %q holds a slash; name the plural alone, such as configmaps. "+
 			"A fault on a resource matches its subresources' requests too", f.Match.Resource)
+	}
+	if _, err := path.Match(f.Match.Name, ""); err != nil {
+		return fmt.Errorf("match.name %q is not a glob: %w", f.Match.Name, err)
+	}
+	if fraction := f.Match.Fraction; fraction != nil && (*fraction <= 0 || *fraction > 1) {
+		return fmt.Errorf("match.fraction %v is not a share of requests above 0 and up to 1", *fraction)
+	}
+	if code := f.Action.Error; code != 0 && (code < 400 || code > 599) {
+		return fmt.Errorf("action.error %d is not an HTTP error status from 400 to 599", code)
+	}
+	switch {
+	case f.Until.Op != nil && *f.Until.Op <= position:
+		return fmt.Errorf("until.op names op %d; want an op after the fault", *f.Until.Op)
+	case f.Action.Delay < 0:
+		return fmt.Errorf("action.delay %s is negative", time.Duration(f.Action.Delay))
+	case f.Until.Count < 0:
+		return fmt.Errorf("until.count %d is negative", f.Until.Count)
+	case f.Until.For < 0:
+		return fmt.Errorf("until.for %s is negative", time.Duration(f.Until.For))
 	}
 	return nil
 }

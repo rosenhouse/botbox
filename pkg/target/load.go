@@ -198,7 +198,7 @@ func load(path string) (*Target, error) {
 	if err != nil {
 		return nil, fmt.Errorf("crds: %w", err)
 	}
-	if err := loaded.refuseClusterScoped(clusterScopedByCRD(crds)); err != nil {
+	if err := loaded.refuseClusterScoped(clusterScopedAtLoad(crds)); err != nil {
 		return nil, err
 	}
 

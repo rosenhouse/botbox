@@ -517,6 +517,34 @@ fixtures: [fixtures.yaml]
 	}
 }
 
+func TestLoadRefusesBuiltInClusterScopedKindsBesideThoseItsCRDsDefine(t *testing.T) {
+	path := writeTarget(t, minimalTarget+`crds: [crds/]
+manages: [v1/ConfigMap, rbac.authorization.k8s.io/v1/ClusterRole, example.com/v1/ClusterRole]
+fixtures: [webhook.yaml]
+`, map[string]string{
+		"widget.yaml":    sampleWidget,
+		"crds/toys.yaml": clusterScopedCRDs,
+		"webhook.yaml":   "apiVersion: admissionregistration.k8s.io/v1\nkind: ValidatingWebhookConfiguration\nmetadata:\n  name: widget-validator\n",
+	})
+
+	_, err := target.Load(path)
+
+	if err == nil {
+		t.Fatal("Load accepted cluster-scoped kinds.")
+	}
+	for _, want := range []string{"primary toy.botbox/v1/Widget", "managed rbac.authorization.k8s.io/v1/ClusterRole",
+		"fixture admissionregistration.k8s.io/v1/ValidatingWebhookConfiguration widget-validator"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load returned %q, which does not name %q.", err, want)
+		}
+	}
+	for _, namespaced := range []string{"ConfigMap", "example.com"} {
+		if strings.Contains(err.Error(), namespaced) {
+			t.Errorf("Load returned %q, which names %s.", err, namespaced)
+		}
+	}
+}
+
 func TestLoadReadsEveryManifestExtensionOfACRDDirectory(t *testing.T) {
 	for _, file := range []string{"crds/widget.json", "crds/widget.yml"} {
 		path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{

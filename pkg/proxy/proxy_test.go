@@ -233,6 +233,23 @@ func TestStripsTheInboundAuthorizationHeader(t *testing.T) {
 	}
 }
 
+func TestPassesTheTargetsImpersonationHeadersThrough(t *testing.T) {
+	seen := make(chan http.Header, 1)
+	p := startProxy(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen <- r.Header
+	}))
+
+	do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps", http.Header{
+		"Impersonate-User":  {"someone"},
+		"Impersonate-Group": {"some-group"}})
+
+	got := <-seen
+	if got.Get("Impersonate-User") != "someone" || got.Get("Impersonate-Group") != "some-group" {
+		t.Errorf("The upstream saw Impersonate-User %q and Impersonate-Group %q, want them as the target sent them.",
+			got.Get("Impersonate-User"), got.Get("Impersonate-Group"))
+	}
+}
+
 func TestPassesUpgradeRequestsThroughUnrecorded(t *testing.T) {
 	p := startProxy(t, okUpstream())
 

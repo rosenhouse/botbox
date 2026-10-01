@@ -57,13 +57,19 @@ func TestVariablesChangedByFindsEachWayToChangeOne(t *testing.T) {
 		"set -a; GOWORK=off; set +a": "GOWORK", "GOWORK=$(echo off)": "GOWORK", "GOWORK=off; mkdir -p tools/botbox": "GOWORK",
 		"unset GOWORK": "GOWORK", "PATH=$PATH:/x": "PATH", "GOTOOLCHAIN=auto": "GOTOOLCHAIN", "unset GOFLAGS": "GOFLAGS",
 		"GOFLAGS=": "GOFLAGS", "unset gopath": "gopath",
-		`: "${GOFLAGS:=-mod=mod}"`: "GOFLAGS", "GOTOOLCHAIN=${GOTOOLCHAIN:-auto}": "GOTOOLCHAIN", "export GOFLAGS": "GOFLAGS", "unset GO111MODULE": "GO111MODULE"} {
+		`: "${GOFLAGS:=-mod=mod}"`: "GOFLAGS", "GOTOOLCHAIN=${GOTOOLCHAIN:-auto}": "GOTOOLCHAIN", "export GOFLAGS": "GOFLAGS", "unset GO111MODULE": "GO111MODULE",
+		`: "${GOFLAGS=}"`: "GOFLAGS"} {
 		if changed, err := variablesChangedBy(t, set+"\n"+readFile(t, toolsRecipe)); err != nil || !slices.Equal(changed, []string{want}) {
 			t.Errorf("variablesChangedBy found %q and %v where the recipe begins %q, want %s.", changed, err, set, want)
 		}
 	}
-	if changed, err := variablesChangedBy(t, `: "$PWD"`+"\n"+readFile(t, toolsRecipe)); err != nil || len(changed) > 0 {
-		t.Errorf("variablesChangedBy found %q and %v where the recipe reads PWD, want none.", changed, err)
+	if changed, err := variablesChangedBy(t, readFile(t, toolsRecipe)+"cd tools/botbox\n"); err != nil || !slices.Equal(changed, []string{"PWD"}) {
+		t.Errorf("variablesChangedBy found %q and %v where the recipe ends in another directory, want PWD.", changed, err)
+	}
+	for _, line := range []string{`: "$PWD"`, "# Run this from your repository root && with go on PATH.", "  # Or || not."} {
+		if changed, err := variablesChangedBy(t, line+"\n"+readFile(t, toolsRecipe)); err != nil || len(changed) > 0 {
+			t.Errorf("variablesChangedBy found %q and %v where the recipe begins %q, want none.", changed, err, line)
+		}
 	}
 	if _, err := variablesChangedBy(t, "false\n"+readFile(t, toolsRecipe)); err == nil {
 		t.Error("variablesChangedBy returned no error where the recipe fails.")
@@ -77,6 +83,11 @@ func TestVariablesChangedByRefusesALineThatRunsOnlySometimes(t *testing.T) {
 		"case x in x) GOWORK=off ;; esac", "while false; do :; done", "until true; do :; done", "for x in y; do :; done"} {
 		if _, err := variablesChangedBy(t, line+"\n"+readFile(t, toolsRecipe)); err == nil {
 			t.Errorf("variablesChangedBy returned no error where the recipe begins %q.", line)
+		}
+	}
+	for _, line := range []string{"true && GOWORK=off", "mkdir -p tools; if true; then GOWORK=off; fi"} {
+		if _, err := variablesChangedBy(t, readFile(t, toolsRecipe)+line+"\n"); err == nil {
+			t.Errorf("variablesChangedBy returned no error where the recipe ends %q.", line)
 		}
 	}
 }
@@ -104,22 +115,22 @@ func TestVariablesChangedByWorksWhereShIsBash(t *testing.T) {
 var word = regexp.MustCompile(`\b[A-Za-z_][A-Za-z0-9_]*\b`)
 
 // runsSometimes is a line that may skip a command: a list joined by || or &&,
-// or a compound command.
-var runsSometimes = regexp.MustCompile(`\|\||&&|^\s*(?:if|case|while|until|for)\b`)
+// or a command that begins with if, case, while, until or for.
+var runsSometimes = regexp.MustCompile(`\|\||&&|(?:^|;)\s*(?:if|case|while|until|for)\b`)
 
 // exportedName is a variable that export -p lists.
 var exportedName = regexp.MustCompile(`(?m)^export (\w+)`)
 
 // variablesChangedBy runs script, with go and bin/botbox stubbed, and returns
 // each variable it sets, changes, exports or unsets. A script names each
-// variable it changes, but cd changes PWD and OLDPWD, so the check watches PWD
-// and each word of the script. It runs the script twice: in a shell that holds
-// an unexported value for each word but PATH, and in one that holds none. Each
-// line must run every time.
+// variable it changes, but cd changes PWD and OLDPWD, so the check watches
+// PATH, PWD and each word of the script. It runs the script twice: in a shell
+// that holds an unexported value for each other word, and in one that holds
+// none. Each line but a comment must run every time.
 func variablesChangedBy(t *testing.T, script string) ([]string, error) {
 	t.Helper()
 	for _, line := range strings.Split(script, "\n") {
-		if runsSometimes.MatchString(line) {
+		if runsSometimes.MatchString(line) && !strings.HasPrefix(strings.TrimSpace(line), "#") {
 			return nil, fmt.Errorf("this line of the script may not run, so the check cannot see what it changes: %q", line)
 		}
 	}
@@ -146,7 +157,8 @@ func variablesChangedBy(t *testing.T, script string) ([]string, error) {
 }
 
 // shellStates runs script after assignments in a shell, and maps each of names
-// before and after script to its value and whether it is exported.
+// before and after script to whether it is set, its value, and whether it is
+// exported.
 func shellStates(t *testing.T, assignments, script string, names []string) (before, after map[string]string, err error) {
 	t.Helper()
 	work, stubs := t.TempDir(), t.TempDir()
@@ -158,7 +170,7 @@ func shellStates(t *testing.T, assignments, script string, names []string) (befo
 	writeFile(t, filepath.Join(stubs, "script.sh"), script)
 	probe := "export -p\nprintf '\\0'\n"
 	for _, name := range names {
-		probe += fmt.Sprintf("printf '%%s %%s\\0' %[1]s \"${%[1]s-}\"\n", name)
+		probe += fmt.Sprintf("printf '%%s %%s%%s\\0' %[1]s \"${%[1]s+=}\" \"${%[1]s-}\"\n", name)
 	}
 	probe += "printf '====\\0'\n"
 	cmd := exec.Command("sh", "-e", "-c", assignments+"\n"+probe+". \"$0\"\n"+probe, filepath.Join(stubs, "script.sh"))
@@ -171,8 +183,8 @@ func shellStates(t *testing.T, assignments, script string, names []string) (befo
 	return shellState(states[0]), shellState(states[1]), nil
 }
 
-// shellState maps each variable that a probe prints to its value and whether it
-// is exported.
+// shellState maps each variable that a probe prints to whether it is set, its
+// value, and whether it is exported.
 func shellState(probed string) map[string]string {
 	exports, variables, _ := strings.Cut(probed, "\x00")
 	state := map[string]string{}

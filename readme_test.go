@@ -130,7 +130,7 @@ func TestLimitPartsRefusesAnyOtherShape(t *testing.T) {
 		"\n Indented.\n", "\n  Indented.\n", "\n\tIndented.\n", "\n-  Item.\n", "\n- \n\n  Item.\n", "\n- - -\n", "\n- `Code`.\n", "\n* Other.\n",
 		"\n- Item.\nLazy.\n", "\n- Item.\n\nAfter.\n", "\n- Item.\n Inside.\n", "\n- Item.\n   Inside.\n", "\n- Item.\n\tInside.\n",
 		"\n- Item.\n  <!-- Comment -->\n", "\n- Item.\n  ```\n", "\n- Item.\n  ~~~\n", "\n-\tItem.\n", "\n+ Other.\n",
-		"\nOpening <!-- hidden --> text.\n", "\n- Item <!-- ([#1](u)) -->.\n", "\nOpening.[^1]\n", "\n[pod]: u \"Hidden.\"\n",
+		"\nOpening <!-- hidden --> text.\n", "\n- Item <!-- ([#1](u)) -->.\n", "\n- Item <span hidden>([#1](u))</span>.\n", "\nOpening.[^1]\n", "\n[pod]: u \"Hidden.\"\n",
 		"\n- Item `([#1](u))`.\n", "\n- Item \\([#1](u)).\n", "\n- Item\n  more `([#1](u))`.\n",
 	} {
 		if _, _, err := limitParts(section); err == nil {

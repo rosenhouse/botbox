@@ -2246,7 +2246,7 @@ built from source and run as a black-box binary.
   names, with botbox replaced by the checkout. It also checks that the `go` before that
   one fails. The unit tier runs the script with `go` stubbed, and checks that it leaves
   its shell's variables as they were. Each line of the script runs every time, so that
-  check sees each change.
+  check sees each change to a variable the script names.
 - **D81 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
   the README's `go test` recipe runs `bin/botbox`, which the tools module of D80 builds,
   and fails the test on a non-zero exit. A build tag keeps it out of a plain

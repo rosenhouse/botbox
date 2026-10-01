@@ -22,7 +22,7 @@ var limits = []limit{
 	{"on the version your CRD stores", 0, "A kubeconfig cluster keeps the webhook."},
 	{"generates sequences only for a primary kind your `crds` define", 0, "botbox draws no sequence for a built-in primary kind"},
 	{"tests namespaced kinds only", 38, "every managed kind and every fixture must be namespaced"},
-	{"refuses a cluster-scoped primary, managed kind or fixture", 38, "each refuses every cluster-scoped kind it knows in one error"},
+	{"refuses a cluster-scoped primary, managed kind or fixture when it loads the target", 38, "each refuses every cluster-scoped kind it knows in one error"},
 	{"passes a controller that leaks a child in another namespace", 38, "it does not see a child the target creates in another"},
 	{"cannot supply an object your controller reads from another namespace", 38, "A fixture sets no `metadata.namespace`"},
 	{"does not test your controller's RBAC", 45, "the target's RBAC is never exercised"},

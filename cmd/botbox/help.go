@@ -164,11 +164,11 @@ func (c command) annotation(f *flag.Flag) string {
 // botbox's commands where name is no command.
 func usage(name string) string {
 	if c, found := lookup(name); found {
-		usage := "Usage:\n  " + c.synopsis() + "\n"
+		text := "Usage:\n  " + c.synopsis() + "\n"
 		if len(c.flags()) > 0 {
-			usage += "Run 'botbox " + c.name + " --help' for its flags.\n"
+			text += "Run 'botbox " + c.name + " --help' for its flags.\n"
 		}
-		return usage
+		return text
 	}
 	var b strings.Builder
 	b.WriteString("Usage:\n  botbox <command> [flags]\n\nCommands:\n")

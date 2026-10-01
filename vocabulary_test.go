@@ -15,7 +15,7 @@ import (
 
 // designVocabulary is what a reader needs DESIGN.md to understand, and
 // go install ships no DESIGN.md.
-var designVocabulary = regexp.MustCompile(`§|DESIGN|T_settle|T_stable|T_delete|N_errloop|N_quiet|N_objects|\bD[0-9]+\b`)
+var designVocabulary = regexp.MustCompile(`§|DESIGN|T_settle|T_stable|T_delete|N_errloop|N_quiet|N_objects|\bD@?[0-9]+\b`)
 
 // citesDesign are the strings that may cite DESIGN.md, by file. The bug
 // matrix is a page for developers, and DESIGN.md holds the bug catalog.

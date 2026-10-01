@@ -324,15 +324,16 @@ sequence many times and starting a control plane costs seconds.
 
 **Shrinking** is sequence-level, and botbox's own pass does all of it. It removes one op at
 a time and replays what is left from clean state. Where an op stays and carries a fault,
-it halves `until.count` down to 1, and `until.for` and `action.delay` down to 10 ms, one
-field at a time. A candidate replaces the sequence where its replay fails the same check,
-by ID. One whose replay errs does not, and one the sequence format refuses is not
-replayed. The pass goes over the sequence again until nothing simplifies. Field values
-are not shrunk. The pass stops at the deadline (§11) and keeps the smallest failing
-sequence it found. rapid only draws sequences (§5.4). Its own shrinker minimizes rapid's
-stream of choices, which draws a different sequence on each replay, while the pass
-shrinks the replayable JSON sequence that the report carries. Each replay is a whole run
-against the cluster.
+it halves `until.count`, `until.for` and `action.delay` one at a time, while the replay
+still fails, but never a count below 1 or a duration below 10 ms. A candidate replaces
+the sequence where its replay fails the same check, by ID. One whose replay errs does
+not, and one the sequence format refuses is not replayed. The pass goes over the sequence
+again until nothing simplifies. Field values are not shrunk. The pass stops at the
+deadline (§11) and keeps the smallest failing sequence it found. rapid only draws
+sequences, through `Example`, which does not shrink (§5.4). rapid shrinks only inside
+`rapid.Check`, and it shrinks the choices a value is drawn from rather than the ops. The
+pass shrinks the JSON sequence the report carries. Each replay is a whole run against the
+cluster.
 
 ### 5.6 Invariant engine
 
@@ -910,9 +911,8 @@ server does take a supported flag, and the ephemeral port above keeps it out of 
 gives only the intent. `Ready` returns an error beside its verdict, and an error means not
 ready (§8.4). A property's error is a configuration error. A nil `Equal` means the §6
 default with the `equalIgnore` paths. An `equal` hook replaces the default and takes no
-`equalIgnore` (§8.1). The
-Runner keys snapshots by kind and name, never by UID, so a recreated object compares
-against its predecessor.
+`equalIgnore` (§8.1). The Runner keys snapshots by kind and name, never by UID, so a
+recreated object compares against its predecessor.
 
 ### 8.3 Generation constraints and admission webhooks
 
@@ -1162,8 +1162,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   ships no documentation. `botbox <command> --help` and `botbox help <command>` print the
   command's synopsis and each flag with its meaning and default. Help goes to stdout and
   exits 0. A bare `botbox` prints botbox's help to stderr and exits 2. A usage error, such
-  as an unknown flag, a missing required flag, a flag after a sequence file or a wrong
-  count of sequence files, exits 2 and prints the error and the command's synopsis to
+  as an unknown flag, a missing required flag, a flag other than `--help` after a sequence
+  file or a wrong count of sequence files, exits 2 and prints the error and the command's synopsis to
   stderr. No message botbox prints cites this document or uses its symbols, such as
   `T_settle`. A message names the target.yaml key and its value instead, as in
   `2s (timeouts.stable)`. A test scans the code's string literals for them.
@@ -1177,7 +1177,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
   CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
-  harness error, or the deadline.
+  harness error, or a deadline that ended a run or stopped the invocation before its last
+  run. A deadline that ends minimization leaves the violation, and exit 1, standing.
   SIGINT, SIGTERM and SIGHUP interrupt the invocation. No further run starts, and the run
   under way is abandoned (§5.5). `botbox run` and `botbox replay` name its directory, and
   `botbox matrix` names its row. A run that failed before the interrupt reports its own
@@ -2069,6 +2070,6 @@ built from source and run as a black-box binary.
   reads it whole.
 - **D@65 This document gives intent where a listing would drift.** §8.2 names `go doc`
   rather than listing `Target`'s fields, and a test holds §11's synopsis to each
-  command's flags. botbox shrinks with its own pass, because rapid's shrinker draws a
-  different sequence on each replay. Hand-written generators wait for a target that needs
-  one.
+  command's flags. botbox shrinks with its own pass, because rapid shrinks only inside
+  `rapid.Check` and shrinks the choices a sequence is drawn from rather than its ops.
+  Hand-written generators wait for a target that needs one.

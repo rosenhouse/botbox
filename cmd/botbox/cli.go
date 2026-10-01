@@ -677,8 +677,8 @@ func (o options) invocationSeed(first run.Sequence) int64 {
 	return first.Seed
 }
 
-// parse reads an invocation. Its errors are usage errors, and opts.command
-// names the command whose usage they need, if any.
+// parse reads an invocation of at least a command. Its errors are usage
+// errors, and opts.command names the command whose usage they need, if any.
 func parse(args []string) (options, []string, error) {
 	if asksForHelp(args[0]) {
 		return parseHelp(args[1:])
@@ -700,11 +700,11 @@ func parse(args []string) (options, []string, error) {
 	})
 
 	sequences := flags.Args()
-	// Parsing stops at the first sequence file, so a dash before it was a "--".
-	for _, later := range sequences[min(1, len(sequences)):] {
-		if strings.HasPrefix(later, "-") {
-			return opts, nil, fmt.Errorf("%s follows a sequence file, and flags go before them", later)
+	if misplaced, found := misplacedFlag(args[1:], sequences); found {
+		if asksForHelp(misplaced) {
+			return opts, nil, flag.ErrHelp
 		}
+		return opts, nil, fmt.Errorf("%s follows %s, and flags go first", misplaced, sequences[0])
 	}
 	for _, name := range c.required {
 		if flags.Lookup(name).Value.String() == "" {
@@ -729,6 +729,20 @@ func parse(args []string) (options, []string, error) {
 		return opts, nil, fmt.Errorf("botbox matrix takes no sequence file, and %d were given: it runs the --sequences directory", len(sequences))
 	}
 	return opts, sequences, nil
+}
+
+// misplacedFlag is a flag after the first operand, where parsing stopped.
+// Operands after a "--" are files, whatever they look like.
+func misplacedFlag(args, operands []string) (string, bool) {
+	if len(operands) < len(args) && args[len(args)-len(operands)-1] == "--" {
+		return "", false
+	}
+	for _, operand := range operands {
+		if len(operand) > 1 && strings.HasPrefix(operand, "-") {
+			return operand, true
+		}
+	}
+	return "", false
 }
 
 func asksForHelp(arg string) bool {

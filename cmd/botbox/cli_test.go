@@ -1495,11 +1495,19 @@ func TestParseReadsTheSequenceFiles(t *testing.T) {
 	}
 }
 
-func TestParseReadsASequenceFileThatReadsAsAFlagAfterTwoDashes(t *testing.T) {
-	_, sequences, err := parse([]string{"replay", "--target", "t.yaml", "--", "-s.json"})
+func TestParseReadsSequenceFilesThatReadAsFlagsAfterTwoDashes(t *testing.T) {
+	_, sequences, err := parse([]string{"run", "--target", "t.yaml", "--", "-a.json", "-b.json"})
 
-	if err != nil || !slices.Equal(sequences, []string{"-s.json"}) {
-		t.Errorf("parse read the sequences %v and returned %v, want [-s.json].", sequences, err)
+	if err != nil || !slices.Equal(sequences, []string{"-a.json", "-b.json"}) {
+		t.Errorf("parse read the sequences %v and returned %v, want [-a.json -b.json].", sequences, err)
+	}
+}
+
+func TestParseReadsADashAsASequenceFile(t *testing.T) {
+	_, sequences, err := parse([]string{"run", "--target", "t.yaml", "a.json", "-"})
+
+	if err != nil || !slices.Equal(sequences, []string{"a.json", "-"}) {
+		t.Errorf("parse read the sequences %v and returned %v, want [a.json -].", sequences, err)
 	}
 }
 

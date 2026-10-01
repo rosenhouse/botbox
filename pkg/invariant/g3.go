@@ -149,7 +149,7 @@ func (in Input) describeDeletion(deleted deletion) string {
 		if op.Type != OpDelete && op.Type != OpRecreate || op.CR != deleted.key {
 			continue
 		}
-		if was, found := in.versionAt(deleted.key, op.Time); found && was.UID == deleted.uid {
+		if was, _ := in.versionAt(deleted.key, op.Time); was.UID == deleted.uid {
 			by = " by " + describe(op)
 		}
 	}

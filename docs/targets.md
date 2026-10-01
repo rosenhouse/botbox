@@ -28,8 +28,9 @@ requests one tick makes, and add up every timer your controller runs, such as on
 resync that makes one request needs `quiet: 1` under the default `stable` of 10s.
 
 `quiet` also bounds the status writes that change nothing, which G2 counts. A write that
-changes something fails G2 whatever `quiet` is. If its timer is faster than `stable`, it fails
-G4 instead, because the settle wait never sees `stable` of quiet. Keep `quiet` as low as your
+changes something fails G2 whatever `quiet` is. If the timer that makes it fires more often
+than once per `stable`, it fails G4 instead, because the settle wait never sees `stable` of
+quiet. Keep `quiet` as low as your
 timer allows, since G1 lets a slow loop of that many requests through.
 
 G6 fails a controller that repeats one failing request more than `thresholds.errloop` times
@@ -73,10 +74,11 @@ the API server serves, and then compares the UID.
 
 botbox counts as live an owner it cannot resolve: one of a kind your target does not declare,
 or one named at a version the API server does not serve. It never deletes an object that names
-such an owner. The run prints a note for each such object and owner, and the report carries it. A real garbage collector cannot
-resolve an unserved version either, so fix that reference in your controller. If your
-controller creates an owner of an undeclared kind, add the kind to `manages`. Otherwise, run
-botbox [against a cluster](#against-a-cluster), whose garbage collector resolves every kind.
+such an owner. The run prints a note for each such object and owner, and the report carries
+it. A real garbage collector cannot resolve an unserved version either, so fix that reference
+in your controller. If your controller creates an owner of an undeclared kind, add the kind to
+`manages`. Otherwise, run botbox [against a cluster](#against-a-cluster), whose garbage
+collector resolves every kind.
 
 ## Several CRs
 

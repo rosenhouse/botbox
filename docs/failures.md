@@ -14,8 +14,8 @@ changes meaning or goes away.
 
 A run that was under way when botbox was killed reads `unfinished`. A run that had already
 failed reads `violation`, even while botbox was still minimizing its sequence. Its `run-<n>/`
-then holds no report yet, and `summary.md` says whether `run-<n>/` holds the failing run's
-evidence or a partial run of the minimized sequence.
+then holds no report, and `summary.md` says whether `run-<n>/` holds the failing run's evidence
+or a partial run of the minimized sequence.
 
 ## The evidence
 
@@ -131,12 +131,12 @@ and then run for `stable`. botbox has no other sign that a controller is back.
   to converge.
 - A controller that crashes again within `stable` of each return never converges, even where it
   wrote its converged state first. G4 reports it and quotes the last exit.
-- An exit during a fault, or while your controller recovers from one, gets the same time once
-  botbox restarts your controller.
-- While a fault is active, only the first exit during each op gets that time. A later exit
-  during the op gets it only where the next op lands before your controller has had `settle`
-  past its return. Otherwise the wait can end before your controller restarts, and botbox checks
-  your properties there.
+- After an exit during a fault, or while your controller recovers from one, botbox restarts
+  your controller and gives it `settle` past its return to converge.
+- While a fault is active, only the first exit during each op gets `settle` past its return. A
+  later exit during the op gets it only where the next op lands before your controller has had
+  `settle` past its return. Otherwise the wait can end before your controller restarts, and
+  botbox checks your properties there.
 - botbox applies no op while your controller waits to restart after an exit during a fault. A
   controller that keeps crashing under a fault therefore fails G4 once the fault stops, or once
   the teardown clears it.
@@ -185,5 +185,5 @@ Exit 2 means botbox could not test your controller, and the message says what to
   `botbox replay`.
 - A controller that binds a fixed port, such as a health probe on `:8081`, collides with a
   second invocation of itself. Give it a free port in `launch.args`, or with `--launch-arg`.
-- A deadline that ends a run, or stops botbox before its last run, exits 2 rather than
-  reporting a find.
+- botbox exits 2, rather than reporting a find, when the deadline ends a run or stops botbox
+  before its last run.

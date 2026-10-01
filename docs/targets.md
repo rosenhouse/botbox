@@ -82,10 +82,10 @@ collector resolves every kind.
 
 ## Several CRs
 
-Every sequence botbox draws creates your `sample` first. A drawn `create` adds a second or a
-third CR, named after your sample with `-2` or `-3`, so that botbox tries several CRs side by
-side. `generate.maxCRs: 1` keeps every sequence to your sample, for a controller that takes one
-CR per namespace.
+Every sequence botbox draws first creates your `sample`, with drawn values in some of its spec
+fields. A drawn `create` adds a second or a third CR, named after your sample with `-2` or `-3`,
+so that botbox tries several CRs side by side. `generate.maxCRs: 1` keeps every sequence to
+your sample, for a controller that takes one CR per namespace.
 
 If your CR names a child in its spec, as cert-manager's `spec.secretName` names its Secret,
 list that path under `generate.distinct`. Each CR after the first then appends its suffix to
@@ -129,7 +129,7 @@ If your controller leaves a kind deleted by design, or recreates it under a new 
 kind under `notRecreated`. cert-manager lists CertificateRequest, because a Ready Certificate
 does not replace a deleted request.
 
-Generation draws few `deleteManaged` ops, so
+Drawn sequences hold few `deleteManaged` ops, so
 [pin a sequence per managed kind](../README.md#pin-a-sequence-per-managed-kind).
 
 ## Fixtures

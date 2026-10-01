@@ -5,7 +5,7 @@ version: dev                       # Reports print it.
 crds:                              # botbox installs the CRDs in these files and directories.
   - crds/
 primary: toy.botbox/v1/Widget      # botbox creates, changes and deletes CRs of this kind.
-sample: widget.yaml                # Every drawn sequence creates this CR first.
+sample: widget.yaml                # Each drawn sequence creates a variant of this CR first.
 manages:                           # The controller creates objects of these kinds.
   - v1/ConfigMap
 launch:
@@ -15,7 +15,7 @@ launch:
     - --label-from=widget-config
     - --bug=0                      # A later --bug wins, so --launch-arg --bug=3 seeds B3.
   env:
-    WATCH_NAMESPACE: $NAMESPACE    # botbox creates a namespace for each run.
+    WATCH_NAMESPACE: $NAMESPACE    # botbox replaces $NAMESPACE with each run's namespace.
 fixtures:                          # The controller reads these objects and owns none.
   - config.yaml
 ready: >-                          # This CEL holds once the controller has converged.
@@ -26,10 +26,11 @@ properties:                        # These checks are your own.
     description: status.ready never exceeds the number of ConfigMaps present.
     # A property also runs where no CR exists, so the CEL guards status.ready.
     cel: '!has(status.ready) || status.ready <= managed.filter(o, o.kind == "ConfigMap").size()'
-    when: checkpoint
 timeouts:                          # The toy converges in milliseconds.
   settle: 5s
   stable: 2s
   delete: 10s
 thresholds:
-  errloop: 5                       # G6 fails more repeats than this, and a 5s settle holds 10.
+  # G6 fails more repeats of a failing request than errloop. controller-runtime's
+  # backoff repeats one 10 times in a 5s settle.
+  errloop: 5

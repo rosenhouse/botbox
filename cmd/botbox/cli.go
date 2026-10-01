@@ -691,7 +691,7 @@ func parse(args []string) (options, []string, error) {
 
 	flags := opts.flags()
 	if err := flags.Parse(args[1:]); err != nil {
-		return opts, nil, err
+		return opts, nil, twoDashes(err)
 	}
 	flags.Visit(func(f *flag.Flag) {
 		opts.seedGiven = opts.seedGiven || f.Name == "seed"
@@ -701,8 +701,11 @@ func parse(args []string) (options, []string, error) {
 
 	sequences := flags.Args()
 	if misplaced, found := misplacedFlag(args[1:], sequences); found {
-		if asksForHelp(misplaced) {
+		switch {
+		case asksForHelp(misplaced):
 			return opts, nil, flag.ErrHelp
+		case misplaced == "--":
+			return opts, nil, fmt.Errorf("-- follows %s, and it goes before the first sequence file", sequences[0])
 		}
 		return opts, nil, fmt.Errorf("%s follows %s, and flags go first", misplaced, sequences[0])
 	}
@@ -712,7 +715,7 @@ func parse(args []string) (options, []string, error) {
 		}
 	}
 	if opts.command == "version" && len(sequences) > 0 {
-		return opts, nil, fmt.Errorf("botbox version takes no argument: %s", strings.Join(sequences, " "))
+		return opts, nil, fmt.Errorf("version takes no argument: %s", strings.Join(sequences, " "))
 	}
 	if opts.deadlineGiven && opts.deadline <= 0 {
 		return opts, nil, fmt.Errorf("--deadline is %s, and an invocation needs time to run: leave the flag out, and botbox derives one", opts.deadline)
@@ -723,12 +726,23 @@ func parse(args []string) (options, []string, error) {
 		}
 	}
 	if opts.command == "replay" && len(sequences) != 1 {
-		return opts, nil, fmt.Errorf("botbox replay takes one sequence file, and %d were given", len(sequences))
+		return opts, nil, fmt.Errorf("replay takes one sequence file, and %d were given", len(sequences))
 	}
 	if opts.command == "matrix" && len(sequences) > 0 {
-		return opts, nil, fmt.Errorf("botbox matrix takes no sequence file, and %d were given: it runs the --sequences directory", len(sequences))
+		return opts, nil, fmt.Errorf("matrix takes no sequence file, since it runs the --sequences directory: %s", strings.Join(sequences, " "))
 	}
 	return opts, sequences, nil
+}
+
+// singleDash is where an error of the flag package spells a flag with one dash.
+var singleDash = regexp.MustCompile(`((?:defined|argument): |for flag )-`)
+
+// twoDashes spells the flag in a parse error with two dashes, as the help does.
+func twoDashes(err error) error {
+	if errors.Is(err, flag.ErrHelp) {
+		return err
+	}
+	return errors.New(singleDash.ReplaceAllString(err.Error(), "$1--"))
 }
 
 // misplacedFlag is a flag after the first operand, where parsing stopped.
@@ -755,7 +769,7 @@ func parseHelp(operands []string) (options, []string, error) {
 	case len(operands) == 0 || len(operands) == 1 && asksForHelp(operands[0]):
 		return options{}, nil, flag.ErrHelp
 	case len(operands) > 1:
-		return options{}, nil, fmt.Errorf("botbox help takes one command, and %d were given", len(operands))
+		return options{}, nil, fmt.Errorf("help takes one command, and %d were given", len(operands))
 	}
 	if _, found := lookup(operands[0]); !found {
 		return options{}, nil, fmt.Errorf("%q is not a botbox command", operands[0])

@@ -2,6 +2,7 @@ package botbox_test
 
 import (
 	"fmt"
+	"maps"
 	"os"
 	"os/exec"
 	"path"
@@ -51,11 +52,11 @@ func TestTheToolsModuleRecipeLeavesItsShellsVariablesAlone(t *testing.T) {
 	}
 }
 
-func TestVariablesChangedByFindsEachWayToSetOne(t *testing.T) {
+func TestVariablesChangedByFindsEachWayToChangeOne(t *testing.T) {
 	t.Setenv("GOWORK", "off") // The script's shell must not inherit it.
 	for set, want := range map[string]string{"GOWORK=off; export GOWORK": "GOWORK", "  export GOWORK=off": "GOWORK",
 		"set -a; GOWORK=off; set +a": "GOWORK", "GOWORK=$(echo off)": "GOWORK", "GOWORK=off; mkdir -p tools/botbox": "GOWORK",
-		"PATH=$PATH:/x": "PATH"} {
+		"unset GOWORK": "GOWORK", "PATH=$PATH:/x": "PATH", "GOTOOLCHAIN=auto": "GOTOOLCHAIN"} {
 		if changed, err := variablesChangedBy(t, set+"\n"+readFile(t, toolsRecipe)); err != nil || !slices.Equal(changed, []string{want}) {
 			t.Errorf("variablesChangedBy found %q and %v where the recipe begins %q, want %s.", changed, err, set, want)
 		}
@@ -68,10 +69,10 @@ func TestVariablesChangedByFindsEachWayToSetOne(t *testing.T) {
 // exportedValue is a variable that export -p lists, and its value.
 var exportedValue = regexp.MustCompile(`(?m)^export (\w+)=(.*)$`)
 
-// variablesChangedBy runs script in a shell that exports PATH alone, with go
-// and bin/botbox stubbed. It names each variable the script leaves new or
-// changed there but OLDPWD, which cd sets. Under set -a the shell exports each
-// variable the script sets, so export -p lists it.
+// variablesChangedBy runs script, with go and bin/botbox stubbed, in a shell
+// that exports PATH and GOWORK alone. It names each variable the script sets,
+// changes or unsets there but OLDPWD, which cd sets. Under set -a the shell
+// exports each variable the script sets, so export -p lists it.
 func variablesChangedBy(t *testing.T, script string) ([]string, error) {
 	t.Helper()
 	work, stubs := t.TempDir(), t.TempDir()
@@ -82,21 +83,30 @@ func variablesChangedBy(t *testing.T, script string) ([]string, error) {
 	writeStub(t, filepath.Join(stubs, "go"), "")
 	writeFile(t, filepath.Join(stubs, "script.sh"), script)
 	cmd := exec.Command("sh", "-e", "-c", `export -p; echo ====; set -a; . "$0"; export -p`, filepath.Join(stubs, "script.sh"))
-	cmd.Dir, cmd.Env = work, []string{"PATH=" + stubs + string(os.PathListSeparator) + os.Getenv("PATH")}
+	cmd.Dir, cmd.Env = work, []string{"PATH=" + stubs + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"GOWORK=" + filepath.Join(work, "go.work")}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("the script returned %v:\n%s", err, out)
 	}
 	before, after, _ := strings.Cut(string(out), "\n====\n")
-	was := map[string]string{}
-	for _, variable := range exportedValue.FindAllStringSubmatch(before, -1) {
-		was[variable[1]] = variable[2]
-	}
+	was, is := exportedValues(before), exportedValues(after)
+	names := maps.Clone(was)
+	maps.Copy(names, is)
 	var changed []string
-	for _, variable := range exportedValue.FindAllStringSubmatch(after, -1) {
-		if was[variable[1]] != variable[2] && variable[1] != "OLDPWD" {
-			changed = append(changed, variable[1])
+	for name := range names {
+		if was[name] != is[name] && name != "OLDPWD" {
+			changed = append(changed, name)
 		}
 	}
 	return changed, nil
+}
+
+// exportedValues maps each exportedValue in exports to its value.
+func exportedValues(exports string) map[string]string {
+	values := map[string]string{}
+	for _, variable := range exportedValue.FindAllStringSubmatch(exports, -1) {
+		values[variable[1]] = variable[2]
+	}
+	return values
 }

@@ -154,8 +154,8 @@ func TestG3NamesWhatDeletedTheCRInEachNote(t *testing.T) {
 		record(10*time.Second, widget("11", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
 		remove(11*time.Second, widget("12", spec(1), status(1, 1), deleting(10*time.Second))).
 		record(11*time.Second, widget("20", spec(1), status(1, 1), uid("uid-w2"), finalizers(cleanup))).
+		opOn(invariant.OpDelete, 19500*time.Millisecond, secondName).
 		op(invariant.OpDelete, 20*time.Second).
-		opOn(invariant.OpDelete, 20500*time.Millisecond, secondName).
 		record(21*time.Second, widget("21", spec(1), status(1, 1), uid("uid-w2"), finalizers(cleanup), deleting(21*time.Second))).
 		remove(22*time.Second, widget("22", spec(1), status(1, 1), uid("uid-w2"), deleting(21*time.Second))).
 		op(invariant.OpCreate, 23*time.Second).
@@ -169,7 +169,7 @@ func TestG3NamesWhatDeletedTheCRInEachNote(t *testing.T) {
 
 	want := []string{
 		"G3 is not evaluated for the deletion of w by op 0 (recreate): a fault was active before its deadline",
-		"G3 is not evaluated for the deletion of w by op 1 (delete): a fault was active before its deadline",
+		"G3 is not evaluated for the deletion of w by op 2 (delete): a fault was active before its deadline",
 		"G3 is not evaluated for the deletion of w by the teardown: a fault was active before its deadline",
 	}
 	if !slices.Equal(result.Notes, want) {
@@ -177,10 +177,11 @@ func TestG3NamesWhatDeletedTheCRInEachNote(t *testing.T) {
 	}
 }
 
-// An op names only the CR it deleted, not a later one of the same name that
-// something else deleted.
+// An op names only the CR it deleted: not a later one of the same name that
+// something else deleted, nor one already being deleted when the op began. A
+// later teardown names neither.
 func TestG3NamesNoOpForADeletionNoOpMade(t *testing.T) {
-	in := newRun().
+	running := newRun().
 		op(invariant.OpCreate, 0).
 		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup))).
 		op(invariant.OpDelete, 10*time.Second).
@@ -191,35 +192,52 @@ func TestG3NamesNoOpForADeletionNoOpMade(t *testing.T) {
 		op(invariant.OpUpdate, 15*time.Second).
 		record(15*time.Second, widget("21", spec(2), status(1, 1), uid("uid-w2"), finalizers(cleanup))).
 		record(20*time.Second, widget("22", spec(2), status(1, 1), uid("uid-w2"), finalizers(cleanup), deleting(20*time.Second))).
-		fault(10500*time.Millisecond, 40*time.Second).
+		op(invariant.OpRecreate, 25*time.Second).
+		fault(10500*time.Millisecond, 30*time.Second).
 		through(35 * time.Second)
+	tornDown := running
+	tornDown.Teardown = at(30 * time.Second)
 
-	result := silent(t, invariant.CleanDeletion, in)
+	for _, in := range []invariant.Input{running, tornDown} {
+		result := silent(t, invariant.CleanDeletion, in)
 
-	want := []string{
-		"G3 is not evaluated for the deletion of w by op 1 (delete): a fault was active before its deadline",
-		"G3 is not evaluated for the deletion of w: a fault was active before its deadline",
-	}
-	if !slices.Equal(result.Notes, want) {
-		t.Errorf("G3 noted %q, want %q.", result.Notes, want)
+		want := []string{
+			"G3 is not evaluated for the deletion of w by op 1 (delete): a fault was active before its deadline",
+			"G3 is not evaluated for the deletion of w: a fault was active before its deadline",
+		}
+		if !slices.Equal(result.Notes, want) {
+			t.Errorf("With the teardown at %v, G3 noted %q, want %q.", in.Teardown, result.Notes, want)
+		}
 	}
 }
 
-// A recreate of a CR that is already gone deletes nothing, though the Observer
-// still shows the gone CR's UID when the op acts.
+// The Observer can record a deletion after the next op begins, so that op
+// finds the CR the op before it deleted.
 func TestG3NamesTheOpThatDeletedTheCRNotALaterOne(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
 		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup))).
 		op(invariant.OpDelete, 10*time.Second).
-		record(10*time.Second, widget("11", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
-		remove(10100*time.Millisecond, widget("12", spec(1), status(1, 1), deleting(10*time.Second))).
-		op(invariant.OpRecreate, 12*time.Second).
-		record(12500*time.Millisecond, widget("20", spec(1), status(1, 1), uid("uid-w2"), finalizers(cleanup))).
+		op(invariant.OpRecreate, 10006*time.Millisecond).
+		record(10020*time.Millisecond, widget("11", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
 		fault(10500*time.Millisecond, 40*time.Second).
 		through(35 * time.Second)
 
 	noted(t, invariant.CleanDeletion, in, "G3 is not evaluated for the deletion of w by op 1 (delete): a fault was active before its deadline")
+}
+
+// The teardown can begin before the Observer records the last op's deletion.
+func TestG3NamesTheOpNotTheTeardownThatFollowedIt(t *testing.T) {
+	in := newRun().
+		op(invariant.OpCreate, 0).
+		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup))).
+		op(invariant.OpDelete, 10*time.Second).
+		teardown(10005*time.Millisecond).
+		record(10020*time.Millisecond, widget("11", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
+		through(15 * time.Second)
+
+	noted(t, invariant.CleanDeletion, in,
+		"G3 is not evaluated for the deletion of w by op 1 (delete): the run ended less than 10s (timeouts.delete) after it")
 }
 
 func TestG3IgnoresACRTheRunRecreated(t *testing.T) {

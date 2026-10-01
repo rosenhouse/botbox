@@ -577,17 +577,19 @@ not come back, where the op followed such a change before the run converged or f
 `Restart` the target had not yet answered, or where a fault reached into the op or its
 wait or the target was still owed time to recover from one where the wait ended. The
 Runner carries the last checkpoint's notes out and `botbox` prints them at the end of the
-run, because a check that was skipped otherwise reads like one that passed. A G3 note
-names the op or the teardown that deleted the CR, since a run may delete one CR more than
-once. G5 also notes
-an `equalIgnore` path it could not follow (§8.1), since it then compares a field the
-target meant it to skip. The Runner also notes each ownerReference the collector could not
-resolve (§5.8), since the object that carries it stays, and G3 would report it without
-saying why. It notes each fault op whose fault the proxy applied to no request, since that
-fault tested nothing (D36). It notes each exit of the target it restarted (§5.5), since a
-run that passes shows no other sign of it. A G4 report on envtest also notes the managed
-kinds whose status envtest never changes (§5.8), since G4 may fail for that alone. botbox
-prints that note once, when the invocation starts, rather than with a run's notes.
+run, because a check that was skipped otherwise reads like one that passed. A run may
+delete one CR more than once, so a G3 note names the first `delete` or `recreate` that
+found the CR, or else the teardown. The Observer can record a deletion after the next op
+begins, and that op finds the CR too. Where neither found it, as when an op deleted a CR
+the Observer had not yet seen, the note names only the CR. G5 also notes an `equalIgnore`
+path it could not follow (§8.1), since it then compares a field the target meant it to
+skip. The Runner also notes each ownerReference the collector could not resolve (§5.8),
+since the object that carries it stays, and G3 would report it without saying why. It
+notes each fault op whose fault the proxy applied to no request, since that fault tested
+nothing (D36). It notes each exit of the target it restarted (§5.5), since a run that
+passes shows no other sign of it. A G4 report on envtest also notes the managed kinds
+whose status envtest never changes (§5.8), since G4 may fail for that alone. botbox prints
+that note once, when the invocation starts, rather than with a run's notes.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
 manages. G4 needs a `Ready` predicate. G1, G2, G5 and G7 need none of their own, but they
@@ -2065,9 +2067,10 @@ built from source and run as a black-box binary.
   DESIGN.md. Each command's help is generated from its flags and gives each flag's
   default, and botbox's help gives the exit codes and `KUBEBUILDER_ASSETS`. A usage error
   prints the command's synopsis. A message names the target.yaml key and its value rather
-  than a symbol of this document. A G3 note names what deleted the CR, because a run may
-  delete one CR twice. Splitting this document was rejected, because the hourly Routine
-  reads it whole.
+  than a symbol of this document. A G3 note names what deleted the CR where botbox can
+  tell, because a run may delete one CR twice. It names the first op that found the CR,
+  because a lagging Observer shows the CR to the op after the one that deleted it.
+  Splitting this document was rejected, because the hourly Routine reads it whole.
 - **D@65 This document gives intent where a listing would drift.** §8.2 names `go doc`
   rather than listing `Target`'s fields, and a test holds §11's synopsis to each
   command's flags. botbox shrinks with its own pass, because rapid shrinks only inside

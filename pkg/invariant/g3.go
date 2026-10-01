@@ -141,23 +141,27 @@ func (out *Result) reportLeftovers(in Input, deleted deletion, deadline time.Tim
 	}
 }
 
-// describeDeletion names the CR and what deleted it: the teardown, or the last
-// delete or recreate before the deletion that found the CR of this UID. An op
-// on a CR the Observer had not yet seen is named nowhere.
+// describeDeletion names the CR and what deleted it where botbox can tell.
 func (in Input) describeDeletion(deleted deletion) string {
-	var by string
+	return "the deletion of " + deleted.key.Name + in.deletedBy(deleted)
+}
+
+// deletedBy names the first delete or recreate that found the CR of this UID,
+// or else the teardown. The Observer can record the deletion after a later op
+// or the teardown has begun.
+func (in Input) deletedBy(deleted deletion) string {
 	for _, op := range in.Ops {
 		if op.Type != OpDelete && op.Type != OpRecreate || op.CR != deleted.key || op.Time.After(deleted.at) {
 			continue
 		}
 		if was, _ := in.versionAt(deleted.key, op.Time); was.UID == deleted.uid {
-			by = " by " + describe(op)
+			return " by " + describe(op)
 		}
 	}
 	if !in.Teardown.IsZero() && !in.Teardown.After(deleted.at) {
-		by = " by the teardown"
+		return " by the teardown"
 	}
-	return "the deletion of " + deleted.key.Name + by
+	return ""
 }
 
 // answering names the deleted CR as the one that answers for the object.

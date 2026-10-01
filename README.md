@@ -60,9 +60,9 @@ its default.
 ## A first run and a first find
 
 Every find this README shows is planted: a bug seeded into the toy controller in this
-repository. Clone [the repository](https://github.com/rosenhouse/botbox). In the clone,
-`go install ./cmd/botbox` installs the botbox that matches it. Then run this in the clone. The
-first build takes a minute or two, and the three runs then take about half a minute:
+repository. Clone [the repository](https://github.com/rosenhouse/botbox), and run this in the
+clone. The first build takes a minute or two, and the three runs then take about half a
+minute:
 
 ```sh
 go build -o bin/toy-widget ./targets/toy-widget

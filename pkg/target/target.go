@@ -157,7 +157,7 @@ func (t *Target) CheckScopes(mapper meta.RESTMapper) error {
 
 // checkScopes names every cluster-scoped kind the target declares. Only then
 // does it refuse a fixture of a namespaced kind that sets a namespace.
-func (t *Target) checkScopes(scope scope) error {
+func (t *Target) checkScopes(scope scopeFunc) error {
 	clusterScoped := func(gvk schema.GroupVersionKind) bool {
 		namespaced, known := scope(gvk)
 		return known && !namespaced

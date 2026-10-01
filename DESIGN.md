@@ -2280,10 +2280,9 @@ built from source and run as a black-box binary.
   rejected, because a held read delays the reaction it feeds as much. A request that
   reached the proxy before a wait's time ran out holds the wait open until `T_settle`
   past its release. Ending the wait sooner checks properties against a state the request
-  is about to change. A request that arrives later does not hold the wait, so a proxy
-  that holds one request after another ends no wait later than the longest delay and
-  `T_settle` past its time. A fault's window also lasts until the proxy releases what it
-  held, because the target still waits on the fault. The checks therefore excuse the
-  target over that time, and the time it owes runs from the release. The derived
-  deadline allows the longest delay and `T_settle` for each wait, and the delay and that
-  hold again each time faults stop.
+  is about to change. A request that arrives later does not hold the wait, so a wait
+  under a proxy that holds one request after another ends no later than the longest
+  delay and `T_settle` past its time. A fault's window also lasts until the proxy
+  releases what it held, because the target still waits on the fault. The checks
+  therefore excuse the target over that time, and the time it owes runs from the
+  release. The derived deadline allows for both.

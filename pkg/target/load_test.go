@@ -590,7 +590,7 @@ func TestLoadRejectsACRDFileThatIsNotYAML(t *testing.T) {
 
 func TestLoadRefusesAFixtureOfANamespacedKindThatNamesANamespace(t *testing.T) {
 	for _, kind := range []struct{ apiVersion, kind string }{{"v1", "Secret"}, {"toy.botbox/v1", "Thing"}} {
-		path := writeTarget(t, minimalTarget+"crds: [crds/]\nfixtures: [config.yaml, issuer.yaml]\n", map[string]string{
+		path := writeTarget(t, minimalTarget+"crds: [crds/]\nfixtures: [issuer.yaml, config.yaml]\n", map[string]string{
 			"widget.yaml": sampleWidget,
 			"crds/thing.yaml": "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n" +
 				"spec:\n  group: toy.botbox\n  names: {kind: Thing, plural: things}\n  scope: Namespaced\n",

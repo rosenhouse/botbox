@@ -95,7 +95,7 @@ func TestCheckScopesJudgesTheScopeOfEveryFixtureBeforeItsNamespace(t *testing.T)
 			want:     "cluster-scoped kinds: the fixture toy.botbox/v1/Gadget shared",
 		},
 		{
-			fixtures: []*unstructured.Unstructured{fixture(secret, "settings", ""), fixture(secret, "ca", "default")},
+			fixtures: []*unstructured.Unstructured{fixture(secret, "settings", ""), fixture(secret, "ca", "default"), fixture(secret, "token", "")},
 			want:     "the fixture v1/Secret ca sets metadata.namespace default; drop it",
 		},
 	} {

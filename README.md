@@ -811,9 +811,9 @@ Seven generic invariants apply to every target. [DESIGN.md](DESIGN.md#6-generic-
 - `make hunt-cert-manager` and `make hunt-external-secrets` hunt for bugs in the pinned controllers
   for `HUNT_MINUTES` (default 120). Each runs the families in `examples/<example>/sequences/hunt/`,
   then up to `HUNT_RUNS` (default 1000) seeds from `HUNT_SEED` (default 1000) on. It keeps each
-  failing run's evidence in `botbox-out/hunt-<example>/`. A run
-  that fails is a candidate to triage, not yet a bug: see
-  [DESIGN.md §11](DESIGN.md#11-repo-conventions). No pull request runs a hunt.
+  failing run's evidence in `botbox-out/hunt-<example>/`. A run that fails is a candidate to
+  triage, not yet a bug: see [DESIGN.md §11](DESIGN.md#11-repo-conventions). No pull request
+  runs a hunt.
 - A block after `<!-- embed: path -->` holds that file byte for byte, and `make test` enforces it.
 - [DESIGN.md](DESIGN.md) is the governing design. Code and docs must not contradict it.
 - [docs/journal.md](docs/journal.md) and [docs/spikes/](docs/spikes/) hold the milestone journal and the experiments behind DESIGN.md §15.

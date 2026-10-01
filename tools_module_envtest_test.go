@@ -37,7 +37,12 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipe := replacingBotbox(t, readFile(t, toolsRecipe), checkout)
+	script := readFile(t, toolsRecipe)
+	lines := strings.Split(strings.TrimSpace(script), "\n")
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "bin/botbox ") {
+		t.Errorf("%s ends with %q, and README.md says its last line runs bin/botbox.", toolsRecipe, last)
+	}
+	recipe := replacingBotbox(t, script, checkout)
 	operatorGoMod := "module example.com/operator\n\ngo " + oldGo + "\n"
 
 	// The operator pins its own tools in tools/tools.go, a common place for them.

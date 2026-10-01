@@ -180,41 +180,47 @@ func TestTheToysSeed2DrawsMoreThanTheShrunkB2Reproducer(t *testing.T) {
 func TestTheToyWithALabelFixtureDrawsB14sReproducerAtSeed19(t *testing.T) {
 	// TestGeneratedFixtureOps finds B14 with it.
 	if ops := drawOps(t, toyWithALabelFixture, 19); !revealsB14(ops) {
-		t.Errorf("Seed 19 draws %v, want an updateFixture under a live Widget, then only settles, then a restart.", opTypes(ops))
+		t.Errorf("Seed 19 draws %v, want an updateFixture under a settled Widget, then only settles, then a restart.", opTypes(ops))
 	}
 }
 
-func TestOnlyARestartNextAfterTheLabelChangesRevealsB14(t *testing.T) {
+func TestOnlyARestartNextAfterTheLabelChangesUnderASettledWidgetRevealsB14(t *testing.T) {
+	create, unsettledCreate := run.Op{Type: run.OpCreate}, run.Op{Type: run.OpCreate, NoSettle: true}
+	label, settle, restart := run.Op{Type: run.OpUpdateFixture}, run.Op{Type: run.OpSettle}, run.Op{Type: run.OpRestart}
 	for _, test := range []struct {
-		ops  []run.OpType
+		name string
+		ops  []run.Op
 		want bool
 	}{
-		{[]run.OpType{run.OpCreate, run.OpUpdateFixture, run.OpSettle, run.OpRestart}, true},
-		{[]run.OpType{run.OpCreate, run.OpUpdateFixture, run.OpUpdate, run.OpRestart}, false},
-		{[]run.OpType{run.OpCreate, run.OpUpdateFixture, run.OpDeleteFixture, run.OpRestart}, false},
-		{[]run.OpType{run.OpCreate, run.OpDelete, run.OpUpdateFixture, run.OpRestart}, false},
-		{[]run.OpType{run.OpUpdateFixture, run.OpCreate, run.OpRestart}, false},
+		{"a settled create", []run.Op{create, label, settle, restart}, true},
+		{"a create a settle follows", []run.Op{unsettledCreate, settle, label, restart}, true},
+		{"a recreate", []run.Op{create, {Type: run.OpRecreate}, label, restart}, true},
+		{"an update after the label", []run.Op{create, label, {Type: run.OpUpdate}, restart}, false},
+		{"a deleteFixture after the label", []run.Op{create, label, {Type: run.OpDeleteFixture}, restart}, false},
+		{"a delete", []run.Op{create, {Type: run.OpDelete}, label, restart}, false},
+		{"no Widget", []run.Op{label, settle, restart}, false},
+		{"a create that has not settled", []run.Op{unsettledCreate, label, settle, restart}, false},
+		{"an update that has not settled", []run.Op{create, {Type: run.OpUpdate, NoSettle: true}, label, settle, restart}, false},
 	} {
-		var ops []run.Op
-		for _, opType := range test.ops {
-			ops = append(ops, run.Op{Type: opType})
-		}
-		if got := revealsB14(ops); got != test.want {
-			t.Errorf("revealsB14(%v) = %t, want %t.", test.ops, got, test.want)
+		if got := revealsB14(test.ops); got != test.want {
+			t.Errorf("With %s, revealsB14(%v) = %t, want %t.", test.name, opTypes(test.ops), got, test.want)
 		}
 	}
 }
 
-// revealsB14 says whether the label changes under a live Widget and a restart
-// is the next op to reconcile it.
+// revealsB14 says whether the label changes once the Widget's last CR op has
+// settled, and a restart is the next op to reconcile it.
 func revealsB14(ops []run.Op) bool {
-	live := false
+	var exists, unsettled bool
 	for i, op := range ops {
-		if op.Type.OnCR() {
-			live = op.Type != run.OpDelete
+		switch {
+		case op.Type.OnCR():
+			exists, unsettled = op.Type != run.OpDelete, op.NoSettle
+		case op.Type == run.OpSettle:
+			unsettled = false
 		}
 		next := slices.IndexFunc(ops[i+1:], func(op run.Op) bool { return op.Type != run.OpSettle })
-		if op.Type == run.OpUpdateFixture && live && next >= 0 && ops[i+1+next].Type == run.OpRestart {
+		if op.Type == run.OpUpdateFixture && exists && !unsettled && next >= 0 && ops[i+1+next].Type == run.OpRestart {
 			return true
 		}
 	}

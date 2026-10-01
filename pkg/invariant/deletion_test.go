@@ -144,6 +144,8 @@ func TestWaitOwedCoversEachDeletion(t *testing.T) {
 			at: 25 * time.Second, want: 25100 * time.Millisecond},
 		{name: "a CR that went after the instant asked about", run: beingDeleted().remove(13*time.Second, deletedWidget("16")),
 			at: 12 * time.Second, want: 20100 * time.Millisecond},
+		{name: "a CR that went at the instant asked about", run: beingDeleted().remove(13*time.Second, deletedWidget("16")),
+			at: 13 * time.Second, want: 18 * time.Second},
 		{name: "a CR that went after its deadline", run: beingDeleted().remove(21*time.Second, deletedWidget("16")),
 			at: 25 * time.Second, want: 20100 * time.Millisecond},
 		{name: "a CR deleted twice", run: beingDeleted().remove(13*time.Second, deletedWidget("16")).

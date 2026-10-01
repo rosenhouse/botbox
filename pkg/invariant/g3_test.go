@@ -148,20 +148,28 @@ func TestG3NotesADeletionAFaultReachedInto(t *testing.T) {
 // deleted it.
 func TestG3NamesWhatDeletedTheCRInEachNote(t *testing.T) {
 	in := newRun().
+		withSecondWidget().
 		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup))).
 		op(invariant.OpRecreate, 10*time.Second).
 		record(10*time.Second, widget("11", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
 		remove(11*time.Second, widget("12", spec(1), status(1, 1), deleting(10*time.Second))).
 		record(11*time.Second, widget("20", spec(1), status(1, 1), uid("uid-w2"), finalizers(cleanup))).
-		fault(10500*time.Millisecond, 40*time.Second).
+		op(invariant.OpDelete, 20*time.Second).
+		opOn(invariant.OpDelete, 20500*time.Millisecond, secondName).
+		record(21*time.Second, widget("21", spec(1), status(1, 1), uid("uid-w2"), finalizers(cleanup), deleting(21*time.Second))).
+		remove(22*time.Second, widget("22", spec(1), status(1, 1), uid("uid-w2"), deleting(21*time.Second))).
+		op(invariant.OpCreate, 23*time.Second).
+		record(23*time.Second, widget("30", spec(1), status(1, 1), uid("uid-w3"), finalizers(cleanup))).
+		fault(10500*time.Millisecond, 50*time.Second).
 		teardown(30*time.Second).
-		record(30*time.Second, widget("21", spec(1), status(1, 1), uid("uid-w2"), finalizers(cleanup), deleting(30*time.Second))).
+		record(30*time.Second, widget("31", spec(1), status(1, 1), uid("uid-w3"), finalizers(cleanup), deleting(30*time.Second))).
 		through(45 * time.Second)
 
 	result := silent(t, invariant.CleanDeletion, in)
 
 	want := []string{
 		"G3 is not evaluated for the deletion of w by op 0 (recreate): a fault was active before its deadline",
+		"G3 is not evaluated for the deletion of w by op 1 (delete): a fault was active before its deadline",
 		"G3 is not evaluated for the deletion of w by the teardown: a fault was active before its deadline",
 	}
 	if !slices.Equal(result.Notes, want) {

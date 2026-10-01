@@ -686,7 +686,7 @@ func parse(args []string) (options, []string, error) {
 	opts := options{command: args[0]}
 	c, found := lookup(opts.command)
 	if !found {
-		return options{}, nil, fmt.Errorf("%q is not a botbox command", opts.command)
+		return opts, nil, fmt.Errorf("%q is not a botbox command", opts.command)
 	}
 
 	flags := opts.flags()

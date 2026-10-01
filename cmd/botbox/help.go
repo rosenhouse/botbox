@@ -117,10 +117,8 @@ func (c command) synopsis() string {
 // flagWord is the flag as a command line spells it, with the back-quoted name
 // in its usage as the value.
 func flagWord(f *flag.Flag) string {
-	if value, _ := flag.UnquoteUsage(f); value != "" {
-		return "--" + f.Name + " " + value
-	}
-	return "--" + f.Name
+	value, _ := flag.UnquoteUsage(f)
+	return "--" + f.Name + " " + value
 }
 
 // help is the command's help, or botbox's where name is no command.

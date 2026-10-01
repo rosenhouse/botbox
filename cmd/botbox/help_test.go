@@ -57,8 +57,8 @@ func TestTheSynopsisListsEveryFlag(t *testing.T) {
 func TestACommandsHelpDescribesEachFlagWithItsDefault(t *testing.T) {
 	for _, c := range commands {
 		got := help(c.name)
-		if !strings.HasPrefix(got, "Usage:\n  "+c.synopsis()+"\n") {
-			t.Errorf("botbox %s --help begins %q, want its synopsis.", c.name, firstLines(got, 2))
+		if !strings.HasPrefix(got, "Usage:\n  "+c.synopsis()+"\n\n"+c.about+"\n") {
+			t.Errorf("botbox %s --help begins %q, want its synopsis and what it does.", c.name, firstLines(got, 4))
 		}
 		(&options{command: c.name}).flags().VisitAll(func(f *flag.Flag) {
 			placeholder, usage := flag.UnquoteUsage(f)
@@ -93,8 +93,17 @@ func TestTheHelpOfACommandThatRunsSaysTheExitCodesAndTheAPIServer(t *testing.T) 
 	}
 }
 
+func TestVersionsHelpSaysOnlyWhatItDoes(t *testing.T) {
+	if got, want := help("version"), "Usage:\n  botbox version\n\nbotbox version prints botbox's version.\n"; got != want {
+		t.Errorf("botbox version --help is\n%s\nwant\n%s", got, want)
+	}
+}
+
 func TestTheTopLevelHelpListsTheCommandsUsersRun(t *testing.T) {
 	got := help("")
+	if want := "botbox finds bugs in a Kubernetes controller."; !strings.HasPrefix(got, want) {
+		t.Errorf("botbox --help begins %q, want %q.", firstLines(got, 1), want)
+	}
 	for _, want := range []string{"\n  run ", "\n  replay ", "\n  version ", "https://github.com/rosenhouse/botbox"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("botbox --help lacks %q:\n%s", want, got)

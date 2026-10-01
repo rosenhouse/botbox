@@ -103,7 +103,7 @@ func TestAnExpiredWaitNamesItsTimeout(t *testing.T) {
 			record(3100*time.Millisecond, widget("13", uid("uid-w2"), spec(3))).
 			checkpoint(8*time.Second, invariant.Expired).waitBegan(3100 * time.Millisecond),
 			"expired with no fault active: in 4.9s (timeouts.settle is 5s), ready never held"},
-		{"a delete's settle wait that ran to its CR's deadline", beingDeleted().fault(11*time.Second, 11500*time.Millisecond).
+		{"a delete's settle wait that ran past its CR's deadline", beingDeleted().fault(11*time.Second, 11500*time.Millisecond).
 			checkpoint(20150*time.Millisecond, invariant.Expired),
 			"expired with no fault active: in 10.15s (timeouts.delete is 10s), the CR w was still being deleted"},
 		{"a delete's settle wait that ended on its CR's deadline", beingDeleted().fault(11*time.Second, 11500*time.Millisecond).

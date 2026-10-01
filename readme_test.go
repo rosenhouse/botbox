@@ -44,7 +44,10 @@ func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
 		t.Errorf("README.md does not say what botbox cannot test right after what it does")
 	}
 	section, _, _ := strings.Cut(rest, "\n## ")
-	opening, bullets := limitParts(section)
+	opening, bullets, after := limitParts(section)
+	if after != "" {
+		t.Errorf("README.md goes on after its list of limits, and a limit belongs in the opening or a bullet: %s", after)
+	}
 	for _, bullet := range bullets {
 		if !slices.ContainsFunc(limits, func(l limit) bool { return l.isIn(bullet) }) {
 			t.Errorf("No row of limits says this README.md limit and links its issue: %s", bullet)
@@ -66,34 +69,26 @@ func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
 	}
 }
 
-var (
-	listItem  = regexp.MustCompile(`\n *(?:[-*+]|[0-9]+[.)])[ \t]+`)
-	blankLine = regexp.MustCompile(`\n\s*\n`)
-)
+var listItem = regexp.MustCompile(`\n *(?:[-*+]|[0-9]+[.)])[ \t]+`)
 
 // opensBlock starts a heading, a fence, a block quote, a thematic break or HTML.
 const opensBlock = `(?:#{1,6}(?:[ \t]|$)|` + "```|~~~" + `|>|(?:\*[ \t]*){3,}$|(?:-[ \t]*){3,}$|(?:_[ \t]*){3,}$|<)`
 
-// limitParts splits the limits section into its opening and its other parts:
-// each bullet, and each paragraph after the list. A line indented less than an
-// item's text ends the item after a blank line, or where it opens a block.
-// CommonMark keeps any other such line in the item as a lazy continuation line,
-// and some HTML too.
-func limitParts(section string) (opening string, parts []string) {
+// limitParts splits the limits section into its opening, its bullets and what
+// follows them. A line indented less than an item's text ends the item after a
+// blank line, or where it opens a block. CommonMark keeps any other such line
+// in the item as a lazy continuation line, and some HTML too.
+func limitParts(section string) (opening string, bullets []string, after string) {
 	items := listItem.Split(section, -1)
 	for i, marker := range listItem.FindAllString(section, -1) {
 		end := regexp.MustCompile(fmt.Sprintf(`(?m)\n\s*\n {0,%[1]d}\S|\n {0,%[1]d}%[2]s`, column(strings.TrimPrefix(marker, "\n"))-1, opensBlock))
-		item, after := items[i+1], ""
+		item := items[i+1]
 		if at := end.FindStringIndex(item); at != nil {
-			item, after = item[:at[0]], item[at[0]:]
+			item, after = item[:at[0]], after+item[at[0]:]
 		}
-		parts = append(parts, item)
-		parts = append(parts, blankLine.Split(after, -1)...)
+		bullets = append(bullets, oneLine(item))
 	}
-	for i := range parts {
-		parts[i] = oneLine(parts[i])
-	}
-	return oneLine(items[0]), slices.DeleteFunc(parts, func(part string) bool { return part == "" })
+	return oneLine(items[0]), bullets, oneLine(after)
 }
 
 // column is the width of start, which begins a line, with tab stops of 4.
@@ -109,17 +104,19 @@ func column(start string) int {
 	return width
 }
 
-func TestLimitPartsSplitsEachBulletAndEachParagraphAfterTheList(t *testing.T) {
-	opening, parts := limitParts("\nOpening one.\n\nOpening two.\n\n- First\n  bullet.\n\n  First's paragraph.\n\n After the first list.\n" +
+func TestLimitPartsSplitsTheOpeningTheBulletsAndWhatFollowsThem(t *testing.T) {
+	opening, bullets, after := limitParts("\nOpening one.\n\nOpening two.\n\n- First\n  bullet.\n\n  First's paragraph.\n\n After the first list.\n" +
 		"-\tSecond.\n\n    Second's paragraph.\n\n  After the second list.\n1.  Third.\n\n   Also after the list.\n\nAfter the list.\n" +
-		"- Fourth.\n<p>After the fourth.</p>\n")
+		"- Fourth.\n- Fifth.\n")
 
 	if want := "Opening one. Opening two."; opening != want {
 		t.Errorf("limitParts gave the opening %q, want %q.", opening, want)
 	}
-	if want := []string{"First bullet. First's paragraph.", "After the first list.", "Second. Second's paragraph.", "After the second list.",
-		"Third.", "Also after the list.", "After the list.", "Fourth.", "<p>After the fourth.</p>"}; !slices.Equal(parts, want) {
-		t.Errorf("limitParts gave the parts %q, want %q.", parts, want)
+	if want := []string{"First bullet. First's paragraph.", "Second. Second's paragraph.", "Third.", "Fourth.", "Fifth."}; !slices.Equal(bullets, want) {
+		t.Errorf("limitParts gave the bullets %q, want %q.", bullets, want)
+	}
+	if want := "After the first list. After the second list. Also after the list. After the list."; after != want {
+		t.Errorf("limitParts gave %q after the bullets, want %q.", after, want)
 	}
 }
 
@@ -132,12 +129,12 @@ func TestLimitPartsEndsAnItemWhereCommonMarkDoes(t *testing.T) {
 		{"\n After.", true}, {" \nAfter.", true}, {"# Heading", true}, {"```", true}, {"~~~", true}, {" > Quote", true},
 		{"***", true}, {"---", true}, {"_ _ _", true}, {"<p>HTML</p>", true},
 	} {
-		want := []string{"Item. " + oneLine(test.next)}
+		want, wantAfter := "Item. "+oneLine(test.next), ""
 		if test.ends {
-			want = []string{"Item.", oneLine(test.next)}
+			want, wantAfter = "Item.", oneLine(test.next)
 		}
-		if _, parts := limitParts("\n- Item.\n" + test.next + "\n"); !slices.Equal(parts, want) {
-			t.Errorf("limitParts gave the parts %q where %q follows an item, want %q.", parts, test.next, want)
+		if _, bullets, after := limitParts("\n- Item.\n" + test.next + "\n"); !slices.Equal(bullets, []string{want}) || after != wantAfter {
+			t.Errorf("limitParts gave the bullets %q and then %q where %q follows an item, want %q and then %q.", bullets, after, test.next, want, wantAfter)
 		}
 	}
 }
@@ -150,9 +147,10 @@ func TestLimitPartsReadsTheReadmesLimitsTheSameDedented(t *testing.T) {
 	if dedented == limits {
 		t.Fatal("README.md's limits have no indented line, so this test checks nothing.")
 	}
-	opening, parts := limitParts(limits)
-	if dedentedOpening, dedentedParts := limitParts(dedented); dedentedOpening != opening || !slices.Equal(dedentedParts, parts) {
-		t.Errorf("limitParts reads README.md's limits dedented as %q and %q, want %q and %q.", dedentedOpening, dedentedParts, opening, parts)
+	opening, bullets, after := limitParts(limits)
+	if dedentedOpening, dedentedBullets, dedentedAfter := limitParts(dedented); dedentedOpening != opening || !slices.Equal(dedentedBullets, bullets) || dedentedAfter != after {
+		t.Errorf("limitParts reads README.md's limits dedented as %q, %q and %q, want %q, %q and %q.",
+			dedentedOpening, dedentedBullets, dedentedAfter, opening, bullets, after)
 	}
 }
 

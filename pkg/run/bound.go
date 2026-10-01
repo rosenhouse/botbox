@@ -34,8 +34,10 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 	faults, stops, exits, untriggered := 0, 0, 0, false
 	for _, op := range s.Ops {
 		if faults > 0 {
-			// The op may first wait for the target to restart.
-			waits += float64(launch.MaxBackoff)
+			// The op may first wait for the target to restart. The target is
+			// then owed T_settle past a return that can come T_settle after
+			// the op, T_settle more than a settle wait.
+			waits += float64(launch.MaxBackoff) + settle
 		}
 		switch op.Type {
 		case OpDelete, OpDeleteFixture:

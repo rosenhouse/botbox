@@ -3212,6 +3212,40 @@ func TestAWaitUnderAFaultOwesTheFirstExitDuringItsOp(t *testing.T) {
 	}
 }
 
+// Under a fault still active, the target exits twice in the wait after op 2,
+// and op 3 lands at or just after the restart from the second exit. Op 3's
+// wait is owed T_settle past the target's return from that restart.
+func TestAnOpThatLandsSoonAfterARestartOwesTheTargetsReturn(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		restartsIn time.Duration
+	}{
+		{name: "an op that waited for the restart", restartsIn: time.Minute},
+		{name: "an op after the restart", restartsIn: 0},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newWaitingHarness(testTimeouts)
+			h.settles, h.exitsLate, h.restartsIn, h.returnsLate = []bool{true, false, false}, []int{2, 2}, test.restartsIn, true
+
+			result, err := runSequence(t.Context(), toyTarget, sequenceOf(createOp, faultOp, updateOp, updateOp),
+				Options{Check: &fakeChecker{}}, h)
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if len(h.exited) != 2 {
+				t.Fatalf("The target exited %d times, want 2.", len(h.exited))
+			}
+			// A target that returns late returns just before T_settle past
+			// the restart.
+			back := h.exited[1].Restart.Add(testTimeouts.Settle - time.Millisecond)
+			if ended := result.Timeline.Ops[3].Settled.Window.End; !ended.Equal(back.Add(testTimeouts.Settle)) {
+				t.Errorf("Op 3's wait ended %v after the target's return, want T_settle after it.", ended.Sub(back))
+			}
+		})
+	}
+}
+
 // sleepEnds runs ends as a sleep begins.
 type sleepEnds struct {
 	*waitingHarness

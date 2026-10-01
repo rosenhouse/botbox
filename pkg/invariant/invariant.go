@@ -370,6 +370,17 @@ func (in Input) opBy(t time.Time) Op {
 	return last
 }
 
+// opBefore returns the last op applied before t.
+func (in Input) opBefore(t time.Time) Op {
+	var last Op
+	for _, op := range in.Ops {
+		if op.Time.Before(t) {
+			last = op
+		}
+	}
+	return last
+}
+
 // op returns the op of this index, which is not its position: an Input may
 // carry a subset of the sequence.
 func (in Input) op(index int) (Op, bool) {

@@ -141,6 +141,36 @@ func TestWhileAFaultIsActiveOnlyTheFirstExitDuringEachOpIsOwed(t *testing.T) {
 	}
 }
 
+// An op that lands before the target has had its time after an exit owes it
+// that time, though another exit came first during the op before.
+func TestWhileAFaultIsActiveAnOpOwesAnExitItLandsSoonAfter(t *testing.T) {
+	// The target restarts from its second exit at 14s.
+	exitsTwice := func() *run {
+		return newRun().fault(time.Second, time.Minute).op(invariant.OpUpdate, 2*time.Second).exit(3*time.Second, 3*time.Second).
+			running(3500*time.Millisecond).exit(4*time.Second, 14*time.Second)
+	}
+	for _, test := range []struct {
+		name string
+		run  *run
+		at   time.Duration
+		want time.Duration
+	}{
+		{name: "an op at the restart", run: exitsTwice().op(invariant.OpSettle, 14*time.Second).running(17 * time.Second),
+			at: 20 * time.Second, want: 22 * time.Second},
+		{name: "an op before the target's return", run: exitsTwice().op(invariant.OpSettle, 16*time.Second).running(17 * time.Second),
+			at: 20 * time.Second, want: 22 * time.Second},
+		{name: "an op as the target's time ends", run: exitsTwice().running(15*time.Second).op(invariant.OpSettle, 20*time.Second),
+			at: 25 * time.Second, want: 8500 * time.Millisecond},
+		{name: "an exit during that op",
+			run: exitsTwice().op(invariant.OpSettle, 14*time.Second).running(15*time.Second).exit(16*time.Second, 26*time.Second),
+			at:  20 * time.Second, want: 31 * time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			owes(t, test.run.through(time.Minute), test.at, test.want)
+		})
+	}
+}
+
 // No op lands while the target waits out a restart a fault excused.
 func TestPendingRestartIsARestartAFaultExcused(t *testing.T) {
 	for _, test := range []struct {

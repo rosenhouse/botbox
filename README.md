@@ -459,11 +459,12 @@ A controller that exits during a fault, or while it recovers from one, has the s
 botbox restarts it. While a fault is active, only your controller's first such exit during
 each op gets that time. If it exits again during the op, the wait can end before it
 restarts, and botbox checks your properties there. botbox applies no op while your
-controller waits to restart after such an exit. A controller that keeps crashing under a
-fault therefore fails G4 once the fault stops, or once the teardown clears it. G7 notes a
-`deleteManaged` after a restart that follows an exit as it does one after a `restart`, and
-notes one where your controller exited, or waited to restart, during the op or its settle
-wait.
+controller waits to restart after such an exit. An op that botbox applies before your
+controller has had that time after such an exit gives it that time too. A controller that
+keeps crashing under a fault therefore fails G4 once the fault stops, or once the teardown
+clears it. G7 notes a `deleteManaged` after a restart that follows an exit as it does one
+after a `restart`, and notes one where your controller exited, or waited to restart,
+during the op or its settle wait.
 The toy controller converges a count of 0 and then crashes under `--launch-arg --bug=12`,
 and `targets/toy-widget/sequences/b12.json` sets one:
 

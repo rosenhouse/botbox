@@ -8,26 +8,28 @@ import (
 // Owed is when the target must have converged by, after the faults that
 // stopped by t. An exit the faults excused owes what settledBy gives its
 // restart, since botbox chose the restart's backoff. While a fault is active,
-// only the first such exit during each op owes it, so that a crash loop under
-// a fault is not owed time for good. Owed is zero where the target owes
-// nothing.
+// only the first such exit since the last op stamped before that time owes
+// it, so that a crash loop under a fault is not owed time for good. Owed is
+// zero where the target owes nothing.
 func (in Input) Owed(t time.Time) time.Time {
 	owed := in.faultsOwed(t)
 	recovered := in.lastConverged(t)
 	active := in.faulted(t, t)
 	for _, exit := range in.Exits {
-		excused := !exit.At.After(t) && exit.At.After(recovered) && in.faultsExcuse(exit.At)
-		if excused && (!active || in.firstExcusedExitDuringItsOp(exit)) {
-			owed = later(owed, in.settledBy(exit.Restart))
+		if exit.At.After(t) || !exit.At.After(recovered) || !in.faultsExcuse(exit.At) {
+			continue
+		}
+		settled := in.settledBy(exit.Restart)
+		if !active || in.firstExcusedExitSince(in.opBefore(settled), exit) {
+			owed = later(owed, settled)
 		}
 	}
 	return owed
 }
 
-// firstExcusedExitDuringItsOp reports whether no earlier exit the faults
-// excused came since the op before this one.
-func (in Input) firstExcusedExitDuringItsOp(exit Exit) bool {
-	op := in.opBy(exit.At)
+// firstExcusedExitSince reports whether no other exit the faults excused came
+// between the op and this exit.
+func (in Input) firstExcusedExitSince(op Op, exit Exit) bool {
 	return !slices.ContainsFunc(in.Exits, func(earlier Exit) bool {
 		return !earlier.At.Before(op.Time) && earlier.At.Before(exit.At) && in.faultsExcuse(earlier.At)
 	})

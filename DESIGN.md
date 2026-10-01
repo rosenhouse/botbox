@@ -171,7 +171,9 @@ The Observer runs independent informers on the real API server, not through the 
 for the target's CRD(s) and the resource kinds the target declares it manages. It records,
 per object: resourceVersion history with timestamps, generation vs observedGeneration
 where present, finalizers, ownerReferences, deletion timestamps, and the UID, on which
-attribution (§6) and the garbage-collector emulation (§5.8) rely.
+attribution (§6) and the garbage-collector emulation (§5.8) rely. It watches the run
+namespace alone, so the primary and every managed kind must be namespaced (§8.1), and it
+does not see a child the target creates in another namespace.
 
 The Observer must never affect the target. It has its own credentials and never writes.
 Deleting a managed object behind the target's back is a Runner control op
@@ -858,10 +860,12 @@ cert-manager lists CertificateRequest: a request records one issuance, and a Rea
 Certificate whose request is deleted issues no new one.
 
 The primary, every managed kind and every fixture must be namespaced, because a run owns
-one namespace (§5.5, D13). botbox refuses the cluster-scoped ones before the first run, in
-two checks that each name every kind they refuse: one when it loads the target, for the
-kinds its `crds` define, and one once the control plane is up, for the rest. botbox
-observes only the run namespace, so it does not see a child the target creates in another.
+one namespace (§5.5, D13). botbox refuses the cluster-scoped ones in one error when it
+loads the target, before it judges a fixture's namespace. It knows the scope of each kind
+the `crds` define and of each kind Kubernetes itself serves. Once the control plane is up,
+and before the first run, discovery refuses any other cluster-scoped kind, such as one
+whose CRD the cluster holds but `crds` does not list. botbox observes only the run
+namespace, so it does not see a child the target creates in another.
 botbox creates the CR and each fixture in the run namespace. A fixture sets no
 `metadata.namespace`, because the target may look for it in the namespace it names. The
 CR may set one, which botbox replaces, because the target finds a CR by watching.
@@ -1345,7 +1349,9 @@ the proxy; the `Image` launcher. Separate design addendum.
    under `refreshPolicy: Periodic` writes such a field, and D40 answered it with a
    target-side setting. The question stands for a controller that offers no such
    setting.
-2. How is a cluster-scoped primary CR (ClusterIssuer-like) isolated per run?
+2. How is a cluster-scoped primary CR (ClusterIssuer-like), managed kind or fixture
+   isolated per run? Should botbox observe a child the target creates in another
+   namespace?
 3. Should a later phase run the target's admission webhook in envtest, so that generation
    can widen beyond `generate.mutate`?
 4. Is `InProcess` worth reviving for speed once envtest run time is measured?
@@ -2079,3 +2085,13 @@ built from source and run as a black-box binary.
   `T_settle` per op after it, so it ends no run the Runner would end on its own. The toy's
   `--lease` elects a leader, so a fault on leases makes the correct toy exit as
   controller-runtime does.
+- **D@38 botbox knows which built-in kinds are cluster-scoped.** Under D52, a built-in
+  cluster-scoped kind was refused only after envtest had started, or after the CRDs were
+  installed on a `--kubeconfig` cluster. A target with a cluster-scoped CRD and a
+  ClusterRole under `manages` heard only of the CRD. A cluster-scoped fixture that set a
+  namespace was told to drop the namespace. botbox now lists the kinds Kubernetes serves
+  at cluster scope, and an envtest test compares that list with discovery on the pinned
+  API server. Loading the target refuses those kinds and the cluster-scoped kinds of
+  `crds` in one error, before it judges a fixture's namespace. Discovery still checks
+  every kind before the first run, for a CRD that `crds` does not list, an aggregated API,
+  or a kind newer than the list.

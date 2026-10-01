@@ -136,7 +136,7 @@ KUBEBUILDER_ASSETS="$(make --no-print-directory assets-path)" ./bin/botbox repla
 ```
 the deadline is 2m12s: this run can take that long at the target's timeouts. --deadline sets another.
 run 1: seed 20260920, sequence targets/toy-widget/sequences/b3.json
-run 1: G3 the v1/ConfigMap widget-0 was still there 10s after widget, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
+run 1: G3 the v1/ConfigMap widget-0 was still there 10s (timeouts.delete) after widget, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-30T19:50:43.395112151Z; 1 version, the first v1/ConfigMap widget-0
   the evidence is in botbox-out/20260930T195026Z-20260920/run-1
 ```

@@ -22,9 +22,13 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 	install := section(t, readme, "## Install")
 	oldest := regexp.MustCompile(`from Go (1\.\d+) on`).FindStringSubmatch(install)
 	remedy := regexp.MustCompile("run the commands with\\s+`GOTOOLCHAIN=(\\w+)`").FindStringSubmatch(install)
-	stopped := regexp.MustCompile("tools module below with\\s+`([^`]+)`").FindStringSubmatch(install)
-	if oldest == nil || remedy == nil || stopped == nil {
-		t.Fatalf("README.md's Install section names no oldest go, no GOTOOLCHAIN to run the commands with, or no error that stops the tools module:\n%s", install)
+	if oldest == nil || remedy == nil {
+		t.Fatalf("README.md's Install section names no oldest go, or no GOTOOLCHAIN to run the commands with:\n%s", install)
+	}
+	keep := section(t, readme, "### Keep botbox out of your go.mod")
+	stopped := regexp.MustCompile("Under\\s+`GOTOOLCHAIN=local`, a\\s+`go`\\s+before\\s+[\\d.]+\\s+stops\\s+this\\s+recipe\\s+with\\s+`([^`]+)`").FindStringSubmatch(keep)
+	if stopped == nil {
+		t.Fatalf("README.md's tools module section names no error that stops the recipe under GOTOOLCHAIN=local:\n%s", keep)
 	}
 	checkout, err := os.Getwd()
 	if err != nil {

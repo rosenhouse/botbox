@@ -8,15 +8,15 @@ import (
 	"testing"
 )
 
-// quickstartRun is the README's first cert-manager quickstart command and the
+// quickstartRun is a page's first cert-manager quickstart command and the
 // block that shows what botbox prints.
 var quickstartRun = regexp.MustCompile("(?s)```sh\nexamples/cert-manager/quickstart\\.sh ([^\n]*)\n```\n\n```\n(.*?)```\n")
 
 // What botbox prints in the cert-manager quickstart depends on what its seeds
 // draw.
-func TestTheREADMEShowsWhatBotboxPrintsInTheCertManagerQuickstart(t *testing.T) {
+func TestTheExamplesPageShowsWhatBotboxPrintsInTheCertManagerQuickstart(t *testing.T) {
 	t.Chdir("../..")
-	args, shown := quickstart(t, readFile(t, "README.md"), readFile(t, "examples/cert-manager/quickstart.sh"))
+	args, shown := quickstart(t, readFile(t, "docs/examples.md"), readFile(t, "examples/cert-manager/quickstart.sh"))
 	args = append(args, "--out", t.TempDir())
 
 	// The fake session passes every run, as cert-manager does.
@@ -25,26 +25,26 @@ func TestTheREADMEShowsWhatBotboxPrintsInTheCertManagerQuickstart(t *testing.T) 
 		t.Fatalf("botbox %s exited %d: %s", strings.Join(args, " "), code, stderr)
 	}
 	if stdout != shown {
-		t.Errorf("The README shows\n%s\nand botbox %s printed\n%s", shown, strings.Join(args, " "), stdout)
+		t.Errorf("docs/examples.md shows\n%s\nand botbox %s printed\n%s", shown, strings.Join(args, " "), stdout)
 	}
 }
 
-func TestQuickstartPassesBotboxTheREADMEsArgs(t *testing.T) {
-	readme := "```sh\nexamples/cert-manager/quickstart.sh --seed 7\n```\n\n```\nprinted\n```\n"
+func TestQuickstartPassesBotboxThePagesArgs(t *testing.T) {
+	page := "```sh\nexamples/cert-manager/quickstart.sh --seed 7\n```\n\n```\nprinted\n```\n"
 	script := "KUBEBUILDER_ASSETS=x ./bin/botbox run \\\n  --runs 5 \"$@\"\necho done\n"
-	args, shown := quickstart(t, readme, script)
+	args, shown := quickstart(t, page, script)
 	if want := []string{"run", "--runs", "5", "--seed", "7"}; !slices.Equal(args, want) || shown != "printed\n" {
 		t.Errorf("quickstart returned %q and %q, want %q and %q.", args, shown, want, "printed\n")
 	}
 }
 
-// quickstart returns what script passes botbox when it runs the README's first
+// quickstart returns what script passes botbox when it runs the page's first
 // cert-manager quickstart command, and the block after that command.
-func quickstart(t *testing.T, readme, script string) (args []string, shown string) {
+func quickstart(t *testing.T, page, script string) (args []string, shown string) {
 	t.Helper()
-	m := quickstartRun.FindStringSubmatch(readme)
+	m := quickstartRun.FindStringSubmatch(page)
 	if m == nil {
-		t.Fatal("The README runs no cert-manager quickstart and shows no output after it.")
+		t.Fatal("The page runs no cert-manager quickstart and shows no output after it.")
 	}
 	_, invocation, found := strings.Cut(script, "./bin/botbox ")
 	if !found {

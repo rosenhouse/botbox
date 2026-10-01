@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/rosenhouse/botbox/pkg/run"
 )
 
 const limitsHeading = "## What botbox cannot test yet"
@@ -20,7 +22,7 @@ var limits = []limit{
 	{"on the version your CRD stores", 0, "A kubeconfig cluster keeps the webhook."},
 	{"generates sequences only for a primary kind your `crds` define", 0, "botbox draws no sequence for a built-in primary kind"},
 	{"tests namespaced kinds only", 38, "every managed kind and every fixture must be namespaced"},
-	{"refuses a cluster-scoped primary, managed kind or fixture when it loads the target", 38, "The first runs when botbox loads the target."},
+	{"refuses a cluster-scoped primary, managed kind or fixture", 38, "each refuses every cluster-scoped kind it knows in one error"},
 	{"passes a controller that leaks a child in another namespace", 38, "it does not see a child the target creates in another"},
 	{"cannot supply an object your controller reads from another namespace", 38, "A fixture sets no `metadata.namespace`"},
 	{"does not test your controller's RBAC", 45, "the target's RBAC is never exercised"},
@@ -165,15 +167,42 @@ func oneLine(text string) string {
 var readmeOrder = []struct{ heading, design string }{
 	{"What botbox cannot test yet", "what it cannot test yet"},
 	{"Install", "install"},
-	{"A find in half a minute", "a find in half a minute"},
-	{"Quickstart: cert-manager", "quickstart against cert-manager"},
-	{"A second example: external-secrets", "what the second example adds"},
+	{"A first run and a first find", "a first run and a first find"},
 	{"Your own controller", "writing `target.yaml` for your own controller"},
-	{"Reading a report", "reading a report"},
-	{"When botbox exits 2", "what to change when botbox exits 2"},
+	{"Reading a failure", "reading a failure"},
 	{"Running in CI", "a CI recipe for adopters"},
 	{"Invariants", "a one-line-per-invariant table"},
 	{"Development and internals", `a closing "Development and internals" section`},
+}
+
+// A reader learns first that botbox tests against a real API server.
+func TestTheReadmeOpensWithTheAPIServerBotboxRuns(t *testing.T) {
+	intro, _, _ := strings.Cut(readFile(t, "README.md"), "\n## ")
+	if says := "against a real kube-apiserver and etcd"; !strings.Contains(oneLine(intro), says) {
+		t.Errorf("README.md's intro does not say botbox runs your controller %q.", says)
+	}
+}
+
+// userPages are the README and the pages it sends a reader to for detail.
+var userPages = []string{"README.md", "docs/targets.md", "docs/failures.md", "docs/examples.md"}
+
+// A reader who copies a sequence from a page gets one botbox runs.
+func TestEverySequenceAPageShowsLoads(t *testing.T) {
+	shown := 0
+	for _, page := range userPages {
+		for _, block := range fencedBlocks(readFile(t, page)) {
+			if !strings.HasPrefix(block, `{"seed"`) {
+				continue
+			}
+			shown++
+			if _, err := run.UnmarshalSequence([]byte(block)); err != nil {
+				t.Errorf("%s shows a sequence botbox refuses: %v\n%s", page, err, block)
+			}
+		}
+	}
+	if shown < 3 {
+		t.Fatalf("The pages show %d sequences, and the README and docs/targets.md show at least three.", shown)
+	}
 }
 
 func TestTheReadmeFollowsTheOrderDesignGives(t *testing.T) {
@@ -202,27 +231,31 @@ func TestTheReadmeFollowsTheOrderDesignGives(t *testing.T) {
 	}
 }
 
-// A reader of the README needs no design document outside its Invariants
-// section, which links DESIGN.md's statements, and its internals section.
+// A reader of the README, and of the pages it sends them to, needs no design
+// document outside the README's Invariants section, which links DESIGN.md's
+// statements, and its internals section.
 func TestTheReadmeNeedsNoDesignDocument(t *testing.T) {
 	milestone := regexp.MustCompile(`\bM[0-9]+\b`)
-	section := ""
-	for i, line := range strings.Split(readFile(t, "README.md"), "\n") {
-		if heading, found := strings.CutPrefix(line, "## "); found {
-			section = heading
-		}
-		if milestone.MatchString(line) {
-			t.Errorf("README.md:%d names a milestone: %s", i+1, line)
-		}
-		said := line
-		switch section {
-		case "Development and internals":
-			continue
-		case "Invariants":
-			said = strings.ReplaceAll(said, "DESIGN.md", "")
-		}
-		if found := designVocabulary.FindString(said); found != "" {
-			t.Errorf("README.md:%d, under %q, uses %q, which only DESIGN.md explains: %s", i+1, section, found, line)
+	for _, page := range userPages {
+		section := ""
+		for i, line := range strings.Split(readFile(t, page), "\n") {
+			if heading, found := strings.CutPrefix(line, "## "); found {
+				section = heading
+			}
+			if milestone.MatchString(line) {
+				t.Errorf("%s:%d names a milestone: %s", page, i+1, line)
+			}
+			said := line
+			switch {
+			case page != "README.md":
+			case section == "Development and internals":
+				continue
+			case section == "Invariants":
+				said = strings.ReplaceAll(said, "DESIGN.md", "")
+			}
+			if found := designVocabulary.FindString(said); found != "" {
+				t.Errorf("%s:%d, under %q, uses %q, which only DESIGN.md explains: %s", page, i+1, section, found, line)
+			}
 		}
 	}
 }
@@ -236,42 +269,44 @@ func quickstartSeeds(text string) [][]string {
 	return quickstartSeed.FindAllStringSubmatch(strings.ReplaceAll(text, "\\\n", " "), -1)
 }
 
+const examplesPage = "docs/examples.md"
+
 // The golden draws pin what the Makefile's example seeds draw.
-func TestTheREADMEsQuickstartsRunTheMakefilesExampleSeed(t *testing.T) {
-	seed, readme := makefilePins(t)["EXAMPLE_SEED"], readFile(t, "README.md")
-	runs := quickstartSeeds(readme)
+func TestTheExamplesPagesQuickstartsRunTheMakefilesExampleSeed(t *testing.T) {
+	seed, page := makefilePins(t)["EXAMPLE_SEED"], readFile(t, examplesPage)
+	runs := quickstartSeeds(page)
 	if len(runs) == 0 {
-		t.Fatal("README.md runs no quickstart with a seed, so this test checks nothing.")
+		t.Fatalf("%s runs no quickstart with a seed, so this test checks nothing.", examplesPage)
 	}
 	for _, run := range runs {
 		if run[1] != seed {
-			t.Errorf("README.md runs %q, and the Makefile's EXAMPLE_SEED is %s.", run[0], seed)
+			t.Errorf("%s runs %q, and the Makefile's EXAMPLE_SEED is %s.", examplesPage, run[0], seed)
 		}
 	}
-	if want := "Seed " + seed + " draws a single op"; !strings.Contains(readme, want) {
-		t.Errorf("README.md does not say %q.", want)
+	if want := "Seed " + seed + " draws a single op"; !strings.Contains(page, want) {
+		t.Errorf("%s does not say %q.", examplesPage, want)
 	}
 }
 
-func TestTheREADMEShowsRunsOfTheMakefilesExampleSeeds(t *testing.T) {
+func TestTheExamplesPageShowsRunsOfTheMakefilesExampleSeeds(t *testing.T) {
 	first, err := strconv.Atoi(makefilePins(t)["EXAMPLE_SEED"])
 	if err != nil {
 		t.Fatal(err)
 	}
-	runs := regexp.MustCompile(`(?m)^run (\d+): seed (\d+), generated$`).FindAllStringSubmatch(readFile(t, "README.md"), -1)
+	runs := regexp.MustCompile(`(?m)^run (\d+): seed (\d+), generated$`).FindAllStringSubmatch(readFile(t, examplesPage), -1)
 	if len(runs) == 0 {
-		t.Fatal("README.md shows no drawn run, so this test checks nothing.")
+		t.Fatalf("%s shows no drawn run, so this test checks nothing.", examplesPage)
 	}
 	for _, run := range runs {
 		n, _ := strconv.Atoi(run[1])
 		if want := strconv.Itoa(first + n - 1); run[2] != want {
-			t.Errorf("README.md shows %q, and from the Makefile's EXAMPLE_SEED run %d draws seed %s.", run[0], n, want)
+			t.Errorf("%s shows %q, and from the Makefile's EXAMPLE_SEED run %d draws seed %s.", examplesPage, run[0], n, want)
 		}
 	}
 }
 
 // Requiring botbox raises a module to these versions, as go prints them.
-func TestTheREADMEInstallQuotesGoModsVersions(t *testing.T) {
+func TestTheREADMEQuotesGoModsVersions(t *testing.T) {
 	readme, required := readFile(t, "README.md"), goModVersions(t)
 	install := section(t, readme, "## Install") + section(t, readme, "### Keep botbox out of your go.mod")
 	quoted := map[string]bool{}
@@ -289,7 +324,7 @@ func TestTheREADMEInstallQuotesGoModsVersions(t *testing.T) {
 	}
 	for _, module := range []string{"go", "k8s.io/api", "sigs.k8s.io/controller-runtime"} {
 		if !quoted[module] {
-			t.Errorf("README.md's Install section quotes no version of %s.", module)
+			t.Errorf("README.md's Install and tools module sections quote no version of %s.", module)
 		}
 	}
 }
@@ -355,19 +390,21 @@ func TestQuickstartSeedReadsEveryWayToPassTheSeed(t *testing.T) {
 }
 
 // An invocation's directory ends in the seed of its first run.
-func TestTheREADMEsEvidenceDirectoriesNameTheirFirstRunsSeed(t *testing.T) {
+func TestThePagesEvidenceDirectoriesNameTheirFirstRunsSeed(t *testing.T) {
 	firstSeed, dirSeed := regexp.MustCompile(`(?m)^run 1: seed (\d+),`), regexp.MustCompile(`Z-(\d+)/run-`)
-	checked := 0
-	for _, block := range strings.Split(readFile(t, "README.md"), "```") {
-		first := firstSeed.FindStringSubmatch(block)
-		for _, dir := range dirSeed.FindAllStringSubmatch(block, -1) {
-			checked++
-			if first == nil || dir[1] != first[1] {
-				t.Errorf("README.md shows the evidence directory %q in a block whose first run shows %q.", dir[0], first)
+	for _, page := range []string{"README.md", examplesPage} {
+		checked := 0
+		for _, block := range strings.Split(readFile(t, page), "```") {
+			first := firstSeed.FindStringSubmatch(block)
+			for _, dir := range dirSeed.FindAllStringSubmatch(block, -1) {
+				checked++
+				if first == nil || dir[1] != first[1] {
+					t.Errorf("%s shows the evidence directory %q in a block whose first run shows %q.", page, dir[0], first)
+				}
 			}
 		}
-	}
-	if checked == 0 {
-		t.Fatal("README.md shows no evidence directory, so this test checks nothing.")
+		if checked == 0 {
+			t.Errorf("%s shows no evidence directory, so this test checks nothing there.", page)
+		}
 	}
 }

@@ -169,6 +169,10 @@ Write yours in this order:
 [docs/targets.md](docs/targets.md) says how to choose the values: for a slow controller, one
 that resyncs on a timer, one that reads objects it does not own, and more.
 
+botbox starts envtest, which runs no Pod and never moves the status of a Deployment, a Job or a
+PersistentVolumeClaim. If your controller waits on one, run botbox
+[against a cluster](docs/targets.md#against-a-cluster), such as kind.
+
 ### Run it
 
 Run botbox from the directory that `launch.binary` is relative to:
@@ -210,21 +214,24 @@ control for each.
 botbox exits 0 when every run passes, 1 when a check fails, and 2 when it could not test your
 controller. On a failure, it prints the check's ID, what the check saw and the run's evidence
 directory, `botbox-out/<timestamp>-<seed>/run-<n>/`. Start with `report.md` there. It says what
-failed, quotes the requests and object versions near the failure, and gives the command that
-replays it.
+failed, quotes what the check read, such as requests or object versions, and gives the command
+that replays it.
 
-botbox shrinks a drawn sequence that fails to the ops the failure needs, before it reports.
-`sequence.json` in the evidence directory holds that shrunk sequence, which may lack even the
-`create`. Each run ends by deleting every CR and checking once more, so G3 or a property can
-fail a sequence with no `delete`. `summary.json`, one directory up, holds each run's sequence
-as drawn.
+Before it reports, botbox minimizes a failing drawn sequence: it removes each op the failure
+does not need. Each removal it tries replays a whole run, so this can take several minutes.
+botbox says so as soon as the run fails, as in
+`run 1: G3 failed, and minimizing its 12 ops can take minutes.` `sequence.json` in the
+evidence directory holds the minimized sequence. It lacks the `create` where your controller
+fails with no CR at all. Each run ends by deleting every CR and checking once more, so G3 or a
+property can fail a sequence with no `delete`. `summary.json`, one directory up, holds each
+run's sequence as drawn.
 
 | Check | Usual cause |
 |---|---|
 | G1 | Your controller keeps making requests after it converged, as a resync timer does. |
 | G2 | Your controller keeps rewriting an object, such as a timestamp in a status. |
 | G3 | A child lacks an ownerReference to its CR, or a finalizer stays on the CR. |
-| G4 | Your controller did not converge within `timeouts.settle`, or `ready` reads a field the CR lacks. |
+| G4 | Your controller did not converge within `timeouts.settle`. It is slow, it never stops writing, or it waits on a Pod, which [envtest never runs](docs/targets.md#against-a-cluster). Or `ready` reads a field the CR lacks. |
 | G5 | A restart changed converged state: a field your controller stamps at startup, or a change it missed until then. |
 | G6 | Your controller repeats one failing request. |
 | G7 | Your controller does not watch the deleted object's kind, as with a missing `Owns()`. |

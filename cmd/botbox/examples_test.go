@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/rosenhouse/botbox/pkg/run"
 )
 
 // quickstartRun is a page's first cert-manager quickstart command and the
@@ -26,6 +28,22 @@ func TestTheExamplesPageShowsWhatBotboxPrintsInTheCertManagerQuickstart(t *testi
 	}
 	if stdout != shown {
 		t.Errorf("docs/examples.md shows\n%s\nand botbox %s printed\n%s", shown, strings.Join(args, " "), stdout)
+	}
+}
+
+// The README quotes the line a drawn run of twelve ops prints once it fails.
+func TestTheREADMEQuotesTheLineBotboxPrintsBeforeItMinimizes(t *testing.T) {
+	violation := run.Violation{ID: "G3"}
+	session := &fakeSession{fails: func(run.Sequence, string) *run.Violation { return &violation }}
+	twelve := slices.Repeat([]run.OpType{run.OpSettle}, 12)
+
+	_, stdout, _ := invokeWith(t, session, countingGenerator(nil, twelve...),
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "1")
+
+	line := regexp.MustCompile(`(?m)^run 1: G3 failed.*$`).FindString(stdout)
+	readme := strings.Join(strings.Fields(readFile(t, "../../README.md")), " ")
+	if line == "" || !strings.Contains(readme, "`"+line+"`") {
+		t.Errorf("botbox printed\n%s\nand README.md does not quote its line %q.", stdout, line)
 	}
 }
 

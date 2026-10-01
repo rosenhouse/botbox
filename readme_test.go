@@ -174,12 +174,18 @@ func TestTheReadmeNeedsNoDesignDocument(t *testing.T) {
 }
 
 // quickstartSeed matches a quickstart command and captures the seed it passes.
-var quickstartSeed = regexp.MustCompile(`(?m)^(?:\./)?examples/\S+/quickstart\.sh.*\s--?seed[ =](\S+)`)
+var quickstartSeed = regexp.MustCompile(`(?m)^(?:\./)?examples/\S+/quickstart\.sh.*\s--?seed(?:[ \t]+|=)(\S+)`)
+
+// quickstartSeeds finds each quickstart command, with the lines a backslash
+// joins, and the seed it passes.
+func quickstartSeeds(text string) [][]string {
+	return quickstartSeed.FindAllStringSubmatch(strings.ReplaceAll(text, "\\\n", " "), -1)
+}
 
 // The golden draws pin what the Makefile's example seeds draw.
 func TestTheREADMEsQuickstartsRunTheMakefilesExampleSeed(t *testing.T) {
 	seed, readme := makefilePins(t)["EXAMPLE_SEED"], readFile(t, "README.md")
-	runs := quickstartSeed.FindAllStringSubmatch(readme, -1)
+	runs := quickstartSeeds(readme)
 	if len(runs) == 0 {
 		t.Fatal("README.md runs no quickstart with a seed, so this test checks nothing.")
 	}
@@ -282,12 +288,32 @@ func TestQuickstartSeedReadsEveryWayToPassTheSeed(t *testing.T) {
 		"examples/x/quickstart.sh -seed 24",
 		"examples/x/quickstart.sh -seed=24",
 		"./examples/x/quickstart.sh --seed 24",
+		"examples/x/quickstart.sh --seed  24",
+		"examples/x/quickstart.sh --runs 1 \\\n  --seed 24",
 	} {
-		if m := quickstartSeed.FindStringSubmatch(command); m == nil || m[1] != "24" {
-			t.Errorf("quickstartSeed reads %q from %q, want 24.", m, command)
+		if m := quickstartSeeds(command); len(m) != 1 || m[0][1] != "24" {
+			t.Errorf("quickstartSeeds reads %q from %q, want 24.", m, command)
 		}
 	}
-	if m := quickstartSeed.FindStringSubmatch("examples/x/quickstart.sh --no-seed 24"); m != nil {
-		t.Errorf("quickstartSeed reads %q from a flag other than the seed.", m)
+	if m := quickstartSeeds("examples/x/quickstart.sh --no-seed 24"); m != nil {
+		t.Errorf("quickstartSeeds reads %q from a flag other than the seed.", m)
+	}
+}
+
+// An invocation's directory ends in the seed of its first run.
+func TestTheREADMEsEvidenceDirectoriesNameTheirFirstRunsSeed(t *testing.T) {
+	firstSeed, dirSeed := regexp.MustCompile(`(?m)^run 1: seed (\d+),`), regexp.MustCompile(`Z-(\d+)/run-`)
+	checked := 0
+	for _, block := range strings.Split(readFile(t, "README.md"), "```") {
+		first := firstSeed.FindStringSubmatch(block)
+		for _, dir := range dirSeed.FindAllStringSubmatch(block, -1) {
+			checked++
+			if first == nil || dir[1] != first[1] {
+				t.Errorf("README.md shows the evidence directory %q in a block whose first run shows %q.", dir[0], first)
+			}
+		}
+	}
+	if checked == 0 {
+		t.Fatal("README.md shows no evidence directory, so this test checks nothing.")
 	}
 }

@@ -109,6 +109,16 @@ func TestEveryHelpLineButTheSynopsisFitsEightyColumns(t *testing.T) {
 	}
 }
 
+func TestWrapFillsEachLineUpToEightyColumns(t *testing.T) {
+	short, long := strings.Repeat("x", 38), strings.Repeat("x", 39)
+	if got, want := wrap("  ", short+" "+long), "  "+short+" "+long; got != want {
+		t.Errorf("wrap gave %q, want one line of 80 columns: %q.", got, want)
+	}
+	if got, want := wrap("  ", long+" "+long), "  "+long+"\n  "+long; got != want {
+		t.Errorf("wrap gave %q, want two lines rather than one of 81 columns: %q.", got, want)
+	}
+}
+
 func TestRunAndReplaySayWhichSequencesTheyRunAndMinimize(t *testing.T) {
 	for name, says := range map[string][]string{
 		"run": {

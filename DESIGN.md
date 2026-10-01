@@ -223,8 +223,9 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   every value drawn. Without `generate.mutate`, botbox prints each spec path it leaves
   alone, and why: its schema says too little to draw from, such as an int-or-string, the
   generator cannot draw a value for it, or the CRD refuses every value drawn for it.
-- **Hand-written generators** per target override schema-driven ones for fields with
-  semantics the schema does not capture. In-repo targets only.
+- **Hand-written generators** per target are deferred (#59). No target needs one, since
+  `sample`, `generate.mutate` and `generate.overlay` keep generation inside what a target
+  accepts (§8.3), and one would need a public Go API.
 
 Every sequence is serializable to JSON (§7) so it can be replayed without rapid. A seed
 names a sequence for one build of botbox and one target declaration. A golden test records
@@ -318,13 +319,19 @@ without noting them. It stops the target without a grace period and deletes the 
 on a budget of its own. Supervision ends with the context, so the target does not
 restart.
 
-Cleanup between runs never restarts the API server, because rapid's shrinker re-invokes
-the test function many times.
+Cleanup between runs never restarts the API server, because a shrink pass replays a
+sequence many times and starting a control plane costs seconds.
 
-**Shrinking** is sequence-level: rapid drives it, and additionally a custom pass removes
-ops one at a time and replays from clean state, keeping the shorter sequence if it still
-fails. Fault ops shrink toward "no fault" and shorter durations. Shrinking stops at the
-run deadline (§11).
+**Shrinking** is sequence-level, and botbox's own pass does all of it. It removes one op at
+a time and replays what is left from clean state. Where an op stays and carries a fault,
+it halves `until.count`, `until.for` and `action.delay` in turn, each as far as it goes.
+It keeps a candidate that fails the same check, by ID, and passes over the sequence again
+until nothing simplifies. A candidate the sequence format refuses is not replayed. Field
+values are not shrunk. The pass stops at the deadline (§11) and keeps the smallest
+failing sequence it found. rapid only draws sequences (§5.4). Its own shrinker would
+minimize rapid's stream of choices, which draws a different sequence on each replay, while
+the pass shrinks the replayable JSON sequence that the report carries. Each replay costs a
+whole run against the cluster, so the pass makes as few as it can.
 
 ### 5.6 Invariant engine
 
@@ -897,41 +904,12 @@ server does take a supported flag, and the ephemeral port above keeps it out of 
 
 ### 8.2 Go form
 
-```go
-type Target struct {
-    Name, Version string
-    CRDs          []string
-    Primary       schema.GroupVersionKind
-    Sample        *unstructured.Unstructured
-    Fixtures      []*unstructured.Unstructured
-    Manages       []schema.GroupVersionKind
-    NotRecreated  []schema.GroupVersionKind             // managed kinds G7 exempts
-    Selector      labels.Selector
-    Ready         func(*unstructured.Unstructured) bool // compiled from `ready`, or a hook
-    ReadyExpr     string                                // `ready` as declared, the default, or go:<name>
-    Equal         func(a, b Snapshot) bool              // §6 default plus `equalIgnore`, or a hook
-    Properties    []Property
-    Generate      GenerateSpec
-    Launch        LaunchSpec
-    Timeouts      Timeouts
-    Thresholds    Thresholds
-}
-
-type Property struct {
-    ID, Description string
-    Eval            func(cr *unstructured.Unstructured, managed []*unstructured.Unstructured) bool
-    When            PropertyWhen // Always, Checkpoint, End
-}
-
-type Snapshot struct {
-    GVK    schema.GroupVersionKind
-    Name   string
-    Object *unstructured.Unstructured
-}
-```
-
-`pkg/target` loads the YAML into this struct. Everything downstream consumes the struct.
-The Runner keys snapshots by kind and name, never by UID, so a recreated object compares
+`pkg/target` loads the YAML into a `Target`, and everything downstream consumes it.
+`go doc github.com/rosenhouse/botbox/pkg/target Target` lists its fields, so this document
+gives only the intent. `Ready` returns an error beside its verdict, and an error means not
+ready (§8.4). A property's error is a configuration error. A nil `Equal` means the §6
+default with the `equalIgnore` paths, and a hook named in target.yaml replaces both. The
+Runner keys snapshots by kind and name, never by UID, so a recreated object compares
 against its predecessor.
 
 ### 8.3 Generation constraints and admission webhooks
@@ -2088,3 +2066,8 @@ built from source and run as a black-box binary.
   run that deleted one CR twice printed two identical G3 notes, so a note names what
   deleted the CR. Splitting DESIGN.md was rejected, because the hourly Routine reads it
   whole.
+- **D@65 DESIGN.md describes the code that exists.** §5.5 said rapid drives shrinking,
+  while botbox's own pass does all of it and rapid only draws. §5.4 promised hand-written
+  generators, which no target has. §8.2 listed a Go form that had drifted from
+  `pkg/target`, so it gives the intent and names `go doc`, which cannot drift. §11's
+  synopsis lacked `matrix` and several flags, so a test holds it to each command's flags.

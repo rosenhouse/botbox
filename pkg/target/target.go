@@ -1,6 +1,6 @@
-// Package target loads a target.yaml (DESIGN.md §8.1) into the Go form of
-// DESIGN.md §8.2. Every error Load returns is a configuration error, which the
-// CLI reports as exit code 2 (§11).
+// Package target loads a target.yaml into a Target, which every other package
+// consumes. Every error Load returns is a configuration error, which the CLI
+// reports as exit code 2.
 package target
 
 import (

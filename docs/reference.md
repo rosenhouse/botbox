@@ -208,6 +208,8 @@ while the checks still give your controller time. The checks run where it ends.
 - Put a `settle` after a `restart`, and one before it unless the op before it settles. G5
   compares the states those waits end in.
 - Put a `settle` between a `noSettle` op and a `deleteManaged`.
+- Put a `settle` between a `noSettle` `delete` and a `create` of its CR, or use a `recreate`,
+  which waits for the old CR to go.
 
 ### Op fields
 

@@ -133,7 +133,10 @@ The proxy is an `httputil.ReverseProxy` in front of the test cluster. It listens
 HTTP/2 only over TLS. The proxy's upstream transport comes from the test cluster's
 `rest.Config` via `rest.TransportFor`, so it carries whatever that cluster uses: a client
 certificate on envtest, a token or exec credential on a kubeconfig cluster. The proxy
-strips any inbound `Authorization` header.
+strips any inbound `Authorization` header. The target's requests therefore carry botbox's
+credentials, admin on envtest, and the target's RBAC is never exercised (§14). A target's
+own `Impersonate-*` headers pass through, and the API server honors them under botbox's
+credentials.
 
 Responsibilities:
 
@@ -1360,6 +1363,10 @@ the proxy; the `Image` launcher. Separate design addendum.
 6. G5 takes an op on one CR to change only that CR and what it owns (§6). Should it judge
    less for a controller whose CRs refer to one another, such as one CR delegating to
    another of its kind?
+7. Should a target declare its RBAC and run under it (§5.2)? The proxy could send a token
+   that botbox requests for a ServiceAccount of the run, bound to the target's Roles and
+   ClusterRoles. On envtest 1.37, such a token was refused a verb and a resource its Role
+   lacked, another namespace, and an impersonation of `system:masters`.
 
 ## 15. Decision log
 

@@ -77,7 +77,13 @@ func TestTheREADMERunsTheGoTestRecipeUncachedUnderItsBuildTag(t *testing.T) {
 	if tag == nil {
 		t.Fatalf("%s has no build tag of one word.", recipe)
 	}
-	commands := regexp.MustCompile("run\\s+`(go test [^`]*)`").FindAllStringSubmatch(section(t, readFile(t, "README.md"), "### From go test"), -1)
+	readme := section(t, readFile(t, "README.md"), "### From go test")
+	if plain := regexp.MustCompile("out of a plain\\s+`(go test [^`]*)`").FindStringSubmatch(readme); plain == nil {
+		t.Error("README.md does not say which go test the build tag keeps the recipe out of.")
+	} else if strings.Contains(plain[1], "-tags") {
+		t.Errorf("README.md says the build tag keeps the recipe out of %q, which sets -tags.", plain[1])
+	}
+	commands := regexp.MustCompile("run\\s+`(go test [^`]*)`").FindAllStringSubmatch(readme, -1)
 	if len(commands) == 0 {
 		t.Fatal("README.md's From go test section runs no go test command.")
 	}

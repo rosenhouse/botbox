@@ -168,10 +168,14 @@ func load(path string) (*Target, error) {
 	if loaded.Sample.GetName() == "" {
 		return nil, fmt.Errorf("sample %s: holds no metadata.name; give it one, since each CR a sequence creates is named after it", samplePath)
 	}
+	fileOf := map[*unstructured.Unstructured]string{}
 	for _, fixture := range declared.Fixtures {
 		objects, err := loadObjects(resolve(dir, fixture))
 		if err != nil {
 			return nil, fmt.Errorf("fixture: %w", err)
+		}
+		for _, object := range objects {
+			fileOf[object] = resolve(dir, fixture)
 		}
 		loaded.Fixtures = append(loaded.Fixtures, objects...)
 		if drawn, mutable := declared.Generate.Fixtures[fixture]; mutable {
@@ -192,6 +196,9 @@ func load(path string) (*Target, error) {
 		return nil, fmt.Errorf("crds: %w", err)
 	}
 	if err := loaded.checkScopes(scopeAtLoad(crds)); err != nil {
+		if misplaced := (*misplacedFixture)(nil); errors.As(err, &misplaced) {
+			return nil, fmt.Errorf("fixture %s: %w", fileOf[misplaced.fixture], err)
+		}
 		return nil, err
 	}
 

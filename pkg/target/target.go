@@ -180,13 +180,20 @@ func (t *Target) checkScopes(scope scopeFunc) error {
 		return fmt.Errorf("a run owns one namespace, so botbox cannot test these cluster-scoped kinds: %s", strings.Join(found, ", "))
 	}
 	for _, fixture := range t.Fixtures {
-		gvk, namespace := fixture.GroupVersionKind(), fixture.GetNamespace()
-		if namespaced, _ := scope(gvk); namespaced && namespace != "" {
-			return fmt.Errorf("the fixture %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace, and the target may look for this one in %s",
-				kindName(gvk), fixture.GetName(), namespace, namespace)
+		if namespaced, _ := scope(fixture.GroupVersionKind()); namespaced && fixture.GetNamespace() != "" {
+			return &misplacedFixture{fixture}
 		}
 	}
 	return nil
+}
+
+// misplacedFixture is a fixture of a namespaced kind that sets a namespace.
+type misplacedFixture struct{ fixture *unstructured.Unstructured }
+
+func (m *misplacedFixture) Error() string {
+	namespace := m.fixture.GetNamespace()
+	return fmt.Sprintf("the fixture %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace, and the target may look for this one in %s",
+		kindName(m.fixture.GroupVersionKind()), m.fixture.GetName(), namespace, namespace)
 }
 
 // kindName writes a kind as target.yaml declares it.

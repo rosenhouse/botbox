@@ -1337,9 +1337,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   here, and only the closing section cites a section, a decision or a symbol of this
   document. The three guide pages cite none. None of them names a milestone. Every
   sequence they show loads, and every link among them and `docs/reference.md` lands on a
-  file and a heading. `make test` enforces these rules. The limits section opens with each limit no issue
-  tracks. Each other limit is a `- ` bullet that links its issue, with its other lines
-  indented two spaces, and nothing follows the list. Each line's text begins with a
+  file and a heading. `make test` enforces these rules. The limits section opens with each
+  limit no issue tracks. Each other limit is a `- ` bullet that links its issue, with its
+  other lines indented two spaces, and nothing follows the list. Each line's text begins with a
   letter, `[` or `(`. The section holds no HTML, footnote or link definition, and no
   bullet holds code or a backslash, so nothing hides a limit or its link. A test refuses
   any other line, lists the limits, holds each bullet to a listed limit, and holds the

@@ -53,10 +53,10 @@ func TestTheToolsModuleRecipeLeavesItsShellsVariablesAlone(t *testing.T) {
 }
 
 func TestVariablesChangedByFindsEachWayToChangeOne(t *testing.T) {
-	t.Setenv("GOWORK", "off") // The script's shell must not inherit it.
 	for set, want := range map[string]string{"GOWORK=off; export GOWORK": "GOWORK", "  export GOWORK=off": "GOWORK",
 		"set -a; GOWORK=off; set +a": "GOWORK", "GOWORK=$(echo off)": "GOWORK", "GOWORK=off; mkdir -p tools/botbox": "GOWORK",
-		"unset GOWORK": "GOWORK", "PATH=$PATH:/x": "PATH", "GOTOOLCHAIN=auto": "GOTOOLCHAIN"} {
+		"unset GOWORK": "GOWORK", "PATH=$PATH:/x": "PATH", "GOTOOLCHAIN=auto": "GOTOOLCHAIN", "unset GOFLAGS": "GOFLAGS",
+		"GOFLAGS=": "GOFLAGS", "unset gopath": "gopath"} {
 		if changed, err := variablesChangedBy(t, set+"\n"+readFile(t, toolsRecipe)); err != nil || !slices.Equal(changed, []string{want}) {
 			t.Errorf("variablesChangedBy found %q and %v where the recipe begins %q, want %s.", changed, err, set, want)
 		}
@@ -69,10 +69,13 @@ func TestVariablesChangedByFindsEachWayToChangeOne(t *testing.T) {
 // exportedValue is a variable that export -p lists, and its value.
 var exportedValue = regexp.MustCompile(`(?m)^export (\w+)=(.*)$`)
 
+// word could name a shell variable.
+var word = regexp.MustCompile(`\b[A-Za-z_][A-Za-z0-9_]*\b`)
+
 // variablesChangedBy runs script, with go and bin/botbox stubbed, in a shell
-// that exports PATH and GOWORK alone. It names each variable the script sets,
-// changes or unsets there but OLDPWD, which cd sets. Under set -a the shell
-// exports each variable the script sets, so export -p lists it.
+// that exports PATH and a value for every other word of the script, since a
+// script names each variable it changes. It returns each variable the script
+// sets, changes or unsets there but OLDPWD, which cd sets.
 func variablesChangedBy(t *testing.T, script string) ([]string, error) {
 	t.Helper()
 	work, stubs := t.TempDir(), t.TempDir()
@@ -82,9 +85,13 @@ func variablesChangedBy(t *testing.T, script string) ([]string, error) {
 	writeStub(t, filepath.Join(work, "bin", "botbox"), "")
 	writeStub(t, filepath.Join(stubs, "go"), "")
 	writeFile(t, filepath.Join(stubs, "script.sh"), script)
-	cmd := exec.Command("sh", "-e", "-c", `export -p; echo ====; set -a; . "$0"; export -p`, filepath.Join(stubs, "script.sh"))
-	cmd.Dir, cmd.Env = work, []string{"PATH=" + stubs + string(os.PathListSeparator) + os.Getenv("PATH"),
-		"GOWORK=" + filepath.Join(work, "go.work")}
+	cmd := exec.Command("sh", "-e", "-c", `export -p; echo ====; . "$0"; export -p`, filepath.Join(stubs, "script.sh"))
+	cmd.Dir, cmd.Env = work, []string{"PATH=" + stubs + string(os.PathListSeparator) + os.Getenv("PATH")}
+	for _, name := range word.FindAllString(script, -1) {
+		if name != "PATH" {
+			cmd.Env = append(cmd.Env, name+"=seed")
+		}
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return nil, fmt.Errorf("the script returned %v:\n%s", err, out)

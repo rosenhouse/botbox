@@ -1322,9 +1322,11 @@ the proxy; the `Image` launcher. Separate design addendum.
   section and that closing section link here, and only the closing section cites a
   section, a decision or a symbol of this document. The README names no milestone.
   `make test` enforces these rules. The limits section opens with each limit no issue
-  tracks. Each other limit is a bullet that links its issue. A test lists the limits and
-  holds the README and this document to them, and a reviewer checks that each linked
-  issue is open (§12). A fenced block preceded by `<!-- embed: <path> -->` has content,
+  tracks. Each other limit is a bullet that links its issue. A test lists the limits,
+  holds each bullet and each paragraph after the list to one, and holds the README and
+  this document to each. A reviewer
+  checks that the opening states no other limit and that each linked issue is open
+  (§12). A fenced block preceded by `<!-- embed: <path> -->` has content,
   excluding the two fence lines, byte-identical to that file including its trailing
   newline; `<path>` is relative to the repository root; `make test` enforces it. It also
   runs the cert-manager quickstart command against a fake session and requires the block
@@ -1354,7 +1356,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   and it may run the code: start a cluster, drive the binary, mutate a function and check
   that a test dies. It flags any import of controller-runtime outside the two places §11
   allows, a README embed block that differs from its file, a limit the README still states
-  though the PR lifts it or its issue is closed, a post whose first line is not
+  though the PR lifts it or its issue is closed, a limit the README's opening states that
+  the test does not list, a post whose first line is not
   `🤖 Created by Claude 🤖`, and a PR description that lacks the milestone, the IDs, or
   the "Design change" section when this document changed. Reviewers never merge.
 - **Journal:** `docs/journal.md`, one entry per milestone, recording what the agents

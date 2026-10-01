@@ -44,11 +44,7 @@ func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
 		t.Errorf("README.md does not say what botbox cannot test right after what it does")
 	}
 	section, _, _ := strings.Cut(rest, "\n## ")
-	parts := regexp.MustCompile(`\n *(?:[-*+]|[0-9]+[.)]) `).Split(section, -1)
-	for i := range parts {
-		parts[i] = oneLine(parts[i])
-	}
-	opening, bullets := parts[0], parts[1:]
+	opening, bullets := limitParts(section)
 	for _, bullet := range bullets {
 		if !slices.ContainsFunc(limits, func(l limit) bool { return l.isIn(bullet) }) {
 			t.Errorf("No row of limits says this README.md limit and links its issue: %s", bullet)
@@ -67,6 +63,38 @@ func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
 		if !slices.ContainsFunc(bullets, l.isIn) {
 			t.Errorf("README.md lists no limit that says %q and links #%d", l.says, l.issue)
 		}
+	}
+}
+
+var (
+	listItem = regexp.MustCompile(`\n *(?:[-*+]|[0-9]+[.)])[ \t]`)
+	// afterList is a blank line before an unindented paragraph, which ends a
+	// list.
+	afterList = regexp.MustCompile(`\n\n(\S)`)
+)
+
+// limitParts splits the limits section into its opening and its other parts:
+// each bullet, and each paragraph after the list.
+func limitParts(section string) (opening string, parts []string) {
+	items := listItem.Split(section, -1)
+	for _, item := range items[1:] {
+		parts = append(parts, strings.Split(afterList.ReplaceAllString(item, "\x00$1"), "\x00")...)
+	}
+	for i := range parts {
+		parts[i] = oneLine(parts[i])
+	}
+	return oneLine(items[0]), parts
+}
+
+func TestLimitPartsSplitsEachBulletAndEachParagraphAfterTheList(t *testing.T) {
+	opening, parts := limitParts("\nOpening one.\n\nOpening two.\n\n- First\n  bullet.\n-\tSecond.\n\n  Second's paragraph.\n" +
+		"1. Third.\n\nAfter the list.\n")
+
+	if want := "Opening one. Opening two."; opening != want {
+		t.Errorf("limitParts gave the opening %q, want %q.", opening, want)
+	}
+	if want := []string{"First bullet.", "Second. Second's paragraph.", "Third.", "After the list."}; !slices.Equal(parts, want) {
+		t.Errorf("limitParts gave the parts %q, want %q.", parts, want)
 	}
 }
 

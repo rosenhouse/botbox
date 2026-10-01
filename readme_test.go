@@ -125,7 +125,7 @@ func TestLimitPartsEndsAnItemWhereCommonMarkDoes(t *testing.T) {
 		next string
 		ends bool
 	}{
-		{"lazy.", false}, {" lazy.", false}, {"#lazy.", false}, {"\n  Inside.", false},
+		{"lazy.", false}, {" lazy.", false}, {"#lazy.", false}, {"\n  Inside.", false}, {"\n\tInside.", false}, {"\t# Inside.", false},
 		{"\n After.", true}, {" \nAfter.", true}, {"# Heading", true}, {"```", true}, {"~~~", true}, {" > Quote", true},
 		{"***", true}, {"---", true}, {"_ _ _", true}, {"<p>HTML</p>", true},
 	} {

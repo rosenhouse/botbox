@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/rosenhouse/botbox/pkg/run"
@@ -119,15 +120,23 @@ func TestSeedsDrawTheGoldenSequences(t *testing.T) {
 	if err := json.Unmarshal(recorded, &golden); err != nil {
 		t.Fatalf("Reading %s failed: %v.", goldenDraws, err)
 	}
+	var differ []string
+	var first json.RawMessage
 	for _, name := range slices.Sorted(maps.Keys(drawn)) {
 		for _, seed := range slices.Sorted(maps.Keys(drawn[name])) {
 			if !equalJSON(golden[name][seed], drawn[name][seed]) {
-				t.Errorf("Seed %s draws a different sequence for %s:\n%s", seed, name, drawn[name][seed])
+				differ = append(differ, name+" seed "+seed)
+				if first == nil {
+					first = drawn[name][seed]
+				}
 			}
 		}
 	}
-	t.Errorf("The draws differ from %s. If the change is deliberate, rerun with -update and say so in the commit.",
-		goldenDraws)
+	t.Errorf("The draws differ from %s for %s. If the change is deliberate, rerun with -update and say so in the commit.",
+		goldenDraws, strings.Join(differ, ", "))
+	if first != nil {
+		t.Logf("%s now draws:\n%s", differ[0], first)
+	}
 }
 
 func TestCertManagersFirstExampleSeedDrawsOneCreate(t *testing.T) {

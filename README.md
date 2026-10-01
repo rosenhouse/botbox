@@ -37,8 +37,49 @@ index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0
 export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 ```
 
+botbox has no release yet, so `@latest` installs main as it is now. Name a commit in its place
+to install the same botbox every time, as [CI](#running-in-ci) should.
+
+Building botbox takes Go 1.26.0 or later. An older `go` command, from Go 1.21 on, downloads a
+newer Go itself, unless `GOTOOLCHAIN=local` is set, as many CI images set it. Then `go install`
+fails with `requires go >= 1.26.0`, and a `go` before 1.24 stops the tools module below with
+`flag provided but not defined: -tool`. Install a newer Go, or run the commands with
+`GOTOOLCHAIN=auto`.
+
 `botbox --help` lists the commands and the exit codes. `botbox run --help` lists each flag of
 `run` with its default.
+
+### Keep botbox out of your go.mod
+
+`go install` leaves your module alone. Requiring botbox in your operator's go.mod, with
+`go get -tool` or by importing one of its packages, raises your module to botbox's versions:
+
+```
+go: upgraded go 1.23.0 => 1.26.0
+go: upgraded k8s.io/api v0.32.0 => v0.37.0
+go: upgraded sigs.k8s.io/controller-runtime v0.20.0 => v0.25.1
+```
+
+botbox's Go packages make no compatibility promise yet. To pin botbox in your repository, give
+it a module of its own. Run this from your repository root:
+
+<!-- embed: examples/tools-module.sh -->
+```sh
+mkdir -p tools/botbox
+cd tools/botbox
+go mod init example.com/operator/tools/botbox
+go mod edit -go=1.26.0
+go get -tool github.com/rosenhouse/botbox/cmd/botbox@latest
+cd ../..
+go -C tools/botbox build -o ../../bin/botbox github.com/rosenhouse/botbox/cmd/botbox
+bin/botbox version
+```
+
+The go line comes first, so that a `go` before 1.24, which lacks `go get -tool`, switches to a
+newer Go before it needs the flag. `tools/botbox/go.mod` then pins botbox. Your own go.mod, and
+any package of yours in `tools/`, stay as they were. Run `bin/botbox` as the last line does, not
+`go -C tools/botbox tool botbox`, which runs botbox in `tools/botbox/`, where your
+`launch.binary` does not resolve.
 
 ### Against kind
 
@@ -79,6 +120,36 @@ kind delete cluster --kubeconfig kind.kubeconfig
   G2 fails. A wider `stable` avoids that.
 
 `make test-kind` runs the toy controller this way.
+
+## A find in half a minute
+
+Every find this README shows is planted: a bug seeded into the toy controller, or a negative
+control that sets up a real controller to fail. In a clone of this repository, this replays a
+sequence against the toy's seeded bug B3, which leaves a ConfigMap without an ownerReference:
+
+```sh
+make build
+KUBEBUILDER_ASSETS="$(make --no-print-directory assets-path)" ./bin/botbox replay \
+  --target targets/toy-widget/target.yaml --launch-arg --bug=3 targets/toy-widget/sequences/b3.json
+```
+
+```
+the deadline is 2m12s: this run can take that long at the target's timeouts. --deadline sets another.
+run 1: seed 20260920, sequence targets/toy-widget/sequences/b3.json
+run 1: G3 the v1/ConfigMap widget-0 was still there 10s after widget, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
+  at 2026-09-30T19:50:43.395112151Z; 1 version, the first v1/ConfigMap widget-0
+  the evidence is in botbox-out/20260930T195026Z-20260920/run-1
+```
+
+The toy converges, so nothing looks wrong until the sequence deletes the Widget and the
+ConfigMap stays. An envtest suite would not see this: envtest runs no garbage collector, so the
+ConfigMap stays whether or not it carries an ownerReference. botbox emulates the collector, and
+G3 fails. [docs/bug-matrix.md](docs/bug-matrix.md) lists each seeded bug and the check that
+catches it.
+
+In a fresh clone, the first `make assets-path` also installs setup-envtest and downloads the
+control plane, and the first `make build` compiles every dependency. After that, the replay
+takes about 25 seconds.
 
 ## Quickstart: cert-manager
 
@@ -421,7 +492,9 @@ a failure, and `make test-example` runs every pinned sequence so none can rot.
 A `create` names its CR in `obj`. An `update`, `delete` or `recreate` acts on the CR named as
 your sample unless it names another in `cr`, such as `{"i": 2, "t": "delete", "cr":
 "example-2"}`. botbox refuses an op on a CR that no op before it creates, and an `update` or
-`delete` of a CR deleted since it was last created.
+`delete` of a CR deleted since it was last created. It also refuses a `create` of a CR that a
+`noSettle` `delete` removed, unless an op between them settles, because a finalizer may still
+hold the old CR. A `recreate` waits for the old CR to go.
 
 In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
 before it settles. G5 compares the states the controller settled in on either side, and leaves a
@@ -667,6 +740,51 @@ CRD schema, `sample`, `generate` and `manages`. A botbox upgrade, or a pull requ
 of those, draws different sequences under the same seed. To tell whether a failure comes from the
 change under review, replay its `sequence.json` against the base branch's controller.
 
+### From go test
+
+A Go test can run botbox and fail on what it finds. This one runs it on the toy controller:
+
+<!-- embed: targets/toy-widget/botbox_test.go -->
+```go
+//go:build botbox
+
+package main
+
+import (
+	"os"
+	"os/exec"
+	"testing"
+	"time"
+)
+
+func TestBotbox(t *testing.T) {
+	botbox := exec.Command("bin/botbox", "run", "--target", "targets/toy-widget/target.yaml",
+		"--seed", "1", "--runs", "3")
+	if deadline, ok := t.Deadline(); ok {
+		// Stop botbox before go test's -timeout, which would leave its control plane running.
+		left := time.Until(deadline).Truncate(time.Second) - 30*time.Second
+		if left <= 0 {
+			t.Fatal("go test's -timeout leaves botbox no time")
+		}
+		botbox.Args = append(botbox.Args, "--deadline", left.String())
+	}
+	botbox.Dir = "../.." // launch.binary is relative to the repository root.
+	botbox.Stdout, botbox.Stderr = os.Stdout, os.Stderr
+	if err := botbox.Run(); err != nil {
+		t.Fatalf("botbox: %v", err)
+	}
+}
+```
+
+Build `bin/botbox`, as the [tools module](#keep-botbox-out-of-your-gomod) does, build your
+controller and set `KUBEBUILDER_ASSETS`. Then run `go test -count=1 -tags botbox ./...`.
+`go test` cannot see a change to your controller or `target.yaml`, so `-count=1` stops it from
+reusing a cached pass. The build tag keeps the test out of a plain `go test ./...`. Raise
+`go test`'s `-timeout` for more runs, because the test stops botbox before it.
+
+botbox has no Go API to call instead. A `ready: go:<name>` or `equal: go:<name>` hook takes
+effect only in a build of botbox that registers it, which takes a change to this repository.
+
 ## Invariants
 
 Seven generic invariants apply to every target. [DESIGN.md](DESIGN.md#6-generic-invariants) states them exactly, with their windows, thresholds and attribution rules.
@@ -688,6 +806,12 @@ Seven generic invariants apply to every target. [DESIGN.md](DESIGN.md#6-generic-
 - `make setup` installs the envtest control plane, and `make help` lists every target.
 - `make test`, `make test-envtest`, `make test-example` and `make test-example-external-secrets` are the tiers CI runs on every PR.
 - `make test-kind` runs the toy through `--kubeconfig` against a kind cluster that it creates and deletes. It needs Docker. The nightly workflow runs the same runs with `make test-kind-runs`.
+- `make hunt-cert-manager` and `make hunt-external-secrets` hunt for bugs in the pinned controllers
+  for `HUNT_MINUTES` (default 120). Each runs the families in `examples/<example>/sequences/hunt/`,
+  then up to `HUNT_RUNS` (default 1000) seeds from `HUNT_SEED` (default 1000) on. It keeps each
+  failing run's evidence, and the botbox that found it, in `botbox-out/hunt-<example>/`. A run
+  that fails is a candidate to triage, not yet a bug: see
+  [DESIGN.md §11](DESIGN.md#11-repo-conventions). No pull request runs a hunt.
 - A block after `<!-- embed: path -->` holds that file byte for byte, and `make test` enforces it.
 - [DESIGN.md](DESIGN.md) is the governing design. Code and docs must not contradict it.
 - [docs/journal.md](docs/journal.md) and [docs/spikes/](docs/spikes/) hold the milestone journal and the experiments behind DESIGN.md §15.

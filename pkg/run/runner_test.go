@@ -2131,6 +2131,19 @@ func TestRunValidatesTheSequenceAgainstTheTarget(t *testing.T) {
 			want:  "op 3 (create) creates the CR widget, which op 2 created and no op since deleted",
 		},
 		{
+			name: "a create of a CR a noSettle delete may still hold",
+			sequence: sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				Op{Type: OpCreate, Obj: widget("widget-2")},
+				Op{Type: OpDelete, NoSettle: true},
+				Op{Type: OpUpdate, CR: "widget-2", Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}, NoSettle: true},
+				Op{Type: OpRestart},
+				Op{Type: OpCreate, Obj: widget("widget")},
+			),
+			check: &fakeChecker{},
+			want:  "op 5 (create) creates the CR widget, which may still be there: op 2 deleted it with noSettle and no op since settles",
+		},
+		{
 			name: "an update of a deleted CR",
 			sequence: sequenceOf(
 				Op{Type: OpCreate, Obj: widget("widget")},
@@ -2179,11 +2192,17 @@ func TestRunValidatesTheSequenceAgainstTheTarget(t *testing.T) {
 
 func TestRunAcceptsOpsOnTheCRsEarlierOpsCreate(t *testing.T) {
 	sequence := sequenceOf(
-		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpCreate, Obj: widget("widget"), NoSettle: true},
 		Op{Type: OpCreate, Obj: widget("widget-2")},
 		Op{Type: OpUpdate, CR: "widget-2", Patch: map[string]any{"spec": map[string]any{"count": float64(1)}}},
 		Op{Type: OpRecreate, CR: "widget-2", Obj: widget("widget-2")},
 		Op{Type: OpDelete, CR: "widget-2"},
+		Op{Type: OpCreate, Obj: widget("widget-2")},
+		Op{Type: OpDelete, CR: "widget-2", NoSettle: true},
+		Op{Type: OpSettle},
+		Op{Type: OpCreate, Obj: widget("widget-2")},
+		Op{Type: OpDelete, CR: "widget-2", NoSettle: true},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(2)}}},
 		Op{Type: OpCreate, Obj: widget("widget-2")},
 		Op{Type: OpDelete},
 		Op{Type: OpSettle},

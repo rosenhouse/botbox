@@ -1374,5 +1374,2503 @@
         }
       ]
     }
+  },
+  "toy-widget with a label fixture": {
+    "1": {
+      "seed": 1,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "restart"
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        }
+      ]
+    },
+    "10": {
+      "seed": 10,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 1
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "restart"
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        }
+      ]
+    },
+    "11": {
+      "seed": 11,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "jxfabh6madhd"
+            }
+          }
+        },
+        {
+          "i": 3,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "ddamgjcs8qc9"
+            }
+          }
+        },
+        {
+          "i": 4,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 1
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        }
+      ]
+    },
+    "12": {
+      "seed": 12,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 10
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        }
+      ]
+    },
+    "13": {
+      "seed": 13,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "7aamsjzhebbh"
+            }
+          }
+        }
+      ]
+    },
+    "14": {
+      "seed": 14,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 2
+          }
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        }
+      ]
+    },
+    "15": {
+      "seed": 15,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        }
+      ]
+    },
+    "16": {
+      "seed": 16,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 4
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 3,
+          "t": "settle"
+        }
+      ]
+    },
+    "17": {
+      "seed": 17,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 10
+            }
+          }
+        },
+        {
+          "i": 2,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 0
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 3,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 2
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        }
+      ]
+    },
+    "18": {
+      "seed": 18,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 4
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "delete"
+        },
+        {
+          "i": 2,
+          "t": "restart"
+        },
+        {
+          "i": 3,
+          "t": "settle"
+        }
+      ]
+    },
+    "19": {
+      "seed": 19,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "restart"
+        },
+        {
+          "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "hcst"
+            }
+          }
+        },
+        {
+          "i": 5,
+          "t": "restart"
+        },
+        {
+          "i": 6,
+          "t": "settle"
+        },
+        {
+          "i": 7,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 8
+          }
+        },
+        {
+          "i": 8,
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        }
+      ]
+    },
+    "2": {
+      "seed": 2,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 0
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "delete",
+          "cr": "widget-2",
+          "noSettle": true
+        },
+        {
+          "i": 3,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "eerjabladagf"
+            }
+          }
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        }
+      ]
+    },
+    "20": {
+      "seed": 20,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        }
+      ]
+    },
+    "21": {
+      "seed": 21,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        }
+      ]
+    },
+    "22": {
+      "seed": 22,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 5
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "restart"
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 3
+            }
+          }
+        }
+      ]
+    },
+    "23": {
+      "seed": 23,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        }
+      ]
+    },
+    "24": {
+      "seed": 24,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 2
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 2
+          }
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 2
+            }
+          }
+        },
+        {
+          "i": 4,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "c6hc7xv8"
+            }
+          }
+        }
+      ]
+    },
+    "25": {
+      "seed": 25,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "delete",
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "restart"
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        }
+      ]
+    },
+    "26": {
+      "seed": 26,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 0
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        },
+        {
+          "i": 3,
+          "t": "delete",
+          "noSettle": true
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
+          "t": "restart"
+        },
+        {
+          "i": 6,
+          "t": "settle"
+        }
+      ]
+    },
+    "27": {
+      "seed": 27,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 0
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "delete"
+        },
+        {
+          "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 5
+          }
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        }
+      ]
+    },
+    "28": {
+      "seed": 28,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        }
+      ]
+    },
+    "29": {
+      "seed": 29,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 6
+            }
+          }
+        },
+        {
+          "i": 2,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 0
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 3,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 4
+          }
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        }
+      ]
+    },
+    "3": {
+      "seed": 3,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 1
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "delete",
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        }
+      ]
+    },
+    "30": {
+      "seed": 30,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 5
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        },
+        {
+          "i": 2,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 3
+          }
+        },
+        {
+          "i": 3,
+          "t": "settle"
+        }
+      ]
+    },
+    "31": {
+      "seed": 31,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 5
+          }
+        },
+        {
+          "i": 4,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        }
+      ]
+    },
+    "32": {
+      "seed": 32,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        }
+      ]
+    },
+    "33": {
+      "seed": 33,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "restart"
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "mene"
+            }
+          }
+        },
+        {
+          "i": 4,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        },
+        {
+          "i": 5,
+          "t": "restart"
+        },
+        {
+          "i": 6,
+          "t": "settle"
+        },
+        {
+          "i": 7,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 5
+            }
+          }
+        }
+      ]
+    },
+    "34": {
+      "seed": 34,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 5
+            }
+          }
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "delete",
+          "cr": "widget-2"
+        }
+      ]
+    },
+    "35": {
+      "seed": 35,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 2
+          }
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        }
+      ]
+    },
+    "36": {
+      "seed": 36,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 0
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 10
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 3,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 6
+            }
+          }
+        },
+        {
+          "i": 4,
+          "t": "restart"
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        }
+      ]
+    },
+    "37": {
+      "seed": 37,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 2
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "restart"
+        },
+        {
+          "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 1
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        }
+      ]
+    },
+    "38": {
+      "seed": 38,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "delete",
+          "noSettle": true
+        },
+        {
+          "i": 3,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-3"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        }
+      ]
+    },
+    "39": {
+      "seed": 39,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 10
+            }
+          }
+        }
+      ]
+    },
+    "4": {
+      "seed": 4,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 0
+            }
+          }
+        }
+      ]
+    },
+    "40": {
+      "seed": 40,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 8
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 5
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "delete"
+        },
+        {
+          "i": 3,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "dvwpfghvspba"
+            }
+          }
+        }
+      ]
+    },
+    "41": {
+      "seed": 41,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 6
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "restart"
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        }
+      ]
+    },
+    "42": {
+      "seed": 42,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 10
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 3,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "ax5de9da"
+            }
+          }
+        },
+        {
+          "i": 4,
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 6
+            }
+          }
+        },
+        {
+          "i": 5,
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        }
+      ]
+    },
+    "43": {
+      "seed": 43,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "delete"
+        }
+      ]
+    },
+    "44": {
+      "seed": 44,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 6
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "restart"
+        },
+        {
+          "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
+          "t": "restart"
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        }
+      ]
+    },
+    "45": {
+      "seed": 45,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 2
+          }
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "restart"
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
+          "t": "delete"
+        },
+        {
+          "i": 6,
+          "t": "settle"
+        }
+      ]
+    },
+    "46": {
+      "seed": 46,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 1
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 2
+          }
+        },
+        {
+          "i": 2,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 3,
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 6
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        }
+      ]
+    },
+    "47": {
+      "seed": 47,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 5
+            }
+          }
+        },
+        {
+          "i": 2,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "gbabbpd9"
+            }
+          }
+        },
+        {
+          "i": 3,
+          "t": "delete"
+        },
+        {
+          "i": 4,
+          "t": "recreate",
+          "cr": "widget-2",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 5,
+          "t": "restart"
+        },
+        {
+          "i": 6,
+          "t": "settle"
+        }
+      ]
+    },
+    "48": {
+      "seed": 48,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        }
+      ]
+    },
+    "49": {
+      "seed": 49,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 10
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 1
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "delete"
+        },
+        {
+          "i": 4,
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 5,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 2
+            }
+          }
+        }
+      ]
+    },
+    "5": {
+      "seed": 5,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "restart"
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        }
+      ]
+    },
+    "50": {
+      "seed": 50,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "f1ddeu9gfdnd"
+            }
+          }
+        }
+      ]
+    },
+    "51": {
+      "seed": 51,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 10
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        }
+      ]
+    },
+    "52": {
+      "seed": 52,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 9
+            }
+          }
+        }
+      ]
+    },
+    "53": {
+      "seed": 53,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 2
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "hkton7paob3c"
+            }
+          }
+        },
+        {
+          "i": 2,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 10
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 3,
+          "t": "settle"
+        }
+      ]
+    },
+    "54": {
+      "seed": 54,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "delete",
+          "noSettle": true
+        },
+        {
+          "i": 3,
+          "t": "settle"
+        }
+      ]
+    },
+    "55": {
+      "seed": 55,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        }
+      ]
+    },
+    "56": {
+      "seed": 56,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 8
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        }
+      ]
+    },
+    "57": {
+      "seed": 57,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        }
+      ]
+    },
+    "58": {
+      "seed": 58,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 10
+            }
+          }
+        },
+        {
+          "i": 2,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "xawwexhv4ikz"
+            }
+          }
+        },
+        {
+          "i": 3,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 4,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "xqchaa6b"
+            }
+          }
+        }
+      ]
+    },
+    "59": {
+      "seed": 59,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "restart"
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        }
+      ]
+    },
+    "6": {
+      "seed": 6,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        }
+      ]
+    },
+    "60": {
+      "seed": 60,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 8
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        }
+      ]
+    },
+    "7": {
+      "seed": 7,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 10
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "g3nabl7a"
+            }
+          }
+        },
+        {
+          "i": 2,
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 0
+            }
+          }
+        },
+        {
+          "i": 3,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 4
+          }
+        },
+        {
+          "i": 4,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "awra"
+            }
+          }
+        },
+        {
+          "i": 5,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        }
+      ]
+    },
+    "8": {
+      "seed": 8,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 1,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 2,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 6
+          }
+        },
+        {
+          "i": 3,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 4
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 4,
+          "t": "update",
+          "cr": "widget-2",
+          "patch": {
+            "spec": {
+              "count": 2
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 5,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-3"
+            },
+            "spec": {
+              "count": 10
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 6,
+          "t": "settle"
+        }
+      ]
+    },
+    "9": {
+      "seed": 9,
+      "target": "toy-widget",
+      "ops": [
+        {
+          "i": 0,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "delete",
+          "noSettle": true
+        },
+        {
+          "i": 3,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.botbox/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        }
+      ]
+    }
   }
 }

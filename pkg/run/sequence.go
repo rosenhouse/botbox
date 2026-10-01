@@ -347,6 +347,9 @@ func (s Sequence) checkCRs(sample string) error {
 			return fmt.Errorf("op %d (%s) writes a CR with no metadata.name; give it one, since ops name the CR they act on", op.Index, op.Type)
 		case op.Type == OpCreate && isLive:
 			return fmt.Errorf("op %d (create) creates the CR %s, which op %d created and no op since deleted", op.Index, name, creator)
+		case op.Type == OpCreate && wasDeleted && !slices.ContainsFunc(s.Ops[deleter:op.Index], Op.Settles):
+			return fmt.Errorf("op %d (create) creates the CR %s, which may still be there: op %d deleted it with noSettle and no op since settles; "+
+				"use a recreate, which waits for it to go, or put a settle op before the create", op.Index, name, deleter)
 		case op.Type == OpCreate:
 		case !isLive && !wasDeleted && op.CR == "":
 			return fmt.Errorf("op %d (%s) names no cr, so it acts on the sample's %s, which no op before it creates", op.Index, op.Type, name)

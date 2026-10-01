@@ -698,8 +698,10 @@ Details the example does not show:
   names its CR in `obj`, and a `recreate` creates the CR it deletes. These are
   configuration errors: an `obj` with no `metadata.name`, an op on a CR that no earlier
   `create` or `recreate` creates, an `update` or `delete` of a CR deleted since it was last
-  created, a `recreate` whose `obj` names another CR, and a `create` of a CR that no
-  `delete` has removed since.
+  created, a `recreate` whose `obj` names another CR, a `create` of a CR that no
+  `delete` has removed since, and a `create` of a CR that a `noSettle` `delete` removed
+  with no op since that settles. A finalizer may still hold that CR, and the API server
+  refuses the create while one does. A `recreate` waits for its old CR to go.
 - A sequence ends with an op that settles, or nothing judges the state it leaves behind
   (§6, D33). That rules out a trailing `noSettle`, `restart` or `fault`.
 - G5 judges a `restart` only between two converged settle waits with no fault's window
@@ -988,7 +990,8 @@ expression and the CR's status beside it (§5.7). An evaluation error in a prope
 configuration error.
 
 A Go hook is a function registered under a name in `pkg/target` and referenced as
-`ready: go:<name>` or `equal: go:<name>`. Hooks exist for in-repo targets only.
+`ready: go:<name>` or `equal: go:<name>`. Hooks exist for in-repo targets only. No Go
+function runs botbox end to end, and its packages make no compatibility promise (D@59).
 
 ## 9. Toy target: `Widget`
 
@@ -1173,7 +1176,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   asset fails rather than passing quietly. Values live in the Makefile. The README's Install
   block and the CI recipe repeat the envtest pins for adopters to copy. The recipe also
   repeats go.mod's module and Go version, and the runner and action releases of
-  `.github/workflows/`. `make test` holds each copy to its source. Each `--deadline` in the
+  `.github/workflows/`. The Install section quotes go.mod's Go version and the k8s.io/api
+  and controller-runtime versions that requiring botbox forces on a module (D@58).
+  `make test` holds each copy to its source. Each `--deadline` in the
   recipe gives a run at least the time that the Makefile's example tiers give one. Bumps
   are their own PRs, never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
@@ -1282,7 +1287,19 @@ the proxy; the `Image` launcher. Separate design addendum.
   through `--kubeconfig` against a kind cluster it creates and deletes, on demand. It
   passes `b0.json` and fixed seeds, and fails B3 on G3 and B8 on G7 as its negative
   controls. It installs the pinned kind into `bin/` and needs Docker. The nightly workflow
-  runs the same runs with `make test-kind-runs`.
+  runs the same runs with `make test-kind-runs`. `make hunt-cert-manager` and
+  `make hunt-external-secrets` hunt for bugs in the adopted examples, on demand and on no
+  pull request. Each runs every family in `examples/<example>/sequences/hunt/`, then up to
+  `HUNT_RUNS` seeds drawn from `HUNT_SEED` on, each in an invocation of its own, until
+  `HUNT_MINUTES` runs out. Each invocation writes under `botbox-out/hunt-<example>/`,
+  beside the copy of `bin/botbox` the hunt runs. A family is checked in only once it
+  passes the pinned controller.
+- **Triage.** A hunt run that fails is a candidate, not a bug. Triage replays it three
+  times, reproduces it by hand against envtest, reads upstream's code path and searches
+  upstream's tracker. A candidate that breaks a botbox rule and no upstream contract is a
+  botbox false positive, and becomes a botbox issue. A candidate that fails on every replay
+  and breaks an upstream contract becomes a draft under `docs/findings/`, with its
+  sequence, for the maintainer to file upstream.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
@@ -1291,20 +1308,27 @@ the proxy; the `Image` launcher. Separate design addendum.
   as a GitHub release asset, and are pinned.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
-  (five lines); what it cannot test yet; install; quickstart against cert-manager, then
-  what the second example adds; writing `target.yaml` for your own controller; reading a
-  report; what to change when botbox exits 2; a CI recipe for adopters, embedded from
-  `examples/ci/github-actions.yml`; a one-line-per-invariant table linking to §6; a
-  closing "Development and internals" section that links to this document and to
-  `docs/bug-matrix.md`. Only the Invariants section and that closing section link here,
-  and only the closing section cites a section, a decision or a symbol of this document.
-  The README names no milestone. `make test` enforces these rules. The limits section
-  opens with each limit no issue tracks. Each other limit is a bullet that links its issue.
-  A test lists the limits and holds the README and this document to them, and a reviewer
-  checks that each linked issue is open (§12). A fenced block preceded by
-  `<!-- embed: <path> -->` has content, excluding the two fence lines, byte-identical to
-  that file including its trailing newline; `<path>` is relative to the repository root;
-  `make test` enforces it.
+  (five lines); what it cannot test yet; install, and a tools module that keeps botbox
+  out of an operator's go.mod, embedded from `examples/tools-module.sh`, which the envtest
+  tier runs (D@58); a find in half a minute, a replay of a bug seeded into the toy, which
+  says that every find the README shows is seeded or a negative control and whose command
+  an envtest test runs as written; quickstart against cert-manager, then what the second
+  example adds; writing `target.yaml` for your own controller; reading a report; what to
+  change when botbox exits 2; a CI recipe for adopters, embedded from
+  `examples/ci/github-actions.yml`, and a test that runs botbox from `go test`, embedded
+  from `targets/toy-widget/botbox_test.go`, which the envtest tier runs (D@59); a
+  one-line-per-invariant table linking to §6; a closing "Development and internals"
+  section that links to this document and to `docs/bug-matrix.md`. Only the Invariants
+  section and that closing section link here, and only the closing section cites a
+  section, a decision or a symbol of this document. The README names no milestone.
+  `make test` enforces these rules. The limits section opens with each limit no issue
+  tracks. Each other limit is a bullet that links its issue. A test lists the limits and
+  holds the README and this document to them, and a reviewer checks that each linked
+  issue is open (§12). A fenced block preceded by `<!-- embed: <path> -->` has content,
+  excluding the two fence lines, byte-identical to that file including its trailing
+  newline; `<path>` is relative to the repository root; `make test` enforces it. It also
+  runs the cert-manager quickstart command against a fake session and requires the block
+  after it to hold what botbox prints.
 - **PRs.** Every PR description, issue, review and comment a Claude session posts begins
   with the line `🤖 Created by Claude 🤖` (CLAUDE.md). The description then names the
   milestone and the invariant/property IDs it touches, and carries a "Design change"
@@ -1407,6 +1431,8 @@ the proxy; the `Image` launcher. Separate design addendum.
    that botbox requests for a ServiceAccount of the run, bound to the target's Roles and
    ClusterRoles. On envtest 1.37, such a token was refused a verb and a resource its Role
    lacked, another namespace, and an impersonation of `system:masters`.
+8. What lets the README show a find in a real controller as a bug botbox found: upstream
+   acknowledging it, or a deterministic replay that a reading of upstream's code confirms?
 
 ## 15. Decision log
 
@@ -1792,10 +1818,15 @@ built from source and run as a black-box binary.
   `Example(seed)`, which rapid documents as fit only for examples and which promises nothing
   across versions. A draw also depends on the CRD schema, the sample, `generate` and
   `manages`. The Makefile, the README and the envtest tier rely on what particular seeds
-  draw. `pkg/generate` records the draws of those seeds for the toy, cert-manager and
-  external-secrets. A change to generation or to rapid that moves a draw fails until the
-  test is rerun with `-update`. The README tells CI to pin botbox to a commit and to replay
-  a failing `sequence.json` against the base branch.
+  draw. `pkg/generate` records the draws of those seeds for the toy, the toy with a label
+  fixture, cert-manager and external-secrets. It takes the example and kind tiers' seeds
+  from the Makefile, and the fixture envtest fails unless it draws what the record holds. A
+  change to generation or to rapid that moves a draw fails until the test is rerun with
+  `-update`. The README's quickstarts must run the Makefile's example seed, and the drawn
+  runs the README shows must start at that seed. Another test runs the README's cert-manager
+  quickstart command as `quickstart.sh` passes it on, and fails unless the README shows what
+  botbox prints. The README tells CI to pin botbox to a commit and to replay a failing
+  `sequence.json` against the base branch.
 - **D55 Generation keeps the CRD's own rules, judged by the API server's code.** The
   generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
   rule `self.maxUnavailable <= self.count`, 15 of 100 drawn sequences broke it, and the
@@ -2174,3 +2205,45 @@ built from source and run as a black-box binary.
   target with kinds of both sorts hears of them in two errors. Merging them into one was
   rejected, because the first check refuses before botbox installs CRDs on a
   `--kubeconfig` cluster.
+- **D@63 The README's first find is a seeded bug, and a hunt looks for real ones.** Every
+  find the README shows is planted, and a real controller's needs a build of minutes. So
+  the README says so, and its first find, after Install, replays the toy's B3. An envtest
+  test runs that command as written and matches what it prints. A real controller may
+  break under API faults, restarts mid-reconcile, changed or missing fixtures and several
+  CRs, and generation draws no fault. So each adopted example carries hand-written
+  families under `sequences/hunt/`, and `make hunt-<example>` runs them and then drawn
+  seeds until a time box runs out. Each family and seed runs in an invocation of its own,
+  because an invocation stops at its first failing run and a hunt keeps every failure. A
+  run the time box cut is no failure, but a find reported after the box's end is one. The
+  hunt runs a copy of `bin/botbox`, so a rebuild during a hunt changes nothing. A family
+  is checked in only once it passes the pinned controller. A run that fails is a
+  candidate until triage keeps it (§11). No agent files a candidate upstream, because an
+  issue there speaks for the maintainer. No pull request runs a hunt, because one takes
+  hours. A `create` of a CR that a `noSettle` `delete` removed, with no op since that
+  settles, is a configuration error (§7), because a finalizer may still hold the old CR.
+  Letting that create wait for the old CR was rejected, because a `recreate` already
+  does.
+- **D@58 The README keeps botbox out of an operator's go.mod.** Minimal version selection
+  works on the whole module graph, so requiring botbox, or importing any of its packages,
+  raises a module to botbox's Go, Kubernetes and controller-runtime versions (D11). The
+  README installs botbox with `go install`, or with `examples/tools-module.sh`, which
+  pins it in a module of its own under `tools/botbox/`. A new directory leaves a `tools/`
+  package of the operator's own, a common place for one, in the operator's module. The
+  script sets the tools module's go line before `go get -tool`, so that a `go` before
+  1.24, which lacks the flag, switches first. It builds `bin/botbox`, because
+  `go -C tools/botbox tool botbox` runs botbox in `tools/botbox/`, where `launch.binary`
+  does not resolve. The envtest tier runs the script in a fresh operator module with a
+  `tools/` package, as the oldest `go` the README names, with botbox replaced by the
+  checkout. It also checks that the `go` before that one fails.
+- **D@59 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
+  the README's `go test` recipe runs `bin/botbox`, which the tools module of D@58 builds,
+  and fails the test on a non-zero exit. A build tag keeps it out of a plain
+  `go test ./...`. The README runs it with `-count=1`, because go test caches a pass and
+  cannot see a change to the controller or `target.yaml`. The recipe sets `--deadline`
+  half a minute before go test's timeout, in whole seconds, and fails the test when that
+  leaves botbox no time. A test that the timeout ends leaves botbox to die of SIGPIPE at
+  its next write, with its control plane still running. The envtest tier runs the recipe
+  from a copy of the repository's layout: on the toy with no bug, under B4, with a
+  timeout too short for its runs, with one that leaves botbox no time, and with no
+  controller to launch.
+  Hooks stay in-repo (D2).

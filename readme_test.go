@@ -72,7 +72,8 @@ func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
 var listItem = regexp.MustCompile(`\n *(?:[-*+]|[0-9]+[.)]) +`)
 
 // opensBlock starts a heading, a fence, a block quote, a thematic break or HTML.
-const opensBlock = `(?:#{1,6}(?: |$)|` + "```|~~~" + `|>|(?:\* *){3,}$|(?:- *){3,}$|(?:_ *){3,}$|<[!?]|</?[A-Za-z][A-Za-z0-9]*(?:[ />]|$))`
+const opensBlock = `(?:#{1,6}(?: |$)|` + "```|~~~" + `|>|(?:(?:\* *){3,}|(?:- *){3,}|(?:_ *){3,})$|` +
+	`<[!?]|</?[A-Za-z][A-Za-z0-9]*(?:[ />]|$))`
 
 // limitParts splits the limits section into its opening, its bullets and what
 // follows them. A line indented less than an item's text ends the item after a
@@ -132,8 +133,9 @@ func TestLimitPartsEndsAnItemWhereCommonMarkDoes(t *testing.T) {
 		ends bool
 	}{
 		{"lazy.", false}, {" lazy.", false}, {"#lazy.", false}, {"\n  Inside.", false}, {"\n\tInside.", false}, {"\t# Inside.", false}, {"  > Inside.", false},
-		{"\n After.", true}, {" \nAfter.", true}, {"# Heading", true}, {"```", true}, {"~~~", true}, {" > Quote", true},
-		{"***", true}, {"---", true}, {"_ _ _", true},
+		{"\n After.", true}, {" \nAfter.", true}, {"# Heading", true}, {"#", true}, {"####### Seven.", false},
+		{"```", true}, {"~~~", true}, {"``Code`` lazy.", false}, {"~~Struck~~ lazy.", false}, {" > Quote", true},
+		{"** *", true}, {"-- -", true}, {"_ _ _", true}, {"**", false}, {"--", false}, {"__", false}, {"***Bold***", false},
 		{"<p>HTML</p>", true}, {"</div>", true}, {`<TD id="x">`, true}, {"<h1>Heading</h1>", true}, {"<hr/>", true}, {"<pre", true},
 		{"<!-- Comment -->", true}, {"<?php ?>", true}, {"<https://example.com> lazy.", false},
 	} {

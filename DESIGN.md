@@ -1167,10 +1167,11 @@ the proxy; the `Image` launcher. Separate design addendum.
   goes to stdout and exits 0. A bare `botbox` prints botbox's help to stderr and exits 2. A
   usage error, such as an unknown flag, a missing required flag, another flag or `--` after
   a sequence file or a wrong count of sequence files, exits 2 and prints the error and the
-  command's synopsis to stderr. It spells a flag with two dashes, as the help does. No
-  message botbox prints cites this document or uses its symbols, such as `T_settle`. A
-  message names the target.yaml key and its value instead, as in `2s (timeouts.stable)`.
-  A test scans the code's string literals for them.
+  command's synopsis to stderr. It spells a flag with two dashes, as the help does, but
+  quotes a flag after a sequence file as given. No message botbox prints cites this
+  document or uses its symbols, such as `T_settle`. A message names the target.yaml key
+  and its value instead, as in `2s (timeouts.stable)`. A test scans the code's string
+  literals for them.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. The deadline abandons the run under way (§5.5), and the
   shrinker stops there and reports the smallest failing sequence it found. Without

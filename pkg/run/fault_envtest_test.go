@@ -280,6 +280,34 @@ func TestAToyThatWinsItsLeaseBackLatePasses(t *testing.T) {
 	}
 }
 
+// A toy with a field index watches Widgets before it leads. The toy with no
+// bug passes, because botbox counts it back only once it wins its lease.
+func TestAToyThatWatchesBeforeItLeadsPasses(t *testing.T) {
+	t.Parallel()
+	toy := loadTarget(t, buildToy(t))
+	toy.Launch.Args = append(toy.Launch.Args, "--lease=3s", "--index")
+	testCluster := startCluster(t, toy.CRDs)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+
+	result, err := run.Run(ctx, toy, readSequence(t, leaseSlow), run.Options{
+		Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+	})
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+	}
+	requests := result.Recorded.Requests
+	widgets := slices.IndexFunc(requests, func(r proxy.Request) bool { return r.Resource == "widgets" })
+	leases := slices.IndexFunc(requests, func(r proxy.Request) bool { return r.Resource == "leases" })
+	if widgets < 0 || leases < 0 || widgets > leases {
+		t.Errorf("The toy first requested Widgets at request %d and leases at request %d, want Widgets first.", widgets, leases)
+	}
+}
+
 // A fault excuses every exit while it is active, and this one never stops. The
 // crash loop still fails G4 once the teardown clears the fault.
 func TestACrashLoopUnderAFaultThatNeverStopsFailsG4(t *testing.T) {

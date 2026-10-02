@@ -1065,6 +1065,10 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   lease, as controller-runtime does. The envtest tier runs it at 3 s under a fault that
   fails most lease updates, so the toy can lose its lease and restart until the teardown
   clears the fault (§6, recovery from faults).
+- `--index` indexes Widgets by `spec.count`, as a controller indexes a field it lists by.
+  controller-runtime starts the informer an index needs before the manager leads, so with
+  `--lease` the toy watches Widgets while it waits out its lease. The envtest tier runs it
+  so under the same fault (§5.5).
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 
@@ -2355,11 +2359,11 @@ built from source and run as a black-box binary.
   properties at every wait a fault excuses was rejected, because properties are how botbox
   sees a fault's transient states (§5.6). A target that elects a leader is back only once
   the API server accepts its create or update of a lease. controller-runtime starts the
-  informers a field index asks for before the manager leads. The toy with an index watched
-  Widgets while it waited out its lease, that watch counted as its return, the wait
-  converged before the toy led, and P1 failed in 3 of 3 runs. A get of a Lease by any of
-  its processes marks a target that elects, because leader election reads its Lease that
-  way to learn who holds it, and an informer lists and watches instead. A restarted
+  informers a field index asks for before the manager leads. The toy with `--index`
+  watched Widgets while it waited out its lease, that watch counted as its return, the
+  wait converged before the toy led, and P1 failed in 3 of 3 runs. A get of a Lease by any
+  of its processes marks a target that elects, because leader election reads its Lease
+  that way to learn who holds it, and an informer lists and watches instead. A restarted
   process reads its lease only once its caches sync, which a fault can delay, so its
   predecessor's get marks it first. A win counts only after the process's own get, because
   botbox stamps a `Restart` op before it kills the leader, which renews without a get. A

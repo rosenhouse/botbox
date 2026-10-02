@@ -40,6 +40,11 @@ func TestBackIsTheFirstRequestThatShowsTheTargetRunning(t *testing.T) {
 			request(1050*time.Millisecond, lease("update")).
 			request(1200*time.Millisecond, lease("get")).
 			request(1600*time.Millisecond, lease("update")), 1600 * time.Millisecond},
+		{"the lease it patched, after a patch the API server refused", newRun().
+			request(1200*time.Millisecond, lease("get")).
+			request(1300*time.Millisecond, leaseAnswered("patch", http.StatusConflict)).
+			request(1400*time.Millisecond, lease("patch")).
+			request(1500*time.Millisecond, watch()), 1400 * time.Millisecond},
 		{"the lease it updated, after updates the API server refused", newRun().
 			request(1100*time.Millisecond, watch()).
 			request(1200*time.Millisecond, lease("get")).

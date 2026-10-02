@@ -53,9 +53,9 @@ func electing(requests []proxy.Request) bool { return slices.ContainsFunc(reques
 func gotLease(r proxy.Request) bool { return isLease(r) && r.Verb == "get" }
 
 // won reports whether a request won the target a lease: the API server
-// accepted its create or update of one.
+// accepted its create, update or patch of one.
 func won(r proxy.Request) bool {
-	return isLease(r) && (r.Verb == "create" || r.Verb == "update") && r.Status/100 == 2
+	return isLease(r) && slices.Contains([]string{"create", "update", "patch"}, r.Verb) && r.Status/100 == 2
 }
 
 func isLease(r proxy.Request) bool { return leaderElection(r) && r.Resource == "leases" }

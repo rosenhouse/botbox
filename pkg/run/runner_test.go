@@ -74,9 +74,11 @@ type fakeHarness struct {
 	// finalizerStays has the Observer record a deleted CR still under deletion.
 	finalizerStays bool
 	// crStays has a recreate's wait for the CR to go end with it still there,
-	// and awaitedUntil is when each such wait was told to give up.
+	// and awaitedUntil is when each such wait was told to give up. inAwait
+	// runs as each such wait begins.
 	crStays      bool
 	awaitedUntil []time.Time
+	inAwait      func()
 
 	// targetGone makes the harness report a target that has stopped, and
 	// stopsAfter is the call it exits at. exitsInWait is the settle wait it
@@ -336,6 +338,9 @@ func (f *fakeHarness) deleteCR(ctx context.Context, name string) error {
 }
 
 func (f *fakeHarness) awaitCRGone(_ context.Context, name string, until func() time.Time) (bool, error) {
+	if f.inAwait != nil {
+		f.inAwait()
+	}
 	f.awaitedUntil = append(f.awaitedUntil, until())
 	return !f.crStays, f.record("awaitCRGone " + name)
 }
@@ -1436,6 +1441,21 @@ func TestRunGivesTheCRARecreateDeletesUntilItsDeadline(t *testing.T) {
 		past := testTimeouts.Delete + releasedAfter + testTimeouts.Settle
 		if len(h.awaitedUntil) != 1 || h.awaitedUntil[0].Before(began.Add(past)) || h.awaitedUntil[0].After(ended.Add(past)) {
 			t.Errorf("The recreate waited for the CR until %v, want T_settle past the release %v after its deadline.", h.awaitedUntil, releasedAfter)
+		}
+	})
+
+	t.Run("past a request the proxy still holds well after its deadline", func(t *testing.T) {
+		h := newFakeHarness()
+		at := time.Now()
+		h.clock = func() time.Time { return at }
+		h.inAwait = func() { at = at.Add(testTimeouts.Delete + time.Minute) }
+		h.holds = func(time.Time) (bool, time.Time) { return true, time.Time{} }
+
+		if _, err := runFake(t, h, nil, sequence); err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if want := []time.Time{at.Add(testTimeouts.Settle)}; !slices.EqualFunc(h.awaitedUntil, want, time.Time.Equal) {
+			t.Errorf("The recreate waited for the CR until %v, want %v: T_settle from now, since the release is yet to come.", h.awaitedUntil, want)
 		}
 	})
 }

@@ -371,8 +371,10 @@ func TestSweepRecordsEachDeleteItTriesAndHowItEnded(t *testing.T) {
 		{"the API server fails", apierrors.NewInternalError(errors.New("the API server is unwell")), "error"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			c, client, _ := fakeCollector(t)
+			c, client, logged := fakeCollector(t)
+			var sent time.Time
 			client.PrependReactor("delete", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+				sent = time.Now()
 				return true, nil, tc.err
 			})
 			before := time.Now()
@@ -381,7 +383,6 @@ func TestSweepRecordsEachDeleteItTriesAndHowItEnded(t *testing.T) {
 				configMapObject("child", "uid-child", configMapOwner("parent", "uid-parent")),
 			})
 
-			after := time.Now()
 			want := map[string]any{
 				"kind": "v1/ConfigMap", "namespace": runNamespace, "name": "child", "uid": "uid-child", "resourceVersion": "7",
 				"owners": []any{map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "name": "parent", "uid": "uid-parent", "gone": "not found"}},
@@ -397,8 +398,11 @@ func TestSweepRecordsEachDeleteItTriesAndHowItEnded(t *testing.T) {
 			if !reflect.DeepEqual(lines[0], want) {
 				t.Errorf("The collector recorded\n\t%v\nwant\n\t%v", lines[0], want)
 			}
-			if tried[0].Before(before) || tried[0].After(after) {
-				t.Errorf("The collector recorded the delete at %v, want between %v and %v.", tried[0], before, after)
+			if tried[0].Before(before) || tried[0].After(sent) {
+				t.Errorf("The collector recorded the delete at %v, want when it sent it, between %v and %v.", tried[0], before, sent)
+			}
+			if failed := tc.result == "error"; (logged.Len() > 0) != failed {
+				t.Errorf("The collector logged %q, want a failure logged only where the API server failed.", logged.String())
 			}
 		})
 	}

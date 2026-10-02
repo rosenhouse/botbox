@@ -571,9 +571,10 @@ A controller that exits during a fault, or while it recovers from one, has the s
 botbox restarts it. While a fault is active, only your controller's first such exit during
 each op gets that time. If it exits again during the op, the wait can end before it
 restarts. A wait can also end before a restarted controller has won its lease back.
-botbox does not check your properties where a wait ends before it could have converged:
-while your controller waits to restart, or before it has requested a resource outside
-leader election since it last started and then run for `stable`. The run notes it.
+botbox does not check a `checkpoint` or `end` property where a wait ends, or the
+teardown checks, before your controller could have converged: while it waits to restart,
+or before it has requested a resource outside leader election since it last started and
+then run for `stable`. The run notes it.
 botbox applies no op while your controller waits to restart after such an exit. An op
 that botbox applies before your controller has had that time after such an exit gives it
 that time too. A controller that keeps crashing under a fault therefore fails G4 once

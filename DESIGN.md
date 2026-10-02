@@ -534,10 +534,12 @@ sooner: a later exit during the op is owed no time, and a target can take longer
 `T_settle` past its restart to win its lease back. The target is then still starting: it
 is waiting to restart, restarted within `T_stable`, or has requested no resource outside
 leader election since it last started, or first did within `T_stable`. G4's statement
-names the same states. A target still starting may not yet have acted on what changed
-while it was down, so no property is evaluated at that checkpoint, under `checkpoint` or
-`end`, and the run notes each one. A property evaluated `always` reads every event rather
-than a checkpoint. No invariant needs the rule. A target that does not come back fails G4
+names the same states. The teardown's checkpoint can find the target so too. A target
+still starting may not yet have acted on what changed while it was down, so no property
+is evaluated at that checkpoint, under `checkpoint` or `end`, and the run notes each one.
+A wait that converged saw the target back for `T_stable`, so its checkpoint is judged,
+even where a `Restart` op replaced a target waiting out its backoff. A property evaluated
+`always` reads every event rather than a checkpoint. No invariant needs the rule. A target that does not come back fails G4
 where a wait expires with no fault active, at the latest in the teardown's recovery wait.
 G7 asks more after a restart: the target must be back before the op. G1 and G2 judge no
 window a fault reaches into, so they skip the window after such a wait where a fault is
@@ -960,8 +962,8 @@ and names the path with `[*]` in its place (§6).
 
 A property's `when` says where it is evaluated: `always` on every Observer event before
 the teardown boundary (§6), `checkpoint` at each checkpoint (§4), `end` at the last
-checkpoint only. Neither of the last two judges a checkpoint where the proxy held a
-request or the target was still starting (§5.5 step 3).
+checkpoint only. Neither of the last two judges a checkpoint §5.5 step 3 leaves
+unjudged.
 
 cert-manager v1.21.2 binds its healthz server to `0.0.0.0:9403`. The one flag that moves
 it, `--internal-healthz-listen-address`, is hidden, and upstream says the prefix and the
@@ -2342,9 +2344,11 @@ built from source and run as a black-box binary.
   still starting by the measure a wait converges on (§6). That covers a target waiting
   out a backoff, where a wait can end after a later exit during the op. It covers the
   first start, because a fault can keep a target from leading before any wait converges.
-  Judging a target that came back by the checkpoint, however late, was rejected: one first
-  heard from just before a wait ends has had no time to act (D60). Owing the target time
-  until it is back was rejected, because an active fault can keep it from leading until
-  the teardown clears the fault, and no bound would then cover the wait. Skipping
-  properties at every wait a fault excuses was rejected, because properties are how
-  botbox sees a fault's transient states (§5.6).
+  Judging a target that came back by the checkpoint, however late, was rejected: one
+  first heard from just before a wait ends has had no time to act (D60, D69). Owing the
+  target time until it is back was rejected, because an active fault can keep it from
+  leading until the teardown clears the fault, and no bound would then cover the wait.
+  A wait that converged is judged whatever the exits read, because a `Restart` op can
+  replace a target waiting out its backoff, and the restart the exit scheduled never
+  comes. Skipping properties at every wait a fault excuses was rejected, because
+  properties are how botbox sees a fault's transient states (§5.6).

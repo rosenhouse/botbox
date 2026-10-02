@@ -88,7 +88,7 @@ thresholds:
 | `properties[*].id` | required | It names the property in output, such as `P1`. No two properties share one. |
 | `properties[*].description` | none | It says what the property means. Reports print it. |
 | `properties[*].cel` | required | It is CEL that says whether the property holds. |
-| `properties[*].when` | `checkpoint` | It says where botbox evaluates the property: `always` at every change botbox observes, `checkpoint` wherever the checks run, and `end` at the last checkpoint. |
+| `properties[*].when` | `checkpoint` | It says where botbox evaluates the property: `always` at every change botbox observes, `checkpoint` wherever the checks run, and `end` at the last checkpoint. The last two skip a checkpoint where a wait ends too early to judge ([Ops](#ops)). |
 | `generate.mutate` | each spec path generation can draw a value for | It lists the dotted spec paths generation may change. Generation changes no others. Without it, `botbox run` prints each spec path it leaves alone, and why. |
 | `generate.overlay` | none | It maps a dotted path to schema keywords. For generation, they win over the CRD's keywords there, and the CRD keeps those they do not name. botbox reads `additionalProperties`, `enum`, `exclusiveMaximum`, `exclusiveMinimum`, `format`, `items`, `maxItems`, `maxLength`, `maxProperties`, `maximum`, `minItems`, `minLength`, `minProperties`, `minimum`, `pattern`, `properties`, `required`, `type`, `x-kubernetes-int-or-string` and `x-kubernetes-list-type`, and refuses any other. |
 | `generate.maxCRs` | `3` | It bounds the CRs a sequence creates, the sample included. `1` keeps every sequence to the sample. |
@@ -195,10 +195,11 @@ runs out keeps the wait open until `timeouts.settle` past its release. It keeps 
 not check your properties where a wait ends with a request held, or released within
 `timeouts.stable`, and the run notes it. Nor does it where your controller waits to restart,
 or has not yet requested a resource outside leader election since it last started and run
-for `timeouts.stable` after that. botbox exits 2 where a `recreate`'s old CR outlasts the
-wait and no check fails, because the op cannot go on. A fault active during the
-`recreate` can do that to a correct controller, as a delay on each request it makes can. End
-the fault before the `recreate` with `until.op`.
+for `timeouts.stable` after that. A property evaluated `always` is still checked at every
+change. botbox exits 2 where a `recreate`'s old CR outlasts the wait and no check fails,
+because the op cannot go on. A fault active during the `recreate` can do that to a correct
+controller, as a delay on each request it makes can. End the fault before the `recreate`
+with `until.op`.
 
 | Op | Needs | May carry | Settles | What it does |
 |---|---|---|---|---|

@@ -7,7 +7,7 @@ import (
 )
 
 // hookPrefix marks a predicate that names a Go hook instead of CEL, as
-// `ready: go:<name>` or `equal: go:<name>` (DESIGN.md §8.4).
+// `ready: go:<name>` or `equal: go:<name>`.
 const hookPrefix = "go:"
 
 var hooks = struct {

@@ -1345,6 +1345,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   locally. External targets are obtained by shallow git clone at a tag plus `go build`, or
   as a GitHub release asset, and are pinned.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
+- **Comments.** A Go comment outside tests makes sense without this document open. It
+  cites no section or decision and uses none of this document's symbols. It names the
+  target.yaml key instead, as a message does. A test scans every such comment, the
+  spikes' included. Tests may cite this document, since they hold the code to it (D@65).
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
   (five lines); what it cannot test yet; install, and a tools module that keeps botbox
   out of an operator's go.mod, embedded from `examples/tools-module.sh`, which the envtest
@@ -2372,3 +2376,11 @@ built from source and run as a black-box binary.
   G4 and the property read only the requests made by the checkpoint, as the wait did.
   Keeping the sign of D60 and D69 and stating the limit was rejected, because the wait
   itself converged too early.
+- **D@65 Go comments need no design document.** Comments outside tests cited this
+  document's sections about 290 times and its decisions 24 times, so a reader needed it
+  open to follow the code, and a renumbered section left each citation wrong. A comment
+  now says what it means and names the target.yaml key rather than a symbol, as D74 asks
+  of a message. A test scans every comment outside tests for what it scans string
+  literals for. Six packages each defined one helper that writes a kind as target.yaml
+  does. `observe.KindName` replaces them, because `observe` imports no other botbox
+  package.

@@ -570,9 +570,12 @@ it wrote its converged state first, so G4 reports it and quotes the last exit.
 A controller that exits during a fault, or while it recovers from one, has the same once
 botbox restarts it. While a fault is active, only your controller's first such exit during
 each op gets that time. If it exits again during the op, the wait can end before it
-restarts, and botbox checks your properties there. botbox applies no op while your
-controller waits to restart after such an exit. An op that botbox applies before your
-controller has had that time after such an exit gives it that time too. A controller that
+restarts. A wait can also end before a restarted controller has won its lease back.
+botbox does not check your properties where a wait ends while your controller waits to
+restart, or before it has requested a resource outside leader election since it last
+started, and the run notes it. botbox applies no op while your controller waits to
+restart after such an exit. An op that botbox applies before your controller has had
+that time after such an exit gives it that time too. A controller that
 keeps crashing under a fault therefore fails G4 once the fault stops, or once the teardown
 clears it. G7 notes a `deleteManaged` after a restart that follows an exit as it does one
 after a `restart`, and notes one where your controller exited, or waited to restart,

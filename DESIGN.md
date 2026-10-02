@@ -1357,7 +1357,7 @@ the proxy; the `Image` launcher. Separate design addendum.
 - **Comments.** A Go comment outside tests makes sense without this document open. It
   cites no section or decision and uses none of this document's symbols. It names the
   target.yaml key instead, as a message does. A test scans every such comment, the
-  spikes' included. Tests may cite this document, since they hold the code to it (D@65).
+  spikes' included. Tests may cite this document, since they hold the code to it (D82).
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox is and
   is not, in a few sentences, which say that it runs the controller against a real
   kube-apiserver and etcd behind a proxy; what it cannot test yet; install; a first run
@@ -1375,7 +1375,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   `targets/toy-widget/botbox_test.go`, which the envtest tier runs (D81); a
   one-line-per-invariant table linking to §6; a closing "Development and internals"
   section that links to this document and to `docs/bug-matrix.md`. Detail lives in pages
-  the README links (D@82): `docs/reference.md` lists every key and field,
+  the README links (D83): `docs/reference.md` lists every key and field,
   `docs/targets.md` says how to write a target, `docs/failures.md` says what each file and
   message of a failure means, and `docs/examples.md` runs the adopted examples and their
   negative controls. Only the README's Invariants section and its closing section link
@@ -2325,7 +2325,7 @@ built from source and run as a black-box binary.
   timeout too short for its runs, with one that leaves botbox no time, and with no
   controller to launch.
   Hooks stay in-repo (D2).
-- **D@65 Go comments need no design document.** Comments outside tests cited this
+- **D82 Go comments need no design document.** Comments outside tests cited this
   document's sections about 290 times and its decisions 24 times, so a reader needed it
   open to follow the code, and a renumbered section left each citation wrong. A comment
   now says what it means and names the target.yaml key rather than a symbol, as D74 asks
@@ -2333,7 +2333,7 @@ built from source and run as a black-box binary.
   literals for. Six packages each defined the same helper, which writes a kind as
   target.yaml does. `observe.KindName` replaces them, because `observe` imports no other
   botbox package.
-- **D@82 The README walks a newcomer from install to CI, and `docs/` holds the detail.**
+- **D83 The README walks a newcomer from install to CI, and `docs/` holds the detail.**
   Two newcomers walked the README cold. One built botbox and fetched the control plane
   twice, because the first find did not use what Install had set up. Both left the README
   for `docs/reference.md` to learn that a property runs where no CR exists, and which
@@ -2361,7 +2361,7 @@ built from source and run as a black-box binary.
   derived deadline is a worst case, and how to size a shorter one. `botbox --help` says
   botbox runs a real kube-apiserver and etcd, and no longer that it injects faults, which
   drawn sequences never do.
-- **D@85 A settle wait outlasts the requests the proxy holds.** A delay fault held the
+- **D84 A settle wait outlasts the requests the proxy holds.** A delay fault held the
   toy's create of a child it had lost for 3 s, longer than its 2 s `T_stable`. Nothing
   changed while the proxy held the create, so the wait converged, and P1 failed the
   correct toy in 3 of 3 runs. A held request now counts as a change until the proxy
@@ -2401,7 +2401,7 @@ built from source and run as a black-box binary.
   request was rejected. An active fault excuses the target, so no check gives such a wait
   an end, and a target that renews a lease under a delay would hold it open until the
   derived deadline.
-- **D@84 No property is judged where the target is still starting.** Under a fault that
+- **D85 No property is judged where the target is still starting.** Under a fault that
   failed most lease updates, the toy with `--lease=3s` lost its lease, and botbox
   restarted it. The restarted toy requested only leader election until it won the lease
   back, in one run 5.5 s after the restart, past its 5 s `T_settle`. The wait after a

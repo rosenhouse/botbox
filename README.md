@@ -23,10 +23,11 @@ such as a Service, it runs only the [sequences you write](docs/targets.md#sequen
 [target.yaml](#write-targetyaml) names the sample, the primary kind and the CRDs.
 
 - botbox tests namespaced kinds only. It refuses a cluster-scoped primary, managed kind or
-  fixture when it loads the target, and exits 2. Where only the cluster knows a kind's scope,
-  it refuses the kind before the first run. It watches only the namespace it creates for each
-  run. So it passes a controller that leaks a child in another namespace, and it cannot supply
-  an object your controller reads from another namespace
+  fixture when it loads the target, and exits 2. For a kind that neither Kubernetes nor your
+  CRDs define, it asks the cluster, and refuses a cluster-scoped one before the first run. It
+  watches only the namespace it creates for each run. So it passes a controller that leaks a
+  child in another namespace, and it cannot supply an object your controller reads from
+  another namespace
   ([#38](https://github.com/rosenhouse/botbox/issues/38)).
 - botbox does not test your controller's RBAC. Its proxy sends your controller's requests with
   botbox's own credentials, which are admin on envtest, so a rule your Role lacks goes
@@ -63,9 +64,9 @@ its default.
 ## A first run and a first find
 
 Every find this README shows is planted: a bug seeded into the toy controller in this
-repository. Clone [the repository](https://github.com/rosenhouse/botbox), and run this in the
-clone. The first build takes a minute or two, and the three runs then take about half a
-minute:
+repository. Clone [the repository](https://github.com/rosenhouse/botbox). In the clone,
+`go install ./cmd/botbox` installs the botbox this README describes. Run this there. The first
+build takes a minute or two, and the three runs then take about half a minute:
 
 ```sh
 go build -o bin/toy-widget ./targets/toy-widget
@@ -99,12 +100,13 @@ run 1: G3 the v1/ConfigMap widget-0 was still there 10s (timeouts.delete) after 
   the evidence is in botbox-out/20260930T195026Z-20260920/run-1
 ```
 
-botbox exits 1. The first indented line says when G3 failed and how many object versions it
-quotes: here one, of the ConfigMap `widget-0`. `report.md` in the evidence directory says what
-failed. The toy converges, so nothing looks wrong until the Widget is deleted and its ConfigMap
-stays. envtest runs no garbage collector, so an envtest suite catches this only if it asserts
-each ownerReference itself. botbox emulates the collector, and G3 judges every object of every
-kind your target manages, in every run, with no test code of yours.
+botbox exits 1. The first indented line says when G3 failed, how many object versions the
+report quotes, and whose version comes first: here one version, of the ConfigMap `widget-0`.
+`report.md` in the evidence directory says what failed. The toy converges, so nothing looks
+wrong until the Widget is deleted and its ConfigMap stays. envtest runs no garbage collector,
+so an envtest suite catches this only if it asserts each ownerReference itself. botbox
+emulates the collector, and G3 judges every object of every kind your target manages, in
+every run, with no test code of yours.
 
 ## Your own controller
 
@@ -176,14 +178,15 @@ Write yours in this order:
      && c.observedGeneration == metadata.generation)
    ```
 5. `properties` are optional checks of your own. A property runs once for each CR, and its
-   CEL reads that CR's `metadata`, `spec` and `status`. `managed` lists the whole objects of
-   your `manages` kinds whose ownerReferences name that CR or no CR, so a property can read
-   `o.metadata.name` or `o.data`. A property also runs where no CR exists, as after the last
-   delete, with empty `metadata`, `spec` and `status`. Guard what it reads there with
-   `has()`, as P1 does.
+   CEL reads that CR's `metadata`, `spec` and `status`. `managed` holds every object of your
+   `manages` kinds that this CR owns, plus every object that no CR owns. It leaves out other
+   CRs' objects. A property reads each object whole, such as `o.metadata.name` or `o.data`. A
+   property also runs where no CR exists, as after the last delete, with empty `metadata`,
+   `spec` and `status`. Guard what it reads there with `has()`, as P1 does.
 6. `timeouts` and `thresholds` default to what suits most controllers. The toy is fast, so it
-   shortens its timeouts. A 5s `settle` holds only 10 backoff repeats of a failing request, so
-   the toy also lowers `errloop` below 10.
+   shortens its timeouts. G6 fails a controller that repeats a failing request more than
+   `errloop` times, 10 by default. A 5s `settle` holds only 10 backoff repeats, so the toy
+   lowers `errloop` to 5.
 
 [docs/reference.md](docs/reference.md) lists every key with its default.
 [docs/targets.md](docs/targets.md) says how to choose the values: for a slow controller, one
@@ -229,7 +232,10 @@ P1 reads the ConfigMaps that `spec.count` sets:
   {"i": 2, "t": "update", "patch": {"spec": {"count": 2}}}]}
 ```
 
-`botbox run --target target.yaml sequences/*.json` runs the sequences you write, as written.
+`i` numbers the ops from 0. A sequence's `seed` draws only the requests that a fault's
+`match.fraction` picks, so any number serves here.
+`botbox replay --target target.yaml sequences/pin.json` runs one such file, and
+`botbox run --target target.yaml sequences/*.json` runs several, as written.
 [docs/targets.md](docs/targets.md#sequences-you-write) says how to write one, with faults too.
 
 ### Real controllers
@@ -250,10 +256,12 @@ Before it reports, botbox minimizes a failing drawn sequence: it removes each op
 does not need. Each removal it tries replays a whole run, so this can take several minutes.
 botbox says so as soon as the run fails, as in
 `run 1: G3 failed, and minimizing its 12 ops can take minutes.` `sequence.json` in the
-evidence directory holds the minimized sequence. Where your controller fails with no CR at all,
-it lacks even the `create`. Each run ends by deleting every CR and checking once more, so G3
-or a property can fail a sequence with no `delete`. `summary.json`, one directory up, holds
-each run's sequence as drawn.
+evidence directory holds the minimized sequence. Where the deadline cut minimizing short, it
+holds the drawn sequence, and `sequence.shrunk.json` beside it holds any smaller failing one
+that botbox found. Where your controller fails with no CR at all, the minimized sequence lacks
+even the `create`. Each run ends by deleting every CR and checking once more, so G3 or a
+property can fail a sequence with no `delete`. `summary.json`, one directory up, holds each
+run's sequence as drawn.
 
 | Check | Usual cause |
 |---|---|
@@ -263,7 +271,7 @@ each run's sequence as drawn.
 | G4 | Your controller did not converge within `timeouts.settle`. It is slow, it never stops writing, or it waits on a Pod, which [envtest never runs](docs/targets.md#against-a-cluster). Or `ready` reads a field the CR lacks. |
 | G5 | A restart changed converged state: a field your controller stamps at startup, or a change it missed until then. |
 | G6 | Your controller repeats one failing request. |
-| G7 | Your controller does not watch the deleted object's kind, as with a missing `Owns()`. |
+| G7 | Your controller missed the deletion. It does not watch the object's kind, as with a missing `Owns()`, or the object lacks the controller ownerReference that `Owns()` follows. |
 
 A property's ID, such as P1, names a check of your own. The report quotes the managed objects'
 metadata where it failed, and says when no CR existed. `objects.jsonl` in the evidence directory

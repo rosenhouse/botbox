@@ -208,10 +208,10 @@ type Difference struct {
 }
 
 // NamesAField says whether Path names what differs, which it does unless the
-// difference is of the object taken as one.
+// difference is in the object as a whole.
 func (d Difference) NamesAField() bool { return d.Path != "" }
 
-// whole is the difference of an object taken as one.
+// whole is a difference in the object as a whole.
 func whole(object Difference, before, after string) Difference {
 	object.Before, object.After = before, after
 	return object

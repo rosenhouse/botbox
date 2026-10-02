@@ -361,7 +361,7 @@ func awaitNamespaceDefaults(ctx context.Context, store *observe.Store, watched [
 }
 
 // excludePresent excludes every object already in the run namespace. The
-// target has not started, so none of them is its.
+// target has not started, so none of them belongs to it.
 func excludePresent(store *observe.Store, watched []schema.GroupVersionKind) {
 	for _, gvk := range watched {
 		for _, version := range store.Current(gvk) {

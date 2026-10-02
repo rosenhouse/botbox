@@ -296,6 +296,96 @@ func widgetsClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), map[schema.GroupVersionResource]string{widgetResource: "WidgetList"}, objects...)
 }
 
+// What the live run says names a kind as target.yaml writes it.
+func TestTheLiveRunNamesKindsAsTargetYAMLDoes(t *testing.T) {
+	fixture := widget("fixture")
+	fixture.SetNamespace("botbox-run-1")
+	held := fixture.DeepCopy()
+	held.SetFinalizers([]string{"toy.botbox/hold"})
+	held.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
+	type reactors map[string]clienttesting.ReactionFunc
+	refused := func(clienttesting.Action) (bool, runtime.Object, error) { return true, nil, errors.New("refused") }
+	accepted := func(clienttesting.Action) (bool, runtime.Object, error) { return true, nil, nil }
+	for _, test := range []struct {
+		name     string
+		objects  []runtime.Object
+		reactors reactors
+		do       func(context.Context, *liveRun) string
+		want     string
+	}{
+		{name: "an unresolved kind", do: func(context.Context, *liveRun) string {
+			_, err := newLiveRun(&Harness{Config: unreachable(), mapper: mapperFor()}, &target.Target{Primary: widgetKind})
+			return fmt.Sprint(err)
+		}, want: "resolving the resource of toy.botbox/v1/Widget:"},
+		{name: "a CR of another kind", do: func(ctx context.Context, live *liveRun) string {
+			cr := &unstructured.Unstructured{}
+			cr.SetGroupVersionKind(configMapKind)
+			return fmt.Sprint(live.createCR(ctx, cr))
+		}, want: "the op creates a v1/ConfigMap, and the target's primary CR is a toy.botbox/v1/Widget"},
+		{name: "a refused deleteManaged", reactors: reactors{"delete": refused},
+			do: func(ctx context.Context, live *liveRun) string {
+				_, err := live.deleteManaged(ctx, widgetKind, "child")
+				return fmt.Sprint(err)
+			}, want: "deleting the managed toy.botbox/v1/Widget child: refused"},
+		{name: "a refused patchFixture", reactors: reactors{"patch": refused},
+			do: func(ctx context.Context, live *liveRun) string {
+				return fmt.Sprint(live.patchFixture(ctx, widgetKind, "fixture", map[string]any{}))
+			}, want: "patching the fixture toy.botbox/v1/Widget fixture: refused"},
+		{name: "a refused deleteFixture", reactors: reactors{"delete": refused},
+			do: func(ctx context.Context, live *liveRun) string {
+				return fmt.Sprint(live.deleteFixture(ctx, widgetKind, "fixture"))
+			}, want: "deleting the fixture toy.botbox/v1/Widget fixture: refused"},
+		{name: "a refused read after deleteFixture", reactors: reactors{"delete": accepted, "get": refused},
+			do: func(ctx context.Context, live *liveRun) string {
+				return fmt.Sprint(live.deleteFixture(ctx, widgetKind, "fixture"))
+			}, want: "waiting for the fixture toy.botbox/v1/Widget fixture to go: refused"},
+		{name: "a fixture its finalizers hold", objects: []runtime.Object{held}, reactors: reactors{"delete": accepted},
+			do: func(ctx context.Context, live *liveRun) string {
+				return fmt.Sprint(live.deleteFixture(ctx, widgetKind, "fixture"))
+			}, want: "the fixture toy.botbox/v1/Widget fixture was still there"},
+		{name: "a fixture something recreated", objects: []runtime.Object{fixture.DeepCopy()},
+			do: func(ctx context.Context, live *liveRun) string {
+				return fmt.Sprint(live.createFixture(ctx, fixture.DeepCopy()))
+			}, want: "something created the fixture toy.botbox/v1/Widget fixture again"},
+		{name: "a refused createFixture", reactors: reactors{"create": refused},
+			do: func(ctx context.Context, live *liveRun) string {
+				return fmt.Sprint(live.createFixture(ctx, fixture.DeepCopy()))
+			}, want: "restoring the fixture toy.botbox/v1/Widget fixture: refused"},
+		{name: "a refused list of what is left", reactors: reactors{"list": refused},
+			do: func(ctx context.Context, live *liveRun) string {
+				_, err := live.forceFinalizers(ctx)
+				return fmt.Sprint(err)
+			}, want: "listing the toy.botbox/v1/Widget left behind: refused"},
+		{name: "a refused patch of finalizers", objects: []runtime.Object{held}, reactors: reactors{"patch": refused},
+			do: func(ctx context.Context, live *liveRun) string {
+				_, err := live.forceFinalizers(ctx)
+				return fmt.Sprint(err)
+			}, want: "clearing the finalizers of toy.botbox/v1/Widget fixture: refused"},
+		{name: "finalizers it forced off", objects: []runtime.Object{held},
+			do: func(ctx context.Context, live *liveRun) string {
+				forced, err := live.forceFinalizers(ctx)
+				return fmt.Sprint(forced, err)
+			}, want: "[toy.botbox/v1/Widget fixture] <nil>"},
+		{name: "a refused delete of what is left", reactors: reactors{"delete-collection": refused},
+			do: func(ctx context.Context, live *liveRun) string {
+				return fmt.Sprint(live.empty(ctx))
+			}, want: "deleting the toy.botbox/v1/Widget left behind: refused"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := widgetsClient(test.objects...)
+			for verb, react := range test.reactors {
+				client.PrependReactor(verb, "widgets", react)
+			}
+			live := liveOver(client)
+			live.emptied = []schema.GroupVersionKind{widgetKind}
+
+			if got := test.do(t.Context(), live); !strings.Contains(got, test.want) {
+				t.Errorf("The live run said %q, want %q.", got, test.want)
+			}
+		})
+	}
+}
+
 func TestAwaitCleanWaitsOutItsWindow(t *testing.T) {
 	store := observe.NewStore(observe.Options{Namespace: "botbox-run-1"})
 	cr := widget("widget")

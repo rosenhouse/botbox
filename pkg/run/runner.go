@@ -89,8 +89,8 @@ type Violation struct {
 	RequestsTotal, VersionsTotal int
 	VersionsOf                   string
 	// Managed is the state at the violation, one version per object the target
-	// managed, and ManagedTotal how many there were. A check that did not ask
-	// leaves the total nil.
+	// managed, and ManagedTotal how many there were. A check that does not
+	// quote the state leaves the total nil.
 	Managed      []observe.Version
 	ManagedTotal *int
 	// Ready is what a readiness verdict read of the predicate and the CR.

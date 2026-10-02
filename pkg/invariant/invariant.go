@@ -170,7 +170,8 @@ type Violation struct {
 	// Managed is the state at At: one version of each object the target
 	// managed, which a check that judges the CR's readiness quotes as a table
 	// of its own. ManagedTotal is how many it was chosen from. A check that
-	// did not ask leaves the total nil, because a count of zero is a finding.
+	// does not quote the state leaves the total nil, so that a total of zero
+	// says the target managed nothing.
 	Managed      []observe.Version `json:"managed,omitempty"`
 	ManagedTotal *int              `json:"managedTotal,omitempty"`
 	// Ready is what a readiness verdict read. Other checks leave it nil.
@@ -270,8 +271,8 @@ func (v Violation) quotingDifferences(e Excerpt[Difference]) Violation {
 	return v
 }
 
-// quotingManaged does the same for the state at the verdict. The total it
-// carries is never nil: the check asked.
+// quotingManaged does the same for the state at the verdict. It sets the
+// total even at zero, which says the target managed nothing.
 func (v Violation) quotingManaged(e Excerpt[observe.Version]) Violation {
 	v.Managed, v.ManagedTotal = e.Quoted, &e.Total
 	return v

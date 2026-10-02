@@ -13,7 +13,7 @@ import (
 // paths that name no resource, such as discovery. A process that elects a
 // leader can start its informers before it leads, so only a lease it won
 // shows it running. It gets the lease before it wins it, while the leader it
-// replaces renews without a get until botbox kills it.
+// replaces renews without a get until a renewal fails.
 func Back(requests []proxy.Request, since time.Time) (time.Time, bool) {
 	if !electing(requests) {
 		return first(requests, since, func(r proxy.Request) bool { return r.Resource != "" && !leaderElection(r) })

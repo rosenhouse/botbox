@@ -38,9 +38,9 @@ func SelfHealing(in Input) (Result, error) {
 				describe(op), object)
 			continue
 		}
-		if start, missing, starting := in.stillStarting(op); starting {
+		if start, starting := in.stillStarting(op); starting {
 			out.note("for %s: the target had %s between %s and it, so it may not yet have been running to recreate the %s",
-				describe(op), missing, start, object)
+				describe(op), notBack(in.Requests), start, object)
 			continue
 		}
 		if in.stopped(op.Time, end) {
@@ -58,15 +58,15 @@ func SelfHealing(in Input) (Result, error) {
 	return out, nil
 }
 
-// stillStarting names the target's last restart before the op, and what the
-// target had not done since, if it was not back by the op.
-func (in Input) stillStarting(op Op) (string, string, bool) {
+// stillStarting names the target's last restart before the op if the target
+// was not back by the op.
+func (in Input) stillStarting(op Op) (string, bool) {
 	start, named := in.lastRestart(op.Time)
 	if named == "" {
-		return "", "", false
+		return "", false
 	}
 	back, found := Back(in.Requests, start)
-	return named, notBack(in.Requests), !found || !back.Before(op.Time)
+	return named, !found || !back.Before(op.Time)
 }
 
 // stopped reports whether the target exited, or waited to restart, at some

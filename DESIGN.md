@@ -297,21 +297,21 @@ The Runner executes one sequence:
    leader election reads its Lease that way to learn who holds it. A process of such a
    target shows it runs once the API server accepts a create or update of a lease that
    follows the process's own get. A controller can start informers before it leads, and
-   the leader that botbox replaces renews its lease without a get until botbox kills it. A
-   process of any other target shows it runs by requesting a resource outside leader
-   election, because a controller lists what it watches as it starts. botbox has no other
-   sign that a target is back. A start and that sign count as changes, so a restarted
-   target runs for `T_stable` past its return before a wait converges. A target that exits
-   again within `T_stable` of each return therefore never converges, even where it wrote
-   its converged state first, and its wait expires as a G4 that counts the exits since the
-   target last converged and quotes the last. A target that runs longer between exits can
-   converge in between, until a backoff outlasts a wait. A target that converges after an
-   exit passes. botbox chose when to restart the target after a `Restart` op and after an
-   exit a fault excuses (§6), so a wait gives it `T_settle` past its return from either,
-   where it returns within `T_settle` of the restart, and `T_settle` past the restart
-   where it does not. While a fault is active, only the first exit a fault excused during
-   each op gets that time (§6). An exit is during the last op stamped before it. An op
-   stamped before the target has had that time after an earlier exit gives it that time
+   the leader that botbox replaces renews its lease without a get while its renewals
+   succeed. A process of any other target shows it runs by requesting a resource outside
+   leader election, because a controller lists what it watches as it starts. botbox has no
+   other sign that a target is back. A start and that sign count as changes, so a
+   restarted target runs for `T_stable` past its return before a wait converges. A target
+   that exits again within `T_stable` of each return therefore never converges, even where
+   it wrote its converged state first, and its wait expires as a G4 that counts the exits
+   since the target last converged and quotes the last. A target that runs longer between
+   exits can converge in between, until a backoff outlasts a wait. A target that converges
+   after an exit passes. botbox chose when to restart the target after a `Restart` op and
+   after an exit a fault excuses (§6), so a wait gives it `T_settle` past its return from
+   either, where it returns within `T_settle` of the restart, and `T_settle` past the
+   restart where it does not. While a fault is active, only the first exit a fault excused
+   during each op gets that time (§6). An exit is during the last op stamped before it. An
+   op stamped before the target has had that time after an earlier exit gives it that time
    too. Before it stamps an op, the Runner waits for any restart that follows an exit a
    fault excused, so the op never lands while the target waits for it. Any other restart
    gives it no more time, and its startup requests count toward G1 where they land in a
@@ -2366,8 +2366,9 @@ built from source and run as a black-box binary.
   that way to learn who holds it, and an informer lists and watches instead. A restarted
   process reads its lease only once its caches sync, which a fault can delay, so its
   predecessor's get marks it first. A win counts only after the process's own get, because
-  botbox stamps a `Restart` op before it kills the leader, which renews without a get. A
-  target that reads a Lease with a get and elects no leader therefore shows it runs only
-  once it writes a lease, and fails G4 where it never does. G4 and the property read only
-  the requests made by the checkpoint, as the wait did. Keeping the sign of D60 and D69
-  and stating the limit was rejected, because the wait itself converged too early.
+  botbox stamps a `Restart` op before it kills the leader, which renews without a get
+  while its renewals succeed. A target that reads a Lease with a get and elects no leader
+  therefore shows it runs only once it writes a lease, and fails G4 where it never does.
+  G4 and the property read only the requests made by the checkpoint, as the wait did.
+  Keeping the sign of D60 and D69 and stating the limit was rejected, because the wait
+  itself converged too early.

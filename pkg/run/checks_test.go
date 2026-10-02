@@ -86,8 +86,9 @@ func convergedRun() Input {
 	store := history()
 	recordWidget(store, at(0.1), "11", 1)
 	return Input{
-		Target:  checkTarget(),
-		Objects: store,
+		Target:   checkTarget(),
+		Requests: []proxy.Request{{Start: at(0.05), Verb: "watch", Resource: "widgets", Watch: true, Status: 200}},
+		Objects:  store,
 		Timeline: Timeline{
 			Ops:         []AppliedOp{appliedOp(0, OpCreate, at(0))},
 			Checkpoints: []Checkpoint{{At: at(2.1), Op: 0, Converged: true}},

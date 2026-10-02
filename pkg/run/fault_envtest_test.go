@@ -233,6 +233,53 @@ func TestAToyThatLosesItsLeaseUnderAFaultPasses(t *testing.T) {
 	}
 }
 
+// leaseSlow fails most of the toy's lease updates and holds its ConfigMap
+// creates, then deletes a child op after op. A restarted toy can take longer
+// than timeouts.settle to win its lease back, and until then it recreates
+// nothing.
+const leaseSlow = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "update", "resource": "leases", "fraction": 0.8}, "action": {"error": 500}}},
+    {"i": 2, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"delay": "1.5s"}}},
+    {"i": 3, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 4, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 5, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 6, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 7, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 8, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
+  ]
+}`
+
+// The toy with no bug passes where a wait ends before it has won its lease
+// back, and the run notes the properties it did not judge there.
+func TestAToyThatWinsItsLeaseBackLatePasses(t *testing.T) {
+	t.Parallel()
+	toy := loadTarget(t, buildToy(t))
+	toy.Launch.Args = append(toy.Launch.Args, "--lease=3s")
+	testCluster := startCluster(t, toy.CRDs)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+
+	result, err := run.Run(ctx, toy, readSequence(t, leaseSlow), run.Options{
+		Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+	})
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+	}
+	if !slices.ContainsFunc(result.Notes, func(note string) bool {
+		return strings.HasPrefix(note, "P1 is not evaluated at the checkpoint after op ") && strings.Contains(note, "leader election")
+	}) {
+		t.Errorf("The run noted %q, want P1 left unjudged where the toy was not back.", result.Notes)
+	}
+}
+
 // A fault excuses every exit while it is active, and this one never stops. The
 // crash loop still fails G4 once the teardown clears the fault.
 func TestACrashLoopUnderAFaultThatNeverStopsFailsG4(t *testing.T) {

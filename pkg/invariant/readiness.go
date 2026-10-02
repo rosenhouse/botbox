@@ -160,20 +160,15 @@ func (w readyWalk) failure() string {
 // converging, or is empty. A target waiting to restart, or not yet back, is
 // not ready, and a restart and the target's return are changes.
 func (in Input) starting(at time.Time, stable time.Duration) string {
-	for _, exit := range in.Exits {
-		if !exit.At.After(at) && exit.Restart.After(at) {
-			return "but the target was waiting to restart"
-		}
+	if in.waitingToRestart(at) {
+		return "but the target was waiting to restart"
 	}
 	for _, exit := range in.Exits {
 		if exit.Restart.After(at.Add(-stable)) && !exit.Restart.After(at) {
 			return fmt.Sprintf("but the target restarted in the last %s (timeouts.stable)", stable)
 		}
 	}
-	start, named := in.lastRestart(at)
-	if named == "" {
-		named = "it started"
-	}
+	start, named := in.lastStart(at)
 	switch back, found := Back(requestsUpTo(in.Requests, at), start); {
 	case !found:
 		return "but the target had requested no resource outside leader election since " + named

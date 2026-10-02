@@ -16,10 +16,9 @@ import (
 func Property(declared target.Property) Check {
 	return func(in Input) (Result, error) {
 		out := Result{ID: declared.ID}
-		points, held := in.evaluationPoints(declared.When)
-		for _, checkpoint := range held {
-			out.note("at the checkpoint after %s: the proxy held a request of the target's there, or released one in the last %s (timeouts.stable), which may still change what %s reads",
-				in.describeOp(checkpoint.Op), in.timeouts().Stable, declared.ID)
+		points, unjudged := in.evaluationPoints(declared)
+		for _, why := range unjudged {
+			out.note("%s", why)
 		}
 		for _, s := range in.statesAt(points) {
 			managed := s.managed(in)
@@ -56,12 +55,12 @@ func Property(declared target.Property) Check {
 }
 
 // evaluationPoints are the instants a property is evaluated at, in order, and
-// the held checkpoints it is not.
+// why it is not evaluated at the other checkpoints.
 // DESIGN.md §4 counts the teardown's checkpoint, so `checkpoint` and `end`
 // keep it; the events the teardown itself caused are botbox's own doing.
-func (in Input) evaluationPoints(when target.PropertyWhen) (points []time.Time, held []Checkpoint) {
+func (in Input) evaluationPoints(declared target.Property) (points []time.Time, unjudged []string) {
 	checkpoints := in.Checkpoints
-	switch when {
+	switch declared.When {
 	case target.Always:
 		for _, v := range in.versions() {
 			if in.tornDown(v.Time) {
@@ -75,11 +74,25 @@ func (in Input) evaluationPoints(when target.PropertyWhen) (points []time.Time, 
 	}
 	// The loader reads an unset `when` as checkpoint (DESIGN.md §8.1).
 	for _, checkpoint := range checkpoints {
-		if checkpoint.Held {
-			held = append(held, checkpoint)
+		if why := in.unjudgeable(checkpoint, declared.ID); why != "" {
+			unjudged = append(unjudged, fmt.Sprintf("at the checkpoint after %s: %s", in.describeOp(checkpoint.Op), why))
 			continue
 		}
 		points = append(points, checkpoint.Time)
 	}
-	return points, held
+	return points, unjudged
+}
+
+// unjudgeable says why the property is not evaluated at the checkpoint, or is
+// empty where it is: what the property reads may be about to change, or the
+// target may not yet have acted on it.
+func (in Input) unjudgeable(checkpoint Checkpoint, property string) string {
+	if checkpoint.Held {
+		return fmt.Sprintf("the proxy held a request of the target's there, or released one in the last %s (timeouts.stable), which may still change what %s reads",
+			in.timeouts().Stable, property)
+	}
+	if down := in.notBack(checkpoint.Time); down != "" {
+		return fmt.Sprintf("the target %s, so it may not yet have acted on what %s reads", down, property)
+	}
+	return ""
 }

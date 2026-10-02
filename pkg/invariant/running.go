@@ -1,6 +1,7 @@
 package invariant
 
 import (
+	"slices"
 	"time"
 
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -44,6 +45,38 @@ func (in Input) restartOwed(t time.Time) time.Time {
 		}
 	}
 	return owed
+}
+
+// notBack says how the target was not back at t, or is empty where it was: it
+// was waiting to restart, or had requested no resource outside leader
+// election since it last started.
+func (in Input) notBack(t time.Time) string {
+	if in.waitingToRestart(t) {
+		return "was waiting to restart"
+	}
+	start, named := in.lastStart(t)
+	if _, found := Back(requestsUpTo(in.Requests, t), start); !found {
+		return "had requested no resource outside leader election since " + named
+	}
+	return ""
+}
+
+// waitingToRestart reports whether the target had exited by t and botbox had
+// not yet started it again.
+func (in Input) waitingToRestart(t time.Time) bool {
+	return slices.ContainsFunc(in.Exits, func(exit Exit) bool {
+		return !exit.At.After(t) && exit.Restart.After(t)
+	})
+}
+
+// lastStart is lastRestart, or the target's first start where it has not
+// restarted.
+func (in Input) lastStart(t time.Time) (time.Time, string) {
+	start, named := in.lastRestart(t)
+	if named == "" {
+		named = "it started"
+	}
+	return start, named
 }
 
 // lastRestart names the target's last start before t, by a Restart op or by

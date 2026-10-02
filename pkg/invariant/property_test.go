@@ -308,6 +308,9 @@ func TestAPropertyThatFoundNoCRQuotesTheStateAlone(t *testing.T) {
 	if got := state(violation); len(got) != 1 || got[0] != "w-0" {
 		t.Errorf("The state holds %v, want the child the property read.", got)
 	}
+	if want := "the property did not hold where no CR existed: "; !strings.HasPrefix(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to begin %q.", violation.Statement, want)
+	}
 }
 
 func TestAPropertyHoldsForEveryCR(t *testing.T) {

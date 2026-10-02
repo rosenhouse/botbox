@@ -86,7 +86,7 @@ func TestAFaultMakesTheToyFailAnInvariantItOtherwisePasses(t *testing.T) {
 
 // The toy with no bug retries a refused create, backing off as it goes, so it
 // recovers once the fault stops, however the fault stopped. B11 never asks
-// again. fault.json is the README's example: the teardown clears its fault.
+// again. fault.json is docs/targets.md's example: the teardown clears its fault.
 func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

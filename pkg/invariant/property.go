@@ -35,7 +35,7 @@ func Property(declared target.Property) Check {
 					continue
 				}
 				violation := Violation{
-					Statement: fmt.Sprintf("the property did not hold: %s", declared.Description),
+					Statement: fmt.Sprintf("the property did not hold where no CR existed: %s", declared.Description),
 					At:        s.at,
 				}.quotingManaged(Sample(theirs))
 				if cr.Object != nil {

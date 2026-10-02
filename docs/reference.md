@@ -1,7 +1,8 @@
 # Reference
 
 This page lists every key of target.yaml, every field of a sequence file, every op and every
-fault field. `make test` fails when one of them has no row here.
+fault field. `make test` fails when one of them has no row here. [targets.md](targets.md) says
+how to choose their values.
 
 ## target.yaml
 
@@ -113,9 +114,9 @@ DESIGN.md writes `settle`, `stable`, `delete`, `errloop` and `quiet` as `T_settl
 lacks. Reading a key a map lacks is an error, so guard an optional field with `has()`. An
 error while evaluating `ready` means not ready. A property also binds `managed`: the managed
 objects whose ownerReferences name that CR or no CR. Where no CR exists, a property runs once,
-with empty `metadata`, `spec` and `status`, over every managed object. The string extensions
-are available. An expression that yields no bool, and an error while evaluating a property,
-end the run as a configuration error.
+with empty `metadata`, `spec` and `status`, over every managed object, and a violation there
+says that no CR existed. The string extensions are available. An expression that yields no
+bool, and an error while evaluating a property, end the run as a configuration error.
 
 `go:<name>` names a function registered with `target.RegisterReady` or `target.RegisterEqual`.
 Only a botbox built with that function can load the target.

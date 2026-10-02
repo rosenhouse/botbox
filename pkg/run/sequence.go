@@ -314,22 +314,48 @@ func (o Op) validateFields() error {
 		"until": o.Until != nil,
 	}
 	wanted := fieldsOf(o.Type)
+	var needed []string
+	for _, field := range opFields {
+		if wanted[field] {
+			needed = append(needed, field)
+		}
+	}
 	for _, field := range opFields {
 		if carried[field] == wanted[field] {
 			continue
 		}
 		if wanted[field] {
-			return fmt.Errorf("a %s op needs %s", o.Type, field)
+			return fmt.Errorf("%s needs %s", o.Type.withArticle(), field)
 		}
-		return fmt.Errorf("a %s op takes no %s", o.Type, field)
+		if len(needed) == 0 {
+			return fmt.Errorf("%s takes no %s", o.Type.withArticle(), field)
+		}
+		return fmt.Errorf("%s takes no %s; it needs %s", o.Type.withArticle(), field, inWords(needed))
 	}
 	if o.Type == OpDeleteManaged && *o.Nth < 0 {
 		return fmt.Errorf("index is %d, want the position of a managed object", *o.Nth)
 	}
 	if o.CR != "" && !slices.Contains(namingOps, o.Type) {
-		return fmt.Errorf("a %s op takes no cr", o.Type)
+		return fmt.Errorf("%s takes no cr", o.Type.withArticle())
 	}
 	return nil
+}
+
+// withArticle names the op type as a sentence does: "a create op", "an update op".
+func (t OpType) withArticle() string {
+	if strings.IndexAny(string(t), "aeiou") == 0 {
+		return "an " + string(t) + " op"
+	}
+	return "a " + string(t) + " op"
+}
+
+// inWords joins words as a sentence lists them: "a", "a and b", "a, b and c".
+func inWords(words []string) string {
+	last := len(words) - 1
+	if last == 0 {
+		return words[0]
+	}
+	return strings.Join(words[:last], ", ") + " and " + words[last]
 }
 
 // namingOps act on a CR an earlier op created, which cr names.
@@ -420,9 +446,7 @@ func (f *Fault) validate(position int) error {
 		return fmt.Errorf("the fault carries %d actions, want exactly one of error, delay or drop", actions)
 	}
 	if verb := f.Match.Verb; verb != "" && !slices.Contains(proxy.Verbs, verb) {
-		last := len(proxy.Verbs) - 1
-		return fmt.Errorf("match.verb %q is not one of %s and %s",
-			verb, strings.Join(proxy.Verbs[:last], ", "), proxy.Verbs[last])
+		return fmt.Errorf("match.verb %q is not one of %s", verb, inWords(proxy.Verbs))
 	}
 	if strings.Contains(f.Match.Resource, "/") {
 		return fmt.Errorf("match.resource %q holds a slash; name the plural alone, such as configmaps. "+

@@ -749,15 +749,27 @@ var (
 	goroutineHeader = regexp.MustCompile(`^goroutine \d+ .*:$`)
 )
 
+// usageHeader opens the usage text that Go's flag package and cobra print
+// below a flag error.
+var usageHeader = regexp.MustCompile(`^Usage( of .+)?:$`)
+
 // whyItStopped is what the target said as it stopped, in the log past from:
-// the line the last panic opens with, or else the last whole line above any
-// stack trace. It is empty where the log holds neither, which leaves the
-// reader the file itself. It also returns where the log ends.
+// the line the last panic opens with, or else the line above the last usage
+// text, or else the last whole line above any stack trace. It is empty where
+// the log holds none, which leaves the reader the file itself. It also returns
+// where the log ends.
 func whyItStopped(path string, from int64) (string, int64) {
 	said, end := tailLines(path, from)
 	for _, line := range slices.Backward(said) {
 		if slices.ContainsFunc(panicked, func(opener string) bool { return strings.HasPrefix(line, opener) }) {
 			return line, end
+		}
+	}
+	if header := lastUsageHeader(said); header >= 0 {
+		for _, line := range slices.Backward(said[:header]) {
+			if strings.TrimSpace(line) != "" {
+				return strings.TrimSpace(line), end
+			}
 		}
 	}
 	for i, line := range slices.Backward(said) {
@@ -768,6 +780,16 @@ func whyItStopped(path string, from int64) (string, int64) {
 		}
 	}
 	return "", end
+}
+
+// lastUsageHeader is the index of the last line that opens a usage text, or -1.
+func lastUsageHeader(lines []string) int {
+	for i, line := range slices.Backward(lines) {
+		if usageHeader.MatchString(line) {
+			return i
+		}
+	}
+	return -1
 }
 
 // tailLines are the whole lines of the file past from, at most maxTail bytes

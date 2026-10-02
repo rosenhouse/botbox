@@ -2683,6 +2683,11 @@ func TestWhatTheTargetSaidOnTheWayOut(t *testing.T) {
 			"E0923 16:05:39.116650    7054 main.go:30] cannot reach 10.96.0.1:443"},
 		{"several lines and no panic", "starting\nlistening on :8080\nE0921 fatal: reconcile failed\n",
 			"E0921 fatal: reconcile failed"},
+		{"an error above cobra's usage text", "Error: unknown flag: --x\nUsage:\n  app [flags]\n\nFlags:\n  -h, --help   help for app\n",
+			"Error: unknown flag: --x"},
+		{"a usage text with nothing above it", "Usage of app:\n  -x\tdoes x\n", "-x\tdoes x"},
+		{"a blank line above a usage text", "E0921 bad flag\n\nUsage of app:\n  -x\tdoes x\n", "E0921 bad flag"},
+		{"two usage texts", "first\nUsage of app:\n  -x\tdoes x\nsecond\nUsage of app:\n  -x\tdoes x\n", "second"},
 		{"a tail that begins mid-line", strings.Repeat("y", pastTheTail) + "\nE0921 fatal: reconcile failed\n",
 			"E0921 fatal: reconcile failed"},
 		{"a last line longer than the tail", "E0921 fatal: " + strings.Repeat("x", pastTheTail) + "\n", ""},
@@ -2716,6 +2721,9 @@ func TestWhatTheTargetSaidAboveItsStackTrace(t *testing.T) {
 		{"panic.log", "panic: runtime error: index out of range [150] with length 0"},
 		{"klog-fatal.log", "F0923 16:05:39.116650    7054 main.go:30] reconciling widget: the cache never synced"},
 		{"zap-json.log", `{"level":"error","ts":"2026-09-23T16:04:03Z","logger":"setup","msg":"unable to create controller","controller":"Widget","error":"no matches for kind \"Widget\" in version \"toy.botbox/v1\"","stacktrace":"main.main\n\tgithub.com/rosenhouse/botbox/zzprobe/main.go:39\nruntime.main\n\truntime/proc.go:290"}`},
+		// Go's flag package prints the error above its usage text.
+		{"flag-usage.log", "flag provided but not defined: -no-such-flag"},
+		{"cobra-usage.log", "Error: unknown flag: --no-such-flag"},
 	} {
 		t.Run(log.file, func(t *testing.T) {
 			if got, _ := whyItStopped(filepath.Join("testdata", "stopped", log.file), 0); got != log.want {

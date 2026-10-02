@@ -164,7 +164,9 @@ func TestTheTopLevelHelpListsTheCommandsUsersRun(t *testing.T) {
 	for _, want := range []string{
 		"\n  run ", "\n  replay ", "\n  version ",
 		"\nRun 'botbox <command> --help' or 'botbox help <command>' for a command's flags.\n",
-		"https://github.com/rosenhouse/botbox", "\ndocs/reference.md there lists every key of target.yaml and every op.\n",
+		"\nThe README at https://github.com/rosenhouse/botbox shows a first run.\n",
+		"\ndocs/reference.md there lists every key of target.yaml and every op.\n",
+		"\ndocs/failures.md there says what each file and message of a failure means.\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("botbox --help lacks %q:\n%s", want, got)
@@ -172,6 +174,17 @@ func TestTheTopLevelHelpListsTheCommandsUsersRun(t *testing.T) {
 	}
 	if strings.Contains(got, "matrix") {
 		t.Errorf("botbox --help names the toy's matrix command:\n%s", got)
+	}
+}
+
+// A drawn sequence injects no fault, so the help promises none.
+func TestTheTopLevelHelpSaysBotboxRunsARealAPIServer(t *testing.T) {
+	got := strings.Join(strings.Fields(help("")), " ")
+	if want := "runs your controller against a real kube-apiserver and etcd"; !strings.Contains(got, want) {
+		t.Errorf("botbox --help does not say it %q:\n%s", want, help(""))
+	}
+	if says := "injects faults"; strings.Contains(got, says) {
+		t.Errorf("botbox --help says it %q:\n%s", says, help(""))
 	}
 }
 

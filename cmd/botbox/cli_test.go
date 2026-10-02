@@ -78,6 +78,8 @@ type fakeSession struct {
 	now func() time.Time
 	// discarding fails discarding a passing run.
 	discarding error
+	// printed is what botbox has printed on stdout so far.
+	printed func() string
 }
 
 func (s *fakeSession) vet(*target.Target) error { return s.refused }
@@ -140,6 +142,7 @@ func invokeCtx(t *testing.T, ctx context.Context, fake *fakeSession,
 	newGenerator func(*target.Target) (Generator, []string, error), args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
+	fake.printed = stdout.String
 	c := newCLI(&stdout, &stderr)
 	c.open = func(options, *target.Target) (session, error) {
 		fake.stderrAtOpen = stderr.String()
@@ -348,6 +351,46 @@ func TestRunShrinksTheFailingSequence(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(session.dirs[0], shrinkDir)); !os.IsNotExist(err) {
 		t.Errorf("The run directory keeps the shrink pass's replays: %v", err)
+	}
+}
+
+// Minimizing can take minutes, so a reader learns of the failure before the
+// first replay. A single op has nothing to minimize.
+func TestADrawnRunSaysItFailedBeforeItMinimizes(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		ops  []run.OpType
+		says string
+	}{
+		{"two ops", []run.OpType{run.OpSettle, run.OpSettle}, "run 1: G3 failed, and minimizing its 2 ops can take minutes.\n"},
+		{"one op", []run.OpType{run.OpSettle}, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			violation := run.Violation{ID: "G3", Statement: "the CR's children go with it"}
+			session := &fakeSession{fails: func(run.Sequence, string) *run.Violation { return &violation }}
+			var atFirstReplay string
+			session.after = func() {
+				if len(session.sequences) == 2 {
+					atFirstReplay = session.printed()
+				}
+			}
+
+			code, stdout, stderr := invokeWith(t, session, countingGenerator(nil, test.ops...),
+				"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "42")
+
+			if code != exitViolation {
+				t.Fatalf("botbox run exited %d: %s", code, stderr)
+			}
+			if test.says == "" {
+				if strings.Contains(stdout, "minimizing its") {
+					t.Errorf("botbox run printed\n%s\nand a single op has nothing to minimize.", stdout)
+				}
+				return
+			}
+			if !strings.HasSuffix(atFirstReplay, "run 1: seed 42, generated\n"+test.says) {
+				t.Errorf("botbox run had printed\n%s\nby the first replay, want it to end with %q.", atFirstReplay, test.says)
+			}
+		})
 	}
 }
 
@@ -813,7 +856,7 @@ func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
 		says       string
 	}{
 		{"drawn runs", []string{"run", "--runs", "10", "--seed", "1"}, 4 * time.Minute,
-			"the deadline is %[1]s: these 10 runs can take %[2]s at the target's timeouts, and minimizing a failure gets 4m0s. --deadline sets another.\n"},
+			"the deadline is %[1]s: these 10 runs can take %[2]s at the target's timeouts, and minimizing a failure gets the rest, at least 4m0s. --deadline sets another.\n"},
 		{"a named sequence", []string{"run", sequence}, 0, named},
 		{"named sequences", []string{"run", sequence, longer}, 0,
 			"the deadline is %[1]s: these 2 runs can take that long at the target's timeouts. --deadline sets another.\n"},

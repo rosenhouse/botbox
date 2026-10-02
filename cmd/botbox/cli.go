@@ -351,6 +351,9 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 		c.report(number, violation, dir)
 		return violation, reportNotes(opts, t, result)
 	}
+	if len(failed.sequence.Ops) > 1 {
+		fmt.Fprintf(c.stdout, "run %d: %s failed, and minimizing its %s can take minutes.\n", number, violation.ID, ops(failed.sequence))
+	}
 	shrunk := run.Shrink(ctx, failed.sequence, violation, func(ctx context.Context, candidate run.Sequence) (run.Result, error) {
 		return s.execute(ctx, t, candidate, filepath.Join(dir, shrinkDir), run.Engine{})
 	})
@@ -641,7 +644,7 @@ func (c *cli) derive(opts *options, t *target.Target, sequences []run.Sequence, 
 		return
 	}
 	opts.deadline = min(runs, math.MaxInt64-minimizing) + minimizing
-	fmt.Fprintf(c.stdout, "the deadline is %s: %s can take %s at the target's timeouts, and minimizing a failure gets %s. --deadline sets another.\n",
+	fmt.Fprintf(c.stdout, "the deadline is %s: %s can take %s at the target's timeouts, and minimizing a failure gets the rest, at least %s. --deadline sets another.\n",
 		opts.deadline, these, runs, minimizing)
 }
 

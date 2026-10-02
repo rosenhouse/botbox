@@ -39,8 +39,9 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 	for _, op := range s.Ops {
 		if faults > 0 {
 			// The op may first wait for the target to restart. The target is
-			// then owed T_settle past a return that can come T_settle after
-			// the op, T_settle more than a settle wait.
+			// then owed timeouts.settle past a return that can come
+			// timeouts.settle after the op, timeouts.settle more than a
+			// settle wait.
 			waits += float64(launch.MaxBackoff) + settle
 		}
 		switch op.Type {
@@ -48,11 +49,12 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 			waits += deletion
 		case OpRecreate:
 			// Its wait for the CR to go lasts while the run is owed time,
-			// which can run T_settle past what the ops before it were given.
+			// which can run timeouts.settle past what the ops before it were
+			// given.
 			waits += max(deletion, settle) + hold
 		case OpRestart:
-			// The target is owed T_settle past its return, which can come
-			// T_settle after the restart.
+			// The target is owed timeouts.settle past its return, which can
+			// come timeouts.settle after the restart.
 			waits += float64(launch.RestartWithin) + settle
 		case OpFault:
 			faults++
@@ -77,10 +79,10 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 	if untriggered {
 		stops++
 	}
-	// From the first fault on, each op allows an exit, owed T_settle past a
-	// return that can come T_settle after a restart that can take MaxBackoff.
-	// Faults that stop are owed as long as they lasted and T_settle, a hold
-	// past that, and another exit. A fault lasts until the proxy releases what
+	// From the first fault on, each op allows an exit, owed timeouts.settle
+	// past a return that can come timeouts.settle after a restart that can
+	// take MaxBackoff. Faults that stop are owed as long as they lasted and
+	// timeouts.settle, a hold past that, and another exit. A fault lasts until the proxy releases what
 	// it held, up to the delay past its trigger.
 	exit := float64(launch.MaxBackoff) + 2*settle
 	waits += float64(exits) * exit

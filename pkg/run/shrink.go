@@ -12,8 +12,8 @@ type Replay func(ctx context.Context, candidate Sequence) (Result, error)
 
 // Shrink simplifies one op at a time, replays what is left and keeps the
 // simpler sequence while it still fails for the same reason, until no op can
-// give any more (DESIGN.md §5.5). It stops at the context's deadline and
-// returns the smallest failing sequence it found (§11).
+// give any more. It stops at the context's deadline and returns the smallest
+// failing sequence it found.
 func Shrink(ctx context.Context, failing Sequence, violation Violation, replay Replay) Sequence {
 	smallest := failing
 	for removed := true; removed; {
@@ -27,16 +27,16 @@ func Shrink(ctx context.Context, failing Sequence, violation Violation, replay R
 func shrinkPass(ctx context.Context, s Sequence, violation Violation, replay Replay) (Sequence, bool) {
 	simplified := false
 	for i := 0; i < len(s.Ops) && ctx.Err() == nil; {
-		// Removal first, because no fault is simpler than a short one
-		// (DESIGN.md §5.5). On success the next op has shifted into this
-		// position, so try it again.
+		// Removal first, because no fault is simpler than a short one. On
+		// success the next op has shifted into this position, so try it
+		// again.
 		if candidate, ok := reproducing(ctx, s, i, []Sequence{s.without(i)}, violation, replay); ok {
 			s, simplified = candidate, true
 			continue
 		}
 		// The op stays. Weaken it as far as it goes, and do not ask about
 		// removing it again: the sequence without it is the same whatever
-		// its fault carries, and each replay is a cluster (§11).
+		// its fault carries, and each replay costs a whole run.
 		if candidate, weakened := weaken(ctx, s, i, violation, replay); weakened {
 			s, simplified = candidate, true
 		}
@@ -47,7 +47,7 @@ func shrinkPass(ctx context.Context, s Sequence, violation Violation, replay Rep
 
 // weaken halves each thing op i's fault carries, one axis at a time and as far
 // as that axis goes. An axis the failure refuses stays refused however far
-// another halves, so weaken asks about it once: each replay is a cluster (§11).
+// another halves, so weaken asks about it once: each replay costs a whole run.
 func weaken(ctx context.Context, s Sequence, i int, violation Violation, replay Replay) (Sequence, bool) {
 	weakened := false
 	if s.Ops[i].Type != OpFault || s.Ops[i].Fault == nil {
@@ -91,15 +91,15 @@ func reproducing(ctx context.Context, s Sequence, i int, candidates []Sequence,
 }
 
 // minFaultDuration is where halving a fault's duration stops. Halving runs to
-// a nanosecond in thirty-two steps, and each step is a whole cluster (§11),
-// for a reproducer nobody can read: a fault delaying a request by a
-// nanosecond is indistinguishable from no fault, which removal already tries.
+// a nanosecond in thirty-two steps, and each step costs a whole run, for a
+// reproducer nobody can read: a fault delaying a request by a nanosecond is
+// indistinguishable from no fault, which removal already tries.
 const minFaultDuration = Duration(10 * time.Millisecond)
 
 // halvings are the axes weakening halves, each returning the milder op to try
-// and whether that axis has anything left to give (DESIGN.md §5.5). A count
-// halves to 1, because a zero Trigger never ends and is a stronger fault, not
-// a milder one. A duration halves to minFaultDuration.
+// and whether that axis has anything left to give. A count halves to 1,
+// because a zero Trigger never ends and is a stronger fault, not a milder one.
+// A duration halves to minFaultDuration.
 var halvings = []func(Op) (Op, bool){
 	func(op Op) (Op, bool) {
 		half := op.Fault.Until.Count / 2
@@ -177,8 +177,8 @@ func reproduces(ctx context.Context, candidate Sequence, violation Violation, re
 }
 
 // without returns the sequence with op i removed, renumbered so that it is
-// legal (DESIGN.md §7). A fault still ends, and a deleted fixture still comes
-// back, where it did: at the op it named, or at the first op left after it.
+// legal. A fault still ends, and a deleted fixture still comes back, where it
+// did: at the op it named, or at the first op left after it.
 func (s Sequence) without(i int) Sequence {
 	shorter := s
 	shorter.Ops = slices.Delete(slices.Clone(s.Ops), i, i+1)

@@ -10,14 +10,14 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// Engine is the invariant engine as a Checker (DESIGN.md §5.6): the generic
-// invariants of §6 and the properties the target declares.
+// Engine is the invariant engine as a Checker: the generic invariants and the
+// properties the target declares.
 type Engine struct{}
 
 var _ Checker = Engine{}
 
 // Check returns every violation the engine found, in its order of checks, and
-// every note. A run ends at the first violation (DESIGN.md §5.5).
+// every note. A run ends at the first violation.
 func (Engine) Check(in Input) (Findings, error) {
 	results, err := Evaluate(in)
 	if err != nil {
@@ -81,7 +81,7 @@ func engineInput(in Input) invariant.Input {
 // engineOps carries each op's index, which is what a checkpoint names and not
 // the op's position in the timeline, the CR a CR op wrote, and the object a
 // deleteManaged op deleted: G3 does not credit the target for a cleanup
-// botbox performed (DESIGN.md §5.4, D38).
+// botbox performed.
 func engineOps(t *target.Target, timeline Timeline) []invariant.Op {
 	ops := make([]invariant.Op, len(timeline.Ops))
 	for i, op := range timeline.Ops {
@@ -93,7 +93,7 @@ func engineOps(t *target.Target, timeline Timeline) []invariant.Op {
 			continue
 		}
 		// The kind resolves: the Runner refuses an op whose kind does not, so
-		// no op that deleted an object can carry one (DESIGN.md §5.4).
+		// no op that deleted an object can carry one.
 		gvk, _ := managedKind(t, op.Op.Kind)
 		ops[i].Deleted = observe.Key{GVK: gvk, Namespace: timeline.Namespace, Name: op.Deleted}
 	}
@@ -131,7 +131,7 @@ func settleResult(checkpoint Checkpoint) invariant.SettleResult {
 
 // engineFaults hands over the windows the proxy applied a fault in. A fault
 // the proxy applied to no request has no window: it changed nothing about the
-// run, so it excuses nothing (DESIGN.md §6, D36).
+// run, so it excuses nothing.
 func engineFaults(windows []Window) []invariant.FaultWindow {
 	var faults []invariant.FaultWindow
 	for _, window := range windows {
@@ -152,7 +152,7 @@ func engineExits(exits []Exit) []invariant.Exit {
 }
 
 // part writes how much of the evidence the line quotes, which is less than the
-// check chose from wherever the bound of D35 cut it.
+// check chose from wherever invariant.MaxEvidence cut it.
 func part(shown, total int, noun string) string {
 	if shown < total {
 		return fmt.Sprintf("%d of %s", shown, count(total, noun))
@@ -170,7 +170,7 @@ func count(n int, noun string) string {
 
 // evidence is what a violation quotes, in one line. The instant it judged is
 // a field of its own, and the whole request log and version history stay in
-// the run directory (DESIGN.md §5.7).
+// the run directory.
 func evidence(violation invariant.Violation) string {
 	var quoted []string
 	// The statement names the first object that differs, and how a whole one does.
@@ -201,10 +201,10 @@ func evidence(violation invariant.Violation) string {
 	return strings.Join(quoted, "; ")
 }
 
-// managedClause says what the target managed at a violation, over the kinds the
-// target declares (DESIGN.md §6). The clause names the declaration because a
-// target that declares too few kinds managed nothing by that measure while the
-// request log shows it creating children.
+// managedClause says what the target managed at a violation, over the kinds
+// the target declares. The clause names the declaration because a target that
+// declares too few kinds managed nothing by that measure while the request log
+// shows it creating children.
 func managedClause(managed int) string {
 	return "the target managed " + count(managed, "object") + " of the kinds it declares"
 }

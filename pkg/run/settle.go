@@ -13,14 +13,14 @@ import (
 // settlePoll is how often a settle wait reads the Observer.
 const settlePoll = 50 * time.Millisecond
 
-// Settle waits for the target's reaction (DESIGN.md §5.5): the Ready predicate
-// holds, the target has shown it runs, and neither the CR nor a managed object
-// has changed, nor the target restarted or come back, nor the proxy held one of
-// its requests, for T_stable. It reports whether it converged within T_settle,
-// or by what owed returns if that is later: the target may still be recovering
-// from a fault or deleting a CR. A request the proxy held by then extends the
-// wait to T_settle past its release. A nil owed owes nothing. The caller judges
-// a wait that expires.
+// Settle waits for the target's reaction: the Ready predicate holds, the
+// target has shown it runs, and neither the CR nor a managed object has
+// changed, nor the target restarted or come back, nor the proxy held one of
+// its requests, for timeouts.stable. It reports whether it converged within
+// timeouts.settle, or by what owed returns if that is later: the target may
+// still be recovering from a fault or deleting a CR. A request the proxy held
+// by then extends the wait to timeouts.settle past its release. A nil owed
+// owes nothing. The caller judges a wait that expires.
 func (h *Harness) Settle(ctx context.Context, owed func() time.Time) (bool, error) {
 	return settle{
 		timeouts: h.target.Timeouts,
@@ -90,10 +90,10 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 	}
 }
 
-// heldOpen is when a wait whose time runs out at deadline may end: T_settle
+// heldOpen is when a wait whose time runs out at deadline may end: settle
 // past the release of each request that reached the proxy before deadline.
 // While the proxy still holds one, its release is yet to come, so heldOpen
-// answers T_settle from now. Each hold ends within its delay.
+// answers settle from now. Each hold ends within its delay.
 func heldOpen(held func(before time.Time) (bool, time.Time), deadline, now time.Time, settle time.Duration) time.Time {
 	holding, released := held(deadline)
 	if holding {

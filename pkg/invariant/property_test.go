@@ -147,6 +147,12 @@ func TestPropertyIsNotEvaluatedWhereTheTargetWasStillStarting(t *testing.T) {
 					": "+test.want+", so it may not yet have acted on what P1 reads")
 			})
 		}
+		t.Run(string(when)+", at the teardown", func(t *testing.T) {
+			in := stale(when).exit(7*time.Second, 9*time.Second).teardownCheckpoint(8 * time.Second).through(10 * time.Second)
+
+			noted(t, invariant.Property(in.Target.Properties[0]), in,
+				"P1 is not evaluated at the checkpoint after teardown: the target was waiting to restart, so it may not yet have acted on what P1 reads")
+		})
 	}
 }
 

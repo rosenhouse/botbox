@@ -193,6 +193,12 @@ func (r *run) settled(when time.Duration, result invariant.SettleResult) *run {
 	return r.checkpoint(when, result).teardown(when + stableWindow + 100*time.Millisecond)
 }
 
+// teardownCheckpoint follows the teardown's deletion window and no settle wait.
+func (r *run) teardownCheckpoint(when time.Duration) *run {
+	r.in.Checkpoints = append(r.in.Checkpoints, invariant.Checkpoint{Op: invariant.Teardown, Time: at(when)})
+	return r
+}
+
 // teardown is when botbox began emptying the namespace (DESIGN.md §5.5).
 func (r *run) teardown(when time.Duration) *run {
 	r.in.Teardown = at(when)

@@ -398,7 +398,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 				violation.ID))
 		}
 	}
-	// What the pass replayed is nobody's evidence.
+	// The shrink pass's replays back no report, so they are deleted.
 	c.warn(os.RemoveAll(filepath.Join(dir, shrinkDir)))
 	c.warn(run.WriteRunSequence(dir, reported))
 	c.warn(c.writeReport(dir, opts, t, filepath.Join(dir, sequenceFile), reported, result))
@@ -601,9 +601,9 @@ var errRunInterrupted = errors.New("an interrupt stopped the run")
 
 // named blames an interrupt, or the deadline, for a run its context cut short.
 // botbox exits 2 at the deadline, as it does for a broken target, so the error
-// has to say which. The context botbox built from the deadline is what it
-// asks.
-// The teardown's cleanup runs on a budget of its own.
+// has to say which. The teardown's cleanup runs on a budget of its own, so
+// named reads ctx.Err() as well as err, and blames only the deadline botbox
+// set.
 func (o options) named(ctx context.Context, err error) error {
 	if _, ok := interruption(ctx); ok && errors.Is(err, context.Canceled) {
 		return errRunInterrupted

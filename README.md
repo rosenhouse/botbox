@@ -561,20 +561,20 @@ its path into `equalIgnore` as written. A Secret's values appear there as marker
 Once a settle wait has converged, botbox restarts a controller that exits, as a kubelet
 would: at once, then after 10s, doubling up to 5 minutes. The run prints a note for each
 exit, quoting the line the controller wrote as it stopped. A settle wait does not converge
-while the controller waits to restart. Nor does it converge until the controller has
-requested a resource outside leader election since it last started and then run for
-`stable`, because botbox has no other sign that it is back. After a `restart` op, a
-controller has `settle` to come back, and `settle` past its return to converge. A
-controller that crashes again within `stable` of each return never converges, even where
-it wrote its converged state first, so G4 reports it and quotes the last exit.
+while the controller waits to restart. Nor does it converge until the controller is back
+since it last started and has run for `stable`. botbox counts a controller back once it
+requests a resource, or, where it elects a leader, once it wins its lease. It has no other
+sign. After a `restart` op, a controller has `settle` to come back, and `settle` past its
+return to converge. A controller that crashes again within `stable` of each return never
+converges, even where it wrote its converged state first, so G4 reports it and quotes the
+last exit.
 A controller that exits during a fault, or while it recovers from one, has the same once
 botbox restarts it. While a fault is active, only your controller's first such exit during
 each op gets that time. If it exits again during the op, the wait can end before it
 restarts. A wait can also end before a restarted controller has won its lease back.
 botbox does not check a `checkpoint` or `end` property where a wait ends, or the
 teardown checks, before your controller could have converged: while it waits to restart,
-or before it has requested a resource outside leader election since it last started and
-then run for `stable`. The run notes it.
+or before it has been back for `stable` since it last started. The run notes it.
 botbox applies no op while your controller waits to restart after such an exit. An op
 that botbox applies before your controller has had that time after such an exit gives it
 that time too. A controller that keeps crashing under a fault therefore fails G4 once
@@ -614,7 +614,8 @@ A settle wait expired. What follows `expired with no fault active` says why:
   in the last 2s (timeouts.stable)`, means your controller exited. The line counts the exits
   since it last converged and quotes the last.
 - A line that goes on `but the target had requested no resource outside leader election
-  since …` means your controller had not come back from a restart, or had not started, when
+  since …`, or `but the target had won no lease since …` for a controller that elects a
+  leader, means your controller had not come back from a restart, or had not started, when
   the wait gave up. `until the last 2s (timeouts.stable)` means it came back too late to run
   for `stable` before then. A controller slow to start needs a wider `settle`.
 

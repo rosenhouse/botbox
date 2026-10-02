@@ -123,8 +123,7 @@ Implementations:
   supervision. The end of the context `Supervise` was given ends it too. `Status` says
   whether a supervised target is waiting to restart, and when the process now running
   started. botbox does not probe the target for health. A settle wait does not converge
-  until the process now running has requested a resource outside leader election, which
-  only a running target does (§5.5).
+  until the process now running has shown it runs (§5.5).
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
 - `Image` — run a container image against a kind cluster, with the proxy in-cluster or
   reached by port-forward. Phase 2 (§10, M8).
@@ -293,15 +292,17 @@ The Runner executes one sequence:
    `sequence.json`, unless the target wrote that its port was taken. Once a wait has
    converged, the target has shown it runs, and the Launcher supervises it (§5.1). The run
    notes each exit and the line the target wrote as it stopped. A wait does not converge
-   while the target waits to restart, nor until the process now running has shown it runs
-   by requesting a resource outside leader election. botbox has no other sign that a target
-   is back, and a controller lists what it watches as it starts. A start and that first
-   request count as changes, so a restarted target runs for `T_stable` past its return
-   before a wait converges. A target that exits again within `T_stable` of each return
-   therefore never converges, even where it wrote its converged state first, and its wait
-   expires as a G4 that counts the exits since the target last converged and quotes the
-   last. A target that runs longer between exits can converge in between, until a backoff
-   outlasts a wait. A target that converges after an exit passes. botbox chose when to
+   while the target waits to restart, nor until the process now running has shown it runs.
+   A target that requests leader election shows it once the API server accepts its create
+   or update of a lease, because a controller can start informers before it leads. Another
+   shows it by requesting a resource, because a controller lists what it watches as it
+   starts. botbox has no other sign that a target is back. A start and that sign count as
+   changes, so a restarted target runs for `T_stable` past its return before a wait
+   converges. A target that exits again within `T_stable` of each return therefore never
+   converges, even where it wrote its converged state first, and its wait expires as a G4
+   that counts the exits since the target last converged and quotes the last. A target
+   that runs longer between exits can converge in between, until a backoff outlasts a
+   wait. A target that converges after an exit passes. botbox chose when to
    restart the target after a `Restart` op and after an exit a fault excuses (§6), so a
    wait gives it `T_settle` past its return from either, where it returns within `T_settle`
    of the restart, and `T_settle` past the restart where it does not. While a fault is
@@ -531,11 +532,11 @@ at the latest in the wait the teardown gives the target once it has cleared the 
 started and has run for `T_stable` after that (§5.5). A wait a fault excuses can end
 sooner: a later exit during the op is owed no time, and a target can take longer than
 `T_settle` past its restart to win its lease back. The target is then still starting: it
-is waiting to restart, restarted within `T_stable`, or has requested no resource outside
-leader election since it last started, or first did within `T_stable`. G4's statement
-names the same states. The teardown's checkpoint can find the target so too. A target
-still starting may not yet have acted on what changed while it was down, so no property
-is evaluated at that checkpoint, under `checkpoint` or `end`, and the run notes each one.
+is waiting to restart, restarted within `T_stable`, or has not shown it runs since it last
+started (§5.5), or first did within `T_stable`. G4's statement names the same states. The
+teardown's checkpoint can find the target so too. A target still starting may not yet
+have acted on what changed while it was down, so no property is evaluated at that
+checkpoint, under `checkpoint` or `end`, and the run notes each one.
 A wait that converged saw the target back for `T_stable`, so its checkpoint is judged,
 even where a `Restart` op replaced a target waiting out its backoff. A property evaluated
 `always` reads every event rather than a checkpoint. No invariant needs the rule. A target
@@ -693,10 +694,9 @@ fixture after the last settle wait that converged, since the target may then hav
 delete the object itself. It notes one where a fault was active during the op or its wait,
 or where the wait ended while the target was still owed time to recover from a fault. It
 also notes an op that follows a restart, by a `Restart` op or by `Supervise` after an exit,
-where the target requested nothing between the last restart and the op but leader
-election's leases and lease candidates, and paths that name no resource. botbox has no
-other sign that the target is back (§5.1), and a process starting up or waiting to lead
-requests only those. A settle wait that converged after the restart rules this out (§5.5).
+where the target had not shown it runs between the last restart and the op. botbox has no
+other sign that the target is back (§5.5). A settle wait that converged after the restart
+rules this out.
 It notes an op where the target exited, or waited to restart, during the op or its wait.
 Where several of these apply, the note names the first. A violation quotes the object's
 history and the managed objects where the wait ended, which show an object recreated under
@@ -739,8 +739,7 @@ Details the example does not show:
   between them, and leaves out what a CR op, a fixture op or a `deleteManaged` between
   them may have changed (§6). Put a `settle` op after a `restart`, and one before it
   unless the op before it settles. G7 judges a `deleteManaged` after a `restart` only once
-  the target has requested a resource outside leader election, which a `settle` op
-  between them waits for.
+  the target has shown it runs (§5.5), which a `settle` op between them waits for.
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
 - A fault's `match.verb` is one of `get`, `list`, `watch`, `create`, `update`, `patch`,
@@ -2351,4 +2350,12 @@ built from source and run as a black-box binary.
   A wait that converged is judged whatever the exits read, because a `Restart` op can
   replace a target waiting out its backoff, and the restart the exit scheduled never
   comes. Skipping properties at every wait a fault excuses was rejected, because
-  properties are how botbox sees a fault's transient states (§5.6).
+  properties are how botbox sees a fault's transient states (§5.6). A target that
+  requests leader election is back only once the API server accepts its create or update
+  of a lease. controller-runtime starts the informers a field index asks for before the
+  manager leads. The toy with an index watched Widgets while it waited out its lease, that
+  watch counted as its return, the wait converged before the toy led, and P1 failed in 3
+  of 3 runs. Any `coordination.k8s.io` request marks a target that elects (D61), so a
+  target that reads Leases and elects no leader never shows it runs, and fails G4.
+  Keeping the sign of D60 and D69 and stating the limit was rejected, because the wait
+  itself converged too early.

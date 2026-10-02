@@ -58,5 +58,17 @@ func TestStartResolvesTheWatchedKindsThroughTheGivenMapper(t *testing.T) {
 		Namespace: namespace,
 		Kinds:     []schema.GroupVersionKind{configMapGVK},
 		Mapper:    knowsNothing(),
-	}, "resolving the resource of")
+	}, "resolving the resource of v1/ConfigMap")
+}
+
+func TestStartRejectsAClusterScopedKind(t *testing.T) {
+	namespaceGVK := schema.GroupVersionKind{Version: "v1", Kind: "Namespace"}
+	mapper := meta.NewDefaultRESTMapper(nil)
+	mapper.Add(namespaceGVK, meta.RESTScopeRoot)
+
+	requireStartRejects(t, observe.Options{
+		Namespace: namespace,
+		Kinds:     []schema.GroupVersionKind{namespaceGVK},
+		Mapper:    mapper,
+	}, "watching v1/Namespace: it is cluster-scoped")
 }

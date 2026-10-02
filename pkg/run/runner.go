@@ -354,8 +354,7 @@ type runner struct {
 	failed  bool
 	// converged is where the last settle wait that converged ended. The first
 	// shows the target works, so botbox supervises it from there on.
-	converged time.Time
-	// teardownStart is where the teardown began.
+	converged     time.Time
 	teardownStart time.Time
 	// crs are the CRs the run created, in the order it first created each.
 	crs    []string

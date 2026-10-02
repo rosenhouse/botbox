@@ -154,7 +154,6 @@ func (o Op) same(other Op) bool {
 	return *o.Fault == *other.Fault
 }
 
-// with returns the sequence with op i replaced.
 func (s Sequence) with(i int, op Op) Sequence {
 	replaced := s
 	replaced.Ops = slices.Clone(s.Ops)

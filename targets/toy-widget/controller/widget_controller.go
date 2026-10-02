@@ -185,7 +185,6 @@ func (r *Reconciler) claimChildrenEarly(ctx context.Context, widget *toyv1.Widge
 	return nil
 }
 
-// b1Hold is r.B1Hold, or defaultB1Hold when that field is unset.
 func (r *Reconciler) b1Hold() time.Duration {
 	if r.B1Hold == 0 {
 		return defaultB1Hold

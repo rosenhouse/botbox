@@ -81,6 +81,10 @@ func TestHarness(t *testing.T) {
 		requireJSONLines(t, filepath.Join(dir, "requests.jsonl"))
 		requireJSONLines(t, filepath.Join(dir, "objects.jsonl"))
 		requireTargetLog(t, filepath.Join(dir, "target.log"))
+		// An empty file says the collector ran and deleted nothing.
+		if deletes, err := os.ReadFile(filepath.Join(dir, "collector.jsonl")); err != nil || len(deletes) > 0 {
+			t.Errorf("collector.jsonl holds %q (%v), want it empty: nothing lost its owner.", deletes, err)
+		}
 	})
 
 	// What the Runner of M3 builds on: a Restart that G5 compares across, and

@@ -3,8 +3,10 @@ package cluster
 import (
 	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"maps"
 	"slices"
@@ -20,6 +22,8 @@ import (
 	"k8s.io/client-go/metadata/metadatainformer"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+
+	"github.com/rosenhouse/botbox/pkg/observe"
 )
 
 const (
@@ -72,6 +76,7 @@ type Collector struct {
 	watched    map[schema.GroupKind]watchedKind
 	log        *slog.Logger
 	unresolved map[Unresolved]bool
+	deletions  []deletion
 
 	informers metadatainformer.SharedInformerFactory
 	events    chan struct{}
@@ -244,7 +249,7 @@ func (c *Collector) sweep(ctx context.Context, objects []object) {
 			c.unresolved[owner] = true
 		}
 		if collect {
-			c.delete(ctx, obj)
+			c.delete(ctx, obj, live.gone(obj))
 		}
 	}
 }
@@ -302,19 +307,94 @@ func (c *Collector) liveOwners(ctx context.Context, objects []object) owners {
 	return live
 }
 
-// delete removes obj unless it changed since the collector read it. The
-// preconditions catch a name taken over by another object, and a dependent
-// adopted by a live owner in the meantime; either change brings a watch event
-// of its own, and with it another sweep.
-func (c *Collector) delete(ctx context.Context, obj object) {
+// delete removes obj unless it changed since the collector read it, and
+// records the attempt. The preconditions catch a name taken over by another
+// object, and a dependent adopted by a live owner in the meantime; either
+// change brings a watch event of its own, and with it another sweep.
+func (c *Collector) delete(ctx context.Context, obj object, owners []goneOwner) {
 	uid, version := obj.meta.UID, obj.meta.ResourceVersion
 	preconditions := metav1.Preconditions{UID: &uid, ResourceVersion: &version}
+	at := time.Now()
 	err := c.client.Resource(obj.resource).Namespace(c.namespace).
 		Delete(ctx, obj.meta.Name, metav1.DeleteOptions{Preconditions: &preconditions})
-	if err != nil && !apierrors.IsNotFound(err) && !apierrors.IsConflict(err) {
+	tried := deletion{
+		Time: at, Kind: observe.KindName(obj.kind), Namespace: c.namespace, Name: obj.meta.Name,
+		UID: uid, ResourceVersion: version, Owners: owners, Result: resultOf(err),
+	}
+	if err != nil {
+		tried.Error = err.Error()
+	}
+	c.deletions = append(c.deletions, tried)
+	if tried.Result == failed {
 		c.logFailure(ctx, "The collector could not delete an object.",
 			"resource", obj.resource.Resource, "name", obj.meta.Name, "error", err)
 	}
+}
+
+// deletion is one delete the collector tried.
+type deletion struct {
+	// Time is when the collector sent the delete.
+	Time time.Time `json:"time"`
+	// Kind is written group/version/Kind.
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	// UID and ResourceVersion are the object as the collector read it, which
+	// the delete names as its preconditions.
+	UID             types.UID `json:"uid"`
+	ResourceVersion string    `json:"resourceVersion"`
+	// Owners are the object's ownerReferences, every one of them gone.
+	Owners []goneOwner `json:"owners"`
+	// Result is deleted, not found, conflict or error. A conflict says the
+	// object changed since the collector read it.
+	Result string `json:"result"`
+	// Error is what the API server answered, unless it deleted the object.
+	Error string `json:"error,omitempty"`
+}
+
+// goneOwner is an ownerReference whose owner the collector found gone.
+type goneOwner struct {
+	metav1.OwnerReference
+	// Gone is not found, or another UID where an object of a different UID
+	// now holds the owner's name.
+	Gone string `json:"gone"`
+	// FoundUID is that object's UID.
+	FoundUID types.UID `json:"foundUID,omitempty"`
+}
+
+// What a deletion says of a delete and of an owner.
+const (
+	deleted    = "deleted"
+	notFound   = "not found"
+	conflict   = "conflict"
+	failed     = "error"
+	anotherUID = "another UID"
+)
+
+func resultOf(err error) string {
+	switch {
+	case err == nil:
+		return deleted
+	case apierrors.IsNotFound(err):
+		return notFound
+	case apierrors.IsConflict(err):
+		return conflict
+	default:
+		return failed
+	}
+}
+
+// WriteLog writes each delete the collector tried, one JSON object per line,
+// in the order it tried them. It reads what the sweeps recorded, so it runs
+// once Stop has returned.
+func (c *Collector) WriteLog(w io.Writer) error {
+	encoder := json.NewEncoder(w)
+	for _, tried := range c.deletions {
+		if err := encoder.Encode(tried); err != nil {
+			return fmt.Errorf("writing the collector's deletes: %w", err)
+		}
+	}
+	return nil
 }
 
 // logFailure reports a call the collector could not make and asks for another
@@ -405,4 +485,16 @@ func (o owners) collectible(obj object) (bool, []Unresolved) {
 		}
 	}
 	return collect, unresolved
+}
+
+// gone says why each owner of a collectible object counts as gone.
+func (o owners) gone(obj object) []goneOwner {
+	gone := make([]goneOwner, len(obj.meta.OwnerReferences))
+	for i, ref := range obj.meta.OwnerReferences {
+		gone[i] = goneOwner{OwnerReference: ref, Gone: notFound}
+		if found := o.resolved[keyOf(ref)]; found.uid != "" {
+			gone[i].Gone, gone[i].FoundUID = anotherUID, found.uid
+		}
+	}
+	return gone
 }

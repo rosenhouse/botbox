@@ -2298,20 +2298,21 @@ built from source and run as a black-box binary.
   request, the wait after a `delete` of the toy's Widget ended while the proxy held the
   toy's delete of its second child, and P1 failed the correct toy in 2 of 2 runs. So
   properties are not evaluated at a checkpoint where the proxy held a request of the
-  target's, and the run notes each such checkpoint. A release just before a wait ends
-  does the same. Under a 5 s delay, the toy's `T_settle`, on its ConfigMap deletes, the
-  wait after a `delete` ended 9 ms after the proxy released the toy's delete of its third
-  child. The toy had not yet lowered `status.ready`, and P1 failed the correct toy in 5 of
-  10 runs. So a checkpoint where the proxy released a request within `T_stable` counts as
-  held too. A wait that converged saw no release for `T_stable`, so it is never held.
-  From `T_stable` after every fault's window has closed, checkpoints judge properties as
-  before. A fault's window also lasts until the proxy releases what it held, because the
-  target still waits on the fault. The checks therefore excuse the target over that time,
-  and the time it owes runs from the release. The derived deadline allows for both. A
-  `recreate`'s wait under requests held one after another can end with the old CR still
-  there. Under a 5 s delay on every ConfigMap request, the toy's lists and deletes ran
-  past the wait, and the run ended as a harness error. Any fault that keeps the CR past
-  the wait does that, as a 500 on the toy's ConfigMap deletes does. Holding the wait open
-  while the proxy holds request after request was rejected. An active fault excuses the
-  target, so no check gives such a wait an end, and a target that renews a lease under a
-  delay would hold it open until the derived deadline.
+  target's, and the run notes each such checkpoint. A request released just before a wait
+  ends can still change what the checks read. Under a 5 s delay, the toy's `T_settle`, on
+  its ConfigMap deletes, the wait after a `delete` ended 9 ms after the proxy released the
+  toy's delete of its third child. The toy had not yet lowered `status.ready`, and P1
+  failed the correct toy in 5 of 10 runs. So a checkpoint where the proxy released a
+  request within `T_stable` counts as held too. A wait that converged saw no release for
+  `T_stable`, so it is never held. From `T_stable` after every fault's window has closed,
+  checkpoints judge properties as before. A fault's window also lasts until the proxy
+  releases what it held, because the target still waits on the fault. The checks
+  therefore excuse the target over that time, and the time it owes runs from the release.
+  The derived deadline allows for both. A `recreate`'s wait under requests held one after
+  another can end with the old CR still there. Under a 5 s delay on every ConfigMap
+  request, the toy's lists and deletes ran past the wait, and the run ended as a harness
+  error. Any fault that keeps the CR past the wait does that, as a 500 on the toy's
+  ConfigMap deletes does. Holding the wait open while the proxy holds request after
+  request was rejected. An active fault excuses the target, so no check gives such a wait
+  an end, and a target that renews a lease under a delay would hold it open until the
+  derived deadline.

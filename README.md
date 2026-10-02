@@ -286,8 +286,8 @@ jq -c 'select(.name == "widget-0") | .object.data' objects.jsonl
 
 ### When botbox exits 2
 
-botbox could not test your controller, and the message says what to change.
-[docs/failures.md](docs/failures.md#when-botbox-exits-2) lists the usual causes.
+botbox could not test your controller, and the message says why.
+[docs/failures.md](docs/failures.md#when-botbox-exits-2) lists the usual causes and what to change.
 
 ## Running in CI
 

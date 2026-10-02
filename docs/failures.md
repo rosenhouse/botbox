@@ -195,7 +195,8 @@ shell passes neither on, so the CI recipe runs botbox with `exec`.
 
 ## When botbox exits 2
 
-Exit 2 means botbox could not test your controller, and the message says what to change.
+Exit 2 means botbox could not test your controller, and the message says why. These are the
+usual causes and what to change.
 
 - `KUBEBUILDER_ASSETS` names the directory holding `etcd` and `kube-apiserver`. Install them as
   the [README](../README.md#install) shows, or point `--kubeconfig` at a cluster.

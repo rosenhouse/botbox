@@ -587,6 +587,7 @@ and `targets/toy-widget/sequences/b12.json` sets one:
 ```
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
+run 1: P1 is not evaluated at the checkpoint after op 1 (update): the target was waiting to restart, so it may not yet have acted on what P1 reads
 run 1: G4 the settle wait after op 1 (update) expired with no fault active: in 5.038s (timeouts.settle is 5s), ready held from 12ms on, but the target was waiting to restart; the target exited 2 times since it last converged, last with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
   at 2026-09-24T00:57:57.490964784Z; 15 requests, the first get /api 200; 5 versions, the first toy.botbox/v1/Widget widget; the target managed 0 objects of the kinds it declares
 ```

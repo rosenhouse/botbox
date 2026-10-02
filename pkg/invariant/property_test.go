@@ -185,6 +185,24 @@ func TestPropertyFiresWhereTheTargetWasBack(t *testing.T) {
 	}
 }
 
+// A wait that converged saw the target back for T_stable. A restart op can
+// replace a target waiting out its backoff, so the restart its exit scheduled
+// never comes.
+func TestPropertyFiresWhereAWaitConverged(t *testing.T) {
+	in := stale(target.Checkpoint).
+		exit(3500*time.Millisecond, 20*time.Second).
+		op(invariant.OpRestart, 4*time.Second).
+		running(4200*time.Millisecond).
+		checkpoint(8*time.Second, invariant.Converged).
+		through(10 * time.Second)
+
+	violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
+
+	if !violation.At.Equal(at(8 * time.Second)) {
+		t.Errorf("The violation is timestamped %v, want the checkpoint at 8s.", violation.At)
+	}
+}
+
 // One checkpoint where the target was still starting leaves the property to
 // the others.
 func TestPropertyFiresAtACheckpointAfterOneWhereTheTargetWasStillStarting(t *testing.T) {
@@ -219,8 +237,11 @@ func TestATargetThatDoesNotComeBackStillFailsG4(t *testing.T) {
 	if fired := firingIDs(results); !slices.Equal(fired, []string{"G4"}) {
 		t.Errorf("Evaluate reported %v, want G4 alone.", fired)
 	}
-	if notes := results[len(results)-1].Notes; len(notes) != 1 || !strings.HasPrefix(notes[0], "P1 is not evaluated at the checkpoint after op 3 (settle)") {
-		t.Errorf("P1 noted %q, want the checkpoint after op 3 (settle).", notes)
+	const want = "P1 is not evaluated at the checkpoint after op 3 (settle)"
+	if !slices.ContainsFunc(results, func(r invariant.Result) bool {
+		return r.ID == "P1" && len(r.Notes) == 1 && strings.HasPrefix(r.Notes[0], want)
+	}) {
+		t.Errorf("The checks found %+v, want P1 to note one checkpoint, beginning %q.", results, want)
 	}
 }
 

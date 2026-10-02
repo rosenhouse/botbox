@@ -85,11 +85,15 @@ func (in Input) evaluationPoints(declared target.Property) (points []time.Time, 
 
 // unjudgeable says why the property is not evaluated at the checkpoint, or is
 // empty where it is: what the property reads may be about to change, or the
-// target may not yet have acted on it.
+// target may not yet have acted on it. A wait that converged saw the target
+// back for T_stable.
 func (in Input) unjudgeable(checkpoint Checkpoint, property string) string {
 	if checkpoint.Held {
 		return fmt.Sprintf("the proxy held a request of the target's there, or released one in the last %s (timeouts.stable), which may still change what %s reads",
 			in.timeouts().Stable, property)
+	}
+	if checkpoint.Settle == Converged {
+		return ""
 	}
 	if starting := in.starting(checkpoint.Time); starting != "" {
 		return fmt.Sprintf("%s, so it may not yet have acted on what %s reads", starting, property)

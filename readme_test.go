@@ -2,13 +2,17 @@ package botbox_test
 
 import (
 	"fmt"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
 	"strings"
 	"testing"
 
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
 	"github.com/rosenhouse/botbox/pkg/run"
+	"github.com/rosenhouse/botbox/pkg/target"
 )
 
 const limitsHeading = "## What botbox cannot test yet"
@@ -386,6 +390,61 @@ func TestQuickstartSeedReadsEveryWayToPassTheSeed(t *testing.T) {
 	}
 	if m := quickstartSeeds("examples/x/quickstart.sh --no-seed 24"); m != nil {
 		t.Errorf("quickstartSeeds reads %q from a flag other than the seed.", m)
+	}
+}
+
+// Few real CRs compare a count as the toy's ready does. Most report a Ready
+// condition, and the README gives a ready for one.
+func TestTheReadmesReadyConditionExampleHoldsOnlyOnACurrentReadyCondition(t *testing.T) {
+	item := strings.ReplaceAll(section(t, readFile(t, "README.md"), "### Write target.yaml"), "\n   ", "\n")
+	var examples []string
+	for _, block := range fencedBlocks(item) {
+		if strings.HasPrefix(block, "ready:") {
+			examples = append(examples, block)
+		}
+	}
+	if len(examples) != 1 {
+		t.Fatalf("README.md's Write target.yaml section shows %d ready examples, want one for a Ready condition.", len(examples))
+	}
+	toy, err := filepath.Abs("targets/toy-widget")
+	if err != nil {
+		t.Fatal(err)
+	}
+	declared := filepath.Join(t.TempDir(), "target.yaml")
+	writeFile(t, declared, fmt.Sprintf("name: ready-example\ncrds: [%s/crds]\nprimary: toy.botbox/v1/Widget\nsample: %s/widget.yaml\nlaunch:\n  binary: controller\n%s",
+		toy, toy, examples[0]))
+	loaded, err := target.Load(declared)
+	if err != nil {
+		t.Fatalf("The README's ready does not load: %v\n%s", err, examples[0])
+	}
+	// condition is a status whose one condition is current and Ready, as edit
+	// leaves it.
+	condition := func(edit func(c map[string]any)) map[string]any {
+		c := map[string]any{"type": "Ready", "status": "True", "observedGeneration": int64(2)}
+		edit(c)
+		return map[string]any{"conditions": []any{c}}
+	}
+	for _, test := range []struct {
+		name   string
+		status map[string]any
+		want   bool
+	}{
+		{"a Ready condition of the current generation", condition(func(map[string]any) {}), true},
+		{"no status", nil, false},
+		{"a status with no conditions", map[string]any{"ready": int64(3)}, false},
+		{"a Ready condition of an older generation", condition(func(c map[string]any) { c["observedGeneration"] = int64(1) }), false},
+		{"a Ready condition with no observedGeneration", condition(func(c map[string]any) { delete(c, "observedGeneration") }), false},
+		{"a Ready condition that is False", condition(func(c map[string]any) { c["status"] = "False" }), false},
+		{"another condition that is True", condition(func(c map[string]any) { c["type"] = "Synced" }), false},
+	} {
+		cr := map[string]any{"metadata": map[string]any{"name": "widget", "generation": int64(2)}}
+		if test.status != nil {
+			cr["status"] = test.status
+		}
+		holds, err := loaded.Ready(&unstructured.Unstructured{Object: cr})
+		if err != nil || holds != test.want {
+			t.Errorf("The README's ready gives %t, %v on %s, want %t.", holds, err, test.name, test.want)
+		}
 	}
 }
 

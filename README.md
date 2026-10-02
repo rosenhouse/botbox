@@ -166,7 +166,15 @@ Write yours in this order:
    controller binds a free one, such as `127.0.0.1:0`.
 4. `ready` is CEL over the CR's `metadata`, `spec` and `status`. Leave it out, and botbox uses
    `has(status.observedGeneration) && status.observedGeneration == metadata.generation`.
-   Guard each optional field with `has()`.
+   Guard each optional field with `has()`. A CR whose `Ready` condition carries
+   `observedGeneration` can use this:
+
+   ```yaml
+   ready: >-
+     has(status.conditions) && status.conditions.exists(c, c.type == "Ready"
+     && c.status == "True" && has(c.observedGeneration)
+     && c.observedGeneration == metadata.generation)
+   ```
 5. `properties` are optional checks of your own. A property runs once for each CR, and its
    CEL reads that CR's `metadata`, `spec` and `status`. `managed` lists the whole objects of
    your `manages` kinds whose ownerReferences name that CR or no CR, so a property can read

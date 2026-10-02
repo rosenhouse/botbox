@@ -67,8 +67,9 @@ settle wait ends and at the end of the teardown. It binds that CR's `metadata`, 
 `status`, and `managed`: the objects whose ownerReferences name that CR, and those that name no
 CR. Where no CR exists, it runs once with empty `metadata`, `spec` and `status` over every
 managed object, and the report says that no CR existed. So every property can run where no CR
-exists, and one whose `when` is `checkpoint` or `end` always does. Guard it with `has()`, or
-begin it with `!has(metadata.name) ||`, which holds there.
+exists, and one whose `when` is `checkpoint` or `end` does so at the teardown unless it skips
+that checkpoint. Guard it with `has()`, or begin it with `!has(metadata.name) ||`, which holds
+there.
 
 A `checkpoint` or `end` property skips a checkpoint where the proxy
 [held a request](targets.md#faults) or your controller was

@@ -346,26 +346,26 @@ func (f *fakeHarness) awaitCRGone(_ context.Context, name string, until func() t
 }
 
 func (f *fakeHarness) managedObjects(gvk schema.GroupVersionKind) []string {
-	_ = f.record("managedObjects " + kindName(gvk))
+	_ = f.record("managedObjects " + observe.KindName(gvk))
 	return f.managed[gvk]
 }
 
 func (f *fakeHarness) deleteManaged(_ context.Context, gvk schema.GroupVersionKind, name string) (bool, error) {
-	err := f.record("deleteManaged " + kindName(gvk) + " " + name)
+	err := f.record("deleteManaged " + observe.KindName(gvk) + " " + name)
 	return err == nil && !slices.Contains(f.gone, name), err
 }
 
 func (f *fakeHarness) patchFixture(_ context.Context, gvk schema.GroupVersionKind, name string, patch map[string]any) error {
-	return f.record(fmt.Sprintf("patchFixture %s %s %v", kindName(gvk), name, patch))
+	return f.record(fmt.Sprintf("patchFixture %s %s %v", observe.KindName(gvk), name, patch))
 }
 
 func (f *fakeHarness) deleteFixture(_ context.Context, gvk schema.GroupVersionKind, name string) error {
-	return f.record("deleteFixture " + kindName(gvk) + " " + name)
+	return f.record("deleteFixture " + observe.KindName(gvk) + " " + name)
 }
 
 func (f *fakeHarness) createFixture(_ context.Context, fixture *unstructured.Unstructured) error {
 	f.restoredAt = time.Now()
-	return f.record(fmt.Sprintf("createFixture %s %s %v", kindName(fixture.GroupVersionKind()), fixture.GetName(), fixture.Object["data"]))
+	return f.record(fmt.Sprintf("createFixture %s %s %v", observe.KindName(fixture.GroupVersionKind()), fixture.GetName(), fixture.Object["data"]))
 }
 
 func (f *fakeHarness) managedCount() int { return f.count }
@@ -2937,7 +2937,7 @@ func TestTheG4OfAnExpiredWaitQuotesTheManagedObjects(t *testing.T) {
 	if result.Violation.ManagedTotal == nil || *result.Violation.ManagedTotal != 25 {
 		t.Errorf("The violation counts %v managed objects, want 25.", result.Violation.ManagedTotal)
 	}
-	if want := kindName(widgetKind) + " widget"; result.Violation.VersionsOf != want {
+	if want := observe.KindName(widgetKind) + " widget"; result.Violation.VersionsOf != want {
 		t.Errorf("The timeline is of %q, want %q.", result.Violation.VersionsOf, want)
 	}
 	versions := result.Violation.Versions

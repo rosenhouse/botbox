@@ -131,7 +131,7 @@ func (out *Result) compare(in Input, op Op, before, after Checkpoint, reached re
 		objects := map[objectKey]observe.Version{}
 		for _, v := range s.live {
 			if !reached.touches(in, v) {
-				objects[objectKey{kind: kindName(v.GVK), name: v.Name}] = v
+				objects[objectKey{kind: observe.KindName(v.GVK), name: v.Name}] = v
 			}
 		}
 		return objects
@@ -157,10 +157,10 @@ func (out *Result) compare(in Input, op Op, before, after Checkpoint, reached re
 		return
 	}
 	first := changed[0].version
-	statement := fmt.Sprintf("the %s %s %s the Restart at %s", kindName(first.GVK), first.Name, changed[0].how, describe(op))
+	statement := fmt.Sprintf("the %s %s %s the Restart at %s", observe.KindName(first.GVK), first.Name, changed[0].how, describe(op))
 	if len(changed) > 1 {
 		statement = fmt.Sprintf("%d objects differ across the Restart at %s, the first the %s %s, which %s it",
-			len(changed), describe(op), kindName(first.GVK), first.Name, changed[0].how)
+			len(changed), describe(op), observe.KindName(first.GVK), first.Name, changed[0].how)
 	}
 	out.violate(Violation{
 		Statement: statement,

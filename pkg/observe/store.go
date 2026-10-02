@@ -176,7 +176,7 @@ func (s *Store) SnapshotAt(t time.Time) []Snapshot {
 		snapshot = append(snapshot, Snapshot{GVK: key.GVK, Name: key.Name, Object: v.Object})
 	}
 	slices.SortFunc(snapshot, func(a, b Snapshot) int {
-		return cmp.Or(strings.Compare(kindName(a.GVK), kindName(b.GVK)), strings.Compare(a.Name, b.Name))
+		return cmp.Or(strings.Compare(KindName(a.GVK), KindName(b.GVK)), strings.Compare(a.Name, b.Name))
 	})
 	return snapshot
 }
@@ -287,15 +287,15 @@ func observedGeneration(obj *unstructured.Unstructured) *int64 {
 
 func compareKeys(a, b Key) int {
 	return cmp.Or(
-		strings.Compare(kindName(a.GVK), kindName(b.GVK)),
+		strings.Compare(KindName(a.GVK), KindName(b.GVK)),
 		strings.Compare(a.Namespace, b.Namespace),
 		strings.Compare(a.Name, b.Name),
 	)
 }
 
-// kindName renders a kind the way DESIGN.md §8.1 writes `manages`:
-// group/version/Kind, and version/Kind in the core group.
-func kindName(gvk schema.GroupVersionKind) string {
+// KindName writes a kind as target.yaml does: group/version/Kind, and
+// version/Kind in the core group.
+func KindName(gvk schema.GroupVersionKind) string {
 	if gvk.Group == "" {
 		return gvk.Version + "/" + gvk.Kind
 	}

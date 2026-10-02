@@ -193,7 +193,7 @@ func evidence(violation invariant.Violation) string {
 	}
 	if versions := violation.Versions; len(versions) > 0 {
 		quoted = append(quoted, fmt.Sprintf("%s, the first %s %s",
-			part(len(versions), violation.VersionsTotal, "version"), kindName(versions[0].GVK), versions[0].Name))
+			part(len(versions), violation.VersionsTotal, "version"), observe.KindName(versions[0].GVK), versions[0].Name))
 	}
 	if violation.ManagedTotal != nil {
 		quoted = append(quoted, managedClause(*violation.ManagedTotal))

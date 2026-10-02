@@ -82,14 +82,14 @@ func Start(cfg *rest.Config, opts Options) (*Observer, error) {
 	for _, gvk := range opts.Kinds {
 		mapping, err := opts.Mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
-			return nil, fmt.Errorf("resolving the resource of %s: %w", kindName(gvk), err)
+			return nil, fmt.Errorf("resolving the resource of %s: %w", KindName(gvk), err)
 		}
 		if mapping.Scope.Name() != meta.RESTScopeNameNamespace {
-			return nil, fmt.Errorf("watching %s: it is cluster-scoped, and the observer watches one namespace", kindName(gvk))
+			return nil, fmt.Errorf("watching %s: it is cluster-scoped, and the observer watches one namespace", KindName(gvk))
 		}
 		informer := o.factory.ForResource(mapping.Resource).Informer()
 		if _, err := informer.AddEventHandler(o.handler(gvk)); err != nil {
-			return nil, fmt.Errorf("watching %s: %w", kindName(gvk), err)
+			return nil, fmt.Errorf("watching %s: %w", KindName(gvk), err)
 		}
 		o.synced = append(o.synced, informer.HasSynced)
 	}

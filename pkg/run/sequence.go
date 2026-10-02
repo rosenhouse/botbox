@@ -14,6 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
@@ -454,17 +455,9 @@ func (f *Fault) validate(position int) error {
 // declares it manages (DESIGN.md §8.1).
 func managedKind(t *target.Target, declared string) (schema.GroupVersionKind, error) {
 	for _, gvk := range t.Manages {
-		if kindName(gvk) == declared {
+		if observe.KindName(gvk) == declared {
 			return gvk, nil
 		}
 	}
 	return schema.GroupVersionKind{}, fmt.Errorf("the target manages no kind %q", declared)
-}
-
-// kindName writes a kind as DESIGN.md §8.1 declares it.
-func kindName(gvk schema.GroupVersionKind) string {
-	if gvk.Group == "" {
-		return gvk.Version + "/" + gvk.Kind
-	}
-	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
 }

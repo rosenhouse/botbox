@@ -20,6 +20,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
+
+	"github.com/rosenhouse/botbox/pkg/observe"
 )
 
 // declaration mirrors target.yaml (DESIGN.md §8.1). Decoding is strict, so a
@@ -281,12 +283,12 @@ func mutableFixtures(file string, objects []*unstructured.Unstructured, declared
 		fixtures[i] = MutableFixture{GVK: object.GroupVersionKind(), Name: object.GetName(), Mutate: paths}
 		if fixtures[i].Name == "" {
 			return nil, fmt.Errorf("generate.fixtures %s: a %s there sets no metadata.name, and a fixture op names its fixture",
-				file, kindName(fixtures[i].GVK))
+				file, observe.KindName(fixtures[i].GVK))
 		}
 		for _, path := range paths {
 			if value, _, _ := unstructured.NestedFieldNoCopy(object.Object, path.Keys()...); !isString(value) {
 				return nil, fmt.Errorf("generate.fixtures %s: the %s %s holds no string at %s",
-					file, kindName(fixtures[i].GVK), fixtures[i].Name, path)
+					file, observe.KindName(fixtures[i].GVK), fixtures[i].Name, path)
 			}
 		}
 	}

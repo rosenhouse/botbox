@@ -57,7 +57,7 @@ func (out *Result) noteWhatBotboxTook(in Input, deleted deletion, deadline time.
 			continue
 		}
 		out.note("for %s: %s deleted %s %s within %s (timeouts.delete) of it, so the target never got the chance to clean it up",
-			in.describeDeletion(deleted), describe(op), kindName(op.Deleted.GVK), op.Deleted.Name, in.timeouts().Delete)
+			in.describeDeletion(deleted), describe(op), observe.KindName(op.Deleted.GVK), op.Deleted.Name, in.timeouts().Delete)
 	}
 }
 
@@ -135,7 +135,7 @@ func (out *Result) reportLeftovers(in Input, deleted deletion, deadline time.Tim
 		}
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the %s %s was still there %s (timeouts.delete) after %s was deleted%s",
-				kindName(left.GVK), left.Name, in.timeouts().Delete, in.answering(deleted, left), orphaned(left, deleted.uid)),
+				observe.KindName(left.GVK), left.Name, in.timeouts().Delete, in.answering(deleted, left), orphaned(left, deleted.uid)),
 			At: deadline,
 		}.quotingVersions(RecentHistory(left.Key, in.History.History(left.Key))))
 	}

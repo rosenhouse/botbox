@@ -46,7 +46,7 @@ type versionLine struct {
 // MarshalJSON renders v as one objects.jsonl line.
 func (v Version) MarshalJSON() ([]byte, error) {
 	return json.Marshal(versionLine{
-		Kind:               kindName(v.GVK),
+		Kind:               KindName(v.GVK),
 		Namespace:          v.Namespace,
 		Name:               v.Name,
 		UID:                v.UID,

@@ -466,3 +466,14 @@ func TestHistoryOfFillsInTheWatchedNamespace(t *testing.T) {
 		t.Errorf("HistoryOf holds resourceVersions %v, want the widget's 10 and 11 in order.", got)
 	}
 }
+
+func TestKindNameLeavesOutTheCoreGroup(t *testing.T) {
+	for gvk, want := range map[schema.GroupVersionKind]string{
+		configMapGVK: "v1/ConfigMap",
+		widgetGVK:    "toy.botbox/v1/Widget",
+	} {
+		if got := observe.KindName(gvk); got != want {
+			t.Errorf("KindName(%#v) is %q, want %q, as target.yaml writes it.", gvk, got, want)
+		}
+	}
+}

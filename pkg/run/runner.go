@@ -397,7 +397,7 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 		fixtures: map[string]*unstructured.Unstructured{},
 	}
 	for _, fixture := range t.Fixtures {
-		r.fixtures[kindName(fixture.GroupVersionKind())+" "+fixture.GetName()] = fixture.DeepCopy()
+		r.fixtures[observe.KindName(fixture.GroupVersionKind())+" "+fixture.GetName()] = fixture.DeepCopy()
 	}
 	failure := r.applyOps(ctx)
 	r.failed = failure != nil
@@ -1027,12 +1027,12 @@ func (r *runner) during(t time.Time) string {
 // unresolvedNote says why the collector kept an object: it counts an owner it
 // cannot resolve as live.
 func unresolvedNote(u cluster.Unresolved) string {
-	why := "it does not watch " + kindName(u.OwnerKind)
+	why := "it does not watch " + observe.KindName(u.OwnerKind)
 	if u.Unserved {
-		why = "the API server does not serve " + kindName(u.OwnerKind)
+		why = "the API server does not serve " + observe.KindName(u.OwnerKind)
 	}
 	return fmt.Sprintf("botbox's garbage collector never deletes %s %s, because %s, the kind of its owner %s",
-		kindName(u.DependentKind), u.DependentName, why, u.OwnerName)
+		observe.KindName(u.DependentKind), u.DependentName, why, u.OwnerName)
 }
 
 // teardownCheckpoint judges the deletion window, unless the target stopped: a

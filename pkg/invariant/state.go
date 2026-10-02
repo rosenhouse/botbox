@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rosenhouse/botbox/pkg/observe"
 )
@@ -74,15 +73,7 @@ func live(latest map[observe.Key]observe.Version) []observe.Version {
 		}
 	}
 	slices.SortFunc(out, func(a, b observe.Version) int {
-		return cmp.Or(strings.Compare(kindName(a.GVK), kindName(b.GVK)), strings.Compare(a.Name, b.Name))
+		return cmp.Or(strings.Compare(observe.KindName(a.GVK), observe.KindName(b.GVK)), strings.Compare(a.Name, b.Name))
 	})
 	return out
-}
-
-// kindName renders a kind the way DESIGN.md §8.1 writes `manages`.
-func kindName(gvk schema.GroupVersionKind) string {
-	if gvk.Group == "" {
-		return gvk.Version + "/" + gvk.Kind
-	}
-	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
 }

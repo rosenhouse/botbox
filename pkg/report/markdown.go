@@ -8,7 +8,6 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -141,7 +140,7 @@ func versionRows(versions []observe.Version) [][]string {
 	rows := make([][]string, len(versions))
 	for i, version := range versions {
 		rows[i] = []string{
-			stamp(version.Time), kindName(version.GVK), version.Name, version.ResourceVersion,
+			stamp(version.Time), observe.KindName(version.GVK), version.Name, version.ResourceVersion,
 			strconv.FormatInt(version.Generation, 10), observed(version.ObservedGeneration),
 			strings.Join(version.Finalizers, ", "), deletionTimestamp(version.DeletionTimestamp), yes(version.Deleted),
 		}
@@ -231,14 +230,6 @@ func (t Target) describe() string {
 
 // stamp writes a time as the request log and the object history do.
 func stamp(at time.Time) string { return at.Format(time.RFC3339Nano) }
-
-// kindName writes a kind as DESIGN.md §8.1 declares it.
-func kindName(gvk schema.GroupVersionKind) string {
-	if gvk.Group == "" {
-		return gvk.Version + "/" + gvk.Kind
-	}
-	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
-}
 
 func yes(set bool) string {
 	if set {

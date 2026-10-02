@@ -13,9 +13,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	kschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"pgregory.net/rapid"
 
+	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
@@ -108,7 +108,7 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 		}
 	}
 	for _, gvk := range t.Manages {
-		g.managed = append(g.managed, kindName(gvk))
+		g.managed = append(g.managed, observe.KindName(gvk))
 	}
 	for _, fixture := range t.Generate.Fixtures {
 		if len(fixture.Mutate) > 0 {
@@ -117,14 +117,6 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 	}
 	g.sequences = rapid.Custom(g.sequence)
 	return g, nil
-}
-
-// kindName writes a kind as a sequence names it.
-func kindName(gvk kschema.GroupVersionKind) string {
-	if gvk.Group == "" {
-		return gvk.Version + "/" + gvk.Kind
-	}
-	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
 }
 
 // drawable keeps the fields the CRD accepts a drawn value of in the sample. A
@@ -378,11 +370,11 @@ func (g *Generator) op(t *rapid.T, index int, at *state) run.Op {
 		op.Nth = new(int)
 	case run.OpUpdateFixture:
 		fixture := rapid.SampledFrom(g.updatable).Draw(t, "fixture")
-		op.Kind, op.Name = kindName(fixture.GVK), fixture.Name
+		op.Kind, op.Name = observe.KindName(fixture.GVK), fixture.Name
 		op.Patch = nest(rapid.SampledFrom(fixture.Mutate).Draw(t, "path").Keys(), fixtureWords.Draw(t, "value"))
 	case run.OpDeleteFixture:
 		fixture := rapid.SampledFrom(g.present(at)).Draw(t, "fixture")
-		op.Kind, op.Name = kindName(fixture.GVK), fixture.Name
+		op.Kind, op.Name = observe.KindName(fixture.GVK), fixture.Name
 	}
 	if op.Type.OnCR() {
 		if op.Type != run.OpCreate && n > 0 {
@@ -424,7 +416,7 @@ func (g *Generator) legal(at *state) []run.OpType {
 // present are the fixtures generation may delete and has not.
 func (g *Generator) present(at *state) []target.MutableFixture {
 	return slices.DeleteFunc(slices.Clone(g.target.Generate.Fixtures), func(fixture target.MutableFixture) bool {
-		return slices.Contains(at.gone, kindName(fixture.GVK)+" "+fixture.Name)
+		return slices.Contains(at.gone, observe.KindName(fixture.GVK)+" "+fixture.Name)
 	})
 }
 

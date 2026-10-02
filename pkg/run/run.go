@@ -350,7 +350,7 @@ func awaitNamespaceDefaults(ctx context.Context, store *observe.Store, watched [
 			if !time.Now().Before(deadline) {
 				return fmt.Errorf("the cluster created no %s %s in the run namespace within %v. "+
 					"kube-controller-manager creates one in every namespace, and botbox waits for it so as not to count it as the target's",
-					kindName(object.gvk), object.name, within)
+					observe.KindName(object.gvk), object.name, within)
 			}
 			if err := sleep(ctx, settlePoll); err != nil {
 				return err

@@ -196,7 +196,7 @@ func churn(stable time.Duration, changes []observe.Version) string {
 	}
 	last := changes[len(changes)-1]
 	return fmt.Sprintf("but the namespace never held still for %s (timeouts.stable): %s in the last %s, the last to %s %s",
-		stable, count(len(changes), "change"), stable, kindName(last.GVK), last.Name)
+		stable, count(len(changes), "change"), stable, observe.KindName(last.GVK), last.Name)
 }
 
 // readiness is what a verdict quotes of the predicate on the CR.

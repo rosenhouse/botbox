@@ -114,7 +114,7 @@ func Recent[T any](evidence []T) Excerpt[T] {
 // (DESIGN.md §5.7).
 func RecentHistory(key observe.Key, history []observe.Version) Excerpt[observe.Version] {
 	quoted := Recent(history)
-	quoted.Of = kindName(key.GVK) + " " + key.Name
+	quoted.Of = observe.KindName(key.GVK) + " " + key.Name
 	return quoted
 }
 
@@ -129,7 +129,7 @@ func Sample(managed []observe.Version) Excerpt[observe.Version] {
 		kinds[v.GVK] = append(kinds[v.GVK], v)
 	}
 	order := slices.SortedFunc(maps.Keys(kinds), func(a, b schema.GroupVersionKind) int {
-		return strings.Compare(kindName(a), kindName(b))
+		return strings.Compare(observe.KindName(a), observe.KindName(b))
 	})
 	for _, gvk := range order {
 		slices.SortStableFunc(kinds[gvk], func(a, b observe.Version) int { return b.Time.Compare(a.Time) })

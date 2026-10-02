@@ -164,16 +164,16 @@ func (t *Target) checkScopes(scope scopeFunc) error {
 	}
 	var found []string
 	if clusterScoped(t.Primary) {
-		found = append(found, "the primary "+kindName(t.Primary))
+		found = append(found, "the primary "+observe.KindName(t.Primary))
 	}
 	for _, gvk := range t.Manages {
 		if clusterScoped(gvk) {
-			found = append(found, "the managed "+kindName(gvk))
+			found = append(found, "the managed "+observe.KindName(gvk))
 		}
 	}
 	for _, fixture := range t.Fixtures {
 		if gvk := fixture.GroupVersionKind(); clusterScoped(gvk) {
-			found = append(found, fmt.Sprintf("the fixture %s %s", kindName(gvk), fixture.GetName()))
+			found = append(found, fmt.Sprintf("the fixture %s %s", observe.KindName(gvk), fixture.GetName()))
 		}
 	}
 	if len(found) > 0 {
@@ -193,15 +193,7 @@ type misplacedFixture struct{ fixture *unstructured.Unstructured }
 func (m *misplacedFixture) Error() string {
 	namespace := m.fixture.GetNamespace()
 	return fmt.Sprintf("the fixture %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace, and the target may look for this one in %s",
-		kindName(m.fixture.GroupVersionKind()), m.fixture.GetName(), namespace, namespace)
-}
-
-// kindName writes a kind as target.yaml declares it.
-func kindName(gvk schema.GroupVersionKind) string {
-	if gvk.Group == "" {
-		return gvk.Version + "/" + gvk.Kind
-	}
-	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
+		observe.KindName(m.fixture.GroupVersionKind()), m.fixture.GetName(), namespace, namespace)
 }
 
 // WatchedKinds are the kinds botbox watches: the primary CR and every managed

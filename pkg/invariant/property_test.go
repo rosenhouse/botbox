@@ -131,8 +131,18 @@ func TestPropertyIsNotEvaluatedWhereTheTargetWasStillStarting(t *testing.T) {
 			{"restarted stable before the checkpoint", stale(when).exit(4*time.Second, 6*time.Second),
 				"the target had requested no resource outside leader election since the restart after its exit during op 1 (deleteManaged)"},
 			{"after a supervised restart, with leader election alone", stale(when).exit(4*time.Second, 5*time.Second).
-				requests(5100*time.Millisecond, time.Second, 3, lease("update")),
-				"the target had requested no resource outside leader election since the restart after its exit during op 1 (deleteManaged)"},
+				requests(5100*time.Millisecond, time.Second, 3, lease("get")),
+				"the target had won no lease since the restart after its exit during op 1 (deleteManaged)"},
+			{"after a supervised restart, with a watch before it won its lease", stale(when).exit(4*time.Second, 5*time.Second).
+				running(5100*time.Millisecond).
+				requests(5200*time.Millisecond, time.Second, 3, lease("get")).
+				request(8100*time.Millisecond, lease("update")),
+				"the target had won no lease since the restart after its exit during op 1 (deleteManaged)"},
+			{"won its lease in the last stable", stale(when).exit(4*time.Second, 5*time.Second).
+				running(5100*time.Millisecond).
+				request(5200*time.Millisecond, lease("get")).
+				request(7900*time.Millisecond, lease("update")),
+				"the target had won no lease since the restart after its exit during op 1 (deleteManaged) until the last 2s (timeouts.stable)"},
 			{"after a supervised restart, with a request after the checkpoint alone", stale(when).exit(4*time.Second, 5*time.Second).running(8100 * time.Millisecond),
 				"the target had requested no resource outside leader election since the restart after its exit during op 1 (deleteManaged)"},
 			{"after a restart op", stale(when).op(invariant.OpRestart, 4*time.Second).op(invariant.OpSettle, 4*time.Second),
@@ -171,7 +181,7 @@ func TestPropertyIsNotEvaluatedWhereTheTargetHadNotShownItRuns(t *testing.T) {
 	in.Target.Properties = []target.Property{property(target.Checkpoint, readyCountsChildren)}
 
 	noted(t, invariant.Property(in.Target.Properties[0]), in,
-		"P1 is not evaluated at the checkpoint after op 0 (create): the target had requested no resource outside leader election since it started")
+		"P1 is not evaluated at the checkpoint after op 0 (create): the target had won no lease since it started")
 }
 
 // The property judges a target back for T_stable by the checkpoint, as a wait
@@ -182,6 +192,10 @@ func TestPropertyFiresWhereTheTargetWasBack(t *testing.T) {
 		"back after a restart before the op": stale(target.Checkpoint).exit(2500*time.Millisecond, 2600*time.Millisecond).
 			running(2700 * time.Millisecond),
 		"exited after the checkpoint": stale(target.Checkpoint).exit(8100*time.Millisecond, 9*time.Second),
+		"back once it won its lease": stale(target.Checkpoint).exit(4*time.Second, 5*time.Second).
+			running(5100*time.Millisecond).
+			request(5200*time.Millisecond, lease("get")).
+			request(6*time.Second, lease("update")),
 	} {
 		t.Run(name, func(t *testing.T) {
 			in := r.checkpoint(8*time.Second, invariant.Expired).through(10 * time.Second)

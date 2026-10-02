@@ -1,6 +1,7 @@
 package invariant
 
 import (
+	"slices"
 	"time"
 
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -8,21 +9,40 @@ import (
 
 // Back is when the target first made a request after since that shows it
 // running, and whether it has. botbox has no other sign that a process it
-// started is running.
+// started is running. A health probe or a discovery read names no resource,
+// and does not show it. A process that elects a leader can start its
+// informers before it leads, so only a lease it won shows it running.
 func Back(requests []proxy.Request, since time.Time) (time.Time, bool) {
+	shows := func(r proxy.Request) bool { return r.Resource != "" }
+	if electing(requests, since) {
+		shows = won
+	}
 	var first time.Time
 	for _, r := range requests {
-		if r.Start.After(since) && showsRunning(r) && (first.IsZero() || r.Start.Before(first)) {
+		if r.Start.After(since) && shows(r) && (first.IsZero() || r.Start.Before(first)) {
 			first = r.Start
 		}
 	}
 	return first, !first.IsZero()
 }
 
-// showsRunning reports whether a request shows the target past starting up. A
-// process waiting to lead requests only leader election and paths that name no
-// resource, such as discovery.
-func showsRunning(r proxy.Request) bool { return r.Resource != "" && !leaderElection(r) }
+// notBack says what a target not back since since had not done.
+func notBack(requests []proxy.Request, since time.Time) string {
+	if electing(requests, since) {
+		return "won no lease"
+	}
+	return "requested no resource outside leader election"
+}
+
+func electing(requests []proxy.Request, since time.Time) bool {
+	return slices.ContainsFunc(requests, func(r proxy.Request) bool { return r.Start.After(since) && leaderElection(r) })
+}
+
+// won reports whether a request won the target a lease: the API server
+// accepted its create or update of one.
+func won(r proxy.Request) bool {
+	return leaderElection(r) && r.Resource == "leases" && (r.Verb == "create" || r.Verb == "update") && r.Status/100 == 2
+}
 
 // settledBy is when a target botbox restarted at restart must have converged:
 // T_settle past its return where it returned within T_settle, or else T_settle

@@ -169,6 +169,7 @@ func TestG7PassesAnObjectThatCameBack(t *testing.T) {
 // waiting out its predecessor's lease, recreates nothing.
 func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 	const wantNote = "G7 is not evaluated for op 2 (deleteManaged): the target had requested no resource outside leader election between op 1 (restart) and it"
+	const wonNoLease = "G7 is not evaluated for op 2 (deleteManaged): the target had won no lease between op 1 (restart) and it"
 	deletedAfter := func(r *run) invariant.Input {
 		return r.
 			deletedManaged(10*time.Second, "w-0").
@@ -183,10 +184,14 @@ func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 		want string
 	}{
 		{"with no request", deletedAfter(restarted()), wantNote},
-		{"with lease requests alone", deletedAfter(restarted().requests(9100*time.Millisecond, 500*time.Millisecond, 4, lease("update"))), wantNote},
+		{"with lease requests alone", deletedAfter(restarted().requests(9100*time.Millisecond, 500*time.Millisecond, 4, lease("get"))), wonNoLease},
 		{"with lease candidate requests alone", deletedAfter(restarted().
 			request(9100*time.Millisecond, leaseCandidate("list")).
-			request(9200*time.Millisecond, leaseCandidate("create"))), wantNote},
+			request(9200*time.Millisecond, leaseCandidate("create"))), wonNoLease},
+		{"with a watch before it won its lease", deletedAfter(restarted().
+			request(9100*time.Millisecond, watch()).
+			request(9200*time.Millisecond, lease("get")).
+			request(10500*time.Millisecond, lease("update"))), wonNoLease},
 		{"with discovery reads alone", deletedAfter(restarted().request(9100*time.Millisecond, nonResource("/api"))), wantNote},
 		{"with a request before the restart alone", deletedAfter(restarted().request(8500*time.Millisecond, get("w-1"))), wantNote},
 		{"with a request in the wait alone", deletedAfter(restarted().request(10500*time.Millisecond, watch())), wantNote},
@@ -246,6 +251,7 @@ func TestG7JudgesAnObjectDeletedOnceARestartedTargetWasBack(t *testing.T) {
 			{"with a watch", watch()},
 			{"with a get the API server refused", failedGet("w-0", http.StatusNotFound)},
 			{"with a resource named leases in another group", leasesElsewhere()},
+			{"with a lease it won", lease("update")},
 		} {
 			t.Run(restart.name+" "+c.name, func(t *testing.T) {
 				in := restart.restarted().

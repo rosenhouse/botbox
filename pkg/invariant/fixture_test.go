@@ -497,6 +497,12 @@ func lease(verb string) proxy.Request {
 	}
 }
 
+func leaseAnswered(verb string, status int) proxy.Request {
+	answered := lease(verb)
+	answered.Status = status
+	return answered
+}
+
 // leaseCandidate is a request that coordinated leader election makes before the
 // target leads, as well as after.
 func leaseCandidate(verb string) proxy.Request {

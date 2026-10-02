@@ -195,11 +195,12 @@ runs out keeps the wait open until `timeouts.settle` past its release. It keeps 
 not check your properties where a wait ends with a request held, or released within
 `timeouts.stable`, and the run notes it. Nor does it where your controller waits to restart,
 or has not been back for `timeouts.stable` since it last started. botbox counts your
-controller back once it requests a resource, or, where it elects a leader, once it wins its
-lease. A property evaluated `always` is still checked at every change. botbox exits 2 where
-a `recreate`'s old CR outlasts the wait and no check fails, because the op cannot go on. A
-fault active during the `recreate` can do that to a correct controller, as a delay on each
-request it makes can. End the fault before the `recreate` with `until.op`.
+controller back once it requests a resource outside leader election, or, where it elects a
+leader, once it wins its lease. A property evaluated `always` is still checked at every
+change. botbox exits 2 where a `recreate`'s old CR outlasts the wait and no check fails,
+because the op cannot go on. A fault active during the `recreate` can do that to a correct
+controller, as a delay on each request it makes can. End the fault before the `recreate`
+with `until.op`.
 
 | Op | Needs | May carry | Settles | What it does |
 |---|---|---|---|---|

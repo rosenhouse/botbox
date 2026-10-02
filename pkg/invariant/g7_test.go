@@ -186,6 +186,7 @@ func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 		{"with no request", deletedAfter(restarted()), wantNote},
 		{"with lease requests alone", deletedAfter(restarted().requests(9100*time.Millisecond, 500*time.Millisecond, 4, lease("get"))), wonNoLease},
 		{"with lease candidate requests alone", deletedAfter(restarted().
+			request(9050*time.Millisecond, leaseCandidate("get")).
 			request(9100*time.Millisecond, leaseCandidate("list")).
 			request(9200*time.Millisecond, leaseCandidate("create"))), wantNote},
 		{"with a watch before it won its lease", deletedAfter(restarted().

@@ -293,27 +293,28 @@ The Runner executes one sequence:
    converged, the target has shown it runs, and the Launcher supervises it (§5.1). The run
    notes each exit and the line the target wrote as it stopped. A wait does not converge
    while the target waits to restart, nor until the process now running has shown it runs.
-   A target that gets a Lease, as leader election does to learn who holds it, shows it once
-   the API server accepts its create or update of a lease, because a controller can start
-   informers before it leads. Another shows it by requesting a resource outside leader
-   election, because a controller lists what it watches as it starts. botbox has no other
-   sign that a target is back. A start and that sign count as changes, so a restarted
-   target runs for `T_stable` past its return before a wait converges. A target that
-   exits again within `T_stable` of each return therefore never
-   converges, even where it wrote its converged state first, and its wait expires as a G4
-   that counts the exits since the target last converged and quotes the last. A target
-   that runs longer between exits can converge in between, until a backoff outlasts a
-   wait. A target that converges after an exit passes. botbox chose when to
-   restart the target after a `Restart` op and after an exit a fault excuses (§6), so a
-   wait gives it `T_settle` past its return from either, where it returns within `T_settle`
-   of the restart, and `T_settle` past the restart where it does not. While a fault is
-   active, only the first exit a fault excused during each op gets that time (§6). An exit
-   is during the last op stamped before it. An op stamped before the target has had that
-   time after an earlier exit gives it that time too. Before it stamps an op, the Runner
-   waits for any restart that follows an exit a fault excused, so the op never lands while
-   the target waits for it. Any other restart gives it no more time, and its startup
-   requests count toward G1 where they land in a quiet window (§6). A target not back when
-   a wait expires fails G4. A restart that fails ends the run as the harness error above.
+   A target that has got a Lease in the run elects a leader, since leader election gets
+   its Lease to learn who holds it. Its process shows it runs once the API server accepts
+   the process's create or update of a lease, because a controller can start informers
+   before it leads. Another target's process shows it by requesting a resource outside
+   leader election, because a controller lists what it watches as it starts. botbox has no
+   other sign that a target is back. A start and that sign count as changes, so a
+   restarted target runs for `T_stable` past its return before a wait converges. A target
+   that exits again within `T_stable` of each return therefore never converges, even where
+   it wrote its converged state first, and its wait expires as a G4 that counts the exits
+   since the target last converged and quotes the last. A target that runs longer between
+   exits can converge in between, until a backoff outlasts a wait. A target that converges
+   after an exit passes. botbox chose when to restart the target after a `Restart` op and
+   after an exit a fault excuses (§6), so a wait gives it `T_settle` past its return from
+   either, where it returns within `T_settle` of the restart, and `T_settle` past the
+   restart where it does not. While a fault is active, only the first exit a fault excused
+   during each op gets that time (§6). An exit is during the last op stamped before it. An
+   op stamped before the target has had that time after an earlier exit gives it that time
+   too. Before it stamps an op, the Runner waits for any restart that follows an exit a
+   fault excused, so the op never lands while the target waits for it. Any other restart
+   gives it no more time, and its startup requests count toward G1 where they land in a
+   quiet window (§6). A target not back when a wait expires fails G4. A restart that fails
+   ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). Properties are not
    evaluated where the proxy held a request of the target's, or released one within
    `T_stable`, which may still change what they read, nor where the target was still
@@ -2341,23 +2342,24 @@ built from source and run as a black-box binary.
   `deleteManaged` gave it `T_settle` past the restart and ended there. P1 read the
   `status.ready` the toy wrote before botbox deleted a child, and failed the correct toy
   in 3 of 3 runs. A property now skips, with a note, a checkpoint where the target was
-  still starting by the measure a wait converges on (§6). That covers a target waiting
-  out a backoff, where a wait can end after a later exit during the op. It covers the
-  first start, because a fault can keep a target from leading before any wait converges.
-  Judging a target that came back by the checkpoint, however late, was rejected: one
-  first heard from just before a wait ends has had no time to act (D60, D69). Owing the
-  target time until it is back was rejected, because an active fault can keep it from
-  leading until the teardown clears the fault, and no bound would then cover the wait.
-  A wait that converged is judged whatever the exits read, because a `Restart` op can
-  replace a target waiting out its backoff, and the restart the exit scheduled never
-  comes. Skipping properties at every wait a fault excuses was rejected, because
-  properties are how botbox sees a fault's transient states (§5.6). A target that elects
-  a leader is back only once the API server accepts its create or update of a lease.
-  controller-runtime starts the informers a field index asks for before the manager
-  leads. The toy with an index watched Widgets while it waited out its lease, that watch
-  counted as its return, the wait converged before the toy led, and P1 failed in 3 of 3
-  runs. A get of a Lease marks a target that elects, because leader election gets its
-  Lease to learn who holds it, and an informer lists and watches instead. A target that
-  gets a Lease and elects no leader therefore shows it runs only once it writes a lease,
-  and fails G4 where it never does. Keeping the sign of D60 and D69 and stating the limit
-  was rejected, because the wait itself converged too early.
+  still starting by the measure a wait converges on (§6). That covers a target waiting out
+  a backoff, where a wait can end after a later exit during the op. It covers the first
+  start, because a fault can keep a target from leading before any wait converges. Judging
+  a target that came back by the checkpoint, however late, was rejected: one first heard
+  from just before a wait ends has had no time to act (D60, D69). Owing the target time
+  until it is back was rejected, because an active fault can keep it from leading until
+  the teardown clears the fault, and no bound would then cover the wait. A wait that
+  converged is judged whatever the exits read, because a `Restart` op can replace a target
+  waiting out its backoff, and the restart the exit scheduled never comes. Skipping
+  properties at every wait a fault excuses was rejected, because properties are how botbox
+  sees a fault's transient states (§5.6). A target that elects a leader is back only once
+  the API server accepts its create or update of a lease. controller-runtime starts the
+  informers a field index asks for before the manager leads. The toy with an index watched
+  Widgets while it waited out its lease, that watch counted as its return, the wait
+  converged before the toy led, and P1 failed in 3 of 3 runs. A get of a Lease anywhere in
+  the run marks a target that elects, because leader election gets its Lease to learn who
+  holds it, and an informer lists and watches instead. A restarted process gets its lease
+  only once its caches sync, which a fault can delay, and its predecessor's get already
+  marks it. A target that gets a Lease and elects no leader therefore shows it runs only
+  once it writes a lease, and fails G4 where it never does. Keeping the sign of D60 and
+  D69 and stating the limit was rejected, because the wait itself converged too early.

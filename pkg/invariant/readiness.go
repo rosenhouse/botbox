@@ -181,9 +181,9 @@ func (in Input) starting(at time.Time) string {
 	}
 	switch back, found := Back(in.Requests, start); {
 	case !found || back.After(at):
-		return fmt.Sprintf("the target had %s since %s", notBack(in.Requests, start), named)
+		return fmt.Sprintf("the target had %s since %s", notBack(in.Requests), named)
 	case back.After(at.Add(-stable)):
-		return fmt.Sprintf("the target had %s since %s until the last %s (timeouts.stable)", notBack(in.Requests, start), named, stable)
+		return fmt.Sprintf("the target had %s since %s until the last %s (timeouts.stable)", notBack(in.Requests), named, stable)
 	}
 	return ""
 }

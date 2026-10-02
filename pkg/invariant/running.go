@@ -15,7 +15,7 @@ import (
 // shows it running.
 func Back(requests []proxy.Request, since time.Time) (time.Time, bool) {
 	shows := func(r proxy.Request) bool { return r.Resource != "" && !leaderElection(r) }
-	if electing(requests, since) {
+	if electing(requests) {
 		shows = won
 	}
 	var first time.Time
@@ -27,21 +27,20 @@ func Back(requests []proxy.Request, since time.Time) (time.Time, bool) {
 	return first, !first.IsZero()
 }
 
-// notBack says what a target that is not back had not done after since.
-func notBack(requests []proxy.Request, since time.Time) string {
-	if electing(requests, since) {
+// notBack says what a target that is not back had not done.
+func notBack(requests []proxy.Request) string {
+	if electing(requests) {
 		return "won no lease"
 	}
 	return "requested no resource outside leader election"
 }
 
-// electing reports whether the target got a lease after since, as leader
-// election does to learn who holds it. An informer lists and watches Leases
-// instead.
-func electing(requests []proxy.Request, since time.Time) bool {
-	return slices.ContainsFunc(requests, func(r proxy.Request) bool {
-		return r.Start.After(since) && isLease(r) && r.Verb == "get"
-	})
+// electing reports whether the target got a lease, as leader election does to
+// learn who holds it. An informer lists and watches Leases instead. A process
+// whose caches have not synced has yet to elect, but an earlier one shows it
+// will.
+func electing(requests []proxy.Request) bool {
+	return slices.ContainsFunc(requests, func(r proxy.Request) bool { return isLease(r) && r.Verb == "get" })
 }
 
 // won reports whether a request won the target a lease: the API server

@@ -507,9 +507,8 @@ hold the old CR. A `recreate` waits for the old CR to go.
 In a sequence you write, put a `settle` op after a `restart`, and one before it unless the op
 before it settles. G5 compares the states the controller settled in on either side, and leaves a
 note instead of a verdict on what another op may have changed in between. G7 likewise notes a
-`deleteManaged` that follows a `restart` before your controller has requested a resource outside
-leader election, since botbox cannot otherwise tell that it is back. The `settle` op after the
-`restart` waits for that request.
+`deleteManaged` that follows a `restart` before your controller is back. The `settle` op after
+the `restart` waits for it to come back.
 
 ## Reading a report
 
@@ -563,11 +562,11 @@ would: at once, then after 10s, doubling up to 5 minutes. The run prints a note 
 exit, quoting the line the controller wrote as it stopped. A settle wait does not converge
 while the controller waits to restart. Nor does it converge until the controller is back
 since it last started and has run for `stable`. botbox counts a controller back once it
-requests a resource, or, where it elects a leader, once it wins its lease. It has no other
-sign. After a `restart` op, a controller has `settle` to come back, and `settle` past its
-return to converge. A controller that crashes again within `stable` of each return never
-converges, even where it wrote its converged state first, so G4 reports it and quotes the
-last exit.
+requests a resource outside leader election, or, where it elects a leader, once it wins its
+lease. It has no other sign. After a `restart` op, a controller has `settle` to come back,
+and `settle` past its return to converge. A controller that crashes again within `stable`
+of each return never converges, even where it wrote its converged state first, so G4
+reports it and quotes the last exit.
 A controller that exits during a fault, or while it recovers from one, has the same once
 botbox restarts it. While a fault is active, only your controller's first such exit during
 each op gets that time. If it exits again during the op, the wait can end before it

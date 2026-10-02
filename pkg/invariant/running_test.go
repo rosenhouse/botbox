@@ -30,9 +30,6 @@ func TestBackIsTheFirstRequestThatShowsTheTargetRunning(t *testing.T) {
 			request(1100*time.Millisecond, lease("list")).
 			request(1200*time.Millisecond, lease("watch")).
 			request(1400*time.Millisecond, watch()), 1400 * time.Millisecond},
-		{"one after leader election up to since", newRun().
-			request(time.Second, lease("get")).
-			request(1400*time.Millisecond, watch()), 1400 * time.Millisecond},
 		{"the lease it created, after a watch as it waited to lead", newRun().
 			request(1100*time.Millisecond, watch()).
 			request(1200*time.Millisecond, leaseAnswered("get", http.StatusNotFound)).
@@ -109,6 +106,10 @@ func TestBackFindsNothingUntilTheTargetShowsItRuns(t *testing.T) {
 		"a lease won up to since": newRun().
 			request(time.Second, lease("update")).
 			request(1100*time.Millisecond, lease("get")),
+		"a watch, by a target that won a lease before since": newRun().
+			request(500*time.Millisecond, lease("get")).
+			request(600*time.Millisecond, lease("update")).
+			request(1400*time.Millisecond, watch()),
 		"a watch as it waited to lead": newRun().
 			request(1100*time.Millisecond, watch()).
 			request(1200*time.Millisecond, lease("get")),

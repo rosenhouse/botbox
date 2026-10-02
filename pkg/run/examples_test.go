@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
@@ -23,7 +24,7 @@ func TestEveryExampleSequenceSuitsItsTarget(t *testing.T) {
 		}
 		fixtures := map[string]bool{}
 		for _, fixture := range declared.Fixtures {
-			fixtures[kindName(fixture.GroupVersionKind())+" "+fixture.GetName()] = true
+			fixtures[observe.KindName(fixture.GroupVersionKind())+" "+fixture.GetName()] = true
 		}
 		hunted := 0
 		err = filepath.WalkDir(filepath.Join(filepath.Dir(path), "sequences"), func(file string, _ fs.DirEntry, err error) error {

@@ -26,7 +26,7 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// botbox exits with one of these codes (DESIGN.md §11).
+// botbox exits with one of these codes.
 const (
 	exitOK        = 0
 	exitViolation = 1
@@ -41,23 +41,23 @@ const (
 )
 
 const (
-	// shrinkDir holds the replays of a shrink pass, which the run directory
-	// keeps none of (DESIGN.md §11).
+	// shrinkDir holds a shrink pass's replays, which are deleted before the
+	// report is written.
 	shrinkDir = "shrink"
 	// sequenceFile is what run.WriteRunSequence writes.
 	sequenceFile = "sequence.json"
-	// shrunkFile holds a minimized sequence the deadline or an interrupt left
-	// unrun, which no recording in the directory is of (DESIGN.md §11).
+	// shrunkFile holds a minimized sequence that the deadline or an interrupt
+	// left unrun, so no recording in the directory comes from it.
 	shrunkFile = "sequence.shrunk.json"
 )
 
 // Generator draws a sequence from a seed, deterministically, for the target it
-// was built for (DESIGN.md §5.4).
+// was built for.
 type Generator func(seed int64) (run.Sequence, error)
 
-// rapidGenerator draws sequences from the target's CRD schema (DESIGN.md
-// §5.4). It reads the CRDs once, because a draw itself does no I/O. It also
-// says which spec paths generation leaves alone.
+// rapidGenerator draws sequences from the target's CRD schema. It reads the
+// CRDs once, because a draw itself does no I/O. It also says which spec paths
+// generation leaves alone.
 func rapidGenerator(t *target.Target) (Generator, []string, error) {
 	g, err := generate.New(t, generate.Options{})
 	if err != nil {
@@ -86,7 +86,7 @@ func newCLI(stdout, stderr io.Writer) *cli {
 }
 
 // session executes sequences against one test cluster. Runs share it, because
-// starting a control plane costs seconds (DESIGN.md §5.5).
+// starting a control plane costs seconds.
 type session interface {
 	// vet refuses a target the cluster cannot run, before any run starts.
 	vet(t *target.Target) error
@@ -94,7 +94,7 @@ type session interface {
 	close() error
 }
 
-// options are the flags of DESIGN.md §11.
+// options are the flags of every command.
 type options struct {
 	command       string
 	target        string
@@ -225,10 +225,10 @@ func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Tar
 		if _, ok := interruption(ctx); ok {
 			return c.stop(record, fmt.Errorf("an interrupt stopped the invocation after %d of %d runs", i, len(runs)))
 		}
-		// The deadline is the invocation's budget (DESIGN.md §11): the next
-		// run does not start. The first always starts, so a spent deadline is
-		// blamed on a run. An invocation the deadline stopped tested less than
-		// asked, so it does not pass.
+		// The deadline is the invocation's budget: the next run does not
+		// start. The first always starts, so a spent deadline is blamed on a
+		// run. An invocation the deadline stopped tested less than asked, so
+		// it does not pass.
 		if i > 0 && ctx.Err() != nil {
 			return c.stop(record, fmt.Errorf("%s stopped the invocation after %d of %d runs", opts.deadlineName(), i, len(runs)))
 		}
@@ -337,10 +337,9 @@ func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, e
 }
 
 // reportFailure minimizes a sequence botbox drew and leaves it in the run
-// directory with the evidence of a run of it (DESIGN.md §5.5). A sequence the
-// caller wrote is reported as it was written. It calls rerunning before it
-// runs the minimized sequence, and returns the violation and notes the report
-// carries.
+// directory with the evidence of a run of it. A sequence the caller wrote is
+// reported as it was written. It calls rerunning before it runs the minimized
+// sequence, and returns the violation and notes the report carries.
 func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *target.Target,
 	failed planned, result run.Result, number int, dir string, rerunning func()) (run.Violation, []string) {
 	violation := *result.Violation
@@ -375,8 +374,8 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 			"%s ended minimization with %s, left unrun in %s: this is the sequence botbox drew",
 			ended(ctx), ops(shrunk), shrunkFile))
 	case ctx.Err() != nil:
-		// §5.7 says a report carries the minimized sequence, and the pass
-		// never got to a smaller one (D31).
+		// A reader takes a report's sequence for the minimized one, and the
+		// pass never got to a smaller one.
 		result.Notes = append(result.Notes, ended(ctx)+
 			" ended minimization before it found a smaller sequence: this is the sequence botbox drew")
 	case simplified:
@@ -396,13 +395,13 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 			// The directory now holds a run of the minimized sequence that
 			// found nothing. The finding stands, and the report says which
 			// run these recordings are of rather than leaving a reader to
-			// infer it from a passing log (D31, D35).
+			// infer it from a passing log.
 			result.Notes = append(result.Notes, fmt.Sprintf(
 				"the minimized sequence passed when it ran again, so this directory holds that run and not the one %s was found in",
 				violation.ID))
 		}
 	}
-	// What the pass replayed is nobody's evidence (DESIGN.md §11).
+	// The shrink pass's replays back no report, so they are deleted.
 	c.warn(os.RemoveAll(filepath.Join(dir, shrinkDir)))
 	c.warn(run.WriteRunSequence(dir, reported))
 	c.warn(c.writeReport(dir, opts, t, filepath.Join(dir, sequenceFile), reported, result))
@@ -431,9 +430,9 @@ func (c *cli) rerun(ctx context.Context, opts options, s session, t *target.Targ
 	return result, err
 }
 
-// replayCommand is the one line §5.7 asks a report to carry. It repeats the
-// flags that select what ran, because a command that leaves them out runs a
-// different target and reproduces nothing.
+// replayCommand is the one line a report carries to reproduce the run. It
+// repeats the flags that select what ran, because a command that leaves them
+// out runs a different target and reproduces nothing.
 func (o options) replayCommand(sequence string) string {
 	command := []string{"botbox", "replay", "--target", o.target}
 	if o.kubeconfig != "" {
@@ -463,7 +462,7 @@ func shellQuote(word string) string {
 	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
 }
 
-// writeReport leaves §5.7's report beside the recordings it describes. replay
+// writeReport leaves the report beside the recordings it describes. replay
 // names the sequence file a reader should run to see this again.
 func (c *cli) writeReport(dir string, opts options, t *target.Target,
 	replay string, sequence run.Sequence, result run.Result) error {
@@ -508,7 +507,7 @@ func reportNotes(opts options, t *target.Target, result run.Result) []string {
 }
 
 // warn reports what went wrong beside a finding, which stands whether or not
-// the run directory could be tidied (DESIGN.md §11).
+// the run directory could be tidied.
 func (c *cli) warn(err error) {
 	if joined, ok := err.(interface{ Unwrap() []error }); ok {
 		for _, err := range joined.Unwrap() {
@@ -529,7 +528,7 @@ func ops(s run.Sequence) string {
 }
 
 // newSeed is the seed of a run the caller gave none for. Every run prints its
-// seed, so that the failure is reproducible from it (DESIGN.md §11).
+// seed, so that the failure is reproducible from it.
 func newSeed() int64 { return rand.Int64() }
 
 func (c *cli) printNotes(number int, notes []string) {
@@ -547,7 +546,7 @@ func (c *cli) report(number int, violation run.Violation, dir string) {
 }
 
 // quotes is what the CLI prints under a violation: when the check judged, and
-// what it quoted (DESIGN.md §5.7).
+// what it quoted.
 func quotes(violation run.Violation) string {
 	var said []string
 	if !violation.At.IsZero() {
@@ -589,7 +588,7 @@ func (c *cli) showRunFiles(dir string) {
 	}
 }
 
-// exitCode maps a run's outcome to the codes of DESIGN.md §11.
+// exitCode maps a run's outcome to botbox's exit codes.
 func exitCode(result run.Result, err error) int {
 	switch {
 	case err != nil:
@@ -604,9 +603,10 @@ func exitCode(result run.Result, err error) int {
 var errRunInterrupted = errors.New("an interrupt stopped the run")
 
 // named blames an interrupt, or the deadline, for a run its context cut short.
-// §11 makes the deadline exit 2, which a reader has to be able to tell from a
-// broken target. The context botbox built from the deadline is what it asks.
-// The teardown's cleanup runs on a budget of its own.
+// botbox exits 2 at the deadline, as it does for a broken target, so the error
+// has to say which. The teardown's cleanup runs on a budget of its own, so
+// named reads ctx.Err() as well as err, and blames only the deadline botbox
+// set.
 func (o options) named(ctx context.Context, err error) error {
 	if _, ok := interruption(ctx); ok && errors.Is(err, context.Canceled) {
 		return errRunInterrupted
@@ -845,7 +845,7 @@ func readSequences(paths []string) ([]run.Sequence, error) {
 }
 
 // clusterSession runs against one test cluster: an envtest control plane
-// botbox starts, or the cluster a kubeconfig names (DESIGN.md §5.8).
+// botbox starts, or the cluster a kubeconfig names.
 type clusterSession struct {
 	*cluster.Cluster
 	// controllerManager says the cluster runs kube-controller-manager, which

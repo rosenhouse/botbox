@@ -26,8 +26,8 @@ type clock struct {
 	polls int
 }
 
-// maxPolls is twice what a wait that runs to T_settle takes.
-var maxPolls = 2 * int(testTimeouts.Settle/testPoll)
+// maxPolls is four times what a wait that runs to T_settle takes.
+var maxPolls = 4 * int(testTimeouts.Settle/testPoll)
 
 func newClock() *clock { return &clock{now: time.Date(2026, 9, 20, 12, 0, 0, 0, time.UTC)} }
 
@@ -63,6 +63,11 @@ func waitOwing(t *testing.T, ctx context.Context, c *clock, state func(since tim
 
 // waitReading is a settle wait over a reading of the run that can fail.
 func waitReading(ctx context.Context, c *clock, state func(since time.Time) (bool, time.Time, error), stopped <-chan struct{}, owed func() time.Time) (bool, time.Duration, error) {
+	return waitHolding(ctx, c, state, holdsNothing, owed, stopped)
+}
+
+// waitHolding is a settle wait while the proxy holds requests as held says.
+func waitHolding(ctx context.Context, c *clock, state func(since time.Time) (bool, time.Time, error), held func(before time.Time) (bool, time.Time), owed func() time.Time, stopped <-chan struct{}) (bool, time.Duration, error) {
 	start := c.now
 	wait := settle{
 		timeouts: testTimeouts,
@@ -70,12 +75,41 @@ func waitReading(ctx context.Context, c *clock, state func(since time.Time) (boo
 		now:      func() time.Time { return c.now },
 		sleep:    c.sleep,
 		state:    state,
+		held:     held,
 		stopped:  stopped,
 		owed:     owed,
 	}
 	converged, err := wait.wait(ctx)
 	return converged, c.now.Sub(start), err
 }
+
+func holdsNothing(time.Time) (bool, time.Time) { return false, time.Time{} }
+
+// holding is a proxy that holds each request from its arrival to its release,
+// both offsets from the start of the wait.
+type holding struct {
+	c        *clock
+	start    time.Time
+	requests [][2]time.Duration
+}
+
+func (h holding) held(before time.Time) (held bool, released time.Time) {
+	for _, request := range h.requests {
+		arrived, release := h.start.Add(request[0]), h.start.Add(request[1])
+		switch {
+		case !arrived.Before(before) || h.c.now.Before(arrived):
+		case h.c.now.Before(release):
+			held = true
+		case release.After(released):
+			released = release
+		}
+	}
+	return held, released
+}
+
+func readyAndQuiet(since time.Time) (bool, time.Time, error) { return true, since, nil }
+
+func notReady(since time.Time) (bool, time.Time, error) { return false, since, nil }
 
 // A ready that yields a non-bool is a configuration error the first time it
 // does, not a CR that is never ready.
@@ -165,6 +199,57 @@ func TestSettleConvergesOnceTheRunHoldsStill(t *testing.T) {
 	}
 	if elapsed != testTimeouts.Stable {
 		t.Errorf("The wait took %v, want T_stable of %v.", elapsed, testTimeouts.Stable)
+	}
+}
+
+// A request the proxy holds is about to change what the checks read.
+func TestSettleConvergesTStableAfterTheProxyReleasesWhatItHeld(t *testing.T) {
+	c := newClock()
+	proxy := holding{c: c, start: c.now, requests: [][2]time.Duration{{500 * time.Millisecond, 2500 * time.Millisecond}}}
+
+	converged, elapsed, err := waitHolding(t.Context(), c, readyAndQuiet, proxy.held, nil, neverStops)
+
+	if err != nil || !converged {
+		t.Fatalf("The wait returned (%t, %v), want convergence.", converged, err)
+	}
+	if want := 2500*time.Millisecond + testTimeouts.Stable; elapsed != want {
+		t.Errorf("The wait took %v, want %v: T_stable past the release.", elapsed, want)
+	}
+}
+
+// A request held when the wait's time runs out gives the target T_settle past
+// its release, as a change would.
+func TestSettleGivesUpNoSoonerThanTSettlePastTheReleaseOfARequestItHeld(t *testing.T) {
+	c := newClock()
+	proxy := holding{c: c, start: c.now, requests: [][2]time.Duration{{4 * time.Second, 6 * time.Second}}}
+
+	converged, elapsed, err := waitHolding(t.Context(), c, notReady, proxy.held, nil, neverStops)
+
+	if err != nil || converged {
+		t.Fatalf("The wait returned (%t, %v), want no convergence: the target is not ready.", converged, err)
+	}
+	if want := 6*time.Second + testTimeouts.Settle; elapsed != want {
+		t.Errorf("The wait took %v, want %v: T_settle past the release.", elapsed, want)
+	}
+}
+
+// A request that reaches the proxy once the wait's time has run out does not
+// hold the wait open, so a proxy that never stops holding requests does not.
+func TestSettleGivesUpWhileTheProxyKeepsHoldingRequests(t *testing.T) {
+	c := newClock()
+	proxy := holding{c: c, start: c.now}
+	for arrived := time.Duration(0); arrived < time.Minute; arrived += 1500 * time.Millisecond {
+		proxy.requests = append(proxy.requests, [2]time.Duration{arrived, arrived + 1500*time.Millisecond})
+	}
+
+	converged, elapsed, err := waitHolding(t.Context(), c, readyAndQuiet, proxy.held, nil, neverStops)
+
+	if err != nil || converged {
+		t.Fatalf("The wait returned (%t, %v), want no convergence: the proxy always holds a request.", converged, err)
+	}
+	// The last request to arrive within T_settle arrives at 4.5s.
+	if want := 6*time.Second + testTimeouts.Settle; elapsed != want {
+		t.Errorf("The wait took %v, want %v: T_settle past the release of the last request that arrived within T_settle.", elapsed, want)
 	}
 }
 

@@ -24,8 +24,8 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// defaultMaxManaged is N_objects of DESIGN.md §5.5: beyond it the run ends as
-// a harness limit rather than a finding.
+// defaultMaxManaged bounds the managed objects in the run namespace. Beyond
+// it, the run ends as a harness limit rather than a finding.
 const defaultMaxManaged = 500
 
 // teardownMargin is what the teardown gets beyond its own waits, so that a run
@@ -42,13 +42,13 @@ const (
 // it said as it stopped. A panic's stack follows the line it opens with.
 const maxTail = 1 << 20
 
-// deletionMargin holds the run namespace open past T_delete, because G3's
-// window opens when the Observer recorded the deletion, which is after the
-// teardown asked for it.
+// deletionMargin holds the run namespace open past timeouts.delete, because
+// G3's window opens when the Observer recorded the deletion, which is after
+// the teardown asked for it.
 const deletionMargin = time.Second
 
-// Checker evaluates the invariants and the target's properties at a checkpoint
-// (DESIGN.md §5.6). Its error is a configuration error, never a finding.
+// Checker evaluates the invariants and the target's properties at a
+// checkpoint. Its error is a configuration error, never a finding.
 type Checker interface {
 	Check(Input) (Findings, error)
 }
@@ -56,7 +56,7 @@ type Checker interface {
 // Findings are what the checks made of the run at one checkpoint.
 type Findings struct {
 	Violations []Violation
-	// Notes name what a check could not judge (DESIGN.md §6).
+	// Notes name what a check could not judge.
 	Notes []string
 }
 
@@ -75,13 +75,12 @@ type Violation struct {
 	ID string
 	// Statement is what the check requires and the run broke.
 	Statement string
-	// At is the instant the check judged, which aligns the evidence below
-	// (DESIGN.md §5.7).
+	// At is the instant the check judged, which aligns the evidence below.
 	At time.Time
 	// Evidence quotes what the run did, in one line.
 	Evidence string
 	// Requests and Versions are the evidence the violation named, which a
-	// report quotes (DESIGN.md §5.7).
+	// report quotes.
 	Requests []proxy.Request
 	Versions []observe.Version
 	// RequestsTotal and VersionsTotal are what the check chose each excerpt
@@ -90,8 +89,8 @@ type Violation struct {
 	RequestsTotal, VersionsTotal int
 	VersionsOf                   string
 	// Managed is the state at the violation, one version per object the target
-	// managed, and ManagedTotal how many there were. A check that did not ask
-	// leaves the total nil (DESIGN.md §5.7, D39).
+	// managed, and ManagedTotal how many there were. A check that does not
+	// quote the state leaves the total nil.
 	Managed      []observe.Version
 	ManagedTotal *int
 	// Ready is what a readiness verdict read of the predicate and the CR.
@@ -113,47 +112,46 @@ func (v Violation) String() string {
 }
 
 // Result is one run's outcome. An error alongside it is a configuration or
-// harness error, never a finding (DESIGN.md §11).
+// harness error, never a finding.
 type Result struct {
 	Timeline Timeline
 	// Violation is the first violation the run found, or nil. A run ends at
 	// its first violation.
 	Violation *Violation
 	// Notes name what the checks could not judge, as the last checkpoint read
-	// the run (DESIGN.md §6).
+	// the run.
 	Notes []string
 	// Recorded is the whole run as the checks read it, sampled once the
 	// teardown is done. A run that ended early recorded what it reached.
 	Recorded Input
 }
 
-// Timeline is what the run did, in order (DESIGN.md §4).
+// Timeline is what the run did, in order.
 type Timeline struct {
-	// Namespace is private to this run and never reused (DESIGN.md §5.5).
+	// Namespace is private to this run and never reused.
 	Namespace   string
 	Ops         []AppliedOp
 	Checkpoints []Checkpoint
 	// Recovery is the settle wait the teardown gave a target still owed time
 	// to recover from the faults, or nil if it owed none.
 	Recovery *Wait
-	// Quiet is the T_stable the teardown waits before it deletes anything,
-	// which §5.5 step 4 makes the run's last quiet window. It closes where
-	// Deletion opens.
+	// Quiet is the timeouts.stable the teardown waits before it deletes
+	// anything, the run's last quiet window. It closes where Deletion opens.
 	Quiet Window
 	// Deletion is the window G3 judges: it opens when the teardown deletes the
 	// primary CR and closes when the namespace is clean or the window expires.
 	Deletion Window
 	// Cleaned is when the teardown saw the run namespace empty, or zero if it
-	// never did (DESIGN.md §6, D34).
+	// never did.
 	Cleaned time.Time
 	// Faults are the windows the proxy applied each fault op's fault in, one
 	// per fault op. A window with no Start is a fault the proxy applied to no
-	// request, which changed nothing and excuses nothing (D36). A window with
-	// no End is a fault the proxy still applies.
+	// request, which changed nothing and excuses nothing. A window with no End
+	// is a fault the proxy still applies or still holds a request of.
 	Faults []Window
 	// Forced names every object the teardown force-removed a finalizer from.
 	// A run that was not abandoned notes each one: G3 judged the deletion
-	// window, which closed before any of this (DESIGN.md §5.5, D37).
+	// window, which closed before any of this.
 	Forced []string
 	// Exits are the times the target stopped on its own after the first
 	// settle wait converged.
@@ -187,7 +185,7 @@ type AppliedOp struct {
 	At time.Time
 	// CR is the primary CR a CR op wrote.
 	CR string
-	// Deleted is the object a deleteManaged op deleted (DESIGN.md §7).
+	// Deleted is the object a deleteManaged op deleted.
 	Deleted string
 	// Restored says botbox created a fixture it had deleted again, after At
 	// and before the op's own change.
@@ -207,7 +205,7 @@ func (w Wait) checkpoint(op int) Checkpoint {
 	return Checkpoint{At: w.Window.End, Began: w.Window.Start, Op: op, Converged: w.Converged}
 }
 
-// Checkpoint is where the checks ran (DESIGN.md §4).
+// Checkpoint is where the checks ran.
 type Checkpoint struct {
 	// At is where the settle wait ended, or where the teardown's deletion
 	// window closed.
@@ -222,14 +220,17 @@ type Checkpoint struct {
 	// Stayed marks a recreate's wait for its old CR to go, which ended with
 	// the CR still there.
 	Stayed bool
+	// Held is whether the proxy held a request of the target's at At, or
+	// released one within timeouts.stable before it.
+	Held bool
 }
 
 // Window is a stretch of a run's time.
 type Window struct{ Start, End time.Time }
 
-// Run executes one sequence against a fresh namespace (DESIGN.md §5.5) and
-// evaluates opts.Check at each checkpoint. The proxy's fault sampling follows
-// the sequence's seed, so a replay faults the same requests.
+// Run executes one sequence against a fresh namespace and evaluates
+// opts.Check at each checkpoint. The proxy's fault sampling follows the
+// sequence's seed, so a replay faults the same requests.
 func Run(ctx context.Context, t *target.Target, sequence Sequence, opts Options) (Result, error) {
 	if err := validateRun(t, sequence, opts); err != nil {
 		return Result{}, fmt.Errorf("running the sequence: %w", err)
@@ -266,7 +267,7 @@ func validateRun(t *target.Target, sequence Sequence, opts Options) error {
 }
 
 // WriteRunSequence puts the sequence in the run directory, so that a failing
-// run carries what it executed (DESIGN.md §11).
+// run carries what it executed.
 func WriteRunSequence(dir string, sequence Sequence) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("creating the run directory: %w", err)
@@ -279,8 +280,8 @@ func WriteRunSequence(dir string, sequence Sequence) error {
 type harness interface {
 	namespace() string
 	now() time.Time
-	// settle waits for the target to converge, past T_settle while owed
-	// returns a later instant.
+	// settle waits for the target to converge, past timeouts.settle while
+	// owed returns a later instant.
 	settle(ctx context.Context, owed func() time.Time) (bool, error)
 	sleep(ctx context.Context, d time.Duration) error
 	restart(ctx context.Context) error
@@ -290,6 +291,9 @@ type harness interface {
 	clearFaults()
 	// faultWindow is what the proxy has done with the fault.
 	faultWindow(id proxy.FaultID) proxy.FaultWindow
+	// held reports, of the target's requests that reached the proxy before
+	// then, whether the proxy holds one and when it last released one.
+	held(before time.Time) (holding bool, released time.Time)
 	// servedResources is what the API server serves now, which includes the
 	// CRDs a target installed.
 	servedResources() ([]metav1.APIResource, error)
@@ -300,7 +304,7 @@ type harness interface {
 	// passed, and reports whether it went.
 	awaitCRGone(ctx context.Context, name string, until func() time.Time) (bool, error)
 	// managedObjects names the managed objects of one kind, ordered by
-	// creationTimestamp then name (DESIGN.md §7).
+	// creationTimestamp then name.
 	managedObjects(gvk schema.GroupVersionKind) []string
 	// deleteManaged deletes the object, and reports false where it was
 	// already gone.
@@ -345,13 +349,13 @@ type runner struct {
 	violation *Violation
 	notes     []string
 	// skipped names what no check judged: what the run could not do, and what
-	// botbox did to the run namespace itself (DESIGN.md §6).
+	// botbox did to the run namespace itself.
 	skipped []string
 	failed  bool
 	// converged is where the last settle wait that converged ended. The first
 	// shows the target works, so botbox supervises it from there on.
 	converged time.Time
-	// teardownStart is where the teardown began.
+
 	teardownStart time.Time
 	// crs are the CRs the run created, in the order it first created each.
 	crs    []string
@@ -369,11 +373,12 @@ type runner struct {
 type heldFault struct {
 	id proxy.FaultID
 	// until is the op index the fault ends at, or nil if only the proxy's own
-	// trigger ends it (DESIGN.md §5.2).
+	// trigger ends it.
 	until *int
 	// window is the fault's place in Timeline.Faults.
 	window int
-	// retired is whether the proxy has stopped applying it.
+	// retired is whether the proxy has stopped applying it and released what
+	// it held.
 	retired bool
 }
 
@@ -390,7 +395,7 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 		fixtures: map[string]*unstructured.Unstructured{},
 	}
 	for _, fixture := range t.Fixtures {
-		r.fixtures[kindName(fixture.GroupVersionKind())+" "+fixture.GetName()] = fixture.DeepCopy()
+		r.fixtures[observe.KindName(fixture.GroupVersionKind())+" "+fixture.GetName()] = fixture.DeepCopy()
 	}
 	failure := r.applyOps(ctx)
 	r.failed = failure != nil
@@ -423,8 +428,7 @@ func refusal(op Op, err error) error {
 	return err
 }
 
-// applyOps applies the sequence in order and stops at the first violation
-// (DESIGN.md §5.5).
+// applyOps applies the sequence in order and stops at the first violation.
 func (r *runner) applyOps(ctx context.Context) error {
 	for _, op := range r.sequence.Ops {
 		if r.violation != nil {
@@ -442,7 +446,7 @@ func (r *runner) applyOps(ctx context.Context) error {
 
 // applyOp applies one op and waits for the target's reaction. A target that
 // has stopped ends the run here, because the op would otherwise be applied to
-// nothing (DESIGN.md §5.5).
+// nothing.
 func (r *runner) applyOp(ctx context.Context, op Op) error {
 	r.expireFaults(op.Index)
 	if err := r.awaitRestart(ctx); err != nil {
@@ -564,8 +568,9 @@ func (r *runner) create(ctx context.Context, op Op) error {
 }
 
 // recreate deletes the CR, waits for it to go and creates the op's object. The
-// wait lasts T_delete, or longer while the run is owed time. A CR still there
-// where the wait ends is judged there.
+// wait lasts timeouts.delete, or longer while the run is owed time or the
+// proxy holds a request, as a settle wait does. A CR still there where the
+// wait ends is judged there.
 func (r *runner) recreate(ctx context.Context, op Op, cr string) error {
 	due := r.now().Add(r.target.Timeouts.Delete)
 	if err := r.h.deleteCR(ctx, cr); err != nil {
@@ -573,10 +578,11 @@ func (r *runner) recreate(ctx context.Context, op Op, cr string) error {
 	}
 	wait := Wait{Window: Window{Start: r.now()}}
 	gone, err := r.h.awaitCRGone(ctx, cr, func() time.Time {
+		deadline := due
 		if owed := r.owed(); owed.After(due) {
-			return owed
+			deadline = owed
 		}
-		return due
+		return heldOpen(r.h.held, deadline, r.now(), r.target.Timeouts.Settle)
 	})
 	switch {
 	case err != nil:
@@ -611,12 +617,11 @@ func (r *runner) judgeStayed(ctx context.Context, op Op, stayed *crStayed) error
 }
 
 // applyDeleteManaged resolves the op's index against the managed objects and
-// deletes the one it names, behind the target's back (DESIGN.md §5.4). How
-// many objects the target manages is its own doing, so an index that resolves
-// to nothing skips the op and is reported as a note. So does an object
-// already gone, which the Observer had not yet seen go. A kind the target
-// does not manage is still a configuration error: no run of that sequence can
-// resolve it.
+// deletes the one it names, behind the target's back. How many objects the
+// target manages is its own doing, so an index that resolves to nothing skips
+// the op and is reported as a note. So does an object already gone, which the
+// Observer had not yet seen go. A kind the target does not manage is still a
+// configuration error: no run of that sequence can resolve it.
 func (r *runner) applyDeleteManaged(ctx context.Context, op Op) (string, error) {
 	gvk, err := managedKind(r.target, op.Kind)
 	if err != nil {
@@ -640,8 +645,7 @@ func (r *runner) applyDeleteManaged(ctx context.Context, op Op) (string, error) 
 	return name, nil
 }
 
-// settle waits for the target's reaction and checkpoints where the wait ends
-// (DESIGN.md §4).
+// settle waits for the target's reaction and checkpoints where the wait ends.
 func (r *runner) settle(ctx context.Context, op Op) error {
 	wait, err := r.wait(ctx)
 	if err != nil {
@@ -651,8 +655,8 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 	return r.judge(ctx, wait.checkpoint(op.Index), invariant.Input.Excused)
 }
 
-// wait waits up to T_settle for the target to converge, or longer while it is
-// owed time to recover from the faults or to finish a deletion.
+// wait waits up to timeouts.settle for the target to converge, or longer
+// while it is owed time to recover from the faults or to finish a deletion.
 func (r *runner) wait(ctx context.Context) (Wait, error) {
 	wait := Wait{Window: Window{Start: r.now()}}
 	converged, err := r.h.settle(ctx, r.owed)
@@ -826,6 +830,10 @@ func (r *runner) checkpoint(checkpoint Checkpoint, expired bool) error {
 	if count := r.h.managedCount(); count > r.limit {
 		return fmt.Errorf("the run namespace holds %d managed objects, over the harness limit of %d", count, r.limit)
 	}
+	// The target may still be acting on a request released within
+	// timeouts.stable. A wait that converged saw no such release.
+	holding, released := r.h.held(checkpoint.At)
+	checkpoint.Held = holding || released.After(checkpoint.At.Add(-r.target.Timeouts.Stable))
 	r.timeline.Checkpoints = append(r.timeline.Checkpoints, checkpoint)
 	r.readExits()
 	if expired {
@@ -883,7 +891,7 @@ func (r *runner) checkResource(resource string) error {
 }
 
 // inject adds the op's fault to those the proxy applies. Its window opens
-// where the proxy first applies it, which may be never (D36).
+// where the proxy first applies it, which may be never.
 func (r *runner) inject(op Op) {
 	r.timeline.Faults = append(r.timeline.Faults, Window{})
 	r.faultOps = append(r.faultOps, op.Index)
@@ -909,9 +917,9 @@ func (r *runner) expireFaults(op int) {
 
 // readFaultWindows writes what the proxy has done with each fault into the
 // timeline: a window opens where the proxy first applied the fault and closes
-// where the proxy stopped applying it (D36). A fault the proxy never applied
-// leaves its window unopened, because the run then ran as if the fault op
-// were not there.
+// where the proxy stopped applying it and released what it held. A fault the
+// proxy never applied leaves its window unopened, because the run then ran as
+// if the fault op were not there.
 func (r *runner) readFaultWindows() {
 	for i := range r.faults {
 		fault := &r.faults[i]
@@ -947,9 +955,11 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 	return nil
 }
 
-// teardown is step 4 of DESIGN.md §5.5. Every step runs even if one fails.
-// Its waits end with the caller's context, which abandons the run: the
-// teardown then judges nothing and kills the target at once.
+// teardown clears the faults, waits for a target still owed time to recover,
+// waits out the last quiet window, deletes the CRs and judges their deletion.
+// Then it empties the namespace and stops the target. Every step runs even if
+// one fails. Its waits end with the caller's context, which abandons the run:
+// the teardown then judges nothing and kills the target at once.
 func (r *runner) teardown(ctx context.Context) error {
 	r.teardownStart = r.now()
 	r.clearFaults()
@@ -966,8 +976,8 @@ func (r *runner) teardown(ctx context.Context) error {
 	cut := r.h.sleep(ctx, r.target.Timeouts.Stable)
 
 	// Stamped before the delete, not after it: from here on botbox is the one
-	// changing the namespace, and no invariant window reaches past this instant
-	// (§6). The T_stable sleep above is the last quiet window, and still the
+	// changing the namespace, and no invariant window reaches past this
+	// instant. The sleep above is the last quiet window, and still the
 	// target's to answer for.
 	r.timeline.Quiet.End = r.now()
 	r.timeline.Deletion.Start = r.timeline.Quiet.End
@@ -998,8 +1008,8 @@ func (r *runner) teardown(ctx context.Context) error {
 	if len(forced) > 0 && cut == nil {
 		// G3's window closed before this, so nothing forced here was ever
 		// credited to the target. What a reader would otherwise miss is that
-		// the namespace did not empty on its own (D37). An abandoned run gave
-		// it no time to.
+		// the namespace did not empty on its own. An abandoned run gave it no
+		// time to.
 		r.skipped = append(r.skipped, fmt.Sprintf("the teardown force-removed the finalizers of %s, so the run namespace did not empty on its own",
 			strings.Join(forced, ", ")))
 	}
@@ -1036,16 +1046,16 @@ func (r *runner) during(t time.Time) string {
 // unresolvedNote says why the collector kept an object: it counts an owner it
 // cannot resolve as live.
 func unresolvedNote(u cluster.Unresolved) string {
-	why := "it does not watch " + kindName(u.OwnerKind)
+	why := "it does not watch " + observe.KindName(u.OwnerKind)
 	if u.Unserved {
-		why = "the API server does not serve " + kindName(u.OwnerKind)
+		why = "the API server does not serve " + observe.KindName(u.OwnerKind)
 	}
 	return fmt.Sprintf("botbox's garbage collector never deletes %s %s, because %s, the kind of its owner %s",
-		kindName(u.DependentKind), u.DependentName, why, u.OwnerName)
+		observe.KindName(u.DependentKind), u.DependentName, why, u.OwnerName)
 }
 
 // teardownCheckpoint judges the deletion window, unless the target stopped: a
-// target that is gone cleaned nothing up (DESIGN.md §5.5).
+// target that is gone cleaned nothing up.
 func (r *runner) teardownCheckpoint(ctx context.Context, clean bool) error {
 	if status := r.h.targetStatus(); !status.Running {
 		return fmt.Errorf("the teardown: %w", r.targetStopped(ctx, status))
@@ -1057,7 +1067,7 @@ func (r *runner) teardownBudget() time.Duration {
 	return r.target.Timeouts.Stable + r.target.Timeouts.Delete + teardownMargin
 }
 
-// spec is the fault in the form the proxy injects (DESIGN.md §5.2).
+// spec is the fault in the form the proxy injects.
 func (f Fault) spec() proxy.FaultSpec {
 	var fraction float64 // The proxy reads 0 as every request.
 	if f.Match.Fraction != nil {

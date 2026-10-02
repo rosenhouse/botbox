@@ -9,12 +9,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
-// ErrNotBool marks a predicate whose result is not a bool. DESIGN.md §8.4
-// makes that a configuration error, never "not ready".
+// ErrNotBool marks a predicate whose result is not a bool. That is a
+// configuration error, never "not ready".
 var ErrNotBool = errors.New("the expression did not yield a bool")
 
 // EvalError reports a predicate that failed to evaluate, so that a report can
-// quote it (DESIGN.md §8.4).
+// quote it.
 type EvalError struct {
 	Predicate string // "ready", or the property ID
 	Expr      string
@@ -27,8 +27,8 @@ func (e *EvalError) Error() string {
 
 func (e *EvalError) Unwrap() error { return e.Err }
 
-// celEnv binds metadata, spec and status, plus whatever extra a property needs
-// (DESIGN.md §8.4).
+// celEnv binds metadata, spec and status, plus whatever extra a property
+// needs.
 func celEnv(extra ...cel.EnvOption) (*cel.Env, error) {
 	opts := []cel.EnvOption{
 		cel.Variable("metadata", cel.DynType),
@@ -109,7 +109,7 @@ func crVars(cr *unstructured.Unstructured) map[string]any {
 }
 
 // dynMap binds one top-level field. A missing field binds to an empty map, so
-// that an expression guarded with has() still evaluates (DESIGN.md §8.4).
+// that an expression guarded with has() still evaluates.
 func dynMap(object map[string]any, field string) map[string]any {
 	value, isMap := object[field].(map[string]any)
 	if !isMap {

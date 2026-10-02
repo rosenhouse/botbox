@@ -54,7 +54,7 @@ func snapshot(v observe.Version) observe.Snapshot {
 	return observe.Snapshot{GVK: v.GVK, Name: v.Name, Object: v.Object}
 }
 
-// comparable reduces an object to what §6 compares.
+// comparable reduces an object to what the default equality compares.
 func (in Input) comparable(obj *unstructured.Unstructured, live ownerSet, out *Result) map[string]any {
 	content := obj.DeepCopy().Object
 	for _, path := range ignoredByDefault {
@@ -102,7 +102,7 @@ func (in Input) owners(s state) ownerSet {
 }
 
 // pruneDangling drops the ownerReferences whose owner no longer exists, which
-// §6 ignores, and the key itself once none remain.
+// the default equality ignores, and the key itself once none remain.
 func (o ownerSet) pruneDangling(metadata map[string]any) {
 	refs, found := metadata["ownerReferences"].([]any)
 	if !found {

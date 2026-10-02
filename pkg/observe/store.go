@@ -1,6 +1,5 @@
 // Package observe records the version history of the primary CR and of every
-// managed kind, so the invariant engine can decide after the fact
-// (DESIGN.md §5.3).
+// managed kind, so the invariant engine can decide after the fact.
 package observe
 
 import (
@@ -41,8 +40,8 @@ type Version struct {
 	Object             *unstructured.Unstructured
 }
 
-// Snapshot is one object of a converged state, which G5 compares
-// (DESIGN.md §8.2).
+// Snapshot is one object of a converged state, which G5 compares and a
+// target's equal hook receives.
 type Snapshot struct {
 	GVK    schema.GroupVersionKind
 	Name   string
@@ -61,8 +60,8 @@ type Store struct {
 	excluded map[Key]bool
 }
 
-// NewStore returns an empty store. opts carry the attribution rule of §6: the
-// managed kinds and the optional selector.
+// NewStore returns an empty store. opts carry what attributes an object to
+// the target: the managed kinds and the optional selector.
 func NewStore(opts Options) *Store {
 	return &Store{opts: opts, byKey: map[Key][]int{}, excluded: map[Key]bool{}}
 }
@@ -100,7 +99,7 @@ func (s *Store) History(key Key) []Version {
 }
 
 // HistoryOf is the version history of one object of the run namespace, which
-// is the only namespace the Observer watches (DESIGN.md §5.3).
+// is the only namespace the Observer watches.
 func (s *Store) HistoryOf(gvk schema.GroupVersionKind, name string) []Version {
 	return s.History(Key{GVK: gvk, Namespace: s.opts.Namespace, Name: name})
 }
@@ -117,7 +116,7 @@ func (s *Store) Managed() []Version {
 }
 
 // ManagedBy returns the managed objects that name owner in their
-// ownerReferences, which attributes them to one CR (§6).
+// ownerReferences, which attributes them to one CR.
 func (s *Store) ManagedBy(owner types.UID) []Version {
 	return slices.DeleteFunc(s.Managed(), func(v Version) bool {
 		return !slices.ContainsFunc(v.OwnerReferences, func(ref metav1.OwnerReference) bool {
@@ -176,7 +175,7 @@ func (s *Store) SnapshotAt(t time.Time) []Snapshot {
 		snapshot = append(snapshot, Snapshot{GVK: key.GVK, Name: key.Name, Object: v.Object})
 	}
 	slices.SortFunc(snapshot, func(a, b Snapshot) int {
-		return cmp.Or(strings.Compare(kindName(a.GVK), kindName(b.GVK)), strings.Compare(a.Name, b.Name))
+		return cmp.Or(strings.Compare(KindName(a.GVK), KindName(b.GVK)), strings.Compare(a.Name, b.Name))
 	})
 	return snapshot
 }
@@ -262,7 +261,7 @@ func newVersion(gvk schema.GroupVersionKind, obj *unstructured.Unstructured, at 
 
 // observedGeneration reads status.observedGeneration, or, where a target
 // reports it per condition instead, the least generation every condition has
-// caught up to (DESIGN.md §5.3).
+// caught up to.
 func observedGeneration(obj *unstructured.Unstructured) *int64 {
 	if top, found, err := unstructured.NestedInt64(obj.Object, "status", "observedGeneration"); found && err == nil {
 		return &top
@@ -287,15 +286,15 @@ func observedGeneration(obj *unstructured.Unstructured) *int64 {
 
 func compareKeys(a, b Key) int {
 	return cmp.Or(
-		strings.Compare(kindName(a.GVK), kindName(b.GVK)),
+		strings.Compare(KindName(a.GVK), KindName(b.GVK)),
 		strings.Compare(a.Namespace, b.Namespace),
 		strings.Compare(a.Name, b.Name),
 	)
 }
 
-// kindName renders a kind the way DESIGN.md §8.1 writes `manages`:
-// group/version/Kind, and version/Kind in the core group.
-func kindName(gvk schema.GroupVersionKind) string {
+// KindName writes a kind as target.yaml does: group/version/Kind, and
+// version/Kind in the core group.
+func KindName(gvk schema.GroupVersionKind) string {
 	if gvk.Group == "" {
 		return gvk.Version + "/" + gvk.Kind
 	}

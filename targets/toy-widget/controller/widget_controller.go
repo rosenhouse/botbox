@@ -1,4 +1,4 @@
-// Package controller reconciles Widgets (DESIGN.md §9).
+// Package controller reconciles Widgets.
 package controller
 
 import (
@@ -52,7 +52,7 @@ type Reconciler struct {
 	Scheme    *runtime.Scheme
 	Bug       Bug
 	// B1Hold is how long B1 holds its premature status; zero behaves as
-	// defaultB1Hold (DESIGN.md §9.1).
+	// defaultB1Hold.
 	B1Hold time.Duration
 	// Resync requeues every Widget this often and writes its status each
 	// time, changed or not. Zero turns the timer off.
@@ -77,7 +77,7 @@ type Reconciler struct {
 func (r *Reconciler) SetupWithManager(mgr ctrl.Manager) error {
 	builder := ctrl.NewControllerManagedBy(mgr).For(&toyv1.Widget{})
 	if r.Bug != B8 {
-		builder = builder.Owns(&corev1.ConfigMap{}) // B8 (§9.1): without this watch, a deleted child goes unnoticed.
+		builder = builder.Owns(&corev1.ConfigMap{}) // B8: without this watch, a deleted child goes unnoticed.
 	}
 	if r.Bug != B14 {
 		// B14: without this watch, a changed label reaches no child.
@@ -147,13 +147,13 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	status, changed := statusFor(widget, ready)
 	if r.Bug == B6 {
-		// B6 (§9.1): a fresh lastSyncTime on every reconcile.
+		// B6: a fresh lastSyncTime on every reconcile.
 		syncedAt := metav1.NowMicro()
 		status.LastSyncTime = &syncedAt
 		return ctrl.Result{}, r.patchStatus(ctx, widget, status)
 	}
 	if r.Bug == B10 && !r.createdChildFor(widget) {
-		return ctrl.Result{}, nil // B10 (§9.1): the status follows a flag a restart lost.
+		return ctrl.Result{}, nil // B10: the status follows a flag a restart lost.
 	}
 	if changed || r.Resync > 0 {
 		if err := r.patchStatus(ctx, widget, status); err != nil {
@@ -168,7 +168,7 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 }
 
 // claimChildrenEarly reports the children ready and holds that state, so that a
-// checkpoint sees a status no ConfigMap backs (B1, §9.1).
+// checkpoint sees a status no ConfigMap backs (B1).
 func (r *Reconciler) claimChildrenEarly(ctx context.Context, widget *toyv1.Widget) error {
 	status, changed := statusFor(widget, widget.Spec.Count)
 	if !changed {
@@ -185,7 +185,6 @@ func (r *Reconciler) claimChildrenEarly(ctx context.Context, widget *toyv1.Widge
 	return nil
 }
 
-// b1Hold is r.B1Hold, or defaultB1Hold when that field is unset.
 func (r *Reconciler) b1Hold() time.Duration {
 	if r.B1Hold == 0 {
 		return defaultB1Hold
@@ -259,7 +258,7 @@ func statusFor(widget *toyv1.Widget, ready int32) (toyv1.WidgetStatus, bool) {
 func (r *Reconciler) syncChildren(ctx context.Context, widget *toyv1.Widget) (int32, error) {
 	count := widget.Spec.Count
 	if r.Bug == B4 {
-		count = widget.Status.Ready // B4 (§9.1): the count comes from the status.
+		count = widget.Status.Ready // B4: the count comes from the status.
 	}
 	label, err := r.label(ctx, widget.Namespace)
 	if err != nil {
@@ -298,7 +297,7 @@ func (r *Reconciler) syncChildren(ctx context.Context, widget *toyv1.Widget) (in
 		}
 	}
 	if r.Bug == B3 {
-		// B3 (§9.1): the orphan counts by name, so only deletion reveals it.
+		// B3: the orphan counts by name, so only deletion reveals it.
 		return r.presentChildren(ctx, widget, required)
 	}
 	return ready, nil
@@ -319,7 +318,7 @@ func (r *Reconciler) presentChildren(ctx context.Context, widget *toyv1.Widget, 
 }
 
 func (r *Reconciler) keepsSurplusChildren() bool {
-	// B2 (§9.1) must keep its duplicates, which no name requires; B7 (§9.1) skips the scale-down delete.
+	// B2 must keep its duplicates, which no name requires; B7 skips the scale-down delete.
 	return r.Bug == B2 || r.Bug == B7
 }
 
@@ -328,14 +327,14 @@ func (r *Reconciler) ensureChild(ctx context.Context, widget *toyv1.Widget, inde
 	case B2:
 		return r.createGeneratedChild(ctx, widget, desired)
 	case B5:
-		// B5 (§9.1): an uncached Get whose NotFound never gives way to a create.
+		// B5: an uncached Get whose NotFound never gives way to a create.
 		child := &corev1.ConfigMap{}
 		if err := r.APIReader.Get(ctx, client.ObjectKeyFromObject(desired), child); err != nil {
 			return fmt.Errorf("reading ConfigMap %s: %w", desired.Name, err)
 		}
 		return nil
 	case B11:
-		// B11 (§9.1): the child is believed present from the moment it is
+		// B11: the child is believed present from the moment it is
 		// asked for, so a create the API server refused is never retried.
 		if r.believesPresent(desired) {
 			return nil
@@ -361,12 +360,12 @@ func (r *Reconciler) ensureChild(ctx context.Context, widget *toyv1.Widget, inde
 }
 
 func (r *Reconciler) orphans(index int) bool {
-	// B3 (§9.1) orphans child 0; B9 (§9.1) orphans every child.
+	// B3 orphans child 0; B9 orphans every child.
 	return r.Bug == B9 || (r.Bug == B3 && index == 0)
 }
 
 func (r *Reconciler) createGeneratedChild(ctx context.Context, widget *toyv1.Widget, desired *corev1.ConfigMap) error {
-	// B2 (§9.1): the child gets a generated name, so no later reconcile recognises it.
+	// B2: the child gets a generated name, so no later reconcile recognises it.
 	child := &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Namespace: desired.Namespace, GenerateName: desired.Name + "-"},
 		Data:       desired.Data,
@@ -421,7 +420,7 @@ func controlledChildren(ctx context.Context, reader client.Reader, widget *toyv1
 func (r *Reconciler) cleanUp(ctx context.Context, widget *toyv1.Widget) error {
 	switch r.Bug {
 	case B9:
-		return r.releaseWidget(ctx, widget) // B9 (§9.1): the finalizer goes before the children do.
+		return r.releaseWidget(ctx, widget) // B9: the finalizer goes before the children do.
 	case B13:
 		return nil // B13: the cleanup never runs.
 	}

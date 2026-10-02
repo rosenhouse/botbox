@@ -14,8 +14,8 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// schema is the part of a CRD's OpenAPI v3 schema the generator reads
-// (DESIGN.md §5.4). What it leaves out, it cannot generate from.
+// schema is the part of a CRD's OpenAPI v3 schema the generator reads. What
+// it leaves out, it cannot generate from.
 type schema struct {
 	Type             string   `json:"type"`
 	Format           string   `json:"format"`
@@ -146,7 +146,7 @@ func unreadKeywords(overlay map[string]any, prefix string) []string {
 	return unread
 }
 
-// schemaNode walks a dotted path into a schema's properties (DESIGN.md §8.1).
+// schemaNode walks a dotted path into a schema's properties.
 func schemaNode(root map[string]any, path []string) (map[string]any, error) {
 	node := root
 	for i, segment := range path {
@@ -161,7 +161,7 @@ func schemaNode(root map[string]any, path []string) (map[string]any, error) {
 }
 
 // mergeInto merges the overlay into the schema node. The overlay wins wherever
-// the two disagree, and keeps what it does not mention (DESIGN.md §8.3).
+// the two disagree, and keeps what it does not mention.
 func mergeInto(node, overlay map[string]any) {
 	for key, value := range overlay {
 		tightening, isObject := value.(map[string]any)
@@ -188,9 +188,8 @@ func asSchema(root map[string]any) (*schema, error) {
 }
 
 // mutableFields are the paths the generator may change: the allowlist in
-// generate.mutate, or every path under spec where it is absent (DESIGN.md
-// §5.4). Without the allowlist, it also says which spec paths it leaves alone
-// and why.
+// generate.mutate, or every path under spec where it is absent. Without the
+// allowlist, it also says which spec paths it leaves alone and why.
 func mutableFields(t *target.Target, s *schema) ([]field, []string, error) {
 	if len(t.Generate.Mutate) == 0 {
 		fields, leftAlone := specFields(s, t.Sample.Object)

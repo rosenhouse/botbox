@@ -70,6 +70,7 @@ func firingIDs(results []invariant.Result) []string {
 func converged() *run {
 	return newRun().
 		op(invariant.OpCreate, 0).
+		running(50*time.Millisecond).
 		record(100*time.Millisecond, widget("11", spec(2), finalizers(cleanup))).
 		record(200*time.Millisecond, child("w-0", "12")).
 		record(300*time.Millisecond, child("w-1", "13")).
@@ -100,6 +101,7 @@ func deletedWidget(resourceVersion string, opts ...option) *unstructured.Unstruc
 func b1() invariant.Input {
 	return newRun().
 		op(invariant.OpCreate, 0).
+		running(50*time.Millisecond).
 		record(100*time.Millisecond, widget("11", spec(2), status(2, 1), finalizers(cleanup))).
 		settled(2200*time.Millisecond, invariant.Converged).
 		request(3100*time.Millisecond, createChild("w-0")).
@@ -204,6 +206,7 @@ func b8() invariant.Input {
 		remove(10100*time.Millisecond, child("w-0", "15")).
 		checkpoint(12200*time.Millisecond, invariant.Converged).
 		op(invariant.OpRestart, 16*time.Second).
+		running(16200*time.Millisecond).
 		record(16300*time.Millisecond, child("w-0", "30", uid("uid-w-0-again"))).
 		checkpoint(18500*time.Millisecond, invariant.Converged).
 		through(20 * time.Second)
@@ -253,6 +256,7 @@ func b15() invariant.Input {
 func restartedAndScaledDown() *run {
 	return newRun().
 		op(invariant.OpCreate, 0).
+		running(50*time.Millisecond).
 		record(100*time.Millisecond, widget("11", spec(3), finalizers(cleanup))).
 		record(200*time.Millisecond, child("w-0", "12"), child("w-1", "13"), child("w-2", "14")).
 		record(500*time.Millisecond, widget("15", spec(3), status(3, 1), finalizers(cleanup))).
@@ -260,6 +264,7 @@ func restartedAndScaledDown() *run {
 		op(invariant.OpRestart, 10*time.Second).
 		op(invariant.OpUpdate, 10100*time.Millisecond).
 		record(10150*time.Millisecond, widget("20", spec(1), generation(2), status(3, 1), finalizers(cleanup))).
+		running(10200*time.Millisecond).
 		remove(10300*time.Millisecond, child("w-1", "21"), child("w-2", "22"))
 }
 

@@ -23,8 +23,7 @@ type Request struct {
 	Status      int       `json:"status"`
 	// Latency is unset until the exchange ends, so an open watch carries its
 	// start and its status alone. A report sampled mid-run therefore carries
-	// no latency where requests.jsonl carries what the request took
-	// (DESIGN.md §5.7).
+	// no latency where requests.jsonl carries what the request took.
 	Latency time.Duration `json:"latencyNs,omitempty"`
 	Fault   string        `json:"fault,omitempty"`
 }

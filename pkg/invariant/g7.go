@@ -27,7 +27,7 @@ func SelfHealing(in Input) (Result, error) {
 		if took, _ := in.versionAt(deleted, op.Time); !in.askedFor(took, seen) {
 			continue // No CR asks for the object back.
 		}
-		object := kindName(deleted.GVK) + " " + deleted.Name
+		object := observe.KindName(deleted.GVK) + " " + deleted.Name
 		if changed, found := in.changedBetween(in.lastConverged(op.Time), op.Time); found {
 			out.note("for %s: the run had not converged since %s, so the target may not have wanted the %s back",
 				describe(op), describe(changed), object)
@@ -39,8 +39,8 @@ func SelfHealing(in Input) (Result, error) {
 			continue
 		}
 		if start, starting := in.stillStarting(op); starting {
-			out.note("for %s: the target had requested no resource outside leader election between %s and it, so it may not yet have been running to recreate the %s",
-				describe(op), start, object)
+			out.note("for %s: the target had %s between %s and it, so it may not yet have been running to recreate the %s",
+				describe(op), notBack(in.Requests), start, object)
 			continue
 		}
 		if in.stopped(op.Time, end) {
@@ -50,7 +50,7 @@ func SelfHealing(in Input) (Result, error) {
 		}
 		out.violate(Violation{
 			Statement: fmt.Sprintf("the %s that %s deleted never came back within the %s the run waited after it, and the target does not list %s under notRecreated",
-				object, describe(op), end.Sub(checkpoint.Began).Round(time.Millisecond), kindName(deleted.GVK)),
+				object, describe(op), end.Sub(checkpoint.Began).Round(time.Millisecond), observe.KindName(deleted.GVK)),
 			At: end,
 		}.quotingVersions(RecentHistory(deleted, upTo(in.History.History(deleted), end))).
 			quotingManaged(Sample(seen.managed(in))))

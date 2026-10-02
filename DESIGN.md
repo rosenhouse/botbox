@@ -123,8 +123,7 @@ Implementations:
   supervision. The end of the context `Supervise` was given ends it too. `Status` says
   whether a supervised target is waiting to restart, and when the process now running
   started. botbox does not probe the target for health. A settle wait does not converge
-  until the process now running has requested a resource outside leader election, which
-  only a running target does (§5.5).
+  until the process now running has shown it runs (§5.5).
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
 - `Image` — run a container image against a kind cluster, with the proxy in-cluster or
   reached by port-forward. Phase 2 (§10, M8).
@@ -146,6 +145,11 @@ Responsibilities:
 - **Record** every request: verb, group/version/resource, namespace, name, status code,
   latency, timestamp. This log is the primary signal for G1.
 - **Stream** long-lived watch responses without buffering (`FlushInterval = -1`).
+- **Hold** a request a delay applies to, and report whether it holds one and when it
+  released the last. It releases a request when it forwards it, once the delay ends, or
+  when the target hangs up on one without a body. Go's server notices a hangup only
+  once it has read the body, so a held write is forwarded anyway. A watch counts as held
+  only until it is forwarded, however long it streams.
 - **Inject faults** according to an active `FaultSpec`:
 
 ```go
@@ -269,9 +273,13 @@ The Runner executes one sequence:
    out what changed. Where `Ready` held and nothing changed within `T_stable`, it says
    that. The Runner and the engine raise it with one function, so they agree. A fault
    excuses it while active, which is once the proxy has applied it and until the proxy
-   stops (D36), and while the target is still owed time to recover from it (§6). A
-   `recreate` whose old CR stays where no check reports it cannot go on, so the run ends
-   as a harness error.
+   stops applying it and has released every request it held (D36), and while the target
+   is still owed time to recover from it (§6). A `recreate` whose old CR stays where no
+   check reports it cannot go on, so the run ends as a harness error.
+   A request the proxy holds counts as a change until the proxy releases it (§5.2), since
+   it is about to change what the checks read. A request that reached the proxy before a
+   wait's time ran out holds the wait open until `T_settle` past its release. It holds a
+   `recreate`'s wait for its old CR open the same way.
    Until a settle wait has converged, normally op 0's, a wait also ends where the target's
    process exits, and the Runner checks the target is running before it applies each op. A
    target that stopped then ends the run as a harness error naming the op it was at (§11):
@@ -286,28 +294,37 @@ The Runner executes one sequence:
    `sequence.json`, unless the target wrote that its port was taken. Once a wait has
    converged, the target has shown it runs, and the Launcher supervises it (§5.1). The run
    notes each exit and the line the target wrote as it stopped. A wait does not converge
-   while the target waits to restart, nor until the process now running has shown it runs
-   by requesting a resource outside leader election. botbox has no other sign that a target
-   is back, and a controller lists what it watches as it starts. A start and that first
-   request count as changes, so a restarted target runs for `T_stable` past its return
-   before a wait converges. A target that exits again within `T_stable` of each return
-   therefore never converges, even where it wrote its converged state first, and its wait
-   expires as a G4 that counts the exits since the target last converged and quotes the
-   last. A target that runs longer between exits can converge in between, until a backoff
-   outlasts a wait. A target that converges after an exit passes. botbox chose when to
-   restart the target after a `Restart` op and after an exit a fault excuses (§6), so a
-   wait gives it `T_settle` past its return from either, where it returns within `T_settle`
-   of the restart, and `T_settle` past the restart where it does not. While a fault is
-   active, only the first exit a fault excused during each op gets that time (§6). An exit
-   is during the last op stamped before it. An op stamped before the target has had that
-   time after an earlier exit gives it that time too. Before it stamps an op, the Runner
-   waits for any restart that follows an exit a fault excused, so the op never lands while
-   the target waits for it. Any other restart gives it no more time, and its startup
-   requests count toward G1 where they land in a quiet window (§6). A target not back when
-   a wait expires fails G4. A restart that fails ends the run as the harness error above.
-3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
-   violation. More than `N_objects` (default 500) managed objects in the namespace ends
-   the run as a harness limit, reported as such rather than as a finding.
+   while the target waits to restart, nor until the process now running has shown it runs.
+   botbox takes a target that has read a Lease with a get to elect a leader, because
+   leader election reads its Lease that way to learn who holds it. A process of such a
+   target shows it runs once the API server accepts a create or update of a lease that
+   follows the process's own get. A controller can start informers before it leads, and
+   the leader that botbox replaces renews its lease without a get while its renewals
+   succeed. A process of any other target shows it runs by requesting a resource outside
+   leader election, because a controller lists what it watches as it starts. botbox has no
+   other sign that a target is back. A start and that sign count as changes, so a
+   restarted target runs for `T_stable` past its return before a wait converges. A target
+   that exits again within `T_stable` of each return therefore never converges, even where
+   it wrote its converged state first, and its wait expires as a G4 that counts the exits
+   since the target last converged and quotes the last. A target that runs longer between
+   exits can converge in between, until a backoff outlasts a wait. A target that converges
+   after an exit passes. botbox chose when to restart the target after a `Restart` op and
+   after an exit a fault excuses (§6), so a wait gives it `T_settle` past its return from
+   either, where it returns within `T_settle` of the restart, and `T_settle` past the
+   restart where it does not. While a fault is active, only the first exit a fault excused
+   during each op gets that time (§6). An exit is during the last op stamped before it. An
+   op stamped before the target has had that time after an earlier exit gives it that time
+   too. Before it stamps an op, the Runner waits for any restart that follows an exit a
+   fault excused, so the op never lands while the target waits for it. Any other restart
+   gives it no more time, and its startup requests count toward G1 where they land in a
+   quiet window (§6). A target not back when a wait expires fails G4. A restart that fails
+   ends the run as the harness error above.
+3. Evaluate invariants and properties at each checkpoint (§4). Properties are not
+   evaluated where the proxy held a request of the target's, or released one within
+   `T_stable`, which may still change what they read, nor where the target was still
+   starting (§6). The run notes each such checkpoint. A run ends at its first violation.
+   More than `N_objects` (default 500) managed objects in the namespace ends the run as a
+   harness limit, reported as such rather than as a finding.
 4. Tear down. Clear every active fault. If the target is still owed time to recover from
    a fault, which is so for a fault the teardown just cleared, wait for convergence as
    step 2 does and checkpoint where the wait ends. This recovery wait is judged as an op's
@@ -487,7 +504,8 @@ step 4). A run judges one window per op whose settle wait it saw end, plus the t
 a sequence whose last op does not settle has only the teardown's, and where the last op
 did settle the two overlap, so traffic in the overlap breaks both. A window a later op or
 a fault reaches into is not judged, where a fault's window runs from the first request the
-proxy faulted with it to the request or the instant its trigger ran out (D36). The
+proxy faulted with it to the request or the instant its trigger ran out, or to the release
+of the last request it held where that is later (D36). The
 teardown clears every fault before its window opens, so a fault it cleared did not reach
 into it. It waits for convergence first only where the target is still owed time to
 recover from a fault (§5.5 step 4), so a sequence ends with an op that settles.
@@ -497,9 +515,10 @@ its delay retries within as long as it has been failing. Once faults stop, G4 th
 gives the target as long as they lasted plus `T_settle`. The faults are those whose
 windows reach past the last settle wait that converged, because a target that converged
 had recovered. They lasted from the first request the proxy faulted with any of them, or
-from that convergence if it came later, to the instant the last of them stopped. A settle
-wait does not give up before that time has passed, and one that expired is excused only
-while a fault is active or that time is still owed. A spec change made within that time is
+from that convergence if it came later, to the instant the last of them stopped, or
+released the last request it held where that is later. A settle wait does not give up
+before that time has passed, and one that expired is excused only while a fault is
+active or that time is still owed. A spec change made within that time is
 judged at the later of the two deadlines. A settle wait that converged sooner ends that
 time early. A target that exits while a fault excuses it, as controller-runtime with
 leader election on does when it loses its lease, then waits out the restart's backoff
@@ -508,13 +527,30 @@ as after a `Restart` (§5.5), and does not judge a window the exit falls in, as 
 judge one a fault reaches into. While a fault is active, only the target's first such exit
 during each op is owed that time, because owing each later exit would hold a crash loop's
 wait open for as long as the fault lasts. If the target exits again during the op, the
-wait can end before it restarts, and the properties are checked there. No op lands while
-the target waits to restart after an exit a fault excused, and an op that lands before
-the target has had its time after such an exit owes it that time too (§5.5). That time
-ends within `2 × T_settle` of the op, so it bounds the op's wait. Once no fault is active,
-every exit a fault excused is owed its time. Only a fault excuses an exit, so a crash loop
-that a fault set off still fails G4, at the latest in the wait the teardown gives the
-target once it has cleared the faults.
+wait can end before it restarts. No op lands while the target waits to restart after an
+exit a fault excused, and an op that lands before the target has had its time after such
+an exit owes it that time too (§5.5). That time ends within `2 × T_settle` of the op, so
+it bounds the op's wait. Once no fault is active, every exit a fault excused is owed its
+time. Only a fault excuses an exit, so a crash loop that a fault set off still fails G4,
+at the latest in the wait the teardown gives the target once it has cleared the faults.
+
+**A target still starting.** A wait converges only once the target is back since it last
+started and has run for `T_stable` after that (§5.5). A wait a fault excuses can end
+sooner: a later exit during the op is owed no time, and a target can take longer than
+`T_settle` past its restart to win its lease back. The target is then still starting: it
+is waiting to restart, restarted within `T_stable`, or has not shown it runs since it last
+started (§5.5), or first did within `T_stable`. G4's statement names the same states. The
+teardown's checkpoint can find the target so too. A target still starting may not yet
+have acted on what changed while it was down, so no property is evaluated at that
+checkpoint, under `checkpoint` or `end`, and the run notes each one.
+A wait that converged saw the target back for `T_stable`, so its checkpoint is judged,
+even where a `Restart` op replaced a target waiting out its backoff. A property evaluated
+`always` reads every event rather than a checkpoint. No invariant needs the rule. A target
+that does not come back fails G4 where a wait expires with no fault active, at the latest
+in the teardown's recovery wait. G7 asks more after a restart: the target must be back
+before the op. G1 and G2 judge no window a fault reaches into, so they skip the window
+after such a wait where a fault is active at its end. G3 judges deadlines, G5 converged
+states and G6 failing requests.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -664,10 +700,8 @@ fixture after the last settle wait that converged, since the target may then hav
 delete the object itself. It notes one where a fault was active during the op or its wait,
 or where the wait ended while the target was still owed time to recover from a fault. It
 also notes an op that follows a restart, by a `Restart` op or by `Supervise` after an exit,
-where the target requested nothing between the last restart and the op but leader
-election's leases and lease candidates, and paths that name no resource. botbox has no
-other sign that the target is back (§5.1), and a process starting up or waiting to lead
-requests only those. A settle wait that converged after the restart rules this out (§5.5).
+where the target had not shown it runs (§5.5) between the last restart and the op. A
+settle wait that converged after the restart rules this out.
 It notes an op where the target exited, or waited to restart, during the op or its wait.
 Where several of these apply, the note names the first. A violation quotes the object's
 history and the managed objects where the wait ended, which show an object recreated under
@@ -710,8 +744,7 @@ Details the example does not show:
   between them, and leaves out what a CR op, a fixture op or a `deleteManaged` between
   them may have changed (§6). Put a `settle` op after a `restart`, and one before it
   unless the op before it settles. G7 judges a `deleteManaged` after a `restart` only once
-  the target has requested a resource outside leader election, which a `settle` op
-  between them waits for.
+  the target has shown it runs (§5.5), which a `settle` op between them waits for.
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
 - A fault's `match.verb` is one of `get`, `list`, `watch`, `create`, `update`, `patch`,
@@ -936,7 +969,8 @@ and names the path with `[*]` in its place (§6).
 
 A property's `when` says where it is evaluated: `always` on every Observer event before
 the teardown boundary (§6), `checkpoint` at each checkpoint (§4), `end` at the last
-checkpoint only.
+checkpoint only. Neither of the last two judges a checkpoint §5.5 step 3 leaves
+unjudged.
 
 cert-manager v1.21.2 binds its healthz server to `0.0.0.0:9403`. The one flag that moves
 it, `--internal-healthz-listen-address`, is hidden, and upstream says the prefix and the
@@ -1038,6 +1072,10 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   lease, as controller-runtime does. The envtest tier runs it at 3 s under a fault that
   fails most lease updates, so the toy can lose its lease and restart until the teardown
   clears the fault (§6, recovery from faults).
+- `--index` indexes Widgets by `spec.count`, as a controller indexes a field it lists by.
+  controller-runtime starts the informer an index needs before the manager leads, so with
+  `--lease` the toy watches Widgets while it waits out its lease. The envtest tier runs it
+  so under the same fault (§5.5).
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 
@@ -1316,6 +1354,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   locally. External targets are obtained by shallow git clone at a tag plus `go build`, or
   as a GitHub release asset, and are pinned.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
+- **Comments.** A Go comment outside tests makes sense without this document open. It
+  cites no section or decision and uses none of this document's symbols. It names the
+  target.yaml key instead, as a message does. A test scans every such comment, the
+  spikes' included. Tests may cite this document, since they hold the code to it (D@65).
 - **README.** Usage-first; internals live here and in `docs/`. Order: what botbox is and
   is not, in a few sentences, which say that it runs the controller against a real
   kube-apiserver and etcd behind a proxy; what it cannot test yet; install; a first run
@@ -2029,7 +2071,10 @@ built from source and run as a black-box binary.
   first wait up to 5 min for a restart, and then owe `T_settle` past a return that can
   come `T_settle` after the op (§5.5). Faults that stopped are owed as long as they lasted
   plus `T_settle` (§6), so each time faults stop, the deadline doubles what the run had
-  and allows another exit. Faults with no trigger stop together, at the teardown.
+  and allows another exit. A request a delay holds can keep a wait open past its time,
+  so the deadline adds the longest delay so far and `T_settle` to each wait. A fault
+  lasts until the proxy releases what it held (§5.5), so the deadline adds that delay to
+  the faults' length too. Faults with no trigger stop together, at the teardown.
   Minimizing gets what the runs left plus 4m, so it may still stop early. At §6's
   timeouts, a create and an update get 3m50s, and ten drawn runs tens of minutes. A fault
   that stops before the update raises the 3m50s to 47 min. Four such faults, each before
@@ -2280,6 +2325,14 @@ built from source and run as a black-box binary.
   timeout too short for its runs, with one that leaves botbox no time, and with no
   controller to launch.
   Hooks stay in-repo (D2).
+- **D@65 Go comments need no design document.** Comments outside tests cited this
+  document's sections about 290 times and its decisions 24 times, so a reader needed it
+  open to follow the code, and a renumbered section left each citation wrong. A comment
+  now says what it means and names the target.yaml key rather than a symbol, as D74 asks
+  of a message. A test scans every comment outside tests for what it scans string
+  literals for. Six packages each defined the same helper, which writes a kind as
+  target.yaml does. `observe.KindName` replaces them, because `observe` imports no other
+  botbox package.
 - **D@82 The README walks a newcomer from install to CI, and `docs/` holds the detail.**
   Two newcomers walked the README cold. One built botbox and fetched the control plane
   twice, because the first find did not use what Install had set up. Both left the README
@@ -2308,3 +2361,75 @@ built from source and run as a black-box binary.
   derived deadline is a worst case, and how to size a shorter one. `botbox --help` says
   botbox runs a real kube-apiserver and etcd, and no longer that it injects faults, which
   drawn sequences never do.
+- **D@85 A settle wait outlasts the requests the proxy holds.** A delay fault held the
+  toy's create of a child it had lost for 3 s, longer than its 2 s `T_stable`. Nothing
+  changed while the proxy held the create, so the wait converged, and P1 failed the
+  correct toy in 3 of 3 runs. A held request now counts as a change until the proxy
+  releases it, so a wait converges no sooner than `T_stable` after the last release. The
+  proxy releases a request when it forwards it, or when the target hangs up on one without
+  a body. A watch therefore counts only until its response can start. Counting it while it
+  streams would keep every wait after a delayed watch from converging. Every held request
+  counts, leader election's too, because a target may manage Leases. A delay on lease
+  renewals can then keep waits from converging until the fault stops. Counting only writes
+  was rejected, because a held read delays the reaction it feeds as much. A request that
+  reached the proxy before a wait's time ran out holds the wait open until `T_settle` past
+  its release. Ending the wait sooner checks properties against a state the request is
+  about to change. A `recreate`'s wait for its old CR is held open the same way. Under a
+  12 s delay on the toy's Widget patches, that wait otherwise ended while the proxy held
+  the patch that clears the finalizer, and P1 failed the correct toy. A request that
+  arrives later does not hold the wait, so a wait under a proxy that holds one request
+  after another ends no later than the longest delay and `T_settle` past its time. Such a
+  wait can still end while the proxy holds a request. Under a 6 s delay on every ConfigMap
+  request, the wait after a `delete` of the toy's Widget ended while the proxy held the
+  toy's delete of its second child, and P1 failed the correct toy in 2 of 2 runs. So
+  properties are not evaluated at a checkpoint where the proxy held a request of the
+  target's, and the run notes each such checkpoint. A request released just before a wait
+  ends can still change what the checks read. Under a 5 s delay, the toy's `T_settle`, on
+  its ConfigMap deletes, the wait after a `delete` ended 9 ms after the proxy released the
+  toy's delete of its third child. The toy had not yet lowered `status.ready`, and P1
+  failed the correct toy in 5 of 10 runs. So a checkpoint where the proxy released a
+  request within `T_stable` counts as held too. A wait that converged saw no release for
+  `T_stable`, so it is never held. From `T_stable` after every fault's window has closed,
+  checkpoints judge properties as before. A fault's window also lasts until the proxy
+  releases what it held, because the target still waits on the fault. The checks
+  therefore excuse the target over that time, and the time it owes runs from the release.
+  The derived deadline allows for both. A `recreate`'s wait under requests held one after
+  another can end with the old CR still there. Under a 5 s delay on every ConfigMap
+  request, the toy's lists and deletes ran past the wait, and the run ended as a harness
+  error. Any fault that keeps the CR past the wait does that, as a 500 on the toy's
+  ConfigMap deletes does. Holding the wait open while the proxy holds request after
+  request was rejected. An active fault excuses the target, so no check gives such a wait
+  an end, and a target that renews a lease under a delay would hold it open until the
+  derived deadline.
+- **D@84 No property is judged where the target is still starting.** Under a fault that
+  failed most lease updates, the toy with `--lease=3s` lost its lease, and botbox
+  restarted it. The restarted toy requested only leader election until it won the lease
+  back, in one run 5.5 s after the restart, past its 5 s `T_settle`. The wait after a
+  `deleteManaged` gave it `T_settle` past the restart and ended there. P1 read the
+  `status.ready` the toy wrote before botbox deleted a child, and failed the correct toy
+  in 3 of 3 runs. A property now skips, with a note, a checkpoint where the target was
+  still starting by the measure a wait converges on (§6). That covers a target waiting out
+  a backoff, where a wait can end after a later exit during the op. It covers the first
+  start, because a fault can keep a target from leading before any wait converges. Judging
+  a target that came back by the checkpoint, however late, was rejected: one first heard
+  from just before a wait ends has had no time to act (D60, D69). Owing the target time
+  until it is back was rejected, because an active fault can keep it from leading until
+  the teardown clears the fault, and no bound would then cover the wait. A wait that
+  converged is judged whatever the exits read, because a `Restart` op can replace a target
+  waiting out its backoff, and the restart the exit scheduled never comes. Skipping
+  properties at every wait a fault excuses was rejected, because properties are how botbox
+  sees a fault's transient states (§5.6). A target that elects a leader is back only once
+  the API server accepts its create or update of a lease. controller-runtime starts the
+  informers a field index asks for before the manager leads. The toy with `--index`
+  watched Widgets while it waited out its lease, that watch counted as its return, the
+  wait converged before the toy led, and P1 failed in 3 of 3 runs. A get of a Lease by any
+  of its processes marks a target that elects, because leader election reads its Lease
+  that way to learn who holds it, and an informer lists and watches instead. A restarted
+  process reads its lease only once its caches sync, which a fault can delay, so its
+  predecessor's get marks it first. A win counts only after the process's own get, because
+  botbox stamps a `Restart` op before it kills the leader, which renews without a get
+  while its renewals succeed. A target that reads a Lease with a get and elects no leader
+  therefore shows it runs only once it writes a lease, and fails G4 where it never does.
+  G4 and the property read only the requests made by the checkpoint, as the wait did.
+  Keeping the sign of D60 and D69 and stating the limit was rejected, because the wait
+  itself converged too early.

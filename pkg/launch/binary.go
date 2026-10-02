@@ -1,5 +1,5 @@
-// Package launch starts, stops and restarts the target process
-// (DESIGN.md §5.1). botbox does not probe the target for health.
+// Package launch starts, stops and restarts the target process. botbox does
+// not probe the target for health.
 package launch
 
 import (
@@ -37,7 +37,7 @@ type Launcher interface {
 }
 
 // Status is what the launcher knows of the target process. It is the process's
-// status, not a health probe (DESIGN.md §5.1).
+// status, not a health probe.
 type Status struct {
 	// Running is whether the target process is alive, or will be once the
 	// supervisor has restarted it.
@@ -340,7 +340,7 @@ func (b *Binary) terminate(ctx context.Context, running *process) error {
 }
 
 // Restart kills the target and execs it again once it has been reaped, so that
-// a fixed port or lock file is released first (DESIGN.md §5.1).
+// a fixed port or lock file is released first.
 func (b *Binary) Restart(ctx context.Context) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

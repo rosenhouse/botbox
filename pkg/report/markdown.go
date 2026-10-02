@@ -8,7 +8,6 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rosenhouse/botbox/pkg/invariant"
 	"github.com/rosenhouse/botbox/pkg/observe"
@@ -69,8 +68,8 @@ var versionHeader = []string{"time", "kind", "name", "resourceVersion", "generat
 
 // quotedLine says what the violation quoted of a timeline and what the bound
 // left out. A check bounds its evidence before the report sees it, at the
-// latest entries of what it chose from (D35). A timeline of one object's
-// history names it; evidence drawn from several names none.
+// latest entries of what it chose from. A timeline of one object's history
+// names it; evidence drawn from several names none.
 func quotedLine(total, shown int, noun, of, recording, holds string) string {
 	subject := ""
 	if of != "" {
@@ -85,7 +84,7 @@ func quotedLine(total, shown int, noun, of, recording, holds string) string {
 
 // managedLine says what the target held at the verdict and how much of it the
 // table quotes. The state has a bound of its own, so it does not crowd out the
-// timeline beside it (D39).
+// timeline beside it.
 func managedLine(total, shown int) string {
 	if total == 0 {
 		return "The target managed no objects of the kinds it declares.\n\n"
@@ -136,12 +135,12 @@ func requestRows(requests []proxy.Request) [][]string {
 }
 
 // versionRows carry the generation and the observed generation, because a
-// check that reads a Ready predicate reads those (DESIGN.md §8.4).
+// check that reads a Ready predicate reads those.
 func versionRows(versions []observe.Version) [][]string {
 	rows := make([][]string, len(versions))
 	for i, version := range versions {
 		rows[i] = []string{
-			stamp(version.Time), kindName(version.GVK), version.Name, version.ResourceVersion,
+			stamp(version.Time), observe.KindName(version.GVK), version.Name, version.ResourceVersion,
 			strconv.FormatInt(version.Generation, 10), observed(version.ObservedGeneration),
 			strings.Join(version.Finalizers, ", "), deletionTimestamp(version.DeletionTimestamp), yes(version.Deleted),
 		}
@@ -208,7 +207,7 @@ func table(md *strings.Builder, header []string, rows [][]string) {
 }
 
 // provenance says what ran the sequence, in the versions each declares, and
-// how far the run got (DESIGN.md §5.7).
+// how far the run got.
 func (d document) provenance() string {
 	who := "The run"
 	if d.Botbox != "" {
@@ -221,7 +220,7 @@ func (d document) provenance() string {
 	return ran + "."
 }
 
-// describe names the target and the version it declares (DESIGN.md §8.1).
+// describe names the target and the version it declares.
 func (t Target) describe() string {
 	if t.Version == "" {
 		return t.Name
@@ -231,14 +230,6 @@ func (t Target) describe() string {
 
 // stamp writes a time as the request log and the object history do.
 func stamp(at time.Time) string { return at.Format(time.RFC3339Nano) }
-
-// kindName writes a kind as DESIGN.md §8.1 declares it.
-func kindName(gvk schema.GroupVersionKind) string {
-	if gvk.Group == "" {
-		return gvk.Version + "/" + gvk.Kind
-	}
-	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
-}
 
 func yes(set bool) string {
 	if set {

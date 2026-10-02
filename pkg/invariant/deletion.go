@@ -5,7 +5,7 @@ import "time"
 // WaitOwed is when a settle wait that has not converged may end: once the
 // target has had its time to recover from the faults and from a Restart op,
 // each deleted CR has gone or reached its G3 deadline, and the run has had
-// T_settle to settle after a CR went.
+// timeouts.settle to settle after a CR went.
 func (in Input) WaitOwed(t time.Time) time.Time {
 	return later(later(in.Owed(t), in.restartOwed(t)), in.deletionOwed(t))
 }
@@ -23,8 +23,8 @@ func (in Input) deletionOwed(t time.Time) time.Time {
 }
 
 // heldByDeletion reports whether a CR's deletion deadline held a wait open
-// past T_settle: the deadline fell after that and by the wait's end, and the
-// CR was still there at the end.
+// past timeouts.settle: the deadline fell after that and by the wait's end,
+// and the CR was still there at the end.
 func (in Input) heldByDeletion(checkpoint Checkpoint) bool {
 	for _, deleted := range in.crDeletionsBy(checkpoint.Time) {
 		_, gone := in.goneBy(deleted, checkpoint.Time)

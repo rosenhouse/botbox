@@ -14,7 +14,7 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// defaultMatrix is the bug matrix of DESIGN.md §9.1.
+// defaultMatrix is the bug matrix the repository checks in.
 const defaultMatrix = "docs/bug-matrix.md"
 
 // control is B0, the row that seeds no bug. It proves the matrix is not vacuous.
@@ -37,12 +37,12 @@ type bugRow struct {
 type checked struct {
 	fired []string
 	// skipped names the checks that left a note: they judged less than the row
-	// shows, which a blank cell would read as a pass (DESIGN.md §6, D31).
+	// shows, which a blank cell would read as a pass.
 	skipped []string
 }
 
 // bugMatrix runs each seeded bug's sequence under the bug and without it, and
-// writes which checks fired (DESIGN.md §9.1).
+// writes which checks fired.
 func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	exercised, err := target.Load(opts.target)
 	if err != nil {
@@ -155,8 +155,8 @@ func (c *cli) exerciseUnder(ctx context.Context, opts options, s session, t *tar
 	return found, nil
 }
 
-// judge applies the acceptance of DESIGN.md §10 M3: some check catches every
-// bug, and no check fires against the toy with no bug.
+// judge applies the matrix's acceptance: some check catches every bug, and no
+// check fires against the toy with no bug.
 func (c *cli) judge(opts options, rows []bugRow) int {
 	code := exitOK
 	for _, row := range rows {
@@ -209,8 +209,8 @@ func (c checked) summary() string {
 }
 
 // observing evaluates nothing, so that a matrix run executes its whole
-// sequence instead of ending at the first violation (DESIGN.md §5.5). The
-// checks then read the whole recording.
+// sequence instead of ending at the first violation. The checks then read the
+// whole recording.
 type observing struct{}
 
 func (observing) Check(run.Input) (run.Findings, error) { return run.Findings{}, nil }
@@ -262,7 +262,7 @@ func checkIDs(t *target.Target) ([]string, error) {
 	return ids, nil
 }
 
-// matrix renders the bug catalog against the checks (DESIGN.md §9.1).
+// matrix renders the toy's seeded bugs against the checks.
 func matrix(sequences string, checks []string, rows []bugRow) string {
 	var out strings.Builder
 	fmt.Fprintf(&out, `# Bug matrix

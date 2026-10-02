@@ -12,8 +12,8 @@ import (
 )
 
 // NoErrorLoop is G6: the target does not make the same failing request, same
-// verb, resource, namespace and name, more than N_errloop times within
-// T_settle under an unchanged spec and fixtures, with no faults (DESIGN.md §6).
+// verb, resource, namespace and name, more than thresholds.errloop times
+// within timeouts.settle under an unchanged spec and fixtures, with no faults.
 func NoErrorLoop(in Input) (Result, error) {
 	threshold := in.errLoop()
 	out := Result{ID: "G6"}
@@ -91,9 +91,9 @@ func failed(r proxy.Request) bool {
 }
 
 // conflicted reports whether the request lost an optimistic-concurrency race,
-// which tells the target to re-read and write again rather than to stop
-// (DESIGN.md §6, G6). Only an update and a patch lose that race: a 409 on a
-// create is AlreadyExists, and repeating it is a loop.
+// which tells the target to re-read and write again rather than to stop. Only
+// an update and a patch lose that race: a 409 on a create is AlreadyExists,
+// and repeating it is a loop.
 func conflicted(r proxy.Request) bool {
 	return r.Status == http.StatusConflict && (r.Verb == "update" || r.Verb == "patch")
 }

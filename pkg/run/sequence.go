@@ -14,12 +14,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
+	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// Sequence is one test sequence in the form of DESIGN.md §7. It is the unit of
-// generation, replay and shrinking.
+// Sequence is one test sequence, as a sequence file holds it. It is the unit
+// of generation, replay and shrinking.
 type Sequence struct {
 	Seed   int64  `json:"seed"`
 	Target string `json:"target"`
@@ -49,7 +50,7 @@ type Op struct {
 	Fault *Fault `json:"spec,omitempty"`
 	// Until is where botbox creates the fixture of a deleteFixture op again.
 	Until *Until `json:"until,omitempty"`
-	// NoSettle skips the Runner's implicit settle wait (DESIGN.md §5.5).
+	// NoSettle skips the Runner's implicit settle wait.
 	NoSettle bool `json:"noSettle,omitempty"`
 }
 
@@ -59,7 +60,7 @@ type Until struct {
 	Op int `json:"op"`
 }
 
-// OpType is an op's "t" (DESIGN.md §5.4).
+// OpType is an op's "t".
 type OpType string
 
 const (
@@ -79,13 +80,13 @@ const (
 var opTypes = []OpType{OpCreate, OpUpdate, OpDelete, OpRecreate, OpSettle, OpRestart, OpFault, OpDeleteManaged,
 	OpUpdateFixture, OpDeleteFixture}
 
-// crOps act on the primary CR and may carry noSettle (DESIGN.md §4).
+// crOps act on the primary CR and may carry noSettle.
 var crOps = []OpType{OpCreate, OpUpdate, OpDelete, OpRecreate}
 
 // OnCR reports whether the op type acts on the primary CR.
 func (t OpType) OnCR() bool { return slices.Contains(crOps, t) }
 
-// Fault is what a fault op injects (DESIGN.md §5.2).
+// Fault is what a fault op injects.
 type Fault struct {
 	Match  Match   `json:"match,omitzero"`
 	Action Action  `json:"action"`
@@ -109,7 +110,7 @@ type Action struct {
 }
 
 // Trigger ends a fault at an op index, once it has applied to a count of
-// requests, or after a duration (DESIGN.md §5.2).
+// requests, or after a duration.
 type Trigger struct {
 	Op    *int     `json:"op,omitempty"`
 	Count int      `json:"count,omitempty"`
@@ -137,8 +138,8 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-// Settles reports whether the Runner waits for convergence after the op
-// (DESIGN.md §5.5). A settle op is the wait itself.
+// Settles reports whether the Runner waits for convergence after the op. A
+// settle op is the wait itself.
 func (o Op) Settles() bool {
 	return o.Type == OpSettle || (!o.NoSettle && slices.Contains(mutatingOps, o.Type))
 }
@@ -174,7 +175,7 @@ func WriteSequence(path string, s Sequence) error {
 
 // UnmarshalSequence decodes a sequence and validates every op. An unknown op
 // type, an unknown field and an op missing what its type needs are all
-// configuration errors (DESIGN.md §11).
+// configuration errors.
 func UnmarshalSequence(data []byte) (Sequence, error) {
 	decoder := json.NewDecoder(bytes.NewReader(data))
 	decoder.DisallowUnknownFields()
@@ -215,8 +216,8 @@ func zeroTriggers(data []byte) map[int]error {
 	return refused
 }
 
-// Marshal returns the sequence's canonical form: the JSON of DESIGN.md §7,
-// indented two spaces and newline-terminated.
+// Marshal returns the sequence's canonical form: JSON indented two spaces and
+// newline-terminated.
 func (s Sequence) Marshal() ([]byte, error) {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
@@ -243,7 +244,7 @@ func (s Sequence) validate(refused map[int]error) error {
 	}
 	// The teardown's quiet window is the only one such a sequence would be
 	// judged on, and the teardown waits for convergence before it opens that
-	// window only after a fault (DESIGN.md §6).
+	// window only after a fault.
 	if len(s.Ops) == 0 {
 		return fmt.Errorf("the sequence holds no ops; want at least the create it opens with")
 	}
@@ -475,20 +476,12 @@ func (f *Fault) validate(position int) error {
 }
 
 // managedKind resolves a deleteManaged op's kind against what the target
-// declares it manages (DESIGN.md §8.1).
+// declares it manages.
 func managedKind(t *target.Target, declared string) (schema.GroupVersionKind, error) {
 	for _, gvk := range t.Manages {
-		if kindName(gvk) == declared {
+		if observe.KindName(gvk) == declared {
 			return gvk, nil
 		}
 	}
 	return schema.GroupVersionKind{}, fmt.Errorf("the target manages no kind %q", declared)
-}
-
-// kindName writes a kind as DESIGN.md §8.1 declares it.
-func kindName(gvk schema.GroupVersionKind) string {
-	if gvk.Group == "" {
-		return gvk.Version + "/" + gvk.Kind
-	}
-	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
 }

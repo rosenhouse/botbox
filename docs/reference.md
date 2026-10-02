@@ -89,7 +89,7 @@ thresholds:
 | `properties[*].id` | required | It names the property in output, such as `P1`. No two properties share one. |
 | `properties[*].description` | none | It says what the property means. Reports print it. |
 | `properties[*].cel` | required | It is CEL that says whether the property holds. |
-| `properties[*].when` | `checkpoint` | It says where botbox evaluates the property: `always` at every change botbox observes, `checkpoint` wherever the checks run, and `end` at the last checkpoint. |
+| `properties[*].when` | `checkpoint` | It says where botbox evaluates the property: `always` at every change botbox observes, `checkpoint` wherever the checks run, and `end` at the last checkpoint. The last two skip a checkpoint where a wait ends too early to judge ([Ops](#ops)). |
 | `generate.mutate` | each spec path generation can draw a value for | It lists the dotted spec paths generation may change. Generation changes no others. Without it, `botbox run` prints each spec path it leaves alone, and why. |
 | `generate.overlay` | none | It maps a dotted path to schema keywords. For generation, they win over the CRD's keywords there, and the CRD keeps those they do not name. botbox reads `additionalProperties`, `enum`, `exclusiveMaximum`, `exclusiveMinimum`, `format`, `items`, `maxItems`, `maxLength`, `maxProperties`, `maximum`, `minItems`, `minLength`, `minProperties`, `minimum`, `pattern`, `properties`, `required`, `type`, `x-kubernetes-int-or-string` and `x-kubernetes-list-type`, and refuses any other. |
 | `generate.maxCRs` | `3` | It bounds the CRs a sequence creates, the sample included. `1` keeps every sequence to the sample. |
@@ -189,14 +189,26 @@ time to recover.
 Every op carries `i` and `t`. A settle wait follows each op that settles. It ends once
 `ready` holds on every CR and nothing has changed for `timeouts.stable`, or once
 `timeouts.settle` runs out. After a fault, a restart or a CR's deletion, it can run longer,
-while the checks still give your controller time. The checks run where it ends.
+while the checks still give your controller time. A request the proxy holds under
+`action.delay` counts as a change until the proxy forwards it. One held as the wait's time
+runs out keeps the wait open until `timeouts.settle` past its release. It keeps a
+`recreate`'s wait for its old CR open the same way. The checks run where it ends. botbox does
+not check your properties where a wait ends with a request held, or released within
+`timeouts.stable`, and the run notes it. Nor does it where your controller waits to restart,
+or has not been back for `timeouts.stable` since it last started. Your controller is back
+once it requests a resource outside leader election. botbox takes a controller that reads a
+Lease with a get to elect a leader, and counts it back only once it wins its lease. A
+property evaluated `always` is still checked at every change. botbox exits 2 where a
+`recreate`'s old CR outlasts the wait and no check fails, because the op cannot go on. A
+fault active during the `recreate` can do that to a correct controller, as a delay on each
+request it makes can. End the fault before the `recreate` with `until.op`.
 
 | Op | Needs | May carry | Settles | What it does |
 |---|---|---|---|---|
 | `create` | `obj` | `noSettle` | yes | It creates `obj`, whose name no live CR has. |
 | `update` | `patch` | `cr`, `noSettle` | yes | It applies `patch` to the CR as a JSON merge patch. |
 | `delete` | none | `cr`, `noSettle` | yes | It deletes the CR and waits up to `timeouts.delete` for it to go. |
-| `recreate` | `obj` | `cr`, `noSettle` | yes | It deletes the CR, waits up to `timeouts.delete` for it to go, and creates `obj`, which has the CR's name. |
+| `recreate` | `obj` | `cr`, `noSettle` | yes | It deletes the CR, waits up to `timeouts.delete` for it to go, or longer as a settle wait can, and creates `obj`, which has the CR's name. |
 | `settle` | none | none | yes | It waits for your controller to converge. |
 | `restart` | none | none | no | It kills your controller and starts it again. |
 | `fault` | `spec` | none | no | It adds a fault the proxy applies to your controller's requests. |
@@ -233,8 +245,9 @@ while the checks still give your controller time. The checks run where it ends.
 
 A fault sets exactly one action. It ends at the first of its `until` triggers, or at the end
 of the run where it sets none. The proxy tries faults in op order, and the first that
-applies to a request wins. The checks do not judge a window a fault applied in, and they
-give your controller as long as the faults lasted, plus `timeouts.settle`, to recover.
+applies to a request wins. The checks do not judge a window a fault applied in or held a
+request in, and they give your controller as long as the faults lasted, plus
+`timeouts.settle`, to recover.
 botbox clears a fault still active at the end, and waits for your controller to recover. A
 fault that applies to no request tests nothing, and the run notes it.
 
@@ -245,7 +258,7 @@ fault that applies to no request tests nothing, and the run notes it.
 | `match.name` | every name | It is a glob over the object name in the request path, as Go's `path.Match` reads it. A list, a watch, a `deletecollection` and a create of an object carry an empty name there, which `*` matches. |
 | `match.fraction` | every request | It gives the share of matching requests the fault applies to, above 0 and up to 1. The sequence's `seed` draws which. |
 | `action.error` | none | The proxy answers with this status, from 400 to 599, and forwards nothing. |
-| `action.delay` | none | The proxy holds the request this long, such as `"500ms"`, then forwards it. It is not negative, and 0 leaves it unset. |
+| `action.delay` | none | The proxy holds the request this long, such as `"500ms"`, then forwards it. A watch counts as held only until then. It is not negative, and 0 leaves it unset. |
 | `action.drop` | none | `true` has the proxy close the connection without an answer. It forwards nothing. |
 | `until.op` | none | The fault ends before this op acts. It is above the fault's own `i`. Past the last op, the fault lasts to the end. |
 | `until.count` | none | The fault ends once it has applied to this many requests. It is above 0. |

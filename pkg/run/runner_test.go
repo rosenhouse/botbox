@@ -74,9 +74,11 @@ type fakeHarness struct {
 	// finalizerStays has the Observer record a deleted CR still under deletion.
 	finalizerStays bool
 	// crStays has a recreate's wait for the CR to go end with it still there,
-	// and awaitedUntil is when each such wait was told to give up.
+	// and awaitedUntil is when each such wait was told to give up. inAwait
+	// runs as each such wait begins.
 	crStays      bool
 	awaitedUntil []time.Time
+	inAwait      func()
 
 	// targetGone makes the harness report a target that has stopped, and
 	// stopsAfter is the call it exits at. exitsInWait is the settle wait it
@@ -120,6 +122,8 @@ type fakeHarness struct {
 	cancelled     []string
 	// clock is the run's clock. Nil is the wall clock.
 	clock func() time.Time
+	// holds answers for the proxy what it held. Nil holds nothing.
+	holds func(before time.Time) (bool, time.Time)
 }
 
 func newFakeHarness() *fakeHarness {
@@ -285,6 +289,13 @@ func (f *fakeHarness) servedResources() ([]metav1.APIResource, error) {
 	return fakeServed, f.fail["servedResources"]
 }
 
+func (f *fakeHarness) held(before time.Time) (bool, time.Time) {
+	if f.holds == nil {
+		return false, time.Time{}
+	}
+	return f.holds(before)
+}
+
 // faultWindow answers as the proxy does. A test either says what the proxy
 // did with each fault, or has it apply every fault as it is given.
 func (f *fakeHarness) faultWindow(id proxy.FaultID) proxy.FaultWindow {
@@ -327,31 +338,34 @@ func (f *fakeHarness) deleteCR(ctx context.Context, name string) error {
 }
 
 func (f *fakeHarness) awaitCRGone(_ context.Context, name string, until func() time.Time) (bool, error) {
+	if f.inAwait != nil {
+		f.inAwait()
+	}
 	f.awaitedUntil = append(f.awaitedUntil, until())
 	return !f.crStays, f.record("awaitCRGone " + name)
 }
 
 func (f *fakeHarness) managedObjects(gvk schema.GroupVersionKind) []string {
-	_ = f.record("managedObjects " + kindName(gvk))
+	_ = f.record("managedObjects " + observe.KindName(gvk))
 	return f.managed[gvk]
 }
 
 func (f *fakeHarness) deleteManaged(_ context.Context, gvk schema.GroupVersionKind, name string) (bool, error) {
-	err := f.record("deleteManaged " + kindName(gvk) + " " + name)
+	err := f.record("deleteManaged " + observe.KindName(gvk) + " " + name)
 	return err == nil && !slices.Contains(f.gone, name), err
 }
 
 func (f *fakeHarness) patchFixture(_ context.Context, gvk schema.GroupVersionKind, name string, patch map[string]any) error {
-	return f.record(fmt.Sprintf("patchFixture %s %s %v", kindName(gvk), name, patch))
+	return f.record(fmt.Sprintf("patchFixture %s %s %v", observe.KindName(gvk), name, patch))
 }
 
 func (f *fakeHarness) deleteFixture(_ context.Context, gvk schema.GroupVersionKind, name string) error {
-	return f.record("deleteFixture " + kindName(gvk) + " " + name)
+	return f.record("deleteFixture " + observe.KindName(gvk) + " " + name)
 }
 
 func (f *fakeHarness) createFixture(_ context.Context, fixture *unstructured.Unstructured) error {
 	f.restoredAt = time.Now()
-	return f.record(fmt.Sprintf("createFixture %s %s %v", kindName(fixture.GroupVersionKind()), fixture.GetName(), fixture.Object["data"]))
+	return f.record(fmt.Sprintf("createFixture %s %s %v", observe.KindName(fixture.GroupVersionKind()), fixture.GetName(), fixture.Object["data"]))
 }
 
 func (f *fakeHarness) managedCount() int { return f.count }
@@ -1337,6 +1351,50 @@ func TestRunLeavesToG3AWaitThatEndedOnACRPastItsDeletionDeadline(t *testing.T) {
 	}
 }
 
+// A request the proxy held where a wait ended was about to change what the
+// checks read there.
+func TestRunMarksEachCheckpointWhereTheProxyHeldARequest(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		holds func(before time.Time) (bool, time.Time)
+		want  bool
+	}{
+		{"none", nil, false},
+		{"one it still holds", func(time.Time) (bool, time.Time) { return true, time.Time{} }, true},
+		{"one it released after", func(before time.Time) (bool, time.Time) { return false, before.Add(time.Millisecond) }, true},
+		{"one it released within T_stable", func(before time.Time) (bool, time.Time) {
+			return false, before.Add(time.Millisecond - testTimeouts.Stable)
+		}, true},
+		{"one it released T_stable before", func(before time.Time) (bool, time.Time) { return false, before.Add(-testTimeouts.Stable) }, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newFakeHarness()
+			h.holds = test.holds
+			check := &heldChecker{}
+
+			result, err := runFake(t, h, check, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if got, want := checkpointsAt(result.Timeline), []int{0, Teardown}; !slices.Equal(got, want) {
+				t.Fatalf("The run checkpointed at %v, want %v.", got, want)
+			}
+			if want := []bool{test.want, test.want}; !slices.Equal(check.read, want) {
+				t.Errorf("The checks read the checkpoints as held %v, want %v.", check.read, want)
+			}
+		})
+	}
+}
+
+// heldChecker records whether the checks read each checkpoint as held.
+type heldChecker struct{ read []bool }
+
+func (c *heldChecker) Check(in Input) (Findings, error) {
+	c.read = append(c.read, in.Timeline.Checkpoints[len(in.Timeline.Checkpoints)-1].Held)
+	return Findings{}, nil
+}
+
 func TestRunGivesTheCRARecreateDeletesUntilItsDeadline(t *testing.T) {
 	sequence := sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}, Op{Type: OpRecreate, Obj: widget("widget")})
 
@@ -1365,6 +1423,39 @@ func TestRunGivesTheCRARecreateDeletesUntilItsDeadline(t *testing.T) {
 		}
 		if len(h.awaitedUntil) != 1 || h.awaitedUntil[0].Before(began.Add(testTimeouts.Delete)) || h.awaitedUntil[0].After(ended.Add(testTimeouts.Delete)) {
 			t.Errorf("The recreate waited for the CR until %v, want %v after the delete.", h.awaitedUntil, testTimeouts.Delete)
+		}
+	})
+
+	t.Run("past a request the proxy held by then", func(t *testing.T) {
+		h := newFakeHarness()
+		const releasedAfter = time.Minute
+		h.holds = func(before time.Time) (bool, time.Time) { return false, before.Add(releasedAfter) }
+		began := time.Now()
+
+		_, err := runFake(t, h, nil, sequence)
+
+		ended := time.Now()
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		past := testTimeouts.Delete + releasedAfter + testTimeouts.Settle
+		if len(h.awaitedUntil) != 1 || h.awaitedUntil[0].Before(began.Add(past)) || h.awaitedUntil[0].After(ended.Add(past)) {
+			t.Errorf("The recreate waited for the CR until %v, want T_settle past the release %v after its deadline.", h.awaitedUntil, releasedAfter)
+		}
+	})
+
+	t.Run("past a request the proxy still holds well after its deadline", func(t *testing.T) {
+		h := newFakeHarness()
+		at := time.Now()
+		h.clock = func() time.Time { return at }
+		h.inAwait = func() { at = at.Add(testTimeouts.Delete + time.Minute) }
+		h.holds = func(time.Time) (bool, time.Time) { return true, time.Time{} }
+
+		if _, err := runFake(t, h, nil, sequence); err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if want := []time.Time{at.Add(testTimeouts.Settle)}; !slices.EqualFunc(h.awaitedUntil, want, time.Time.Equal) {
+			t.Errorf("The recreate waited for the CR until %v, want %v: T_settle from now, since the release is yet to come.", h.awaitedUntil, want)
 		}
 	})
 }
@@ -2854,7 +2945,7 @@ func TestTheG4OfAnExpiredWaitQuotesTheManagedObjects(t *testing.T) {
 	if result.Violation.ManagedTotal == nil || *result.Violation.ManagedTotal != 25 {
 		t.Errorf("The violation counts %v managed objects, want 25.", result.Violation.ManagedTotal)
 	}
-	if want := kindName(widgetKind) + " widget"; result.Violation.VersionsOf != want {
+	if want := observe.KindName(widgetKind) + " widget"; result.Violation.VersionsOf != want {
 		t.Errorf("The timeline is of %q, want %q.", result.Violation.VersionsOf, want)
 	}
 	versions := result.Violation.Versions

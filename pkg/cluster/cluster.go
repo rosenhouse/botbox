@@ -2,8 +2,7 @@
 // envtest control plane it starts, or an existing cluster a kubeconfig names.
 // envtest reads KUBEBUILDER_ASSETS itself; `make setup` installs the binaries.
 //
-// This is the one harness package allowed to import controller-runtime
-// (DESIGN.md §11).
+// This is the one harness package allowed to import controller-runtime.
 package cluster
 
 import (

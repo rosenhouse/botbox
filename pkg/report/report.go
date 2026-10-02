@@ -1,6 +1,6 @@
 // Package report writes what a failing run found, as report.json and
-// report.md beside the run's recordings (DESIGN.md §5.7). The caller fills in
-// a Report, so that nothing here depends on the Runner.
+// report.md beside the run's recordings. The caller fills in a Report, so
+// that nothing here depends on the Runner.
 package report
 
 import (
@@ -17,7 +17,7 @@ import (
 	"github.com/rosenhouse/botbox/pkg/proxy"
 )
 
-// A failing run writes these two files (DESIGN.md §11).
+// A failing run writes these two files.
 const (
 	JSONFile     = "report.json"
 	MarkdownFile = "report.md"
@@ -33,22 +33,20 @@ type Report struct {
 	Check  Check
 	Target Target
 	// Botbox is the version of botbox that ran the sequence. A bug report
-	// needs it beside the target's own (DESIGN.md §5.7).
+	// needs it beside the target's own.
 	Botbox string
-	// Seed is the sequence's seed, which the run is reproducible from
-	// (DESIGN.md §11).
+	// Seed is the sequence's seed, which the run is reproducible from.
 	Seed int64
 	// Notes name what a check could not judge, and what the test cluster
 	// cannot run. Without them a report claims more than its run showed.
 	Notes []string
 	// Replay is the one-line command that re-executes the sequence.
 	Replay string
-	// Sequence is the minimized sequence in the canonical form of
-	// DESIGN.md §7, as run.Sequence.Marshal writes it.
+	// Sequence is the minimized sequence in its canonical form, as
+	// run.Sequence.Marshal writes it.
 	Sequence json.RawMessage
 	// Applied is how many of the sequence's ops the run reached, and Ops is
-	// how many it holds. A run that ended at its violation reached fewer
-	// (DESIGN.md §5.5).
+	// how many it holds. A run that ended at its violation reached fewer.
 	Applied, Ops int
 	// Requests and Versions are the evidence the check quoted, and
 	// RequestsTotal and VersionsTotal how many entries it chose them from. A
@@ -60,9 +58,9 @@ type Report struct {
 	// empty where the versions are of several.
 	VersionsOf string
 	// Managed is the state at the violation, one version per object the target
-	// managed, and ManagedTotal how many there were. A check that did not ask
-	// leaves the total nil, because a count of zero is a finding
-	// (DESIGN.md §5.7, D39).
+	// managed, and ManagedTotal how many there were. A check that does not
+	// quote the state leaves the total nil, so that a total of zero says the
+	// target managed nothing.
 	Managed      []observe.Version
 	ManagedTotal *int
 	// Ready is what a readiness verdict read, which the report bounds.
@@ -74,17 +72,17 @@ type Report struct {
 	Compared         string
 }
 
-// Check is the invariant or property the run broke (DESIGN.md §6).
+// Check is the invariant or property the run broke.
 type Check struct {
 	ID        string `json:"id"`
 	Statement string `json:"statement"`
 	// At is the instant the check judged, which the evidence below is aligned
-	// on (DESIGN.md §5.7).
+	// on.
 	At       time.Time `json:"at,omitzero"`
 	Evidence string    `json:"evidence,omitempty"`
 }
 
-// Target is the controller the run exercised (DESIGN.md §8.1).
+// Target is the controller the run exercised.
 type Target struct {
 	Name    string `json:"name"`
 	Version string `json:"version,omitempty"`
@@ -190,8 +188,9 @@ func recent[T any](evidence []T) []T {
 	return evidence
 }
 
-// managedTotal is what the state was chosen from, and nil only where no check
-// asked: a report that quotes a state counts it, whatever the caller named.
+// managedTotal is what the state was chosen from, and nil only where the
+// check quoted no state: a report that quotes a state counts it, whatever the
+// caller named.
 func managedTotal(total *int, rows int) *int {
 	if total == nil && rows == 0 {
 		return nil
@@ -205,7 +204,7 @@ func managedTotal(total *int, rows int) *int {
 
 // marshal renders report.json: two spaces of indentation and a trailing
 // newline, as a sequence file has. HTML escaping stays off, so that a CEL
-// statement's < and & read as themselves (DESIGN.md §8.4).
+// statement's < and & read as themselves.
 func (d document) marshal() ([]byte, error) {
 	var encoded bytes.Buffer
 	encoder := json.NewEncoder(&encoded)

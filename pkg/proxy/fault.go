@@ -14,7 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-// FaultSpec is one fault the proxy injects (DESIGN.md §5.2).
+// FaultSpec is one fault the proxy injects.
 type FaultSpec struct {
 	Match  RequestMatcher
 	Action FaultAction
@@ -117,26 +117,47 @@ func (p *Proxy) ClearFaults() {
 	}
 }
 
-// FaultWindow is what the proxy has done with one fault (DESIGN.md §5.2).
+// FaultWindow is what the proxy has done with one fault.
 type FaultWindow struct {
 	// First is when the proxy first applied the fault, and zero if it never
 	// has: a fault that matches no request changes nothing about the run.
 	First time.Time
-	// Retired is when the proxy stopped applying the fault, and zero while it
-	// would still apply it.
+	// Retired is when the proxy stopped applying the fault and released every
+	// request it held, and zero until then.
 	Retired time.Time
 }
 
 // Window reports what the proxy has done with the fault, removed or not. The
 // Runner reads it into the run's timeline: a fault excuses the target over the
-// window the proxy applied it in, and a fault it never applied excuses nothing
-// (DESIGN.md §6).
+// window the proxy applied it in or held a request of the target's, and a fault
+// it never applied excuses nothing.
 func (p *Proxy) Window(id FaultID) FaultWindow {
 	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	fault := p.faults[id]
-	return FaultWindow{First: fault.first, Retired: fault.retiredBy(now)}
+	return FaultWindow{First: fault.first, Retired: fault.endedBy(now)}
+}
+
+// Held reports, of the requests that reached the proxy before t, whether a
+// delay still holds one and when the proxy last released one. The proxy
+// releases a request when it forwards it, or when the target hangs up on one
+// without a body, so a watch counts only until its response can start.
+func (p *Proxy) Held(t time.Time) (holding bool, released time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, fault := range p.faults {
+		for _, held := range fault.holds {
+			switch {
+			case !held.arrived.Before(t):
+			case held.released.IsZero():
+				holding = true
+			case held.released.After(released):
+				released = held.released
+			}
+		}
+	}
+	return holding, released
 }
 
 type injectedFault struct {
@@ -148,7 +169,12 @@ type injectedFault struct {
 	// request that used up Until.Count arrived, and removed is when the
 	// caller retired it.
 	first, spent, removed time.Time
+	// holds are the requests a delay held.
+	holds []*hold
 }
+
+// hold is a delay's hold on one request. Its release is zero while it lasts.
+type hold struct{ arrived, released time.Time }
 
 // remove stamps the removal. The caller holds the proxy's lock, so no request
 // the fault applied to comes after it.
@@ -189,6 +215,24 @@ func (f *injectedFault) retiredBy(now time.Time) time.Time {
 	return retired
 }
 
+// endedBy is retiredBy, or later while the fault still holds a request: until
+// the proxy releases it, the fault keeps the target waiting.
+func (f *injectedFault) endedBy(now time.Time) time.Time {
+	ended := f.retiredBy(now)
+	if ended.IsZero() {
+		return ended
+	}
+	for _, held := range f.holds {
+		if held.released.IsZero() {
+			return time.Time{}
+		}
+		if held.released.After(ended) {
+			ended = held.released
+		}
+	}
+	return ended
+}
+
 // earliest is the earlier of two instants, where a zero one has not come.
 func earliest(a, b time.Time) time.Time {
 	if a.IsZero() || (!b.IsZero() && b.Before(a)) {
@@ -198,16 +242,35 @@ func earliest(a, b time.Time) time.Time {
 }
 
 // faultFor returns the action of the first active fault the request matches.
-func (p *Proxy) faultFor(r Request) FaultAction {
+// A delay's hold begins under the same lock, so the fault never looks retired
+// with the request still to be held.
+func (p *Proxy) faultFor(r Request) (FaultAction, *hold) {
 	now := time.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	for _, fault := range p.faults {
-		if !fault.expired(now) && fault.applies(r, now) {
-			return fault.spec.Action
+		if fault.expired(now) || !fault.applies(r, now) {
+			continue
 		}
+		if _, delays := fault.spec.Action.(Delay); !delays {
+			return fault.spec.Action, nil
+		}
+		held := &hold{arrived: r.Start}
+		fault.holds = append(fault.holds, held)
+		return fault.spec.Action, held
 	}
-	return nil
+	return nil, nil
+}
+
+// await keeps a held request from the API server for d, and reports whether d
+// elapsed. ctx ends sooner where the target hangs up on a request without a
+// body: Go's server notices a hangup only once it has read the body.
+func (p *Proxy) await(ctx context.Context, held *hold, d time.Duration) bool {
+	elapsed := sleep(ctx, d)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	held.released = time.Now()
+	return elapsed
 }
 
 // writeStatus replaces the upstream response with a metav1.Status, so the

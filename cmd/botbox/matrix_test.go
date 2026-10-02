@@ -46,7 +46,8 @@ func recorded(t *testing.T, converged bool) run.Result {
 	}
 	start := time.Now()
 	result := run.Result{Recorded: run.Input{
-		Target: toy,
+		Target:   toy,
+		Requests: []proxy.Request{{Start: start, Verb: "watch", Resource: "widgets", Watch: true, Status: 200}},
 		Timeline: run.Timeline{
 			Ops:         []run.AppliedOp{{Op: run.Op{Index: 0, Type: run.OpSettle}, At: start}},
 			Checkpoints: []run.Checkpoint{{At: start.Add(5 * time.Second), Op: 0, Converged: converged}},

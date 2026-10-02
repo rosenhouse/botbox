@@ -20,10 +20,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
+
+	"github.com/rosenhouse/botbox/pkg/observe"
 )
 
-// declaration mirrors target.yaml (DESIGN.md §8.1). Decoding is strict, so a
-// misspelled key is a configuration error rather than silence.
+// declaration mirrors target.yaml. Decoding is strict, so a misspelled key is
+// a configuration error rather than silence.
 type declaration struct {
 	Name         string                `json:"name"`
 	Version      string                `json:"version"`
@@ -76,7 +78,7 @@ type thresholdsDeclaration struct {
 
 // Load reads target.yaml at path. Paths inside it resolve against the file's
 // own directory, except launch.binary, which resolves against the working
-// directory (DESIGN.md §8.1).
+// directory.
 func Load(path string) (*Target, error) {
 	loaded, err := load(path)
 	if err != nil {
@@ -281,12 +283,12 @@ func mutableFixtures(file string, objects []*unstructured.Unstructured, declared
 		fixtures[i] = MutableFixture{GVK: object.GroupVersionKind(), Name: object.GetName(), Mutate: paths}
 		if fixtures[i].Name == "" {
 			return nil, fmt.Errorf("generate.fixtures %s: a %s there sets no metadata.name, and a fixture op names its fixture",
-				file, kindName(fixtures[i].GVK))
+				file, observe.KindName(fixtures[i].GVK))
 		}
 		for _, path := range paths {
 			if value, _, _ := unstructured.NestedFieldNoCopy(object.Object, path.Keys()...); !isString(value) {
 				return nil, fmt.Errorf("generate.fixtures %s: the %s %s holds no string at %s",
-					file, kindName(fixtures[i].GVK), fixtures[i].Name, path)
+					file, observe.KindName(fixtures[i].GVK), fixtures[i].Name, path)
 			}
 		}
 	}
@@ -373,9 +375,9 @@ func timeouts(declared timeoutsDeclaration) (Timeouts, error) {
 		return Timeouts{}, err
 	}
 	// A settle wait ends once the Ready predicate holds and nothing has
-	// changed for stable, within settle (DESIGN.md §5.5). Where stable is the
-	// wider of the two, no wait can end that way, and every run reports G4
-	// against a target that did nothing wrong.
+	// changed for stable, within settle. Where stable is the wider of the
+	// two, no wait can end that way, and every run reports G4 against a
+	// target that did nothing wrong.
 	if parsed.Stable >= parsed.Settle {
 		return Timeouts{}, fmt.Errorf("timeouts: stable %s is not shorter than settle %s, and a settle wait has to observe stable of quiet inside settle",
 			parsed.Stable, parsed.Settle)
@@ -426,8 +428,7 @@ func resolve(dir, path string) string {
 // group/Kind typo does not read as a core-group version.
 var apiVersion = regexp.MustCompile(`^v[1-9][0-9]*((alpha|beta)[1-9][0-9]*)?$`)
 
-// parseGVK reads group/version/Kind, or version/Kind for the core group
-// (DESIGN.md §8.1).
+// parseGVK reads group/version/Kind, or version/Kind for the core group.
 func parseGVK(declared string) (schema.GroupVersionKind, error) {
 	malformed := errors.New("want group/version/Kind or version/Kind")
 	parts := strings.Split(declared, "/")

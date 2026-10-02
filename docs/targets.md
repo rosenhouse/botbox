@@ -212,8 +212,8 @@ before it runs it:
 Put a `settle` op after a `restart`, and one before it unless the op before it settles. G5
 compares the states your controller settled in on either side. It notes, rather than judges,
 what another op may have changed in between. The `settle` after a `restart` also waits for your
-controller to request a resource outside leader election, which is botbox's only sign that it
-is back. G7 notes, rather than judges, a `deleteManaged` that comes before that sign.
+controller to [come back](failures.md#restarts-and-crash-loops). G7 notes, rather than judges, a
+`deleteManaged` that comes before your controller is back.
 
 ## Faults
 
@@ -235,6 +235,13 @@ controller behaves once the fault stops. A controller backs off while its reques
 once the faults stop botbox gives it as long as they lasted, plus `settle`, to converge. That
 includes a fault still active when the sequence ends, like the one above. botbox clears it and
 waits for your controller before it tears the run down.
+
+A delay's window lasts until it stops and the proxy releases the last request it held. A settle
+wait counts a held request as a change until the proxy releases it. A watch counts only until
+the proxy forwards it. A request held as the wait's time runs out keeps the wait open until
+`settle` past its release. It keeps a `recreate`'s wait for its old CR open the same way. Where
+a wait ends with a request held, or released within `stable`, botbox does not check your
+properties there, and the run notes it.
 
 The proxy tries faults in op order, the first that applies to a request wins, and each runs
 out on its own `until`. A fault that matches no request changes nothing and hides nothing, and

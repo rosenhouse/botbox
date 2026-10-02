@@ -70,6 +70,10 @@ managed object, and the report says that no CR existed. So every property can ru
 exists, and one whose `when` is `checkpoint` or `end` always does. Guard it with `has()`, or
 begin it with `!has(metadata.name) ||`, which holds there.
 
+A `checkpoint` or `end` property skips a checkpoint where the proxy
+[held a request](targets.md#faults) or your controller was
+[still starting](#restarts-and-crash-loops), and the run notes it.
+
 The report quotes the property's description, the versions of the CR it failed on, and the
 managed objects' metadata. Read the values the property judged from `objects.jsonl`.
 
@@ -92,7 +96,8 @@ A settle wait expired. What follows `expired with no fault active` says why:
 - `but the target was waiting to restart`, or `but the target restarted in the last 2s
   (timeouts.stable)`, means your controller exited. The line counts the exits since it last
   converged, and quotes the last.
-- `but the target had requested no resource outside leader election since …` means your
+- `but the target had requested no resource outside leader election since …`, or `but the
+  target had won no lease since …` for a controller that elects a leader, means your
   controller had not come back from a restart, or had not started, when the wait gave up.
   `until the last 2s (timeouts.stable)` means it came back too late to run for `stable` before
   then. A controller slow to start needs a wider `settle`.
@@ -140,9 +145,10 @@ at once, then after 10s, doubling up to 5 minutes. Before that, an exit ends the
 with exit 2. The run prints a note for each exit, and quotes the line your controller wrote as
 it stopped.
 
-A settle wait does not converge while your controller waits to restart. Nor does it converge
-until your controller has requested a resource outside leader election since it last started,
-and then run for `stable`. botbox has no other sign that a controller is back.
+A settle wait does not converge while your controller waits to restart, nor before it has been
+back for `stable` since it last started. Your controller is back once it requests a resource
+outside leader election. botbox takes a controller that reads a Lease with a get to elect a
+leader, and counts it back only once it wins its lease. botbox has no other sign.
 
 - After a `restart` op, your controller has `settle` to come back, and `settle` past its return
   to converge.
@@ -152,8 +158,11 @@ and then run for `stable`. botbox has no other sign that a controller is back.
   your controller and gives it `settle` past its return to converge.
 - While a fault is active, only the first exit during each op gets `settle` past its return. A
   later exit during the op gets it only where the next op lands before your controller has had
-  `settle` past its return. Otherwise the wait can end before your controller restarts, and
-  botbox checks your properties there.
+  `settle` past its return. Otherwise the wait can end before your controller restarts. A wait
+  can also end before a restarted controller has won its lease back.
+- botbox does not check a `checkpoint` or `end` property where a wait ends, or the teardown
+  checks, before your controller could have converged: while it waits to restart, or before it
+  has been back for `stable` since it last started. The run notes it.
 - botbox applies no op while your controller waits to restart after an exit during a fault. A
   controller that keeps crashing under a fault therefore fails G4 once the fault stops, or once
   the teardown clears it.
@@ -168,6 +177,7 @@ each start:
 ```
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
 run 1: the target exited during op 1 (update) with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
+run 1: P1 is not evaluated at the checkpoint after op 1 (update): the target was waiting to restart, so it may not yet have acted on what P1 reads
 run 1: G4 the settle wait after op 1 (update) expired with no fault active: in 5.038s (timeouts.settle is 5s), ready held from 12ms on, but the target was waiting to restart; the target exited 2 times since it last converged, last with exit status 2 after writing "panic: runtime error: integer divide by zero [recovered, repanicked]"
   at 2026-09-24T00:57:57.490964784Z; 15 requests, the first get /api 200; 5 versions, the first toy.botbox/v1/Widget widget; the target managed 0 objects of the kinds it declares
 ```
@@ -202,5 +212,9 @@ Exit 2 means botbox could not test your controller, and the message says what to
   `botbox replay`.
 - A controller that binds a fixed port, such as a health probe on `:8081`, collides with a
   second invocation of itself. Give it a free port in `launch.args`, or with `--launch-arg`.
+- A `recreate` cannot create its CR while the old one is there, so botbox exits 2 where the old
+  CR outlasts the wait and no check fails. A fault active during the `recreate` can do that to a
+  correct controller, as a delay on each request it makes can. End the fault before the
+  `recreate` with `until.op`.
 - botbox exits 2, rather than reporting a find, when the deadline ends a run or stops botbox
   before its last run.

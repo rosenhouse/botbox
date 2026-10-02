@@ -27,11 +27,11 @@ import (
 )
 
 // clearFinalizers is the merge patch the teardown forces on an object whose
-// finalizers never cleared (DESIGN.md §5.5).
+// finalizers never cleared.
 var clearFinalizers = []byte(`{"metadata":{"finalizers":null}}`)
 
 // liveRun is the Runner's harness over a started run. Its writes go straight
-// to the API server, never through the proxy (DESIGN.md §5.3).
+// to the API server, never through the proxy.
 type liveRun struct {
 	h         *Harness
 	target    *target.Target
@@ -59,7 +59,7 @@ func newLiveRun(h *Harness, t *target.Target) (*liveRun, error) {
 	for _, gvk := range emptied {
 		mapping, err := h.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
 		if err != nil {
-			return nil, fmt.Errorf("resolving the resource of %s: %w", kindName(gvk), err)
+			return nil, fmt.Errorf("resolving the resource of %s: %w", observe.KindName(gvk), err)
 		}
 		resources[gvk] = mapping.Resource
 	}
@@ -92,12 +92,14 @@ func (l *liveRun) clearFaults() { l.h.Proxy.ClearFaults() }
 
 func (l *liveRun) faultWindow(id proxy.FaultID) proxy.FaultWindow { return l.h.Proxy.Window(id) }
 
+func (l *liveRun) held(before time.Time) (bool, time.Time) { return l.h.Proxy.Held(before) }
+
 func (l *liveRun) servedResources() ([]metav1.APIResource, error) {
 	return cluster.ServedResources(l.h.Config)
 }
 
 // createCR creates the op's object as the primary CR and tells the Observer
-// botbox created it, so that it never counts as managed (DESIGN.md §6).
+// botbox created it, so that it never counts as managed.
 func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) error {
 	cr := obj.DeepCopy()
 	switch gvk := cr.GroupVersionKind(); {
@@ -105,7 +107,7 @@ func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) 
 		cr.SetGroupVersionKind(l.target.Primary)
 	case gvk != l.target.Primary:
 		return fmt.Errorf("the op creates a %s, and the target's primary CR is a %s",
-			kindName(gvk), kindName(l.target.Primary))
+			observe.KindName(gvk), observe.KindName(l.target.Primary))
 	}
 	cr.SetNamespace(l.h.Namespace)
 	if _, err := l.crs().Create(ctx, cr, metav1.CreateOptions{}); err != nil {
@@ -155,8 +157,8 @@ func (l *liveRun) awaitCRGone(ctx context.Context, name string, until func() tim
 	return gone, nil
 }
 
-// managedObjects names the managed objects of one kind in the order
-// DESIGN.md §7 resolves an index against: creationTimestamp, then name.
+// managedObjects names the managed objects of one kind in the order a
+// deleteManaged op's index counts in: creationTimestamp, then name.
 func (l *liveRun) managedObjects(gvk schema.GroupVersionKind) []string {
 	var managed []observe.Version
 	for _, version := range l.h.Observer.Managed() {
@@ -182,7 +184,7 @@ func (l *liveRun) deleteManaged(ctx context.Context, gvk schema.GroupVersionKind
 	case apierrors.IsNotFound(err):
 		return false, nil
 	case err != nil:
-		return false, fmt.Errorf("deleting the managed %s %s: %w", kindName(gvk), name, err)
+		return false, fmt.Errorf("deleting the managed %s %s: %w", observe.KindName(gvk), name, err)
 	}
 	return true, nil
 }
@@ -193,17 +195,17 @@ func (l *liveRun) patchFixture(ctx context.Context, gvk schema.GroupVersionKind,
 		_, err = l.of(gvk).Patch(ctx, name, types.MergePatchType, data, metav1.PatchOptions{})
 	}
 	if err != nil {
-		return fmt.Errorf("patching the fixture %s %s: %w", kindName(gvk), name, err)
+		return fmt.Errorf("patching the fixture %s %s: %w", observe.KindName(gvk), name, err)
 	}
 	return nil
 }
 
-// deleteFixture deletes the fixture and waits T_delete for it to go, so that
-// botbox can create it again.
+// deleteFixture deletes the fixture and waits timeouts.delete for it to go,
+// so that botbox can create it again.
 func (l *liveRun) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind, name string) error {
 	fixtures := l.of(gvk)
 	if err := fixtures.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
-		return fmt.Errorf("deleting the fixture %s %s: %w", kindName(gvk), name, err)
+		return fmt.Errorf("deleting the fixture %s %s: %w", observe.KindName(gvk), name, err)
 	}
 	var held []string
 	deadline := time.Now().Add(l.target.Timeouts.Delete)
@@ -216,10 +218,10 @@ func (l *liveRun) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind
 	})
 	switch {
 	case err != nil:
-		return fmt.Errorf("waiting for the fixture %s %s to go: %w", kindName(gvk), name, err)
+		return fmt.Errorf("waiting for the fixture %s %s to go: %w", observe.KindName(gvk), name, err)
 	case !gone:
 		return fmt.Errorf("the fixture %s %s was still there %v (timeouts.delete) after botbox deleted it, held by the finalizers %v",
-			kindName(gvk), name, l.target.Timeouts.Delete, held)
+			observe.KindName(gvk), name, l.target.Timeouts.Delete, held)
 	}
 	return nil
 }
@@ -242,9 +244,9 @@ func (l *liveRun) createFixture(ctx context.Context, fixture *unstructured.Unstr
 	switch {
 	case apierrors.IsAlreadyExists(err):
 		return fmt.Errorf("something created the fixture %s %s again after botbox deleted it, so botbox cannot restore it",
-			kindName(gvk), fixture.GetName())
+			observe.KindName(gvk), fixture.GetName())
 	case err != nil:
-		return fmt.Errorf("restoring the fixture %s %s: %w", kindName(gvk), fixture.GetName(), err)
+		return fmt.Errorf("restoring the fixture %s %s: %w", observe.KindName(gvk), fixture.GetName(), err)
 	}
 	return nil
 }
@@ -252,7 +254,7 @@ func (l *liveRun) createFixture(ctx context.Context, fixture *unstructured.Unstr
 func (l *liveRun) managedCount() int { return len(l.h.Observer.Managed()) }
 
 // awaitClean waits for the target to remove what it manages and for the CR to
-// go, which is what G3 requires within T_delete.
+// go, which is what G3 requires within timeouts.delete.
 func (l *liveRun) awaitClean(ctx context.Context, within time.Duration) (bool, error) {
 	deadline := time.Now().Add(within)
 	return l.await(ctx, func() time.Time { return deadline }, func() (bool, error) {
@@ -269,7 +271,7 @@ func (l *liveRun) forceFinalizers(ctx context.Context) ([]string, error) {
 	for _, gvk := range l.emptied {
 		list, err := l.of(gvk).List(ctx, metav1.ListOptions{})
 		if err != nil {
-			failures = append(failures, fmt.Errorf("listing the %s left behind: %w", kindName(gvk), err))
+			failures = append(failures, fmt.Errorf("listing the %s left behind: %w", observe.KindName(gvk), err))
 			continue
 		}
 		for _, object := range list.Items {
@@ -280,22 +282,22 @@ func (l *liveRun) forceFinalizers(ctx context.Context) ([]string, error) {
 			switch {
 			case apierrors.IsNotFound(err):
 			case err != nil:
-				failures = append(failures, fmt.Errorf("clearing the finalizers of %s %s: %w", kindName(gvk), object.GetName(), err))
+				failures = append(failures, fmt.Errorf("clearing the finalizers of %s %s: %w", observe.KindName(gvk), object.GetName(), err))
 			default:
-				forced = append(forced, kindName(gvk)+" "+object.GetName())
+				forced = append(forced, observe.KindName(gvk)+" "+object.GetName())
 			}
 		}
 	}
 	return forced, errors.Join(failures...)
 }
 
-// empty deletes what the run left in the namespace (DESIGN.md §5.5).
+// empty deletes what the run left in the namespace.
 func (l *liveRun) empty(ctx context.Context) error {
 	var failures []error
 	for _, gvk := range l.emptied {
 		err := l.of(gvk).DeleteCollection(ctx, metav1.DeleteOptions{}, metav1.ListOptions{})
 		if err != nil && !apierrors.IsNotFound(err) {
-			failures = append(failures, fmt.Errorf("deleting the %s left behind: %w", kindName(gvk), err))
+			failures = append(failures, fmt.Errorf("deleting the %s left behind: %w", observe.KindName(gvk), err))
 		}
 	}
 	return errors.Join(failures...)

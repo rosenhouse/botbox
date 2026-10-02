@@ -259,13 +259,22 @@ func TestAnExpiredWaitSaysTheTargetHadNotShownItRuns(t *testing.T) {
 		return readyCR().running(1100*time.Millisecond).op(invariant.OpRestart, 3*time.Second).op(invariant.OpSettle, 3*time.Second)
 	}
 	const sinceTheRestart = "in 5s (timeouts.settle is 5s), ready held from 0s on, but the target had requested no resource outside leader election since op 0 (restart)"
+	const wonNoLease = "in 5s (timeouts.settle is 5s), ready held from 0s on, but the target had won no lease since op 0 (restart)"
 	for _, test := range []struct {
 		name string
 		run  *run
 		want string
 	}{
 		{"after a restart op", restarted(), sinceTheRestart},
-		{"after a restart op, with leader election alone", restarted().requests(3100*time.Millisecond, time.Second, 4, lease("update")), sinceTheRestart},
+		{"after a restart op, with leader election alone", restarted().requests(3100*time.Millisecond, time.Second, 4, lease("get")), wonNoLease},
+		{"after a restart op, with a watch before it won its lease", restarted().
+			running(3100*time.Millisecond).
+			requests(3200*time.Millisecond, time.Second, 5, lease("get")).
+			request(8100*time.Millisecond, lease("update")), wonNoLease},
+		{"until the last stable, once it won its lease", restarted().
+			running(3100*time.Millisecond).
+			request(3200*time.Millisecond, lease("get")).
+			request(6500*time.Millisecond, lease("update")), wonNoLease + " until the last 2s (timeouts.stable)"},
 		{"after a restart op, with a request after the wait alone", restarted().running(9 * time.Second), sinceTheRestart},
 		{"after a restart op at the instant of a supervised restart", restarted().exit(2*time.Second, 3*time.Second),
 			sinceTheRestart + "; the target exited 1 time since it last converged, last with the exit at 2s"},
@@ -288,6 +297,12 @@ func TestAnExpiredWaitSaysTheTargetHadNotShownItRuns(t *testing.T) {
 			"in 5s (timeouts.settle is 5s), no CR was left to be ready, but the target had requested no resource outside leader election since op 0 (restart)"},
 		{"until the last stable", restarted().running(6500 * time.Millisecond), sinceTheRestart + " until the last 2s (timeouts.stable)"},
 		{"until the last stable began", restarted().running(6 * time.Second), "in 5s (timeouts.settle is 5s), ready held from 0s on, and nothing changed in the last 2s (timeouts.stable)"},
+		// The Runner says why where the wait ends, before it can see later requests.
+		{"with a lease got after the wait alone", restarted().running(6*time.Second).request(9*time.Second, lease("get")),
+			"in 5s (timeouts.settle is 5s), ready held from 0s on, and nothing changed in the last 2s (timeouts.stable)"},
+		{"not back, with a lease got after the wait", restarted().request(9*time.Second, lease("get")), sinceTheRestart},
+		{"until the last stable, with a lease got after the wait", restarted().running(6500*time.Millisecond).request(9*time.Second, lease("get")),
+			sinceTheRestart + " until the last 2s (timeouts.stable)"},
 		// A recreate's wait lasts T_delete, which can be shorter than stable.
 		{"in a wait shorter than stable", readyCR().running(1100*time.Millisecond).op(invariant.OpRestart, 7*time.Second).op(invariant.OpRecreate, 7*time.Second),
 			"but the target had requested no resource outside leader election since op 0 (restart)"},

@@ -24,27 +24,20 @@ var citesDesign = map[string]string{
 }
 
 // Every string botbox prints comes from a literal, so no literal may need
-// DESIGN.md to be understood. Nor may the command's doc, which go doc prints.
+// DESIGN.md to be understood.
 func TestNoStringLiteralUsesTheDesignsVocabulary(t *testing.T) {
-	files := productionGoFiles(t)
-	if !slices.Contains(files, "pkg/invariant/g2.go") {
-		t.Fatalf("The scan listed %v, which skips the checks.", files)
-	}
-	for _, path := range files {
-		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ParseComments|parser.SkipObjectResolution)
+	read := map[string]bool{}
+	for _, path := range goFilesOutsideTests(t, "docs") {
+		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
 		if err != nil {
 			t.Fatal(err)
-		}
-		if strings.HasPrefix(path, "cmd/") && parsed.Doc != nil {
-			if found := designVocabulary.FindString(parsed.Doc.Text()); found != "" {
-				t.Errorf("%s: the command's doc uses %q, which only DESIGN.md explains.", path, found)
-			}
 		}
 		ast.Inspect(parsed, func(node ast.Node) bool {
 			literal, ok := node.(*ast.BasicLit)
 			if !ok || literal.Kind != token.STRING {
 				return true
 			}
+			read[path] = true
 			value, err := strconv.Unquote(literal.Value)
 			if err != nil {
 				t.Fatalf("%s: %v", path, err)
@@ -58,12 +51,46 @@ func TestNoStringLiteralUsesTheDesignsVocabulary(t *testing.T) {
 			return true
 		})
 	}
+	requireRead(t, read, "cmd/botbox/main.go", "pkg/invariant/g2.go", "targets/toy-widget/controller/bug.go")
 }
 
-// productionGoFiles lists the root module's Go files outside tests.
-func productionGoFiles(t *testing.T) []string {
+// A comment must make sense without DESIGN.md open. go doc prints some of
+// them, and go install ships no DESIGN.md.
+func TestNoCommentUsesTheDesignsVocabulary(t *testing.T) {
+	read := map[string]bool{}
+	positions := token.NewFileSet()
+	for _, path := range goFilesOutsideTests(t) {
+		parsed, err := parser.ParseFile(positions, path, nil, parser.ParseComments|parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, group := range parsed.Comments {
+			read[path] = true
+			for _, comment := range group.List {
+				if found := designVocabulary.FindString(comment.Text); found != "" {
+					t.Errorf("%s: %s uses %q, which only DESIGN.md explains.", positions.Position(comment.Pos()), comment.Text, found)
+				}
+			}
+		}
+	}
+	requireRead(t, read, "cmd/botbox/main.go", "pkg/invariant/g2.go", "targets/toy-widget/controller/bug.go", "docs/spikes/cert-manager-envtest/main.go")
+}
+
+// requireRead fails unless the scan read something in each of paths.
+func requireRead(t *testing.T, read map[string]bool, paths ...string) {
 	t.Helper()
-	skipped := append(ignoredDirs(t), ".git", "docs")
+	for _, path := range paths {
+		if !read[path] {
+			t.Errorf("The scan read nothing in %s.", path)
+		}
+	}
+}
+
+// goFilesOutsideTests lists the repository's Go files outside tests, outside
+// skipped and outside what .gitignore names.
+func goFilesOutsideTests(t *testing.T, skipped ...string) []string {
+	t.Helper()
+	skipped = append(append(skipped, ignoredDirs(t)...), ".git")
 	var paths []string
 	err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {
 		switch {

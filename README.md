@@ -52,7 +52,8 @@ names another directory, as the [CI recipe](#running-in-ci) does. A new shell ne
 three lines again.
 
 botbox has no release yet, so `@latest` installs main as it is now. Name a commit in its place
-to install the same botbox every time, as [CI](#running-in-ci) should.
+to install the same botbox every time, as [CI](#running-in-ci) should. In a clone of the
+repository, `go install ./cmd/botbox` installs the botbox that its README describes.
 
 Building botbox takes Go 1.26.0 or later. A `go` command from Go 1.21 on downloads that Go
 itself, unless `GOTOOLCHAIN=local` is set, as in many CI images. Then `go install` fails with
@@ -64,9 +65,9 @@ its default.
 ## A first run and a first find
 
 Every find this README shows is planted: a bug seeded into the toy controller in this
-repository. Clone [the repository](https://github.com/rosenhouse/botbox). In the clone,
-`go install ./cmd/botbox` installs the botbox this README describes. Run this there. The first
-build takes a minute or two, and the three runs then take about half a minute:
+repository. Clone [the repository](https://github.com/rosenhouse/botbox), and run this in the
+clone. The first build takes a minute or two, and the three runs then take about half a
+minute:
 
 ```sh
 go build -o bin/toy-widget ./targets/toy-widget
@@ -184,9 +185,8 @@ Write yours in this order:
    property also runs where no CR exists, as after the last delete, with empty `metadata`,
    `spec` and `status`. Guard what it reads there with `has()`, as P1 does.
 6. `timeouts` and `thresholds` default to what suits most controllers. The toy is fast, so it
-   shortens its timeouts. G6 fails a controller that repeats a failing request more than
-   `errloop` times, 10 by default. A 5s `settle` holds only 10 backoff repeats, so the toy
-   lowers `errloop` to 5.
+   shortens its timeouts. Its 5s `settle` holds only 10 backoff repeats, so it also lowers
+   `errloop` below the default of 10.
 
 [docs/reference.md](docs/reference.md) lists every key with its default.
 [docs/targets.md](docs/targets.md) says how to choose the values: for a slow controller, one
@@ -256,12 +256,12 @@ Before it reports, botbox minimizes a failing drawn sequence: it removes each op
 does not need. Each removal it tries replays a whole run, so this can take several minutes.
 botbox says so as soon as the run fails, as in
 `run 1: G3 failed, and minimizing its 12 ops can take minutes.` `sequence.json` in the
-evidence directory holds the minimized sequence. Where the deadline cut minimizing short, it
-holds the drawn sequence, and `sequence.shrunk.json` beside it holds any smaller failing one
-that botbox found. Where your controller fails with no CR at all, the minimized sequence lacks
-even the `create`. Each run ends by deleting every CR and checking once more, so G3 or a
-property can fail a sequence with no `delete`. `summary.json`, one directory up, holds each
-run's sequence as drawn.
+evidence directory holds the minimized sequence. Where the deadline or an interrupt cut
+minimizing short, it holds the drawn sequence, and `sequence.shrunk.json` beside it holds any
+smaller failing one that botbox found. Where your controller fails with no CR at all, the
+minimized sequence lacks even the `create`. Each run ends by deleting every CR and checking
+once more, so G3 or a property can fail a sequence with no `delete`. `summary.json`, one
+directory up, holds each run's sequence as drawn.
 
 | Check | Usual cause |
 |---|---|

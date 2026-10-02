@@ -116,18 +116,15 @@ Where a fault reached into the deletion, G3 cannot judge it. The settle wait's G
 held the wait open past `settle`, the line gives `timeouts.delete is …` in place of
 `timeouts.settle is …`.
 
-## When G1, G2, G5, G6 or G7 fails
+## When G1, G2, G6 or G7 fails
 
-- G1's `the target made … API requests in the … (timeouts.stable) after op …, where
-  thresholds.quiet allows …` counts what your controller requested once it had converged. A
-  controller that resyncs on a timer needs a `quiet` that
-  [fits the timer](targets.md#thresholds).
+- G1's `the target made … API requests in …, where thresholds.quiet allows …` counts the
+  requests your controller made while botbox expected it to be quiet. A controller that
+  resyncs on a timer needs a `quiet` that [fits the timer](targets.md#thresholds).
 - G2's `the target changed … objects in …, where a converged target changes nothing` means your
   controller kept rewriting what it manages, such as a timestamp in a status. Its
-  `the target made … status writes in …` counts writes that changed nothing, which `quiet`
-  bounds.
-- G5's line names the first field a restart changed. Name a field your controller stamps at
-  startup in [`equalIgnore`](targets.md#equalignore).
+  `the target made … status writes in …` counts every status write, even one that changed
+  nothing.
 - G6's `the target repeated the failing request … times within … (timeouts.settle), where
   thresholds.errloop allows …` names the request your controller kept retrying.
   [Thresholds](targets.md#thresholds) says how `errloop` relates to `settle`.

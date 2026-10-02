@@ -1322,10 +1322,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   and a first find, which draw runs on the toy and replay a bug seeded into it, say that
   every find the README shows is seeded, and run as written in an envtest test, with the
   botbox and the control plane that install leaves; writing `target.yaml` for your own
-  controller, around the toy's `target.yaml` embedded as the worked example, with a
-  `ready` for a CR that reports a Ready condition, which `make test` evaluates, how to
-  run it, and a sequence to pin per managed kind and per property, which the envtest tier
-  runs; reading a failure, with the usual cause of each check and a link to what to change
+  controller, around the toy's `target.yaml` embedded as the worked example, with how to
+  run it, a `ready` for a CR that reports a Ready condition, which `make test` evaluates,
+  and a sequence to pin per managed kind and per property, which the envtest tier runs;
+  reading a failure, with the usual cause of each check and a link to what to change
   when botbox exits 2; a CI recipe for adopters,
   embedded from `examples/ci/github-actions.yml`, a tools module that keeps botbox out of
   an operator's go.mod, embedded from `examples/tools-module.sh`, which the envtest tier

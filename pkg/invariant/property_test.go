@@ -128,6 +128,8 @@ func TestPropertyIsNotEvaluatedWhereTheTargetWasStillStarting(t *testing.T) {
 				"the target restarted in the last 2s (timeouts.stable)"},
 			{"restarted at the checkpoint", stale(when).exit(4*time.Second, 8*time.Second),
 				"the target restarted in the last 2s (timeouts.stable)"},
+			{"restarted stable before the checkpoint", stale(when).exit(4*time.Second, 6*time.Second),
+				"the target had requested no resource outside leader election since the restart after its exit during op 1 (deleteManaged)"},
 			{"after a supervised restart, with leader election alone", stale(when).exit(4*time.Second, 5*time.Second).
 				requests(5100*time.Millisecond, time.Second, 3, lease("update")),
 				"the target had requested no resource outside leader election since the restart after its exit during op 1 (deleteManaged)"},

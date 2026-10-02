@@ -522,11 +522,10 @@ during each op is owed that time, because owing each later exit would hold a cra
 wait open for as long as the fault lasts. If the target exits again during the op, the
 wait can end before it restarts. No op lands while the target waits to restart after an
 exit a fault excused, and an op that lands before the target has had its time after such
-an exit owes it that time too (§5.5). That time
-ends within `2 × T_settle` of the op, so it bounds the op's wait. Once no fault is active,
-every exit a fault excused is owed its time. Only a fault excuses an exit, so a crash loop
-that a fault set off still fails G4, at the latest in the wait the teardown gives the
-target once it has cleared the faults.
+an exit owes it that time too (§5.5). That time ends within `2 × T_settle` of the op, so
+it bounds the op's wait. Once no fault is active, every exit a fault excused is owed its
+time. Only a fault excuses an exit, so a crash loop that a fault set off still fails G4,
+at the latest in the wait the teardown gives the target once it has cleared the faults.
 
 **A target still starting.** A wait converges only once the target is back since it last
 started and has run for `T_stable` after that (§5.5). A wait a fault excuses can end
@@ -539,11 +538,12 @@ still starting may not yet have acted on what changed while it was down, so no p
 is evaluated at that checkpoint, under `checkpoint` or `end`, and the run notes each one.
 A wait that converged saw the target back for `T_stable`, so its checkpoint is judged,
 even where a `Restart` op replaced a target waiting out its backoff. A property evaluated
-`always` reads every event rather than a checkpoint. No invariant needs the rule. A target that does not come back fails G4
-where a wait expires with no fault active, at the latest in the teardown's recovery wait.
-G7 asks more after a restart: the target must be back before the op. G1 and G2 judge no
-window a fault reaches into, so they skip the window after such a wait where a fault is
-active at its end. G3 judges deadlines, G5 converged states and G6 failing requests.
+`always` reads every event rather than a checkpoint. No invariant needs the rule. A target
+that does not come back fails G4 where a wait expires with no fault active, at the latest
+in the teardown's recovery wait. G7 asks more after a restart: the target must be back
+before the op. G1 and G2 judge no window a fault reaches into, so they skip the window
+after such a wait where a fault is active at its end. G3 judges deadlines, G5 converged
+states and G6 failing requests.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the

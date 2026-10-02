@@ -560,13 +560,13 @@ its path into `equalIgnore` as written. A Secret's values appear there as marker
 Once a settle wait has converged, botbox restarts a controller that exits, as a kubelet
 would: at once, then after 10s, doubling up to 5 minutes. The run prints a note for each
 exit, quoting the line the controller wrote as it stopped. A settle wait does not converge
-while the controller waits to restart. Nor does it converge until the controller is back
-since it last started and has run for `stable`. botbox counts a controller back once it
-requests a resource outside leader election, or, where it elects a leader, once it wins its
-lease. It has no other sign. After a `restart` op, a controller has `settle` to come back,
-and `settle` past its return to converge. A controller that crashes again within `stable`
-of each return never converges, even where it wrote its converged state first, so G4
-reports it and quotes the last exit.
+while the controller waits to restart, nor before the controller has been back for `stable`
+since it last started. A controller is back once it requests a resource outside leader
+election. botbox takes a controller that reads a Lease with a get to elect a leader, and
+counts it back only once it wins its lease. botbox has no other sign. After a `restart` op,
+a controller has `settle` to come back, and `settle` past its return to converge. A
+controller that crashes again within `stable` of each return never converges, even where
+it wrote its converged state first, so G4 reports it and quotes the last exit.
 A controller that exits during a fault, or while it recovers from one, has the same once
 botbox restarts it. While a fault is active, only your controller's first such exit during
 each op gets that time. If it exits again during the op, the wait can end before it

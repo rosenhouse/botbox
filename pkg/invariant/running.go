@@ -12,15 +12,24 @@ import (
 // started is running. A process starting up can request leader election and
 // paths that name no resource, such as discovery. A process that elects a
 // leader can start its informers before it leads, so only a lease it won
-// shows it running.
+// shows it running. It gets the lease before it wins it, while the leader it
+// replaces renews without a get until botbox kills it.
 func Back(requests []proxy.Request, since time.Time) (time.Time, bool) {
-	shows := func(r proxy.Request) bool { return r.Resource != "" && !leaderElection(r) }
-	if electing(requests) {
-		shows = won
+	if !electing(requests) {
+		return first(requests, since, func(r proxy.Request) bool { return r.Resource != "" && !leaderElection(r) })
 	}
+	if got, found := first(requests, since, gotLease); found {
+		return first(requests, got, won)
+	}
+	return time.Time{}, false
+}
+
+// first is when the first request after since that matches started, and
+// whether one did.
+func first(requests []proxy.Request, since time.Time, matches func(proxy.Request) bool) (time.Time, bool) {
 	var first time.Time
 	for _, r := range requests {
-		if r.Start.After(since) && shows(r) && (first.IsZero() || r.Start.Before(first)) {
+		if r.Start.After(since) && matches(r) && (first.IsZero() || r.Start.Before(first)) {
 			first = r.Start
 		}
 	}
@@ -39,9 +48,9 @@ func notBack(requests []proxy.Request) string {
 // learn who holds it. An informer lists and watches Leases instead. A process
 // whose caches have not synced has yet to elect, but an earlier one shows it
 // will.
-func electing(requests []proxy.Request) bool {
-	return slices.ContainsFunc(requests, func(r proxy.Request) bool { return isLease(r) && r.Verb == "get" })
-}
+func electing(requests []proxy.Request) bool { return slices.ContainsFunc(requests, gotLease) }
+
+func gotLease(r proxy.Request) bool { return isLease(r) && r.Verb == "get" }
 
 // won reports whether a request won the target a lease: the API server
 // accepted its create or update of one.

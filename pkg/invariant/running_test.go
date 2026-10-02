@@ -34,6 +34,12 @@ func TestBackIsTheFirstRequestThatShowsTheTargetRunning(t *testing.T) {
 			request(1100*time.Millisecond, watch()).
 			request(1200*time.Millisecond, leaseAnswered("get", http.StatusNotFound)).
 			request(1300*time.Millisecond, leaseAnswered("create", http.StatusCreated)), 1300 * time.Millisecond},
+		{"the lease it won after its get, not its predecessor's renewal", newRun().
+			request(500*time.Millisecond, lease("get")).
+			request(600*time.Millisecond, lease("update")).
+			request(1050*time.Millisecond, lease("update")).
+			request(1200*time.Millisecond, lease("get")).
+			request(1600*time.Millisecond, lease("update")), 1600 * time.Millisecond},
 		{"the lease it updated, after updates the API server refused", newRun().
 			request(1100*time.Millisecond, watch()).
 			request(1200*time.Millisecond, lease("get")).
@@ -106,6 +112,16 @@ func TestBackFindsNothingUntilTheTargetShowsItRuns(t *testing.T) {
 		"a lease won up to since": newRun().
 			request(time.Second, lease("update")).
 			request(1100*time.Millisecond, lease("get")),
+		"a renewal by its predecessor alone": newRun().
+			request(500*time.Millisecond, lease("get")).
+			request(600*time.Millisecond, lease("update")).
+			request(1050*time.Millisecond, lease("update")),
+		"a renewal by its predecessor before it got its lease": newRun().
+			request(500*time.Millisecond, lease("get")).
+			request(600*time.Millisecond, lease("update")).
+			request(1050*time.Millisecond, lease("update")).
+			request(1100*time.Millisecond, watch()).
+			request(1200*time.Millisecond, lease("get")),
 		"a watch, by a target that won a lease before since": newRun().
 			request(500*time.Millisecond, lease("get")).
 			request(600*time.Millisecond, lease("update")).

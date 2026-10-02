@@ -28,12 +28,12 @@ type Options struct {
 	// Kinds are what the Observer watches. They include Manages, or what the
 	// target manages goes unseen.
 	Kinds []schema.GroupVersionKind
-	// Manages are the kinds the target declares it manages (DESIGN.md §8.1).
-	// The Observer attributes only those to the target.
+	// Manages are the kinds the target declares it manages. The Observer
+	// attributes only those to the target.
 	Manages []schema.GroupVersionKind
 	// Mapper resolves each watched kind to the resource its informer lists.
 	Mapper meta.RESTMapper
-	// Selector optionally refines attribution to the objects it matches (§6).
+	// Selector optionally refines attribution to the objects it matches.
 	Selector labels.Selector
 }
 
@@ -52,8 +52,8 @@ func (o Options) validate() error {
 }
 
 // Observer records the version history of the run namespace from the real API
-// server, never through the proxy, and never writes (DESIGN.md §5.3). It
-// answers its Store's queries directly.
+// server, never through the proxy, and never writes. It answers its Store's
+// queries directly.
 type Observer struct {
 	*Store
 

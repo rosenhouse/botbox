@@ -12,8 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// WriteHistory writes the run's objects.jsonl (DESIGN.md §5.7): one version per
-// line, in the order recorded.
+// WriteHistory writes the run's objects.jsonl: one version per line, in the
+// order recorded.
 func (s *Store) WriteHistory(w io.Writer) error {
 	encoder := json.NewEncoder(w)
 	for _, v := range s.all() {
@@ -24,8 +24,8 @@ func (s *Store) WriteHistory(w io.Writer) error {
 	return nil
 }
 
-// versionLine is one objects.jsonl line. Its field names are the report's
-// interface and change only with §5.7.
+// versionLine is one objects.jsonl line. Readers of the file parse its field
+// names, so they do not change.
 type versionLine struct {
 	Kind               string                     `json:"kind"` // group/version/Kind
 	Namespace          string                     `json:"namespace"`

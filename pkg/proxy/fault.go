@@ -14,7 +14,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-// FaultSpec is one fault the proxy injects (DESIGN.md §5.2).
+// FaultSpec is one fault the proxy injects.
 type FaultSpec struct {
 	Match  RequestMatcher
 	Action FaultAction
@@ -117,7 +117,7 @@ func (p *Proxy) ClearFaults() {
 	}
 }
 
-// FaultWindow is what the proxy has done with one fault (DESIGN.md §5.2).
+// FaultWindow is what the proxy has done with one fault.
 type FaultWindow struct {
 	// First is when the proxy first applied the fault, and zero if it never
 	// has: a fault that matches no request changes nothing about the run.
@@ -130,7 +130,7 @@ type FaultWindow struct {
 // Window reports what the proxy has done with the fault, removed or not. The
 // Runner reads it into the run's timeline: a fault excuses the target over the
 // window the proxy applied it in or held a request of the target's, and a fault
-// it never applied excuses nothing (DESIGN.md §6).
+// it never applied excuses nothing.
 func (p *Proxy) Window(id FaultID) FaultWindow {
 	now := time.Now()
 	p.mu.Lock()

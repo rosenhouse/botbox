@@ -6,6 +6,7 @@ import (
 	"flag"
 	"maps"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -168,6 +169,25 @@ func TestCertManagersExampleSeedsDrawWhatTheMakefileSays(t *testing.T) {
 			t.Errorf("Seeds %v draw no %s, and the Makefile says they do.", seeds, want)
 		}
 	}
+}
+
+func TestCertManagersPinnedSequencesSetRotationPolicyNever(t *testing.T) {
+	// Draws never set Never, so the example tier runs it only from the
+	// sequences it pins.
+	files, err := filepath.Glob("../../examples/cert-manager/sequences/*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range files {
+		sequence, err := run.ReadSequence(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.Contains(carriedAt(sequence, "spec", "privateKey", "rotationPolicy"), any("Never")) {
+			return
+		}
+	}
+	t.Errorf("None of %v sets spec.privateKey.rotationPolicy to Never.", files)
 }
 
 func TestTheToysSeed2DrawsMoreThanTheShrunkB2Reproducer(t *testing.T) {

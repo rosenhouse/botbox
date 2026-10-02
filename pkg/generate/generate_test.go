@@ -616,6 +616,12 @@ func generatedAt(sequence run.Sequence, sample *unstructured.Unstructured, path 
 	return values
 }
 
+// carriedAt collects what a sequence's CRs and patches hold at a path, the
+// sample's values included.
+func carriedAt(sequence run.Sequence, path ...string) []any {
+	return generatedAt(sequence, &unstructured.Unstructured{}, path...)
+}
+
 // differences are the dotted paths where two objects disagree.
 func differences(a, b map[string]any, prefix string) []string {
 	var paths []string

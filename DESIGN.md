@@ -2381,6 +2381,6 @@ built from source and run as a black-box binary.
   open to follow the code, and a renumbered section left each citation wrong. A comment
   now says what it means and names the target.yaml key rather than a symbol, as D74 asks
   of a message. A test scans every comment outside tests for what it scans string
-  literals for. Six packages each defined one helper that writes a kind as target.yaml
-  does. `observe.KindName` replaces them, because `observe` imports no other botbox
-  package.
+  literals for. Six packages each defined the same helper, which writes a kind as
+  target.yaml does. `observe.KindName` replaces them, because `observe` imports no other
+  botbox package.

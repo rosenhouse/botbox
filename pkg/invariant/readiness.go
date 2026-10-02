@@ -179,11 +179,12 @@ func (in Input) starting(at time.Time) string {
 	if named == "" {
 		named = "it started"
 	}
-	switch back, found := Back(in.Requests, start); {
-	case !found || back.After(at):
-		return fmt.Sprintf("the target had %s since %s", notBack(in.Requests), named)
+	requests := requestsUpTo(in.Requests, at)
+	switch back, found := Back(requests, start); {
+	case !found:
+		return fmt.Sprintf("the target had %s since %s", notBack(requests), named)
 	case back.After(at.Add(-stable)):
-		return fmt.Sprintf("the target had %s since %s until the last %s (timeouts.stable)", notBack(in.Requests), named, stable)
+		return fmt.Sprintf("the target had %s since %s until the last %s (timeouts.stable)", notBack(requests), named, stable)
 	}
 	return ""
 }

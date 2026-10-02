@@ -2356,10 +2356,11 @@ built from source and run as a black-box binary.
   the API server accepts its create or update of a lease. controller-runtime starts the
   informers a field index asks for before the manager leads. The toy with an index watched
   Widgets while it waited out its lease, that watch counted as its return, the wait
-  converged before the toy led, and P1 failed in 3 of 3 runs. A get of a Lease anywhere in
-  the run marks a target that elects, because leader election gets its Lease to learn who
-  holds it, and an informer lists and watches instead. A restarted process gets its lease
-  only once its caches sync, which a fault can delay, and its predecessor's get already
-  marks it. A target that gets a Lease and elects no leader therefore shows it runs only
+  converged before the toy led, and P1 failed in 3 of 3 runs. A get of a Lease by any of
+  its processes marks a target that elects, because leader election gets its Lease to
+  learn who holds it, and an informer lists and watches instead. A restarted process gets
+  its lease only once its caches sync, which a fault can delay, and its predecessor's get
+  already marks it. G4 and the property read only the requests made by the checkpoint, as
+  the wait did. A target that gets a Lease and elects no leader therefore shows it runs only
   once it writes a lease, and fails G4 where it never does. Keeping the sign of D60 and
   D69 and stating the limit was rejected, because the wait itself converged too early.

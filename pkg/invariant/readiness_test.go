@@ -297,6 +297,12 @@ func TestAnExpiredWaitSaysTheTargetHadNotShownItRuns(t *testing.T) {
 			"in 5s (timeouts.settle is 5s), no CR was left to be ready, but the target had requested no resource outside leader election since op 0 (restart)"},
 		{"until the last stable", restarted().running(6500 * time.Millisecond), sinceTheRestart + " until the last 2s (timeouts.stable)"},
 		{"until the last stable began", restarted().running(6 * time.Second), "in 5s (timeouts.settle is 5s), ready held from 0s on, and nothing changed in the last 2s (timeouts.stable)"},
+		// The Runner says why where the wait ends, before it can see later requests.
+		{"with a lease got after the wait alone", restarted().running(6*time.Second).request(9*time.Second, lease("get")),
+			"in 5s (timeouts.settle is 5s), ready held from 0s on, and nothing changed in the last 2s (timeouts.stable)"},
+		{"not back, with a lease got after the wait", restarted().request(9*time.Second, lease("get")), sinceTheRestart},
+		{"until the last stable, with a lease got after the wait", restarted().running(6500*time.Millisecond).request(9*time.Second, lease("get")),
+			sinceTheRestart + " until the last 2s (timeouts.stable)"},
 		// A recreate's wait lasts T_delete, which can be shorter than stable.
 		{"in a wait shorter than stable", readyCR().running(1100*time.Millisecond).op(invariant.OpRestart, 7*time.Second).op(invariant.OpRecreate, 7*time.Second),
 			"but the target had requested no resource outside leader election since op 0 (restart)"},

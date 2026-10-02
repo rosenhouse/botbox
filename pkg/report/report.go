@@ -48,6 +48,8 @@ type Report struct {
 	// Applied is how many of the sequence's ops the run reached, and Ops is
 	// how many it holds. A run that ended at its violation reached fewer.
 	Applied, Ops int
+	// Collector says botbox's garbage collector ran.
+	Collector bool
 	// Requests and Versions are the evidence the check quoted, and
 	// RequestsTotal and VersionsTotal how many entries it chose them from. A
 	// caller that names no total is read as having quoted everything it saw.
@@ -133,6 +135,7 @@ type document struct {
 	VersionsOf       string                 `json:"versionsOf,omitempty"`
 	Managed          []observe.Version      `json:"managed,omitempty"`
 	ManagedTotal     *int                   `json:"managedTotal,omitempty"`
+	Collector        bool                   `json:"-"`
 }
 
 func (r Report) document() document {
@@ -157,6 +160,7 @@ func (r Report) document() document {
 		VersionsOf:       r.VersionsOf,
 		Managed:          state(r.Managed),
 		ManagedTotal:     managedTotal(r.ManagedTotal, len(r.Managed)),
+		Collector:        r.Collector,
 	}
 }
 

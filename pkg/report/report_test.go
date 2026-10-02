@@ -188,6 +188,33 @@ func TestReportQuotesTheRequestsAndVersionsTheViolationNamed(t *testing.T) {
 	}
 }
 
+// botbox's garbage collector runs only on envtest, and its deletes never
+// reach requests.jsonl.
+func TestReportNamesTheCollectorsDeletesWhereItRan(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		collector bool
+		want      string
+	}{
+		{"on a cluster with its own garbage collector", false,
+			"The run directory holds `requests.jsonl`, `objects.jsonl` and `target.log`.\n"},
+		{"on envtest", true,
+			"The run directory holds `requests.jsonl`, `objects.jsonl`, `collector.jsonl` and `target.log`. " +
+				"`collector.jsonl` holds each delete that botbox's garbage collector tried.\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			failure := failingRun()
+			failure.Collector = tc.collector
+
+			md, _ := write(t, failure)
+
+			if !strings.Contains(md, "botbox v1.2.3 exercised toy-widget v0.1.0 on seed 23. "+tc.want) {
+				t.Errorf("The report does not say %q:\n%s", tc.want, md)
+			}
+		})
+	}
+}
+
 func TestReportNamesWhatRanWhereNoVersionIsDeclared(t *testing.T) {
 	failure := failingRun()
 	failure.Target.Version, failure.Botbox = "", ""

@@ -36,9 +36,9 @@ func (in Input) firstExcusedExitSince(op Op, exit Exit) bool {
 }
 
 // faultsOwed is Owed of the faults alone: as long after the last of them as
-// they lasted, and T_settle more. A target backs off while its requests fail,
-// and one that doubles its delay retries within as long as it has been
-// failing. That span starts no earlier than the target's last convergence,
+// they lasted, and timeouts.settle more. A target backs off while its
+// requests fail, and one that doubles its delay retries within as long as it
+// has been failing. That span starts no earlier than the target's last convergence,
 // which is when it last recovered.
 func (in Input) faultsOwed(t time.Time) time.Time {
 	recovered := in.lastConverged(t)

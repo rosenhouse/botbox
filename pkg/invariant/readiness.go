@@ -161,8 +161,9 @@ func (w readyWalk) failure() string {
 
 // starting says how the target was still starting at at, or is empty. A wait
 // does not converge on a target waiting to restart or not yet back, and a
-// restart and the target's return are changes, which a wait needs T_stable
-// past. A target still starting may not yet have acted on the run.
+// restart and the target's return are changes, which a wait needs
+// timeouts.stable past. A target still starting may not yet have acted on the
+// run.
 func (in Input) starting(at time.Time) string {
 	stable := in.timeouts().Stable
 	for _, exit := range in.Exits {

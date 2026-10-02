@@ -13,8 +13,8 @@ import (
 
 // CleanDeletion is G3: after the CR is deleted with no fault active, every
 // object the target manages for it is deleted and the CR's finalizers are
-// cleared within T_delete (DESIGN.md §6). Owned children go with the
-// collector, so what remains is an orphan or an uncleared finalizer (§5.8).
+// cleared within timeouts.delete. The garbage collector deletes the children
+// the CR owns, so what remains is an orphan or an uncleared finalizer.
 func CleanDeletion(in Input) (Result, error) {
 	out := Result{ID: "G3"}
 	for _, deleted := range in.crDeletions() {
@@ -35,14 +35,14 @@ func CleanDeletion(in Input) (Result, error) {
 
 // noteWhatBotboxTook records the objects botbox deleted inside the window
 // after the CR went. A deleteManaged op takes an object out of the target's
-// hands (DESIGN.md §5.4), and the target had until the deadline, so whether
-// it would have cleaned that object is nobody's to say (D38). Judging it
-// either way would be a guess; a silent pass reads as cleanup that happened.
+// hands, and the target had until the deadline, so whether it would have
+// cleaned that object is nobody's to say. Judging it either way would be a
+// guess; a silent pass reads as cleanup that happened.
 func (out *Result) noteWhatBotboxTook(in Input, deleted deletion, deadline time.Time) {
 	states := in.statesAt([]time.Time{deleted.at, deadline})
 	had, since := states[0], states[1]
 	for _, op := range in.Ops {
-		// Only a DeleteManaged op names an object it took (DESIGN.md §5.4).
+		// Only a DeleteManaged op names an object it took.
 		was, hadIt := had.version(op.Deleted)
 		if !hadIt {
 			continue
@@ -81,7 +81,7 @@ func (in Input) cleanedBy(t time.Time) bool {
 
 // deletion is one deletion of the primary CR, timestamped as the Observer saw
 // it: metadata.deletionTimestamp holds whole seconds only. Its deadline is
-// T_delete later.
+// timeouts.delete later.
 type deletion struct {
 	key          observe.Key
 	uid          types.UID
@@ -172,8 +172,8 @@ func (in Input) answering(deleted deletion, left observe.Version) string {
 	return "the CR " + deleted.key.Name
 }
 
-// orphaned names what the collector could not reach: an object with no
-// ownerReference to the CR is the target's own to delete (DESIGN.md §6, §5.8).
+// orphaned names what the garbage collector could not reach: an object with
+// no ownerReference to the CR is the target's own to delete.
 func orphaned(left observe.Version, cr types.UID) string {
 	if ownedBy(left.OwnerReferences, cr) {
 		return ""

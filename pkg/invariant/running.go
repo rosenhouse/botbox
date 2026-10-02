@@ -61,8 +61,8 @@ func won(r proxy.Request) bool {
 func isLease(r proxy.Request) bool { return leaderElection(r) && r.Resource == "leases" }
 
 // settledBy is when a target botbox restarted at restart must have converged:
-// T_settle past its return where it returned within T_settle, or else T_settle
-// past the restart.
+// timeouts.settle past its return where it returned within timeouts.settle,
+// or else timeouts.settle past the restart.
 func (in Input) settledBy(restart time.Time) time.Time {
 	settle := in.timeouts().Settle
 	if back, found := Back(in.Requests, restart); found && back.Before(restart.Add(settle)) {

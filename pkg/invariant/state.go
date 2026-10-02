@@ -46,7 +46,6 @@ func (s state) version(key observe.Key) (observe.Version, bool) {
 	return observe.Version{}, false
 }
 
-// managed returns the objects the target manages (DESIGN.md §6).
 func (s state) managed(in Input) []observe.Version {
 	var managed []observe.Version
 	for _, v := range s.live {

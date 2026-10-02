@@ -7,8 +7,7 @@ import (
 )
 
 // BoundedReconciliation is G1: once the settle wait has ended, the target
-// makes no more API requests in T_stable than thresholds.quiet allows
-// (DESIGN.md §6).
+// makes no more API requests in timeouts.stable than thresholds.quiet allows.
 func BoundedReconciliation(in Input) (Result, error) {
 	out := Result{ID: "G1"}
 	allowed := in.quietAllowance()

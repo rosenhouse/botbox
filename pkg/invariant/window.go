@@ -13,12 +13,12 @@ import (
 )
 
 // MaxEvidence caps how much of a request log or a version history one
-// violation carries into the report (DESIGN.md §5.7).
+// violation carries into the report.
 const MaxEvidence = 20
 
-// quiet is a stretch in which DESIGN.md §6 requires the run to have gone
-// still: the T_stable that follows an op's settle wait, and the T_stable the
-// teardown waits before it deletes. G1 and G2 both check it.
+// quiet is a stretch in which the run must have gone still: the
+// timeouts.stable that follows an op's settle wait, and the timeouts.stable
+// the teardown waits before it deletes. G1 and G2 both check it.
 type quiet struct {
 	what       string
 	start, end time.Time
@@ -55,10 +55,10 @@ func (in Input) quietWindows() []quiet {
 	return windows
 }
 
-// teardownWindow is the T_stable the teardown waits before it deletes
-// anything, which §5.5 step 4 makes a quiet window of its own: a run whose
-// last op never settles has no other. The teardown clears every fault before
-// the window opens, so a fault it cleared did not reach into it.
+// teardownWindow is the timeouts.stable the teardown waits before it deletes
+// anything. It is a quiet window of its own, because a run whose last op never
+// settles has no other. The teardown clears every fault before the window
+// opens, so a fault it cleared did not reach into it.
 func (in Input) teardownWindow() (quiet, bool) {
 	w := quiet{
 		what:  fmt.Sprintf("the %s (timeouts.stable) the teardown waited before deleting", in.timeouts().Stable),
@@ -72,8 +72,9 @@ func (in Input) teardownWindow() (quiet, bool) {
 }
 
 // settleEnd is when the op's settle wait ended, on convergence or where it
-// gave up, which is where §6's quiet window opens. An op the Runner did not settle
-// after, or whose wait the run did not reach the end of, has no window.
+// gave up, which is where the op's quiet window opens. An op the Runner did
+// not settle after, or whose wait the run did not reach the end of, has no
+// window.
 func (in Input) settleEnd(op int) (time.Time, bool) {
 	for _, checkpoint := range in.Checkpoints {
 		if checkpoint.Op == op && checkpoint.Settle != NoSettle {
@@ -90,18 +91,16 @@ func (in Input) tornDown(t time.Time) bool {
 }
 
 // Excerpt is bounded evidence and how many entries it was chosen from. The
-// bound is D35's; the count is what lets a report say it quoted a part. Of
-// names the object a timeline is the history of, and is empty for evidence
-// drawn from several.
+// count lets a report say it quoted a part. Of names the object a timeline is
+// the history of, and is empty for evidence drawn from several.
 type Excerpt[T any] struct {
 	Quoted []T
 	Total  int
 	Of     string
 }
 
-// Recent caps a timeline of evidence at its MaxEvidence latest entries
-// (DESIGN.md §5.7, D35). The Runner bounds the evidence of a violation it
-// raises itself the same way.
+// Recent caps a timeline of evidence at its MaxEvidence latest entries. The
+// Runner bounds the evidence of a violation it raises itself the same way.
 func Recent[T any](evidence []T) Excerpt[T] {
 	if len(evidence) > MaxEvidence {
 		return Excerpt[T]{Quoted: evidence[len(evidence)-MaxEvidence:], Total: len(evidence)}
@@ -110,8 +109,7 @@ func Recent[T any](evidence []T) Excerpt[T] {
 }
 
 // RecentHistory caps one object's history and names it, so that a report can
-// say whose versions it quotes without any site spelling the subject out
-// (DESIGN.md §5.7).
+// say whose versions it quotes without any site spelling the subject out.
 func RecentHistory(key observe.Key, history []observe.Version) Excerpt[observe.Version] {
 	quoted := Recent(history)
 	quoted.Of = observe.KindName(key.GVK) + " " + key.Name
@@ -122,7 +120,7 @@ func RecentHistory(key observe.Key, history []observe.Version) Excerpt[observe.V
 // a bound of its own so that it does not crowd out the timeline beside it. It
 // takes one object from each kind in turn, newest first, so that a bound too
 // small for them drops the oldest of each kind rather than every object of the
-// kinds that sort last (DESIGN.md §5.7, D39).
+// kinds that sort last.
 func Sample(managed []observe.Version) Excerpt[observe.Version] {
 	kinds := map[schema.GroupVersionKind][]observe.Version{}
 	for _, v := range managed {

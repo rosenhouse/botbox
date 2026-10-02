@@ -60,6 +60,8 @@ func TestTheReferenceSaysAHeldRequestHoldsASettleWait(t *testing.T) {
 		"One held as the wait's time runs out keeps the wait open until `timeouts.settle` past its release.",
 		"It keeps a `recreate`'s wait for its old CR open the same way.",
 		"botbox does not check your properties where a wait ends with a request held, or released within `timeouts.stable`, and the run notes it.",
+		"botbox exits 2 where a `recreate`'s old CR outlasts the wait and no check fails, because the op cannot go on.",
+		"End the fault before the `recreate` with `until.op`.",
 	} {
 		if !reference.Says(t, opsHeading, says) {
 			t.Errorf("%s does not say under %q: %s", reference.Path, opsHeading, says)

@@ -2307,4 +2307,11 @@ built from source and run as a black-box binary.
   From `T_stable` after every fault's window has closed, checkpoints judge properties as
   before. A fault's window also lasts until the proxy releases what it held, because the
   target still waits on the fault. The checks therefore excuse the target over that time,
-  and the time it owes runs from the release. The derived deadline allows for both.
+  and the time it owes runs from the release. The derived deadline allows for both. A
+  `recreate`'s wait under requests held one after another can end with the old CR still
+  there. Under a 5 s delay on every ConfigMap request, the toy's lists and deletes ran
+  past the wait, and the run ended as a harness error. Any fault that keeps the CR past
+  the wait does that, as a 500 on the toy's ConfigMap deletes does. Holding the wait open
+  while the proxy holds request after request was rejected. An active fault excuses the
+  target, so no check gives such a wait an end, and a target that renews a lease under a
+  delay would hold it open until the derived deadline.

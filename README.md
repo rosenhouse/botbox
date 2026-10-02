@@ -645,6 +645,10 @@ Exit 2 means botbox could not test your controller, and the message says what to
   for `botbox replay`. A controller that binds a fixed port, such as a health probe on
   `:8081`, collides with a second invocation of itself. Give it a free port in
   `launch.args`, or with `--launch-arg`.
+- A `recreate` cannot create its CR while the old one is there, so botbox exits 2 where the
+  old CR outlasts the wait and no check fails. A fault active during the `recreate` can do
+  that to a correct controller, as a delay on each request it makes can. End the fault
+  before the `recreate` with `until.op`.
 
 ## Running in CI
 

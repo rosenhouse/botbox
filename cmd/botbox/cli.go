@@ -41,13 +41,13 @@ const (
 )
 
 const (
-	// shrinkDir holds the replays of a shrink pass, which the run directory
-	// keeps none of.
+	// shrinkDir holds a shrink pass's replays, which are deleted before the
+	// report is written.
 	shrinkDir = "shrink"
 	// sequenceFile is what run.WriteRunSequence writes.
 	sequenceFile = "sequence.json"
-	// shrunkFile holds a minimized sequence the deadline or an interrupt left
-	// unrun, which no recording in the directory is of.
+	// shrunkFile holds a minimized sequence that the deadline or an interrupt
+	// left unrun, so no recording in the directory comes from it.
 	shrunkFile = "sequence.shrunk.json"
 )
 

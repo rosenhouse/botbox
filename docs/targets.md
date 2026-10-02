@@ -70,7 +70,8 @@ binds a free one, such as `127.0.0.1:0`, so that two invocations do not collide.
 envtest runs no garbage collector, so botbox runs its own over the kinds your target declares.
 It deletes an object once every owner the object names is gone. It treats a foreground or
 orphan delete as a background one. It finds an owner by group, kind and name, at any version
-the API server serves, and then compares the UID.
+the API server serves, and then compares the UID. A failing run's `collector.jsonl` records
+each delete it tried and how the delete ended.
 
 botbox counts as live an owner it cannot resolve: one of a kind your target does not declare,
 or one named at a version the API server does not serve. It never deletes an object that names

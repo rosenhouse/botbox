@@ -32,6 +32,11 @@ A passing run leaves only its entry in the summary. A failing run writes its evi
   again for its evidence, because the deadline or an interrupt came first. It exists only then.
 - `requests.jsonl` holds every request your controller made, as the proxy saw it.
 - `objects.jsonl` holds every version of every object botbox observed.
+- `collector.jsonl` holds each delete that botbox's garbage collector tried on envtest: when,
+  the object, each owner and why it counts as gone, and how the delete ended, such as
+  `deleted`, `not found` or `conflict`. These deletes never pass the proxy, so
+  `requests.jsonl` lacks them. The file is empty where the collector deleted nothing, and
+  absent on a cluster with a garbage collector of its own.
 - `target.log` holds your controller's own output.
 - `kubeconfig` is the kubeconfig your controller was given. It points at the proxy rather than
   the API server, and names the run's namespace.

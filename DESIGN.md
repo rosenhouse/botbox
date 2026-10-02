@@ -89,7 +89,8 @@ external-secrets, upstream open-source projects, unmodified and pinned by versio
 ```
 
 In envtest mode the test cluster also includes botbox's garbage-collector emulation
-(§5.8). It writes to the API server directly, never through the proxy.
+(§5.8). It writes to the API server directly, never through the proxy, and records its
+own deletes.
 
 ### 5.1 Launcher
 
@@ -454,8 +455,11 @@ Consequences:
   per object that carries it (§6). The emulator is watch-driven and deletes within 1 s of
   the owner's deletion event. It does not patch dangling ownerReferences off a dependent
   that still has a live owner. `blockOwnerDeletion`, foreground and orphan policies are
-  not modelled. Its writes bypass the proxy and never count as target traffic. On a
-  kubeconfig cluster it is off.
+  not modelled. Its writes bypass the proxy and never count as target traffic. It records
+  each delete it sends in `collector.jsonl` (§11, D@90): when, the object with the UID
+  and resourceVersion it read, which are the delete's preconditions, each owner and
+  whether it was not found or held by another UID, and how the delete ended, a 404 or a
+  409 included. On a kubeconfig cluster it is off.
 - **Self-cleanup.** The Runner empties the run namespace itself (§5.5, step 4).
 - **No workloads.** A kind that runs Pods, and a claim Pods mount, keep the status they
   were created with: Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob,
@@ -1283,10 +1287,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   `<out>/<timestamp>-<seed>/`, taking the next free name where a second invocation of one
   seed opens a directory in the same second. Each failing run writes `run-<n>/` under it
   with `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl`,
-  `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
-  where the deadline or an interrupt ended the shrink pass before its result could be
-  run there. The `kubeconfig` names the proxy and the run namespace. A passing run's
-  recordings are not kept.
+  `target.log`, the `kubeconfig` the target was given and, on envtest, `collector.jsonl`,
+  plus `sequence.shrunk.json` where the deadline or an interrupt ended the shrink pass
+  before its result could be run there. The `kubeconfig` names the proxy and the run
+  namespace. A passing run's recordings are not kept.
   Once `run` or `replay` has read or drawn its sequences, it writes `summary.json` and
   `summary.md` into the invocation's directory. It writes them again as each run starts,
   once a run finds a violation, before it runs a minimized sequence again, and when the
@@ -2436,3 +2440,18 @@ built from source and run as a black-box binary.
 - **D86 The envtest tier's CI budget is ten minutes.** On CI, `pkg/run` alone took 309 s,
   past the five minutes the tier had. The maintainer chose a larger budget over shorter
   tests or a tier split across jobs.
+- **D@90 A run records each delete of botbox's garbage collector.** Hunt seed 1043 failed
+  where cert-manager re-pointed a Secret's ownerReference just before the collector
+  deleted the Secret, and the delete failed its precondition. The collector's writes
+  bypass the proxy, and it dropped a 404 or a 409 silently. `objects.jsonl` showed the
+  Secret go, but not who deleted it, nor that a delete lost a race, and triage needed a
+  private build that logged the collector. On envtest a run now writes `collector.jsonl`,
+  one line per delete the collector sends (§5.8), and a report names it. A file of its own
+  keeps `requests.jsonl` to the target's traffic, which G1, G2 and G6 read and a reader
+  takes as the controller's. `objects.jsonl` holds what the Observer saw, and a delete that
+  lost its race changed no object. Owner reads are not recorded: a sweep reads every owner
+  on each event, and the delete's line says what the read found. A run whose collector
+  deleted nothing writes an empty file, which says so. A kubeconfig cluster's collector is
+  not botbox's, so botbox writes no file there. The lines are held in memory and written
+  as the run ends, as the other recordings are, so a passing run whose directory is
+  discarded pays for one line per delete.

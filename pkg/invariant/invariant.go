@@ -106,9 +106,9 @@ type Checkpoint struct {
 	Held bool
 }
 
-// FaultWindow is a period in which a fault was active. Every
-// invariant ignores what a fault reached into. A zero End means the fault
-// outlived the run.
+// FaultWindow is a period in which a fault was active. Every invariant
+// ignores what a fault reached into. A zero End means the fault outlived the
+// run.
 type FaultWindow struct{ Start, End time.Time }
 
 // overlaps reports whether the fault was active anywhere in [from, to]. A

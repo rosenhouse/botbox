@@ -82,8 +82,8 @@ func bound(timeouts target.Timeouts, s Sequence) float64 {
 	// From the first fault on, each op allows an exit, owed timeouts.settle
 	// past a return that can come timeouts.settle after a restart that can
 	// take MaxBackoff. Faults that stop are owed as long as they lasted and
-	// timeouts.settle, a hold past that, and another exit. A fault lasts until the proxy releases what
-	// it held, up to the delay past its trigger.
+	// timeouts.settle, a hold past that, and another exit. A fault lasts until
+	// the proxy releases what it held, up to the delay past its trigger.
 	exit := float64(launch.MaxBackoff) + 2*settle
 	waits += float64(exits) * exit
 	for range stops {

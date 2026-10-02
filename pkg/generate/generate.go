@@ -160,9 +160,9 @@ func (g *Generator) sequence(t *rapid.T) run.Sequence {
 // checkpointed inserts the settle waits that leave the drawn ops judged. A
 // restart is wrapped in them: G5 compares the converged state either side of
 // a restart, less what another op in between may have changed. The last op
-// takes one because nothing else judges the state the run ends in. A noSettle elsewhere is left alone. A deleted fixture comes back
-// before the next op that settles, since the target may rightly not be ready
-// without it.
+// takes one because nothing else judges the state the run ends in. A noSettle
+// elsewhere is left alone. A deleted fixture comes back before the next op
+// that settles, since the target may rightly not be ready without it.
 func checkpointed(ops []run.Op) []run.Op {
 	judged := make([]run.Op, 0, 3*len(ops))
 	settled := false

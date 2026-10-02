@@ -338,9 +338,8 @@ func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, e
 
 // reportFailure minimizes a sequence botbox drew and leaves it in the run
 // directory with the evidence of a run of it. A sequence the caller wrote is
-// reported as it was written. It calls rerunning before it
-// runs the minimized sequence, and returns the violation and notes the report
-// carries.
+// reported as it was written. It calls rerunning before it runs the minimized
+// sequence, and returns the violation and notes the report carries.
 func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *target.Target,
 	failed planned, result run.Result, number int, dir string, rerunning func()) (run.Violation, []string) {
 	violation := *result.Violation
@@ -601,8 +600,9 @@ func exitCode(result run.Result, err error) int {
 var errRunInterrupted = errors.New("an interrupt stopped the run")
 
 // named blames an interrupt, or the deadline, for a run its context cut short.
-// The deadline exits 2, which a reader has to be able to tell from a broken
-// target. The context botbox built from the deadline is what it asks.
+// botbox exits 2 at the deadline, as it does for a broken target, so the error
+// has to say which. The context botbox built from the deadline is what it
+// asks.
 // The teardown's cleanup runs on a budget of its own.
 func (o options) named(ctx context.Context, err error) error {
 	if _, ok := interruption(ctx); ok && errors.Is(err, context.Canceled) {

@@ -229,8 +229,8 @@ type Checkpoint struct {
 type Window struct{ Start, End time.Time }
 
 // Run executes one sequence against a fresh namespace and evaluates
-// opts.Check at each checkpoint. The proxy's fault sampling follows
-// the sequence's seed, so a replay faults the same requests.
+// opts.Check at each checkpoint. The proxy's fault sampling follows the
+// sequence's seed, so a replay faults the same requests.
 func Run(ctx context.Context, t *target.Target, sequence Sequence, opts Options) (Result, error) {
 	if err := validateRun(t, sequence, opts); err != nil {
 		return Result{}, fmt.Errorf("running the sequence: %w", err)

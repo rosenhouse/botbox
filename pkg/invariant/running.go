@@ -27,7 +27,7 @@ func Back(requests []proxy.Request, since time.Time) (time.Time, bool) {
 	return first, !first.IsZero()
 }
 
-// notBack says what a target not back since since had not done.
+// notBack says what a target that is not back had not done after since.
 func notBack(requests []proxy.Request, since time.Time) string {
 	if electing(requests, since) {
 		return "won no lease"

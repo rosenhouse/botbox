@@ -26,6 +26,10 @@ func TestBackIsTheFirstRequestThatShowsTheTargetRunning(t *testing.T) {
 			request(500*time.Millisecond, get("w-0")).
 			request(time.Second, get("w-0")).
 			request(1400*time.Millisecond, watch()), 1400 * time.Millisecond},
+		{"one after it listed and watched leases", newRun().
+			request(1100*time.Millisecond, lease("list")).
+			request(1200*time.Millisecond, lease("watch")).
+			request(1400*time.Millisecond, watch()), 1400 * time.Millisecond},
 		{"one after leader election up to since", newRun().
 			request(time.Second, lease("get")).
 			request(1400*time.Millisecond, watch()), 1400 * time.Millisecond},
@@ -110,6 +114,7 @@ func TestBackFindsNothingUntilTheTargetShowsItRuns(t *testing.T) {
 			request(1200*time.Millisecond, lease("get")),
 		"lease writes the API server refused": newRun().
 			request(1100*time.Millisecond, watch()).
+			request(1150*time.Millisecond, lease("get")).
 			request(1200*time.Millisecond, leaseAnswered("create", http.StatusConflict)).
 			request(1300*time.Millisecond, leaseAnswered("update", http.StatusInternalServerError)),
 		"a lease update the API server has not answered": newRun().

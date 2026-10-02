@@ -293,12 +293,13 @@ The Runner executes one sequence:
    converged, the target has shown it runs, and the Launcher supervises it (§5.1). The run
    notes each exit and the line the target wrote as it stopped. A wait does not converge
    while the target waits to restart, nor until the process now running has shown it runs.
-   A target that requests leader election shows it once the API server accepts its create
-   or update of a lease, because a controller can start informers before it leads. Another
-   shows it by requesting a resource, because a controller lists what it watches as it
-   starts. botbox has no other sign that a target is back. A start and that sign count as
-   changes, so a restarted target runs for `T_stable` past its return before a wait
-   converges. A target that exits again within `T_stable` of each return therefore never
+   A target that gets a Lease, as leader election does to learn who holds it, shows it once
+   the API server accepts its create or update of a lease, because a controller can start
+   informers before it leads. Another shows it by requesting a resource outside leader
+   election, because a controller lists what it watches as it starts. botbox has no other
+   sign that a target is back. A start and that sign count as changes, so a restarted
+   target runs for `T_stable` past its return before a wait converges. A target that
+   exits again within `T_stable` of each return therefore never
    converges, even where it wrote its converged state first, and its wait expires as a G4
    that counts the exits since the target last converged and quotes the last. A target
    that runs longer between exits can converge in between, until a backoff outlasts a
@@ -2355,7 +2356,8 @@ built from source and run as a black-box binary.
   of a lease. controller-runtime starts the informers a field index asks for before the
   manager leads. The toy with an index watched Widgets while it waited out its lease, that
   watch counted as its return, the wait converged before the toy led, and P1 failed in 3
-  of 3 runs. Any `coordination.k8s.io` request marks a target that elects (D61), so a
-  target that reads Leases and elects no leader never shows it runs, and fails G4.
+  of 3 runs. A get of a Lease marks a target that elects, because leader election gets
+  its Lease to learn who holds it, and an informer lists and watches instead. A target
+  that gets a Lease and elects no leader therefore never shows it runs, and fails G4.
   Keeping the sign of D60 and D69 and stating the limit was rejected, because the wait
   itself converged too early.

@@ -187,7 +187,7 @@ func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 		{"with lease requests alone", deletedAfter(restarted().requests(9100*time.Millisecond, 500*time.Millisecond, 4, lease("get"))), wonNoLease},
 		{"with lease candidate requests alone", deletedAfter(restarted().
 			request(9100*time.Millisecond, leaseCandidate("list")).
-			request(9200*time.Millisecond, leaseCandidate("create"))), wonNoLease},
+			request(9200*time.Millisecond, leaseCandidate("create"))), wantNote},
 		{"with a watch before it won its lease", deletedAfter(restarted().
 			request(9100*time.Millisecond, watch()).
 			request(9200*time.Millisecond, lease("get")).
@@ -245,17 +245,20 @@ func TestG7JudgesAnObjectDeletedOnceARestartedTargetWasBack(t *testing.T) {
 		{"after a supervised restart", func() *run { return converged().exit(9*time.Second, 9*time.Second) }},
 	} {
 		for _, c := range []struct {
-			name    string
-			request proxy.Request
+			name     string
+			requests []proxy.Request
 		}{
-			{"with a watch", watch()},
-			{"with a get the API server refused", failedGet("w-0", http.StatusNotFound)},
-			{"with a resource named leases in another group", leasesElsewhere()},
-			{"with a lease it won", lease("update")},
+			{"with a watch", []proxy.Request{watch()}},
+			{"with a get the API server refused", []proxy.Request{failedGet("w-0", http.StatusNotFound)}},
+			{"with a resource named leases in another group", []proxy.Request{leasesElsewhere()}},
+			{"with a lease it won", []proxy.Request{lease("get"), lease("update")}},
 		} {
 			t.Run(restart.name+" "+c.name, func(t *testing.T) {
-				in := restart.restarted().
-					request(9500*time.Millisecond, c.request).
+				r := restart.restarted()
+				for i, request := range c.requests {
+					r.request(9500*time.Millisecond+time.Duration(i)*100*time.Millisecond, request)
+				}
+				in := r.
 					deletedManaged(10*time.Second, "w-0").
 					remove(10100*time.Millisecond, child("w-0", "15")).
 					checkpoint(12100*time.Millisecond, invariant.Converged).

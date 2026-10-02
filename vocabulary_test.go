@@ -26,11 +26,8 @@ var citesDesign = map[string]string{
 // Every string botbox prints comes from a literal, so no literal may need
 // DESIGN.md to be understood.
 func TestNoStringLiteralUsesTheDesignsVocabulary(t *testing.T) {
-	files := goFilesOutsideTests(t, "docs")
-	if !slices.Contains(files, "pkg/invariant/g2.go") {
-		t.Fatalf("The scan listed %v, which skips the checks.", files)
-	}
-	for _, path := range files {
+	read := map[string]bool{}
+	for _, path := range goFilesOutsideTests(t, "docs") {
 		parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.SkipObjectResolution)
 		if err != nil {
 			t.Fatal(err)
@@ -40,6 +37,7 @@ func TestNoStringLiteralUsesTheDesignsVocabulary(t *testing.T) {
 			if !ok || literal.Kind != token.STRING {
 				return true
 			}
+			read[path] = true
 			value, err := strconv.Unquote(literal.Value)
 			if err != nil {
 				t.Fatalf("%s: %v", path, err)
@@ -53,29 +51,37 @@ func TestNoStringLiteralUsesTheDesignsVocabulary(t *testing.T) {
 			return true
 		})
 	}
+	requireRead(t, read, "cmd/botbox/main.go", "pkg/invariant/g2.go", "targets/toy-widget/controller/bug.go")
 }
 
 // A comment must make sense without DESIGN.md open. go doc prints some of
 // them, and go install ships no DESIGN.md.
 func TestNoCommentUsesTheDesignsVocabulary(t *testing.T) {
-	files := goFilesOutsideTests(t)
-	for _, scanned := range []string{"cmd/botbox/main.go", "pkg/invariant/g2.go", "docs/spikes/cert-manager-envtest/main.go"} {
-		if !slices.Contains(files, scanned) {
-			t.Fatalf("The scan listed %v, which skips %s.", files, scanned)
-		}
-	}
+	read := map[string]bool{}
 	positions := token.NewFileSet()
-	for _, path := range files {
+	for _, path := range goFilesOutsideTests(t) {
 		parsed, err := parser.ParseFile(positions, path, nil, parser.ParseComments|parser.SkipObjectResolution)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for _, group := range parsed.Comments {
+			read[path] = true
 			for _, comment := range group.List {
 				if found := designVocabulary.FindString(comment.Text); found != "" {
 					t.Errorf("%s: %s uses %q, which only DESIGN.md explains.", positions.Position(comment.Pos()), comment.Text, found)
 				}
 			}
+		}
+	}
+	requireRead(t, read, "cmd/botbox/main.go", "pkg/invariant/g2.go", "targets/toy-widget/controller/bug.go", "docs/spikes/cert-manager-envtest/main.go")
+}
+
+// requireRead fails unless the scan read something in each of paths.
+func requireRead(t *testing.T, read map[string]bool, paths ...string) {
+	t.Helper()
+	for _, path := range paths {
+		if !read[path] {
+			t.Errorf("The scan read nothing in %s.", path)
 		}
 	}
 }

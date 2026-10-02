@@ -26,8 +26,8 @@ A passing run leaves only its entry in the summary. A failing run writes its evi
   and the evidence.
 - `report.json` holds the same, for a machine.
 - `sequence.json` holds the sequence that the rest of the directory is evidence of. botbox
-  minimizes a drawn sequence before it reports, so this is the minimized one. `summary.json`
-  keeps the sequence as drawn.
+  minimizes a drawn sequence before it reports, so this is the minimized one, unless the
+  deadline or an interrupt cut minimizing short. `summary.json` keeps the sequence as drawn.
 - `sequence.shrunk.json` holds a smaller failing sequence that botbox found but did not run
   again for its evidence, because the deadline or an interrupt came first. It exists only then.
 - `requests.jsonl` holds every request your controller made, as the proxy saw it.
@@ -66,9 +66,9 @@ where its `when` says, once for each CR. Its default `when`, `checkpoint`, runs 
 settle wait ends and at the end of the teardown. It binds that CR's `metadata`, `spec` and
 `status`, and `managed`: the objects whose ownerReferences name that CR, and those that name no
 CR. Where no CR exists, it runs once with empty `metadata`, `spec` and `status` over every
-managed object, and the report says that no CR existed. So a property whose `when` is
-`checkpoint` or `end` always runs where no CR exists. Guard it with `has()`, or begin it with
-`!has(metadata.name) ||`, which holds there.
+managed object, and the report says that no CR existed. So every property can run where no CR
+exists, and one whose `when` is `checkpoint` or `end` always does. Guard it with `has()`, or
+begin it with `!has(metadata.name) ||`, which holds there.
 
 The report quotes the property's description, the versions of the CR it failed on, and the
 managed objects' metadata. Read the values the property judged from `objects.jsonl`.
@@ -115,6 +115,26 @@ Where a fault reached into the deletion, G3 cannot judge it. The settle wait's G
 `the CR … was still being deleted, held by the finalizers …`. Where the CR's deletion deadline
 held the wait open past `settle`, the line gives `timeouts.delete is …` in place of
 `timeouts.settle is …`.
+
+## When G1, G2, G5, G6 or G7 fails
+
+- G1's `the target made … API requests in the … (timeouts.stable) after op …, where
+  thresholds.quiet allows …` counts what your controller requested once it had converged. A
+  controller that resyncs on a timer needs a `quiet` that
+  [fits the timer](targets.md#thresholds).
+- G2's `the target changed … objects in …, where a converged target changes nothing` means your
+  controller kept rewriting what it manages, such as a timestamp in a status. Its
+  `the target made … status writes in …` counts writes that changed nothing, which `quiet`
+  bounds.
+- G5's line names the first field a restart changed. Name a field your controller stamps at
+  startup in [`equalIgnore`](targets.md#equalignore).
+- G6's `the target repeated the failing request … times within … (timeouts.settle), where
+  thresholds.errloop allows …` names the request your controller kept retrying.
+  [Thresholds](targets.md#thresholds) says how `errloop` relates to `settle`.
+- G7's `the … that op … (deleteManaged) deleted never came back …` means your controller did
+  not recreate the object. Check that it watches the kind, and that the object carries the
+  controller ownerReference that `Owns()` follows. List a kind your controller leaves deleted
+  by design under [`notRecreated`](targets.md#deleted-objects).
 
 ## Restarts and crash loops
 

@@ -29,9 +29,9 @@ resync that makes one request needs `quiet: 1` under the default `stable` of 10s
 
 `quiet` also bounds the status writes that change nothing, which G2 counts. A write that
 changes something fails G2 whatever `quiet` is. If the timer that makes it fires more often
-than once per `stable`, it fails G4 instead, because the settle wait never sees `stable` of
-quiet. Keep `quiet` as low as your
-timer allows, since G1 lets a slow loop of that many requests through.
+than once per `stable`, your controller fails G4 instead, because the settle wait never sees
+`stable` of quiet. Keep `quiet` as low as your timer allows, since G1 lets a slow loop of
+that many requests through.
 
 G6 fails a controller that repeats one failing request more than `thresholds.errloop` times
 within `settle`. controller-runtime's default backoff repeats a request 11 times in its first

@@ -448,6 +448,21 @@ func TestTheReadmesReadyConditionExampleHoldsOnlyOnACurrentReadyCondition(t *tes
 	}
 }
 
+// botbox --help sends a reader to docs/failures.md for what each failure means.
+func TestTheFailuresPageNamesEveryCheck(t *testing.T) {
+	checks := regexp.MustCompile(`(?m)^\| (G[0-9]+) \|`).FindAllStringSubmatch(section(t, readFile(t, "README.md"), "## Invariants"), -1)
+	if len(checks) == 0 {
+		t.Fatal("README.md's Invariants section lists no check, so this test checks nothing.")
+	}
+	// A heading that names a check says nothing of what its failure means.
+	text := regexp.MustCompile(`(?m)^#.*$`).ReplaceAllString(readFile(t, "docs/failures.md"), "")
+	for _, check := range checks {
+		if !regexp.MustCompile(`\b` + check[1] + `\b`).MatchString(text) {
+			t.Errorf("docs/failures.md does not say what a %s failure means.", check[1])
+		}
+	}
+}
+
 // An invocation's directory ends in the seed of its first run.
 func TestThePagesEvidenceDirectoriesNameTheirFirstRunsSeed(t *testing.T) {
 	firstSeed, dirSeed := regexp.MustCompile(`(?m)^run 1: seed (\d+),`), regexp.MustCompile(`Z-(\d+)/run-`)

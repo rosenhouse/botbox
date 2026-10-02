@@ -76,8 +76,8 @@ run 1: G3 the v1/Secret example-tls was still there 1m0s (timeouts.delete) after
 ```
 
 Seed 23 draws a single op, so there is nothing to minimize. botbox cuts a longer sequence to the
-ops the failure needs before it reports, which costs a replay each. A derived deadline gives
-that at least 4 minutes, and a longer `--deadline` gives it more.
+ops the failure needs before it reports. Each removal it tries replays a whole run. A derived
+deadline gives that at least 4 minutes, and a longer `--deadline` gives it more.
 
 `make test-example` runs this control. It fails unless the default configuration passes, the
 control fails on G3 naming that Secret, and the control's evidence hides the Secret's private

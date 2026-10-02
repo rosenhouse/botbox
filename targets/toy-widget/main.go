@@ -1,4 +1,5 @@
-// Command toy-widget runs the Widget controller of the toy target (DESIGN.md §9).
+// Command toy-widget runs the Widget controller of the toy target, with the
+// seeded bug --bug names.
 package main
 
 import (
@@ -24,9 +25,9 @@ import (
 	"github.com/rosenhouse/botbox/targets/toy-widget/controller"
 )
 
-// b1Hold is how long B1 holds its premature status. DESIGN.md §9.1 requires
-// T_stable < hold < 2 × T_stable, which lands B1's children after the
-// checkpoint and inside the quiet window that follows.
+// b1Hold is how long B1 holds its premature status. It is longer than the
+// toy's timeouts.stable and shorter than twice that, which lands B1's children
+// after the checkpoint and inside the quiet window that follows.
 const b1Hold = 3 * time.Second
 
 func main() {

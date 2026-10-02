@@ -1,4 +1,4 @@
-// Package v1 holds the API of the toy target (DESIGN.md §9).
+// Package v1 holds the API of the toy target.
 // +kubebuilder:object:generate=true
 // +groupName=toy.botbox
 package v1
@@ -33,7 +33,7 @@ type WidgetStatus struct {
 	ObservedGeneration int64 `json:"observedGeneration"`
 	// LastSyncTime is when the controller last reconciled. Only the seeded bug
 	// B6 writes it, and it holds microseconds so that every write lands as a
-	// change (DESIGN.md §9.1).
+	// change.
 	// +optional
 	LastSyncTime *metav1.MicroTime `json:"lastSyncTime,omitempty"`
 }

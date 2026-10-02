@@ -427,7 +427,7 @@ const heldDeletes = `{
 // heldChildDeletes has the proxy hold the toy's ConfigMap deletes for
 // timeouts.settle, then deletes a Widget with three children. The wait after
 // the delete ends as the proxy releases the third delete, before the toy
-// counts the child gone.
+// removes the Widget's finalizer.
 const heldChildDeletes = `{
   "seed": 23,
   "target": "toy-widget",

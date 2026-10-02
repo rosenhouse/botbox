@@ -27,13 +27,13 @@ func Back(requests []proxy.Request, since time.Time) (time.Time, bool) {
 // first is when the first request after since that matches started, and
 // whether one did.
 func first(requests []proxy.Request, since time.Time, matches func(proxy.Request) bool) (time.Time, bool) {
-	var first time.Time
+	var earliest time.Time
 	for _, r := range requests {
-		if r.Start.After(since) && matches(r) && (first.IsZero() || r.Start.Before(first)) {
-			first = r.Start
+		if r.Start.After(since) && matches(r) && (earliest.IsZero() || r.Start.Before(earliest)) {
+			earliest = r.Start
 		}
 	}
-	return first, !first.IsZero()
+	return earliest, !earliest.IsZero()
 }
 
 // notBack says what a target that is not back had not done.
@@ -44,10 +44,10 @@ func notBack(requests []proxy.Request) string {
 	return "requested no resource outside leader election"
 }
 
-// electing reports whether the target got a lease, as leader election does to
-// learn who holds it. An informer lists and watches Leases instead. A process
-// whose caches have not synced has yet to elect, but an earlier one shows it
-// will.
+// electing reports whether the target read a lease with a get, as leader
+// election does to learn who holds it. An informer lists and watches Leases
+// instead. A process whose caches have not synced has yet to elect, but an
+// earlier one shows it will.
 func electing(requests []proxy.Request) bool { return slices.ContainsFunc(requests, gotLease) }
 
 func gotLease(r proxy.Request) bool { return isLease(r) && r.Verb == "get" }

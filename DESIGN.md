@@ -1327,7 +1327,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   run that errs keeps its directory, and the error names it and the command that replays
   the run. CI uploads that directory.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
-  5 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
+  10 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
   binary (cached). All four run on every PR. The `-nightly` target beside each example
   runs it on seeds botbox draws, with the negative control. `make test-kind` = the toy
@@ -2433,3 +2433,6 @@ built from source and run as a black-box binary.
   once it writes a lease, and fails G4 where it never does. G4 and the property read only
   the requests made by the checkpoint, as the wait did. Keeping the sign of D60 and D69
   and stating the limit was rejected, because the wait itself converged too early.
+- **D86 The envtest tier's CI budget is ten minutes.** On CI, `pkg/run` alone took 309 s,
+  past the five minutes the tier had. The maintainer chose a larger budget over shorter
+  tests or a tier split across jobs.

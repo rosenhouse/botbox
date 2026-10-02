@@ -47,12 +47,11 @@ jobs:
       - name: Unit tests
         run: make test
 
-  # Envtest tier: must finish under 5 minutes on CI (§11); the 10-minute
-  # timeout only allows headroom for a cold envtest binary download on a
-  # cache miss.
+  # §11 budgets the envtest tier at ten minutes, and the timeout adds the cold
+  # download of the envtest binaries that a cache miss pays for.
   envtest:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v5

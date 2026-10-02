@@ -91,8 +91,8 @@ func (in Input) unjudgeable(checkpoint Checkpoint, property string) string {
 		return fmt.Sprintf("the proxy held a request of the target's there, or released one in the last %s (timeouts.stable), which may still change what %s reads",
 			in.timeouts().Stable, property)
 	}
-	if down := in.notBack(checkpoint.Time); down != "" {
-		return fmt.Sprintf("the target %s, so it may not yet have acted on what %s reads", down, property)
+	if starting := in.starting(checkpoint.Time); starting != "" {
+		return fmt.Sprintf("%s, so it may not yet have acted on what %s reads", starting, property)
 	}
 	return ""
 }

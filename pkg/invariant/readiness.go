@@ -33,7 +33,7 @@ func (in Input) ExpiredWait(checkpoint Checkpoint) (Violation, error) {
 		ID: "G4",
 		Statement: fmt.Sprintf("the settle wait after %s expired with no fault active: in %s (%s), %s%s%s",
 			in.describeOp(checkpoint.Op), at.Sub(began).Round(time.Millisecond), timeout,
-			walk.why(began, in.starting(at, stable), churn(stable, changes)),
+			walk.why(began, in.starting(at), churn(stable, changes)),
 			in.repeated(began, at), in.exited(at)),
 		At: at,
 	}.quotingRequests(Recent(requestsUpTo(in.Requests, at))).
@@ -126,6 +126,9 @@ func (w *readyWalk) step(in Input, at time.Time, crs []observe.Version, written 
 // why says what kept the wait from converging: Ready, the target's start, or
 // else what changed.
 func (w readyWalk) why(began time.Time, starting, churn string) string {
+	if starting != "" {
+		starting = "but " + starting
+	}
 	switch {
 	case w.crs == 0:
 		return "no CR was left to be ready, " + cmp.Or(starting, churn)
@@ -156,24 +159,31 @@ func (w readyWalk) failure() string {
 	return "it evaluated to false"
 }
 
-// starting says how the target's start kept the wait that ended at at from
-// converging, or is empty. A target waiting to restart, or not yet back, is
-// not ready, and a restart and the target's return are changes.
-func (in Input) starting(at time.Time, stable time.Duration) string {
-	if in.waitingToRestart(at) {
-		return "but the target was waiting to restart"
+// starting says how the target was still starting at at, or is empty. A wait
+// does not converge on a target waiting to restart or not yet back, and a
+// restart and the target's return are changes, which a wait needs T_stable
+// past. A target still starting may not yet have acted on the run.
+func (in Input) starting(at time.Time) string {
+	stable := in.timeouts().Stable
+	for _, exit := range in.Exits {
+		if !exit.At.After(at) && exit.Restart.After(at) {
+			return "the target was waiting to restart"
+		}
 	}
 	for _, exit := range in.Exits {
 		if exit.Restart.After(at.Add(-stable)) && !exit.Restart.After(at) {
-			return fmt.Sprintf("but the target restarted in the last %s (timeouts.stable)", stable)
+			return fmt.Sprintf("the target restarted in the last %s (timeouts.stable)", stable)
 		}
 	}
-	start, named := in.lastStart(at)
-	switch back, found := Back(requestsUpTo(in.Requests, at), start); {
-	case !found:
-		return "but the target had requested no resource outside leader election since " + named
+	start, named := in.lastRestart(at)
+	if named == "" {
+		named = "it started"
+	}
+	switch back, found := Back(in.Requests, start); {
+	case !found || back.After(at):
+		return "the target had requested no resource outside leader election since " + named
 	case back.After(at.Add(-stable)):
-		return fmt.Sprintf("but the target had requested no resource outside leader election since %s until the last %s (timeouts.stable)", named, stable)
+		return fmt.Sprintf("the target had requested no resource outside leader election since %s until the last %s (timeouts.stable)", named, stable)
 	}
 	return ""
 }

@@ -274,9 +274,9 @@ func TestAToyThatWinsItsLeaseBackLatePasses(t *testing.T) {
 		t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
 	}
 	if !slices.ContainsFunc(result.Notes, func(note string) bool {
-		return strings.HasPrefix(note, "P1 is not evaluated at the checkpoint after op ") && strings.Contains(note, "leader election")
+		return strings.HasPrefix(note, "P1 is not evaluated at the checkpoint after op ") && strings.Contains(note, "may not yet have acted")
 	}) {
-		t.Errorf("The run noted %q, want P1 left unjudged where the toy was not back.", result.Notes)
+		t.Errorf("The run noted %q, want P1 left unjudged where the toy was still starting.", result.Notes)
 	}
 }
 

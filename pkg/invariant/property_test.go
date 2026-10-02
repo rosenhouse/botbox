@@ -98,13 +98,13 @@ func TestPropertyIsNotEvaluatedWhereTheProxyHeldARequest(t *testing.T) {
 	}
 }
 
-// stale is a run whose CR counts a child botbox deleted, which a target that
-// is not back has not yet seen go.
+// stale is a run whose CR counts a child botbox deleted, which a target still
+// starting has not yet seen go.
 func stale(when target.PropertyWhen) *run {
 	r := newRun().
 		op(invariant.OpCreate, 0).
+		running(0).
 		record(time.Second, widget("10", spec(2), status(2, 1)), child("w-0", "11"), child("w-1", "12")).
-		running(1100*time.Millisecond).
 		checkpoint(2*time.Second, invariant.Converged).
 		deletedManaged(3*time.Second, "w-1").
 		remove(3100*time.Millisecond, child("w-1", "13"))
@@ -112,8 +112,8 @@ func stale(when target.PropertyWhen) *run {
 	return r
 }
 
-// A target that is not back has not acted on what the property reads.
-func TestPropertyIsNotEvaluatedWhereTheTargetWasNotBack(t *testing.T) {
+// A target still starting may not yet have acted on what the property reads.
+func TestPropertyIsNotEvaluatedWhereTheTargetWasStillStarting(t *testing.T) {
 	for _, when := range []target.PropertyWhen{target.Checkpoint, target.End} {
 		for _, test := range []struct {
 			name string
@@ -124,6 +124,8 @@ func TestPropertyIsNotEvaluatedWhereTheTargetWasNotBack(t *testing.T) {
 				"the target was waiting to restart"},
 			{"exited at the checkpoint", stale(when).exit(8*time.Second, 9*time.Second),
 				"the target was waiting to restart"},
+			{"restarted in the last stable", stale(when).exit(4*time.Second, 6100*time.Millisecond).running(6200 * time.Millisecond),
+				"the target restarted in the last 2s (timeouts.stable)"},
 			{"after a supervised restart, with leader election alone", stale(when).exit(4*time.Second, 5*time.Second).
 				requests(5100*time.Millisecond, time.Second, 3, lease("update")),
 				"the target had requested no resource outside leader election since the restart after its exit during op 1 (deleteManaged)"},
@@ -131,6 +133,10 @@ func TestPropertyIsNotEvaluatedWhereTheTargetWasNotBack(t *testing.T) {
 				"the target had requested no resource outside leader election since the restart after its exit during op 1 (deleteManaged)"},
 			{"after a restart op", stale(when).op(invariant.OpRestart, 4*time.Second).op(invariant.OpSettle, 4*time.Second),
 				"the target had requested no resource outside leader election since op 2 (restart)"},
+			{"back in the last stable", stale(when).exit(4*time.Second, 5*time.Second).running(7900 * time.Millisecond),
+				"the target had requested no resource outside leader election since the restart after its exit during op 1 (deleteManaged) until the last 2s (timeouts.stable)"},
+			{"back at the checkpoint", stale(when).exit(4*time.Second, 5*time.Second).running(8 * time.Second),
+				"the target had requested no resource outside leader election since the restart after its exit during op 1 (deleteManaged) until the last 2s (timeouts.stable)"},
 		} {
 			t.Run(string(when)+", "+test.name, func(t *testing.T) {
 				in := test.run.checkpoint(8*time.Second, invariant.Expired).through(10 * time.Second)
@@ -144,7 +150,7 @@ func TestPropertyIsNotEvaluatedWhereTheTargetWasNotBack(t *testing.T) {
 	}
 }
 
-// A target that has never shown it runs is not back either.
+// A target that has never shown it runs is still starting too.
 func TestPropertyIsNotEvaluatedWhereTheTargetHadNotShownItRuns(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
@@ -158,12 +164,11 @@ func TestPropertyIsNotEvaluatedWhereTheTargetHadNotShownItRuns(t *testing.T) {
 		"P1 is not evaluated at the checkpoint after op 0 (create): the target had requested no resource outside leader election since it started")
 }
 
-// The property judges a target back by the checkpoint, however late it came
-// back, and the checkpoints where it was back.
+// The property judges a target back for T_stable by the checkpoint, as a wait
+// that converges does.
 func TestPropertyFiresWhereTheTargetWasBack(t *testing.T) {
 	for name, r := range map[string]*run{
-		"back just before the checkpoint": stale(target.Checkpoint).exit(4*time.Second, 5*time.Second).running(7900 * time.Millisecond),
-		"back at the checkpoint":          stale(target.Checkpoint).exit(4*time.Second, 5*time.Second).running(8 * time.Second),
+		"back for stable": stale(target.Checkpoint).exit(4*time.Second, 5*time.Second).running(6 * time.Second),
 		"back after a restart before the op": stale(target.Checkpoint).exit(2500*time.Millisecond, 2600*time.Millisecond).
 			running(2700 * time.Millisecond),
 		"exited after the checkpoint": stale(target.Checkpoint).exit(8100*time.Millisecond, 9*time.Second),
@@ -180,9 +185,9 @@ func TestPropertyFiresWhereTheTargetWasBack(t *testing.T) {
 	}
 }
 
-// One checkpoint where the target was not back leaves the property to the
-// others.
-func TestPropertyFiresAtACheckpointAfterOneWhereTheTargetWasNotBack(t *testing.T) {
+// One checkpoint where the target was still starting leaves the property to
+// the others.
+func TestPropertyFiresAtACheckpointAfterOneWhereTheTargetWasStillStarting(t *testing.T) {
 	in := stale(target.Checkpoint).
 		exit(4*time.Second, 5*time.Second).
 		checkpoint(8*time.Second, invariant.Expired).
@@ -199,7 +204,7 @@ func TestPropertyFiresAtACheckpointAfterOneWhereTheTargetWasNotBack(t *testing.T
 }
 
 // The property leaves to G4 a target that does not come back.
-func TestATargetThatIsNotBackStillFailsG4(t *testing.T) {
+func TestATargetThatDoesNotComeBackStillFailsG4(t *testing.T) {
 	in := stale(target.Checkpoint).
 		op(invariant.OpRestart, 4*time.Second).
 		op(invariant.OpSettle, 4*time.Second).
@@ -219,8 +224,9 @@ func TestATargetThatIsNotBackStillFailsG4(t *testing.T) {
 	}
 }
 
-// A property evaluated on every event reads no checkpoint.
-func TestPropertyEvaluatedAlwaysIgnoresWhereTheTargetWasNotBack(t *testing.T) {
+// A property evaluated on every event reads no checkpoint, so it judges a
+// target still starting.
+func TestPropertyEvaluatedAlwaysIgnoresWhereTheTargetWasStillStarting(t *testing.T) {
 	in := stale(target.Always).
 		exit(4*time.Second, 9*time.Second).
 		checkpoint(8*time.Second, invariant.Expired).
@@ -465,8 +471,8 @@ func TestAPropertyQuotesTheCRVersionsNearestTheViolation(t *testing.T) {
 func TestAPropertyQuotesNoVersionRecordedAfterTheViolation(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).
+		running(500*time.Millisecond).
 		record(time.Second, widget("10", spec(2), status(2, 1))).
-		running(1100*time.Millisecond).
 		checkpoint(3*time.Second, invariant.Converged).
 		record(4*time.Second, widget("11", spec(2), status(2, 1))).
 		through(8 * time.Second)
@@ -526,8 +532,8 @@ func TestAPropertyHoldsForEveryCR(t *testing.T) {
 	in := newRun().withSecondWidget().
 		op(invariant.OpCreate, 0).
 		record(100*time.Millisecond, widget("10", spec(1), status(1, 1)), secondWidget("20", spec(3), status(3, 1))).
+		running(0).
 		record(200*time.Millisecond, child("w-0", "11"), secondChild("w2-0", "21")).
-		running(300*time.Millisecond).
 		checkpoint(2*time.Second, invariant.Converged).
 		through(2 * time.Second)
 
@@ -546,8 +552,8 @@ func TestAPropertyReadsTheObjectsOfItsCR(t *testing.T) {
 	in := newRun().withSecondWidget().
 		op(invariant.OpCreate, 0).
 		record(100*time.Millisecond, widget("10", spec(2), status(2, 1)), secondWidget("20", spec(2), status(2, 1))).
+		running(0).
 		record(200*time.Millisecond, child("w-0", "11"), secondChild("w2-0", "21"), secondChild("w2-1", "22")).
-		running(300*time.Millisecond).
 		checkpoint(2*time.Second, invariant.Converged).
 		through(2 * time.Second)
 

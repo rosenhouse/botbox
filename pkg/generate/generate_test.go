@@ -550,6 +550,11 @@ func TestGeneratedValuesObeyTheOverlay(t *testing.T) {
 				rt.Fatalf("spec.dnsNames holds %d names, outside the overlay's 1 to 3.", length)
 			}
 		}
+		for _, policy := range carriedAt(sequence, "spec", "privateKey", "rotationPolicy") {
+			if policy != "Always" {
+				rt.Fatalf("spec.privateKey.rotationPolicy is %#v. Under Never, cert-manager waits for a user once a later op changes the algorithm.", policy)
+			}
+		}
 	})
 }
 

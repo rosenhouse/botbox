@@ -345,10 +345,11 @@ type deletion struct {
 	ResourceVersion string    `json:"resourceVersion"`
 	// Owners are the object's ownerReferences, every one of them gone.
 	Owners []goneOwner `json:"owners"`
-	// Result is deleted, not found, conflict or error. A conflict says the
-	// object changed since the collector read it.
+	// Result is deleted, not found, conflict or error. Deleted says the API
+	// server accepted the delete, which a finalizer can still hold. Conflict
+	// says the object changed since the collector read it.
 	Result string `json:"result"`
-	// Error is what the API server answered, unless it deleted the object.
+	// Error is what the API server answered, unless it accepted the delete.
 	Error string `json:"error,omitempty"`
 }
 

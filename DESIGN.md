@@ -459,7 +459,8 @@ Consequences:
   each delete it sends in `collector.jsonl` (§11, D@90): when, the object with the UID
   and resourceVersion it read, which are the delete's preconditions, each owner and
   whether it was not found or held by another UID, and how the delete ended, a 404 or a
-  409 included. On a kubeconfig cluster it is off.
+  409 included. It stops once the Runner has emptied the namespace (§5.5, step 4), so its
+  last deletes can race that cleanup. On a kubeconfig cluster it is off.
 - **Self-cleanup.** The Runner empties the run namespace itself (§5.5, step 4).
 - **No workloads.** A kind that runs Pods, and a claim Pods mount, keep the status they
   were created with: Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob,
@@ -2441,17 +2442,15 @@ built from source and run as a black-box binary.
   past the five minutes the tier had. The maintainer chose a larger budget over shorter
   tests or a tier split across jobs.
 - **D@90 A run records each delete of botbox's garbage collector.** Hunt seed 1043 failed
-  where cert-manager re-pointed a Secret's ownerReference just before the collector
-  deleted the Secret, and the delete failed its precondition. The collector's writes
-  bypass the proxy, and it dropped a 404 or a 409 silently. `objects.jsonl` showed the
-  Secret go, but not who deleted it, nor that a delete lost a race, and triage needed a
-  private build that logged the collector. On envtest a run now writes `collector.jsonl`,
-  one line per delete the collector sends (§5.8), and a report names it. A file of its own
-  keeps `requests.jsonl` to the target's traffic, which G1, G2 and G6 read and a reader
-  takes as the controller's. `objects.jsonl` holds what the Observer saw, and a delete that
-  lost its race changed no object. Owner reads are not recorded: a sweep reads every owner
-  on each event, and the delete's line says what the read found. A run whose collector
-  deleted nothing writes an empty file, which says so. A kubeconfig cluster's collector is
-  not botbox's, so botbox writes no file there. The lines are held in memory and written
-  as the run ends, as the other recordings are, so a passing run whose directory is
-  discarded pays for one line per delete.
+  where cert-manager re-pointed a Secret's ownerReference just before the collector's
+  delete, which then failed its precondition. The collector's writes bypass the proxy,
+  and it dropped a 404 or a 409 silently, so the evidence showed the Secret go but not
+  who deleted it. On envtest a run now writes `collector.jsonl`, a line per delete the
+  collector sends, a retry included (§5.8), and a report names it. Adding the lines to
+  `requests.jsonl` was rejected, because G1, G2 and G6 read it as the target's traffic.
+  `objects.jsonl` holds versions, and a delete that lost its race changes none. Owner
+  reads are not recorded, because a sweep reads every owner on each event and the
+  delete's line says what the read found. An empty file says the collector deleted
+  nothing. A kubeconfig cluster runs its own garbage collector, so botbox writes no file
+  there. The lines are kept in memory and written as the run ends, as the other
+  recordings are.

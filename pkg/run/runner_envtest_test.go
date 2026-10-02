@@ -204,6 +204,9 @@ func collectorLines(t *testing.T, dir string) []map[string]any {
 	}
 	var lines []map[string]any
 	for _, text := range strings.Split(strings.TrimSuffix(string(written), "\n"), "\n") {
+		if text == "" {
+			continue
+		}
 		var line map[string]any
 		if err := json.Unmarshal([]byte(text), &line); err != nil {
 			t.Fatalf("The line %q of collector.jsonl does not parse: %v", text, err)
@@ -364,7 +367,8 @@ func TestRunner(t *testing.T) {
 	})
 
 	// The toy deletes only the children it controls, so the collector alone
-	// deletes a ConfigMap the Widget owns without controlling it.
+	// deletes a ConfigMap the Widget owns without controlling it. B3 fails
+	// G3, and botbox keeps a failing run's directory.
 	t.Run("leaves in run-1 the collector's delete of a child after its owner's deletion", func(t *testing.T) {
 		toy := loadTarget(t, binary)
 		toy.Launch.Args = append(toy.Launch.Args, "--bug=3")
@@ -401,6 +405,13 @@ func TestRunner(t *testing.T) {
 		deleted := slices.IndexFunc(deletes, func(line map[string]any) bool { return line["result"] == "deleted" })
 		if deleted < 0 {
 			t.Fatalf("collector.jsonl holds %v, want the collector's delete of %s.", deletes, collectedName)
+		}
+		// Nothing else has an owner, and only one delete of an object succeeds.
+		for i, line := range deletes {
+			if line["name"] != collectedName || (i != deleted && line["result"] == "deleted") {
+				t.Errorf("collector.jsonl holds %v, want one delete of %s, and at most lost races besides.", deletes, collectedName)
+				break
+			}
 		}
 		tried, err := time.Parse(time.RFC3339Nano, fmt.Sprint(deletes[deleted]["time"]))
 		if err != nil || !tried.After(result.Timeline.Ops[1].At) {

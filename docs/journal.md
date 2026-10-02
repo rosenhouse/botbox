@@ -255,6 +255,12 @@ re-run so the run directory's evidence is of the sequence botbox prints.
 - The example's `spec.dnsNames` overlay admitted `plg-.example.test`. A DNS label may not
   start or end with a hyphen, and neither the CRD nor the API server says so, so §8.3 makes
   the pattern the target declaration's job.
+- The example mutated `spec.privateKey.rotationPolicy` and `spec.privateKey.algorithm`.
+  Under `Never`, cert-manager keeps a stored key that a later algorithm does not match, and
+  waits for a user, as its CRD documents, so G4 failed a correct cert-manager. Triage of a
+  hunt found it on 2026-10-02. No key of `target.yaml` states a rule across ops, so the
+  overlay draws the policy only as `Always`, and `sequences/rotation-never.json` runs
+  `Never` (D@89).
 - A Widget created at `spec.count: 0` went Ready 0 to 0, so its status merge patch carried
   only `observedGeneration` and never wrote `status.ready`. Its own `ready` expression then
   never held. About 13% of toy draws set count 0, and every one of them failed G4.

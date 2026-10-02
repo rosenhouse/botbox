@@ -18,8 +18,8 @@ func Property(declared target.Property) Check {
 		out := Result{ID: declared.ID}
 		points, held := in.evaluationPoints(declared.When)
 		for _, checkpoint := range held {
-			out.note("at the checkpoint after %s: the proxy still held a request of the target's there, which may have been about to change what %s reads",
-				in.describeOp(checkpoint.Op), declared.ID)
+			out.note("at the checkpoint after %s: the proxy held a request of the target's there, or released one in the last %s (timeouts.stable), which may still change what %s reads",
+				in.describeOp(checkpoint.Op), in.timeouts().Stable, declared.ID)
 		}
 		for _, s := range in.statesAt(points) {
 			managed := s.managed(in)
@@ -56,7 +56,7 @@ func Property(declared target.Property) Check {
 }
 
 // evaluationPoints are the instants a property is evaluated at, in order, and
-// the checkpoints it is not, where the proxy held a request of the target's.
+// the held checkpoints it is not.
 // DESIGN.md §4 counts the teardown's checkpoint, so `checkpoint` and `end`
 // keep it; the events the teardown itself caused are botbox's own doing.
 func (in Input) evaluationPoints(when target.PropertyWhen) (points []time.Time, held []Checkpoint) {

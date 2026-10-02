@@ -432,14 +432,14 @@ the controller behaves once the fault stops. A delay's window lasts until it sto
 proxy releases the last request it held. A settle wait counts a held request as a change
 until the proxy releases it. A request held as the wait's time runs out keeps the wait open
 until `settle` past its release. It keeps a `recreate`'s wait for its old CR open the same
-way. Where a wait ends with a request still held, botbox does not check your properties
-there, and the run notes it. A watch counts only until the proxy forwards it. A controller
-backs off while its requests fail, so once the faults stop botbox gives it as long as they
-lasted, plus `settle`, to converge. That includes a fault still active when the sequence
-ends, like the one above: botbox clears it and waits for the controller before it tears the
-run down. The proxy tries faults in op order, the first that applies to a request wins, and
-each runs out on its own `until`. A fault that matches no request changes nothing and hides
-nothing.
+way. Where a wait ends with a request held, or released within `stable`, botbox does not
+check your properties there, and the run notes it. A watch counts only until the proxy
+forwards it. A controller backs off while its requests fail, so once the faults stop botbox
+gives it as long as they lasted, plus `settle`, to converge. That includes a fault still
+active when the sequence ends, like the one above: botbox clears it and waits for the
+controller before it tears the run down. The proxy tries faults in op order, the first that
+applies to a request wins, and each runs out on its own `until`. A fault that matches no
+request changes nothing and hides nothing.
 `match.verb` is a Kubernetes verb such as `create` or `list`, and `match.resource` is the
 plural the API server serves, such as `configmaps`. botbox refuses any other value, because
 the fault would match nothing. It also refuses a value that would test something else, such

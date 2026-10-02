@@ -89,7 +89,7 @@ func TestPropertyIsNotEvaluatedWhereTheProxyHeldARequest(t *testing.T) {
 			in.Target.Properties = []target.Property{property(when, readyCountsChildren)}
 
 			noted(t, invariant.Property(in.Target.Properties[0]), in,
-				"P1 is not evaluated at the checkpoint after op 0 (delete): the proxy still held a request of the target's there")
+				"P1 is not evaluated at the checkpoint after op 0 (delete): the proxy held a request of the target's there, or released one in the last 2s (timeouts.stable)")
 		})
 	}
 }

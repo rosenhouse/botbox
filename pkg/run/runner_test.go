@@ -1357,7 +1357,10 @@ func TestRunMarksEachCheckpointWhereTheProxyHeldARequest(t *testing.T) {
 		{"none", nil, false},
 		{"one it still holds", func(time.Time) (bool, time.Time) { return true, time.Time{} }, true},
 		{"one it released after", func(before time.Time) (bool, time.Time) { return false, before.Add(time.Millisecond) }, true},
-		{"one it released by then", func(before time.Time) (bool, time.Time) { return false, before }, false},
+		{"one it released within T_stable", func(before time.Time) (bool, time.Time) {
+			return false, before.Add(time.Millisecond - testTimeouts.Stable)
+		}, true},
+		{"one it released T_stable before", func(before time.Time) (bool, time.Time) { return false, before.Add(-testTimeouts.Stable) }, false},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newFakeHarness()

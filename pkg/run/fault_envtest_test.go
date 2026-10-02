@@ -349,6 +349,20 @@ const heldDeletes = `{
   ]
 }`
 
+// heldChildDeletes has the proxy hold the toy's ConfigMap deletes for
+// timeouts.settle, then deletes a Widget with three children. The wait after
+// the delete ends as the proxy releases the third delete, before the toy
+// counts the child gone.
+const heldChildDeletes = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 3}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "delete", "resource": "configmaps"}, "action": {"delay": "5s"}}},
+    {"i": 2, "t": "delete"}
+  ]
+}`
+
 // heldFinalizer has the proxy hold the toy's patch that clears its Widget's
 // finalizer for longer than timeouts.delete, which a recreate waits for the
 // Widget to go.
@@ -362,7 +376,8 @@ const heldFinalizer = `{
   ]
 }`
 
-// The correct toy passes where a wait ends with a request still held.
+// The correct toy passes where a wait ends with a request held, or just
+// released.
 func TestTheCorrectToyPassesWhereAWaitEndsWithARequestHeld(t *testing.T) {
 	t.Parallel()
 	binary := buildToy(t)
@@ -373,6 +388,7 @@ func TestTheCorrectToyPassesWhereAWaitEndsWithARequestHeld(t *testing.T) {
 		noted string
 	}{
 		{"a delete's wait", heldDeletes, "P1 is not evaluated at the checkpoint after op 2 (delete)"},
+		{"a delete's wait that ends as the proxy releases a request", heldChildDeletes, "P1 is not evaluated at the checkpoint after op 2 (delete)"},
 		{"a recreate's wait for its CR", heldFinalizer, ""},
 	} {
 		t.Run(test.name, func(t *testing.T) {

@@ -192,7 +192,8 @@ while the checks still give your controller time. A request the proxy holds unde
 `action.delay` counts as a change until the proxy forwards it. One held as the wait's time
 runs out keeps the wait open until `timeouts.settle` past its release. It keeps a
 `recreate`'s wait for its old CR open the same way. The checks run where it ends. botbox does
-not check your properties where a wait ends with a request still held, and the run notes it.
+not check your properties where a wait ends with a request held, or released within
+`timeouts.stable`, and the run notes it.
 
 | Op | Needs | May carry | Settles | What it does |
 |---|---|---|---|---|

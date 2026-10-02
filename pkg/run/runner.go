@@ -222,7 +222,8 @@ type Checkpoint struct {
 	// Stayed marks a recreate's wait for its old CR to go, which ended with
 	// the CR still there.
 	Stayed bool
-	// Held is whether the proxy held a request of the target's at At.
+	// Held is whether the proxy held a request of the target's at At, or
+	// released one within T_stable before it.
 	Held bool
 }
 
@@ -812,8 +813,10 @@ func (r *runner) checkpoint(checkpoint Checkpoint, expired bool) error {
 	if count := r.h.managedCount(); count > r.limit {
 		return fmt.Errorf("the run namespace holds %d managed objects, over the harness limit of %d", count, r.limit)
 	}
+	// The target may still be acting on a request released within T_stable.
+	// A wait that converged saw no such release.
 	holding, released := r.h.held(checkpoint.At)
-	checkpoint.Held = holding || released.After(checkpoint.At)
+	checkpoint.Held = holding || released.After(checkpoint.At.Add(-r.target.Timeouts.Stable))
 	r.timeline.Checkpoints = append(r.timeline.Checkpoints, checkpoint)
 	r.readExits()
 	if expired {

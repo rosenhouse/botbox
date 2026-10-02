@@ -313,8 +313,9 @@ The Runner executes one sequence:
    requests count toward G1 where they land in a quiet window (§6). A target not back when
    a wait expires fails G4. A restart that fails ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). Properties are not
-   evaluated where the proxy held a request of the target's, which was about to change
-   what they read, and the run notes each such checkpoint. A run ends at its first
+   evaluated where the proxy held a request of the target's, or released one within
+   `T_stable`, which may still change what they read, and the run notes each such
+   checkpoint. A run ends at its first
    violation. More than `N_objects` (default 500) managed objects in the namespace ends
    the run as a harness limit, reported as such rather than as a finding.
 4. Tear down. Clear every active fault. If the target is still owed time to recover from
@@ -2297,8 +2298,13 @@ built from source and run as a black-box binary.
   request, the wait after a `delete` of the toy's Widget ended while the proxy held the
   toy's delete of its second child, and P1 failed the correct toy in 2 of 2 runs. So
   properties are not evaluated at a checkpoint where the proxy held a request of the
-  target's, and the run notes each such checkpoint. Once every fault's window has closed,
-  the proxy holds nothing, so later checkpoints judge properties as before. A fault's
-  window also lasts until the proxy releases what it held, because the target still waits
-  on the fault. The checks therefore excuse the target over that time, and the time it
-  owes runs from the release. The derived deadline allows for both.
+  target's, and the run notes each such checkpoint. A release just before a wait ends
+  does the same. Under a 5 s delay, the toy's `T_settle`, on its ConfigMap deletes, the
+  wait after a `delete` ended 9 ms after the proxy released the toy's delete of its third
+  child. The toy had not yet lowered `status.ready`, and P1 failed the correct toy in 5 of
+  10 runs. So a checkpoint where the proxy released a request within `T_stable` counts as
+  held too. A wait that converged saw no release for `T_stable`, so it is never held.
+  From `T_stable` after every fault's window has closed, checkpoints judge properties as
+  before. A fault's window also lasts until the proxy releases what it held, because the
+  target still waits on the fault. The checks therefore excuse the target over that time,
+  and the time it owes runs from the release. The derived deadline allows for both.

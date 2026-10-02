@@ -102,7 +102,8 @@ type Checkpoint struct {
 	// the CR still there. timeouts.delete bounds that wait.
 	Stayed bool
 	// Held marks a checkpoint where the proxy held a request of the
-	// target's, which was about to change what the checks read.
+	// target's, or released one within T_stable, which may still change what
+	// the checks read.
 	Held bool
 }
 

@@ -149,8 +149,8 @@ timeouts:                          # The toy converges in milliseconds.
   stable: 2s
   delete: 10s
 thresholds:
-  # G6 fails more repeats of a failing request than errloop. controller-runtime's
-  # backoff repeats one 10 times in a 5s settle.
+  # G6 fails a controller that repeats a failing request more than errloop
+  # times. controller-runtime's backoff repeats one 10 times in a 5s settle.
   errloop: 5
 ```
 
@@ -305,7 +305,7 @@ on:
     - cron: '17 6 * * *'
 
 env:
-  BOTBOX_VERSION: <commit>   # a commit of main
+  BOTBOX_VERSION: <commit>   # Set this to a commit of main.
   SETUP_ENVTEST_VERSION: v0.25.1
   ENVTEST_K8S_VERSION: 1.37.0
   ENVTEST_INDEX_URL: https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
@@ -344,7 +344,7 @@ jobs:
             ~/go/bin
             bin/envtest
           key: ${{ steps.tools.outputs.cache-primary-key }}
-      - run: go build -o bin/controller ./cmd/controller   # whatever launch.binary names
+      - run: go build -o bin/controller ./cmd/controller   # Build what launch.binary names.
       # exec lets a cancel's signal reach botbox, which bash does not pass on.
       - if: github.event_name == 'pull_request'
         run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-out

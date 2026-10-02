@@ -31,6 +31,6 @@ timeouts:                          # The toy converges in milliseconds.
   stable: 2s
   delete: 10s
 thresholds:
-  # G6 fails more repeats of a failing request than errloop. controller-runtime's
-  # backoff repeats one 10 times in a 5s settle.
+  # G6 fails a controller that repeats a failing request more than errloop
+  # times. controller-runtime's backoff repeats one 10 times in a 5s settle.
   errloop: 5

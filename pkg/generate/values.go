@@ -29,7 +29,7 @@ const (
 var wordRunes = rapid.RuneFrom([]rune("abcdefghijklmnopqrstuvwxyz0123456789"))
 
 // valuesOf builds the generator of the values a schema allows, or reports that
-// the schema does not say enough to generate them (DESIGN.md §5.4).
+// the schema does not say enough to generate them.
 func valuesOf(s *schema) (*rapid.Generator[any], error) {
 	if len(s.Enum) > 0 {
 		enum := slices.Clone(s.Enum)

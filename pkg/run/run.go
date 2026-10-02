@@ -36,7 +36,7 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// The run directory holds these files (DESIGN.md §11).
+// The run directory holds these files.
 const (
 	kubeconfigFile = "kubeconfig"
 	targetLogFile  = "target.log"
@@ -51,14 +51,14 @@ const namespacePrefix = "botbox-run-"
 // Options configure one run.
 type Options struct {
 	// Dir receives the run's files: the target's kubeconfig and target.log,
-	// and the recordings Stop writes (DESIGN.md §11).
+	// and the recordings Stop writes.
 	Dir string
 	// Seed drives the proxy's fault sampling, so that a replay faults the same
 	// requests. Run takes it from the sequence.
 	Seed int64
 	// Config reaches a control plane the caller already started. Runs share
-	// one, because the shrinker replays a sequence many times (DESIGN.md §5.5).
-	// A nil Config starts an envtest cluster for this run alone.
+	// one, because the shrinker replays a sequence many times. A nil Config
+	// starts an envtest cluster for this run alone.
 	Config *rest.Config
 	// ControllerManager says the cluster runs kube-controller-manager, as kind
 	// does and envtest does not. Its garbage collector replaces botbox's
@@ -71,8 +71,7 @@ type Options struct {
 	// requires it; Start does not use it.
 	Check Checker
 	// MaxManaged ends a run whose namespace holds more managed objects, as a
-	// harness limit rather than a finding. Zero takes the default of
-	// DESIGN.md §5.5.
+	// harness limit rather than a finding. Zero takes defaultMaxManaged.
 	MaxManaged int
 }
 
@@ -92,10 +91,10 @@ func (o Options) namespaceDefaultsWithin() time.Duration {
 
 // Harness is one run's machinery.
 type Harness struct {
-	// Namespace is private to this run and never reused (DESIGN.md §5.5).
+	// Namespace is private to this run and never reused.
 	Namespace string
 	// Config reaches the API server directly. botbox's own writes never go
-	// through the proxy (DESIGN.md §5.3).
+	// through the proxy.
 	Config   *rest.Config
 	Proxy    *proxy.Proxy
 	Observer *observe.Observer
@@ -117,9 +116,11 @@ type Harness struct {
 	logQuoted int64
 }
 
-// Start brings the run up in the order DESIGN.md §5.5 requires and leaves the
-// target running. A failure takes back down whatever came up. The caller must
-// call Stop.
+// Start creates the run directory, then brings up in order: a cluster, unless
+// opts.Config reaches one; the namespace; the proxy; the Observer; botbox's
+// garbage collector, unless the cluster runs a controller manager; the
+// fixtures; and the target, which it leaves running. A failure takes back down
+// whatever came up. The caller must call Stop.
 func Start(ctx context.Context, t *target.Target, opts Options) (*Harness, error) {
 	if err := validate(t, opts); err != nil {
 		return nil, fmt.Errorf("starting the run: %w", err)
@@ -236,8 +237,8 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 }
 
 // Stop takes the run down in the reverse of the order Start brought it up, and
-// writes the run's recordings (DESIGN.md §5.7). Emptying the namespace is the
-// Runner's own step (§5.5).
+// writes the run's recordings. Emptying the namespace is the Runner's own
+// step.
 func (h *Harness) Stop(ctx context.Context) error {
 	return errors.Join(h.down.run(ctx), h.writeRecordings())
 }
@@ -267,8 +268,8 @@ func deleteNamespace(ctx context.Context, core kubernetes.Interface, name string
 	return err
 }
 
-// newNamespaceName returns a name no other run takes (DESIGN.md §5.5), so that
-// a namespace left terminating by envtest is harmless.
+// newNamespaceName returns a name no other run takes, so that a namespace left
+// terminating by envtest is harmless.
 func newNamespaceName() string {
 	return namespacePrefix + strings.ToLower(rand.Text()[:8])
 }
@@ -286,8 +287,7 @@ func (h *Harness) observeOptions() observe.Options {
 }
 
 // applyFixtures creates the target's fixtures in the run namespace and tells
-// the Observer botbox created them, so that they never count as managed
-// (DESIGN.md §6).
+// the Observer botbox created them, so that they never count as managed.
 func (h *Harness) applyFixtures(ctx context.Context) error {
 	if len(h.target.Fixtures) == 0 {
 		return nil
@@ -350,7 +350,7 @@ func awaitNamespaceDefaults(ctx context.Context, store *observe.Store, watched [
 			if !time.Now().Before(deadline) {
 				return fmt.Errorf("the cluster created no %s %s in the run namespace within %v. "+
 					"kube-controller-manager creates one in every namespace, and botbox waits for it so as not to count it as the target's",
-					kindName(object.gvk), object.name, within)
+					observe.KindName(object.gvk), object.name, within)
 			}
 			if err := sleep(ctx, settlePoll); err != nil {
 				return err
@@ -361,7 +361,7 @@ func awaitNamespaceDefaults(ctx context.Context, store *observe.Store, watched [
 }
 
 // excludePresent excludes every object already in the run namespace. The
-// target has not started, so none of them is its.
+// target has not started, so none of them belongs to it.
 func excludePresent(store *observe.Store, watched []schema.GroupVersionKind) {
 	for _, gvk := range watched {
 		for _, version := range store.Current(gvk) {

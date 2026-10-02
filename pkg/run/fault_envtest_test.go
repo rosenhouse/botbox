@@ -86,7 +86,7 @@ func TestAFaultMakesTheToyFailAnInvariantItOtherwisePasses(t *testing.T) {
 
 // The toy with no bug retries a refused create, backing off as it goes, so it
 // recovers once the fault stops, however the fault stopped. B11 never asks
-// again. fault.json is the README's example: the teardown clears its fault.
+// again. fault.json is docs/targets.md's example: the teardown clears its fault.
 func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -233,6 +233,81 @@ func TestAToyThatLosesItsLeaseUnderAFaultPasses(t *testing.T) {
 	}
 }
 
+// leaseSlow fails most of the toy's lease updates and holds its ConfigMap
+// creates, then deletes a child op after op. A restarted toy can take longer
+// than timeouts.settle to win its lease back, and until then it recreates
+// nothing.
+const leaseSlow = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "update", "resource": "leases", "fraction": 0.8}, "action": {"error": 500}}},
+    {"i": 2, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"delay": "1.5s"}}},
+    {"i": 3, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 4, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 5, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 6, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 7, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 8, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
+  ]
+}`
+
+// The toy with no bug passes where a wait ends before it has won its lease
+// back, and the run notes the properties it did not judge there.
+func TestAToyThatWinsItsLeaseBackLatePasses(t *testing.T) {
+	t.Parallel()
+	toy := loadTarget(t, buildToy(t))
+	toy.Launch.Args = append(toy.Launch.Args, "--lease=3s")
+	testCluster := startCluster(t, toy.CRDs)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+
+	result, err := run.Run(ctx, toy, readSequence(t, leaseSlow), run.Options{
+		Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+	})
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+	}
+	if !slices.ContainsFunc(result.Notes, func(note string) bool {
+		return strings.HasPrefix(note, "P1 is not evaluated at the checkpoint after op ") && strings.Contains(note, "may not yet have acted")
+	}) {
+		t.Errorf("The run noted %q, want P1 left unjudged where the toy was still starting.", result.Notes)
+	}
+}
+
+// A toy with a field index watches Widgets before it leads. The toy with no
+// bug passes, because botbox counts it back only once it wins its lease.
+func TestAToyThatWatchesBeforeItLeadsPasses(t *testing.T) {
+	t.Parallel()
+	toy := loadTarget(t, buildToy(t))
+	toy.Launch.Args = append(toy.Launch.Args, "--lease=3s", "--index")
+	testCluster := startCluster(t, toy.CRDs)
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+
+	result, err := run.Run(ctx, toy, readSequence(t, leaseSlow), run.Options{
+		Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
+	})
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+	}
+	requests := result.Recorded.Requests
+	widgets := slices.IndexFunc(requests, func(r proxy.Request) bool { return r.Resource == "widgets" })
+	leases := slices.IndexFunc(requests, func(r proxy.Request) bool { return r.Resource == "leases" })
+	if widgets < 0 || leases < 0 || widgets > leases {
+		t.Errorf("The toy first requested Widgets at request %d and leases at request %d, want Widgets first.", widgets, leases)
+	}
+}
+
 // A fault excuses every exit while it is active, and this one never stops. The
 // crash loop still fails G4 once the teardown clears the fault.
 func TestACrashLoopUnderAFaultThatNeverStopsFailsG4(t *testing.T) {
@@ -256,6 +331,173 @@ func TestACrashLoopUnderAFaultThatNeverStopsFailsG4(t *testing.T) {
 	if result.Violation == nil || result.Violation.ID != "G4" ||
 		!strings.Contains(result.Violation.Statement, "after the last fault stopped") {
 		t.Errorf("The run reported %v, want the G4 of the wait after the last fault stopped.", result.Violation)
+	}
+}
+
+// heldCreate has the proxy hold the toy's ConfigMap creates for longer than
+// T_stable, then deletes a child. Until the proxy releases the create of its
+// replacement, status.ready counts a child that is not there.
+const heldCreate = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"delay": "3s"}}},
+    {"i": 2, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
+  ]
+}`
+
+// heldReads has the proxy hold the toy's watches of ConfigMaps, which it
+// makes as it restarts, and its lists of them, which it makes as it cleans up
+// after a deleted Widget.
+const heldReads = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "list", "resource": "configmaps"}, "action": {"delay": "1s"}}},
+    {"i": 2, "t": "fault", "spec": {"match": {"verb": "watch", "resource": "configmaps"}, "action": {"delay": "1s"}}},
+    {"i": 3, "t": "restart"},
+    {"i": 4, "t": "settle"},
+    {"i": 5, "t": "delete"}
+  ]
+}`
+
+// The correct toy passes, and each wait converges, no sooner than T_stable
+// after the proxy released every request it held, however long a held watch
+// then streams.
+func TestASettleWaitOutlastsTheRequestsTheProxyHolds(t *testing.T) {
+	t.Parallel()
+	binary := buildToy(t)
+	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
+	spendsItsCount := readSequence(t, heldCreate)
+	spendsItsCount.Ops[1].Fault.Until.Count = 1
+	pastSettle := readSequence(t, heldCreate)
+	pastSettle.Ops[1].Fault.Action.Delay = run.Duration(6 * time.Second)
+	for _, test := range []struct {
+		name     string
+		sequence run.Sequence
+		delay    time.Duration
+	}{
+		{"a create held while a child is gone", readSequence(t, heldCreate), 3 * time.Second},
+		{"a create that spends its fault's count", spendsItsCount, 3 * time.Second},
+		{"a create held past timeouts.settle", pastSettle, 6 * time.Second},
+		{"watches and lists", readSequence(t, heldReads), time.Second},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			toy := loadTarget(t, binary)
+
+			result, err := run.Run(t.Context(), toy, test.sequence, run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if result.Violation != nil {
+				t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+			}
+			for i, window := range result.Timeline.Faults {
+				if window.Start.IsZero() {
+					t.Errorf("The proxy held no request with fault %d.", i)
+				}
+			}
+			for _, op := range result.Timeline.Ops {
+				if wait := op.Settled; wait != nil {
+					requireQuietAfterHolds(t, op.Op.Index, *wait, result.Recorded.Requests, test.delay, toy.Timeouts.Stable)
+				}
+			}
+		})
+	}
+}
+
+// heldDeletes has the proxy hold each of the toy's ConfigMap requests for
+// longer than timeouts.settle, then deletes the Widget. The toy deletes its
+// children one held request after another, so the wait after the delete ends
+// with one held.
+const heldDeletes = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"resource": "configmaps"}, "action": {"delay": "6s"}}},
+    {"i": 2, "t": "delete"}
+  ]
+}`
+
+// heldChildDeletes has the proxy hold the toy's ConfigMap deletes for
+// timeouts.settle, then deletes a Widget with three children. The wait after
+// the delete ends as the proxy releases the third delete, before the toy
+// removes the Widget's finalizer.
+const heldChildDeletes = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 3}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "delete", "resource": "configmaps"}, "action": {"delay": "5s"}}},
+    {"i": 2, "t": "delete"}
+  ]
+}`
+
+// heldFinalizer has the proxy hold the toy's patch that clears its Widget's
+// finalizer for longer than timeouts.delete, which a recreate waits for the
+// Widget to go.
+const heldFinalizer = `{
+  "seed": 23,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "patch", "resource": "widgets"}, "action": {"delay": "12s"}, "until": {"count": 1}}},
+    {"i": 2, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}}
+  ]
+}`
+
+// The correct toy passes where a wait ends with a request held, or just
+// released.
+func TestTheCorrectToyPassesWhereAWaitEndsWithARequestHeld(t *testing.T) {
+	t.Parallel()
+	binary := buildToy(t)
+	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
+	for _, test := range []struct {
+		name, sequence string
+		// noted is what the run notes, if anything.
+		noted string
+	}{
+		{"a delete's wait", heldDeletes, "P1 is not evaluated at the checkpoint after op 2 (delete)"},
+		{"a delete's wait that ends as the proxy releases a request", heldChildDeletes, "P1 is not evaluated at the checkpoint after op 2 (delete)"},
+		{"a recreate's wait for its CR", heldFinalizer, ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := run.Run(t.Context(), loadTarget(t, binary), readSequence(t, test.sequence),
+				run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if result.Violation != nil {
+				t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+			}
+			if test.noted != "" && !slices.ContainsFunc(result.Notes, func(note string) bool { return strings.HasPrefix(note, test.noted) }) {
+				t.Errorf("The run noted %q, want one beginning %q.", result.Notes, test.noted)
+			}
+		})
+	}
+}
+
+// requireQuietAfterHolds requires a wait that converged T_stable after the
+// proxy released each request it held for delay that arrived before the end.
+func requireQuietAfterHolds(t *testing.T, op int, wait run.Wait, log []proxy.Request, delay, stable time.Duration) {
+	t.Helper()
+	if !wait.Converged {
+		t.Errorf("The wait after op %d expired at %v.", op, wait.Window.End)
+	}
+	for _, request := range log {
+		released := request.Start.Add(delay)
+		if strings.HasPrefix(request.Fault, "delay") && request.Start.Before(wait.Window.End) && wait.Window.End.Before(released.Add(stable)) {
+			t.Errorf("The wait after op %d ended at %v, less than T_stable after the proxy released the %s %s it held at %v.",
+				op, wait.Window.End, request.Verb, request.Path, released)
+		}
 	}
 }
 

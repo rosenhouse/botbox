@@ -22,18 +22,18 @@ import (
 	"github.com/rosenhouse/botbox/pkg/observe"
 )
 
-// ReadyFunc is the target's readiness predicate (DESIGN.md §6, G4). An error
-// means "not ready"; it is an *EvalError, which a report quotes (§8.4).
+// ReadyFunc is the target's readiness predicate, which G4 judges. An error
+// means "not ready"; it is an *EvalError, which a report quotes.
 type ReadyFunc func(cr *unstructured.Unstructured) (bool, error)
 
 // PropertyFunc evaluates a declared property over the primary CR and the
-// managed objects. An error is a configuration error (DESIGN.md §8.4).
+// managed objects. An error is a configuration error.
 type PropertyFunc func(cr *unstructured.Unstructured, managed []*unstructured.Unstructured) (bool, error)
 
-// EqualFunc compares snapshots taken around a Restart (DESIGN.md §6, G5).
+// EqualFunc compares snapshots taken around a Restart, for G5.
 type EqualFunc func(a, b observe.Snapshot) bool
 
-// PropertyWhen says where a property is evaluated (DESIGN.md §8.1).
+// PropertyWhen says where a property is evaluated.
 type PropertyWhen string
 
 const (
@@ -49,7 +49,7 @@ type Property struct {
 	When            PropertyWhen
 }
 
-// GenerateSpec constrains sequence generation (DESIGN.md §8.3).
+// GenerateSpec constrains sequence generation.
 type GenerateSpec struct {
 	// Mutate lists dotted paths the generator may change. Empty means every
 	// schema path.
@@ -75,7 +75,7 @@ type MutableFixture struct {
 	Mutate []Path
 }
 
-// LaunchSpec says how to run the target (DESIGN.md §5.1).
+// LaunchSpec says how to run the target.
 type LaunchSpec struct {
 	// Binary is relative to the working directory, or a name on PATH.
 	Binary string `json:"binary"`
@@ -99,21 +99,20 @@ func (l LaunchSpec) Check() error {
 	}
 }
 
-// Timeouts are the run's waits (DESIGN.md §6).
+// Timeouts are the run's waits, as target.yaml's timeouts declare them.
 type Timeouts struct{ Settle, Stable, Delete time.Duration }
 
-// Thresholds hold N_errloop for G6, and the requests G1 and the status writes
-// G2 allow in one quiet window (DESIGN.md §6).
+// Thresholds hold thresholds.errloop for G6, and thresholds.quiet: the
+// requests G1 and the status writes G2 allow in one quiet window.
 type Thresholds struct{ ErrLoop, Quiet int }
 
-// Defaults for a target that declares neither block (DESIGN.md §6).
+// Defaults for a target that declares neither block.
 var (
 	DefaultTimeouts   = Timeouts{Settle: 30 * time.Second, Stable: 10 * time.Second, Delete: 60 * time.Second}
 	DefaultThresholds = Thresholds{ErrLoop: 10}
 )
 
-// DefaultReady is the readiness predicate of DESIGN.md §6, used by a target
-// that declares none.
+// DefaultReady is the readiness predicate of a target that declares none.
 const DefaultReady = "has(status.observedGeneration) && status.observedGeneration == metadata.generation"
 
 // Target is a controller under test, its CRDs, and how to exercise it.
@@ -133,7 +132,7 @@ type Target struct {
 	// go:<name>.
 	ReadyExpr string
 	// Equal is nil unless the target names a hook. The invariant engine then
-	// applies the §6 default equality together with EqualIgnore.
+	// applies the default equality together with EqualIgnore.
 	Equal       EqualFunc
 	EqualIgnore []Path
 	Properties  []Property
@@ -164,16 +163,16 @@ func (t *Target) checkScopes(scope scopeFunc) error {
 	}
 	var found []string
 	if clusterScoped(t.Primary) {
-		found = append(found, "the primary "+kindName(t.Primary))
+		found = append(found, "the primary "+observe.KindName(t.Primary))
 	}
 	for _, gvk := range t.Manages {
 		if clusterScoped(gvk) {
-			found = append(found, "the managed "+kindName(gvk))
+			found = append(found, "the managed "+observe.KindName(gvk))
 		}
 	}
 	for _, fixture := range t.Fixtures {
 		if gvk := fixture.GroupVersionKind(); clusterScoped(gvk) {
-			found = append(found, fmt.Sprintf("the fixture %s %s", kindName(gvk), fixture.GetName()))
+			found = append(found, fmt.Sprintf("the fixture %s %s", observe.KindName(gvk), fixture.GetName()))
 		}
 	}
 	if len(found) > 0 {
@@ -193,20 +192,12 @@ type misplacedFixture struct{ fixture *unstructured.Unstructured }
 func (m *misplacedFixture) Error() string {
 	namespace := m.fixture.GetNamespace()
 	return fmt.Sprintf("the fixture %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace, and the target may look for this one in %s",
-		kindName(m.fixture.GroupVersionKind()), m.fixture.GetName(), namespace, namespace)
-}
-
-// kindName writes a kind as target.yaml declares it.
-func kindName(gvk schema.GroupVersionKind) string {
-	if gvk.Group == "" {
-		return gvk.Version + "/" + gvk.Kind
-	}
-	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
+		observe.KindName(m.fixture.GroupVersionKind()), m.fixture.GetName(), namespace, namespace)
 }
 
 // WatchedKinds are the kinds botbox watches: the primary CR and every managed
-// kind. The collector resolves an owner only among them (DESIGN.md §5.8), and
-// managed objects are commonly owned by the CR.
+// kind. The collector resolves an owner only among them, and managed objects
+// are commonly owned by the CR.
 func (t *Target) WatchedKinds() []schema.GroupVersionKind {
 	kinds := []schema.GroupVersionKind{t.Primary}
 	for _, gvk := range t.Manages {

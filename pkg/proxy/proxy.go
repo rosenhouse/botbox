@@ -1,6 +1,5 @@
-// Package proxy is the reverse proxy between a target and the test cluster
-// (DESIGN.md §5.2). It records every request, streams watches and injects
-// faults.
+// Package proxy is the reverse proxy between a target and the test cluster.
+// It records every request, streams watches and injects faults.
 package proxy
 
 import (
@@ -111,15 +110,14 @@ func (p *Proxy) Kubeconfig(path, namespace string) error {
 // arrives and completed when its exchange ends, so a record whose exchange is
 // still in flight carries a zero Latency. The response reaches the client
 // before that completion, so a caller that needs finished records waits for
-// quiescence, as a settle wait does (DESIGN.md §5.5).
+// quiescence, as a settle wait does.
 func (p *Proxy) Log() []Request {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return slices.Clone(p.log)
 }
 
-// WriteLog writes the log as one JSON object per line (`requests.jsonl`,
-// DESIGN.md §11).
+// WriteLog writes the log as requests.jsonl: one JSON object per line.
 func (p *Proxy) WriteLog(w io.Writer) error {
 	encoder := json.NewEncoder(w)
 	for _, request := range p.Log() {
@@ -140,7 +138,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 	defer p.inFlight.Done()
 
 	request := newRequest(r)
-	action := p.faultFor(request)
+	action, held := p.faultFor(request)
 	if action != nil {
 		request.Fault = action.String()
 	}
@@ -158,7 +156,7 @@ func (p *Proxy) serve(w http.ResponseWriter, r *http.Request) {
 		drop(response)
 		return
 	case Delay:
-		if !sleep(r.Context(), action.For) {
+		if !p.await(r.Context(), held, action.For) {
 			return
 		}
 	}

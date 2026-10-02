@@ -13,12 +13,14 @@ import (
 // settlePoll is how often a settle wait reads the Observer.
 const settlePoll = 50 * time.Millisecond
 
-// Settle waits for the target's reaction (DESIGN.md §5.5): the Ready predicate
-// holds, the target has shown it runs, and neither the CR nor a managed object
-// has changed, nor the target restarted or come back, for T_stable. It reports
-// whether it converged within T_settle, or by what owed returns if that is
-// later: the target may still be recovering from a fault or deleting a CR. A
-// nil owed owes nothing. The caller judges a wait that expires.
+// Settle waits for the target's reaction: the Ready predicate holds, the
+// target has shown it runs, and neither the CR nor a managed object has
+// changed, nor the target restarted or come back, nor the proxy held one of
+// its requests, for timeouts.stable. It reports whether it converged within
+// timeouts.settle, or by what owed returns if that is later: the target may
+// still be recovering from a fault or deleting a CR. A request the proxy held
+// by then extends the wait to timeouts.settle past its release. A nil owed
+// owes nothing. The caller judges a wait that expires.
 func (h *Harness) Settle(ctx context.Context, owed func() time.Time) (bool, error) {
 	return settle{
 		timeouts: h.target.Timeouts,
@@ -26,6 +28,7 @@ func (h *Harness) Settle(ctx context.Context, owed func() time.Time) (bool, erro
 		now:      time.Now,
 		sleep:    sleep,
 		state:    h.state,
+		held:     h.Proxy.Held,
 		stopped:  h.Launcher.Exited(),
 		owed:     owed,
 	}.wait(ctx)
@@ -41,6 +44,9 @@ type settle struct {
 	// state reports whether the target is ready, and when the run last
 	// changed, which is never before since. Its error ends the wait.
 	state func(since time.Time) (ready bool, changed time.Time, err error)
+	// held reports, of the target's requests that reached the proxy before
+	// then, whether the proxy holds one and when it last released one.
+	held func(before time.Time) (holding bool, released time.Time)
 	// stopped is closed once the target's process has stopped.
 	stopped <-chan struct{}
 	// owed is when the wait may give up, which can move while the wait runs.
@@ -60,6 +66,12 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 		if closed(s.stopped) {
 			return false, nil
 		}
+		// A held request is about to change what the checks read.
+		if holding, released := s.held(now); holding {
+			changed = now
+		} else if released.After(changed) {
+			changed = released
+		}
 		if ready && !now.Before(changed.Add(s.timeouts.Stable)) {
 			return true, nil
 		}
@@ -69,13 +81,28 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 				deadline = owed
 			}
 		}
-		if !now.Before(deadline) {
+		if !now.Before(heldOpen(s.held, deadline, now, s.timeouts.Settle)) {
 			return false, nil
 		}
 		if err := s.sleep(ctx, s.poll); err != nil {
 			return false, err
 		}
 	}
+}
+
+// heldOpen is when a wait whose time runs out at deadline may end: settle
+// past the release of each request that reached the proxy before deadline.
+// While the proxy still holds one, its release is yet to come, so heldOpen
+// answers settle from now. Each hold ends within its delay.
+func heldOpen(held func(before time.Time) (bool, time.Time), deadline, now time.Time, settle time.Duration) time.Time {
+	holding, released := held(deadline)
+	if holding {
+		released = now
+	}
+	if end := released.Add(settle); end.After(deadline) {
+		return end
+	}
+	return deadline
 }
 
 func closed(c <-chan struct{}) bool {

@@ -28,7 +28,8 @@ const (
 	// cacheSyncTimeout bounds the wait for the watches to catch up.
 	cacheSyncTimeout = time.Minute
 	// retryDelay is how long the collector waits to sweep again after a call
-	// to the API server failed. It stays well inside §5.8's one-second bound.
+	// to the API server failed. It stays well inside the second within which
+	// the collector deletes an object after its owner's deletion event.
 	retryDelay = 250 * time.Millisecond
 )
 
@@ -62,8 +63,8 @@ func (o CollectorOptions) Validate() error {
 
 // Collector deletes an object of a watched kind once every owner in its
 // ownerReferences is gone, as kube-controller-manager would. envtest runs no
-// controller manager (DESIGN.md §5.8). The collector holds its own client, so
-// its writes reach the API server directly and never the proxy.
+// controller manager. The collector holds its own client, so its writes reach
+// the API server directly and never the proxy.
 type Collector struct {
 	client     metadata.Interface
 	namespace  string
@@ -182,8 +183,8 @@ func collectorConfig(config *rest.Config) *rest.Config {
 	return config
 }
 
-// namespacedKinds maps each kind to the resource it is served at.
-// Cluster-scoped kinds are out of scope in phase 1 (DESIGN.md §15, D13).
+// namespacedKinds maps each kind to the resource it is served at. A run owns
+// one namespace, so a cluster-scoped kind is an error.
 func namespacedKinds(mapper apimeta.RESTMapper, kinds []schema.GroupVersionKind) (map[schema.GroupKind]watchedKind, error) {
 	watched := map[schema.GroupKind]watchedKind{}
 	for _, gvk := range kinds {

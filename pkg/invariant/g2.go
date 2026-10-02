@@ -8,8 +8,8 @@ import (
 )
 
 // NoChurn is G2: once converged under a stable spec, the primary CR, the set
-// of managed objects and their resourceVersions do not change for T_stable
-// (DESIGN.md §6). A status write whose content is unchanged moves no
+// of managed objects and their resourceVersions do not change for
+// timeouts.stable. A status write whose content is unchanged moves no
 // resourceVersion, so the proxy log supplies that half, which
 // thresholds.quiet bounds.
 func NoChurn(in Input) (Result, error) {
@@ -50,7 +50,7 @@ func (in Input) changesIn(window quiet) []observe.Version {
 }
 
 // attributes reports whether the version is the target's work: the primary CR
-// or a managed object (DESIGN.md §6).
+// or a managed object.
 func (in Input) attributes(v observe.Version) bool {
 	return v.GVK == in.Target.Primary || in.History.IsManaged(v.Key)
 }

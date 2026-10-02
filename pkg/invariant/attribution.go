@@ -39,7 +39,6 @@ func (s state) crs(gvk schema.GroupVersionKind) []observe.Version {
 	return crs
 }
 
-// holds reports whether the state holds the CR.
 func (s state) holds(uid types.UID) bool {
 	return slices.ContainsFunc(s.live, func(v observe.Version) bool { return v.UID == uid })
 }

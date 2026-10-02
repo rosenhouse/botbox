@@ -1,6 +1,7 @@
 package invariant
 
 import (
+	"slices"
 	"time"
 
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -8,25 +9,60 @@ import (
 
 // Back is when the target first made a request after since that shows it
 // running, and whether it has. botbox has no other sign that a process it
-// started is running.
+// started is running. A process starting up can request leader election and
+// paths that name no resource, such as discovery. A process that elects a
+// leader can start its informers before it leads, so only a lease it won
+// shows it running. It gets the lease before it wins it, while the leader it
+// replaces renews without a get until a renewal fails.
 func Back(requests []proxy.Request, since time.Time) (time.Time, bool) {
-	var first time.Time
-	for _, r := range requests {
-		if r.Start.After(since) && showsRunning(r) && (first.IsZero() || r.Start.Before(first)) {
-			first = r.Start
-		}
+	if !electing(requests) {
+		return first(requests, since, func(r proxy.Request) bool { return r.Resource != "" && !leaderElection(r) })
 	}
-	return first, !first.IsZero()
+	if got, found := first(requests, since, gotLease); found {
+		return first(requests, got, won)
+	}
+	return time.Time{}, false
 }
 
-// showsRunning reports whether a request shows the target past starting up. A
-// process waiting to lead requests only leader election and paths that name no
-// resource, such as discovery.
-func showsRunning(r proxy.Request) bool { return r.Resource != "" && !leaderElection(r) }
+// first is when the first request after since that matches started, and
+// whether one did.
+func first(requests []proxy.Request, since time.Time, matches func(proxy.Request) bool) (time.Time, bool) {
+	var earliest time.Time
+	for _, r := range requests {
+		if r.Start.After(since) && matches(r) && (earliest.IsZero() || r.Start.Before(earliest)) {
+			earliest = r.Start
+		}
+	}
+	return earliest, !earliest.IsZero()
+}
+
+// notBack says what a target that is not back had not done.
+func notBack(requests []proxy.Request) string {
+	if electing(requests) {
+		return "won no lease"
+	}
+	return "requested no resource outside leader election"
+}
+
+// electing reports whether the target read a lease with a get, as leader
+// election does to learn who holds it. An informer lists and watches Leases
+// instead. A process whose caches have not synced has yet to elect, but an
+// earlier one shows it will.
+func electing(requests []proxy.Request) bool { return slices.ContainsFunc(requests, gotLease) }
+
+func gotLease(r proxy.Request) bool { return isLease(r) && r.Verb == "get" }
+
+// won reports whether a request won the target a lease: the API server
+// accepted its create, update or patch of one.
+func won(r proxy.Request) bool {
+	return isLease(r) && slices.Contains([]string{"create", "update", "patch"}, r.Verb) && r.Status/100 == 2
+}
+
+func isLease(r proxy.Request) bool { return leaderElection(r) && r.Resource == "leases" }
 
 // settledBy is when a target botbox restarted at restart must have converged:
-// T_settle past its return where it returned within T_settle, or else T_settle
-// past the restart.
+// timeouts.settle past its return where it returned within timeouts.settle,
+// or else timeouts.settle past the restart.
 func (in Input) settledBy(restart time.Time) time.Time {
 	settle := in.timeouts().Settle
 	if back, found := Back(in.Requests, restart); found && back.Before(restart.Add(settle)) {

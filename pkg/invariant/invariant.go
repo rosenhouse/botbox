@@ -1,7 +1,7 @@
-// Package invariant checks one run against the generic invariants of
-// DESIGN.md §6 and the target's declared properties. Every check is a pure
-// function over the proxy's request log, the Observer's history and the target
-// declaration (§5.6).
+// Package invariant checks one run against the generic invariants, which hold
+// for every target, and the target's declared properties. Every check is a
+// pure function over the proxy's request log, the Observer's history and the
+// target declaration.
 package invariant
 
 import (
@@ -14,7 +14,7 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// OpType is the kind of one op in a sequence (DESIGN.md §4).
+// OpType is the kind of one op in a sequence.
 type OpType string
 
 const (
@@ -48,15 +48,14 @@ func (op Op) givesInput() bool {
 	return op.Type.changesSpec() || op.Type == OpUpdateFixture || op.Restored
 }
 
-// Op is one executed step of the sequence (DESIGN.md §7).
+// Op is one executed step of the sequence.
 type Op struct {
 	// Index is the op's place in the sequence, which Checkpoint.Op names.
 	Index int
 	Type  OpType
 	Time  time.Time
 	// Deleted is the object a DeleteManaged op removed. Every other op carries
-	// the zero Key, and so does a DeleteManaged op that deleted nothing
-	// (DESIGN.md §7).
+	// the zero Key, and so does a DeleteManaged op that deleted nothing.
 	Deleted observe.Key
 	// CR is the primary CR a CR op wrote. Every other op carries the zero Key.
 	CR observe.Key
@@ -71,7 +70,7 @@ func (op Op) changesRun() bool {
 	return op.Type.touchesCR() || op.Deleted != (observe.Key{}) || op.Type.onFixture() || op.Restored
 }
 
-// SettleResult is how the settle wait a checkpoint follows ended (DESIGN.md §5.5).
+// SettleResult is how the settle wait a checkpoint follows ended.
 type SettleResult string
 
 const (
@@ -89,7 +88,7 @@ const (
 	Recovery = -2
 )
 
-// Checkpoint is a point at which the engine evaluates (DESIGN.md §4).
+// Checkpoint is an instant at which the checks judge the run.
 type Checkpoint struct {
 	// Op is the Index of the op the checkpoint follows, Teardown or Recovery.
 	Op int
@@ -101,11 +100,15 @@ type Checkpoint struct {
 	// Stayed marks a recreate's wait for its old CR to go, which ended with
 	// the CR still there. timeouts.delete bounds that wait.
 	Stayed bool
+	// Held marks a checkpoint where the proxy held a request of the
+	// target's, or released one within timeouts.stable, which may still change
+	// what the checks read.
+	Held bool
 }
 
-// FaultWindow is a period in which a fault was active (DESIGN.md §5.2). Every
-// invariant ignores what a fault reached into. A zero End means the fault
-// outlived the run.
+// FaultWindow is a period in which a fault was active. Every invariant
+// ignores what a fault reached into. A zero End means the fault outlived the
+// run.
 type FaultWindow struct{ Start, End time.Time }
 
 // overlaps reports whether the fault was active anywhere in [from, to]. A
@@ -133,23 +136,23 @@ type Input struct {
 	Checkpoints []Checkpoint
 	Faults      []FaultWindow
 	Exits       []Exit
-	// Teardown is when botbox began emptying the run namespace
-	// (DESIGN.md §5.5). What changes after it is botbox's own doing, so no
-	// window reaches past it. G3 judges the deletion it opens.
+	// Teardown is when botbox began emptying the run namespace. What changes
+	// after it is botbox's own doing, so no window reaches past it. G3 judges
+	// the deletion it opens.
 	Teardown time.Time
-	// Quiet is when the teardown began waiting T_stable, which §5.5 step 4
-	// makes the run's last quiet window. The window closes at Teardown.
+	// Quiet is when the teardown began waiting timeouts.stable, the run's last
+	// quiet window. The window closes at Teardown.
 	Quiet time.Time
 	// Cleaned is when botbox saw the run namespace empty: every managed object
-	// gone and the CR with it (DESIGN.md §5.5). It satisfies G3's deletion for
-	// every deadline at or after it. Zero means the namespace never emptied.
+	// gone and the CR with it. It satisfies G3's deletion for every deadline
+	// at or after it. Zero means the namespace never emptied.
 	Cleaned time.Time
 	// End is the instant the engine evaluates at, after which the run is
 	// unobserved. A zero End takes the last checkpoint's time.
 	End time.Time
 }
 
-// Violation is one failure with the evidence a report quotes (DESIGN.md §5.7).
+// Violation is one failure with the evidence a report quotes.
 type Violation struct {
 	ID        string            `json:"id"`
 	Statement string            `json:"statement"`
@@ -157,9 +160,8 @@ type Violation struct {
 	Requests  []proxy.Request   `json:"requests,omitempty"`
 	Versions  []observe.Version `json:"versions,omitempty"`
 	// RequestsTotal and VersionsTotal are how many entries each excerpt above
-	// was chosen from, which a report needs to say what the bound left out
-	// (DESIGN.md §5.7). The quotingRequests and quotingVersions methods set
-	// each pair together.
+	// was chosen from, which a report needs to say what the bound left out.
+	// The quotingRequests and quotingVersions methods set each pair together.
 	RequestsTotal int `json:"requestsTotal,omitempty"`
 	VersionsTotal int `json:"versionsTotal,omitempty"`
 	// VersionsOf names the object the timeline is the history of, and is
@@ -168,8 +170,8 @@ type Violation struct {
 	// Managed is the state at At: one version of each object the target
 	// managed, which a check that judges the CR's readiness quotes as a table
 	// of its own. ManagedTotal is how many it was chosen from. A check that
-	// did not ask leaves the total nil, because a count of zero is a finding
-	// (DESIGN.md §5.7, D39).
+	// does not quote the state leaves the total nil, so that a total of zero
+	// says the target managed nothing.
 	Managed      []observe.Version `json:"managed,omitempty"`
 	ManagedTotal *int              `json:"managedTotal,omitempty"`
 	// Ready is what a readiness verdict read. Other checks leave it nil.
@@ -206,10 +208,10 @@ type Difference struct {
 }
 
 // NamesAField says whether Path names what differs, which it does unless the
-// difference is of the object taken as one.
+// difference is in the object as a whole.
 func (d Difference) NamesAField() bool { return d.Path != "" }
 
-// whole is the difference of an object taken as one.
+// whole is a difference in the object as a whole.
 func whole(object Difference, before, after string) Difference {
 	object.Before, object.After = before, after
 	return object
@@ -219,16 +221,15 @@ func whole(object Difference, before, after string) Difference {
 type Result struct {
 	ID         string      `json:"id"`
 	Violations []Violation `json:"violations,omitempty"`
-	// Notes record what the check could not evaluate, which the report prints
-	// (DESIGN.md §6, G5).
+	// Notes record what the check could not evaluate, which the report prints.
 	Notes []string `json:"notes,omitempty"`
 }
 
 // Check is one invariant or property. Its error is a configuration error,
-// never a finding (DESIGN.md §8.4).
+// never a finding.
 type Check func(Input) (Result, error)
 
-// Generic returns the invariants of DESIGN.md §6, in ID order.
+// Generic returns the invariants every target is held to, in ID order.
 func Generic() []Check {
 	return []Check{BoundedReconciliation, NoChurn, CleanDeletion, Convergence, RestartStable, NoErrorLoop, SelfHealing}
 }
@@ -270,8 +271,8 @@ func (v Violation) quotingDifferences(e Excerpt[Difference]) Violation {
 	return v
 }
 
-// quotingManaged does the same for the state at the verdict. The total it
-// carries is never nil: the check asked.
+// quotingManaged does the same for the state at the verdict. It sets the
+// total even at zero, which says the target managed nothing.
 func (v Violation) quotingManaged(e Excerpt[observe.Version]) Violation {
 	v.Managed, v.ManagedTotal = e.Quoted, &e.Total
 	return v
@@ -284,13 +285,12 @@ func (r *Result) violate(v Violation) {
 }
 
 // note records what the check left unjudged, naming the check, so that a
-// reader can tell a skipped check from a passing one (DESIGN.md §6).
+// reader can tell a skipped check from a passing one.
 func (r *Result) note(format string, args ...any) {
 	r.Notes = append(r.Notes, r.ID+" is not evaluated "+fmt.Sprintf(format, args...))
 }
 
-// timeouts are the target's windows, with §6's defaults wherever it declares
-// none.
+// timeouts are the target's, with the defaults wherever it declares none.
 func (in Input) timeouts() target.Timeouts {
 	declared := in.Target.Timeouts
 	if declared.Settle <= 0 {
@@ -305,7 +305,7 @@ func (in Input) timeouts() target.Timeouts {
 	return declared
 }
 
-// errLoop is N_errloop, G6's threshold (DESIGN.md §6).
+// errLoop is G6's threshold, thresholds.errloop.
 func (in Input) errLoop() int {
 	if in.Target.Thresholds.ErrLoop > 0 {
 		return in.Target.Thresholds.ErrLoop
@@ -313,8 +313,8 @@ func (in Input) errLoop() int {
 	return target.DefaultThresholds.ErrLoop
 }
 
-// quietAllowance is N_quiet, the requests G1 and the status writes G2 allow in
-// one quiet window.
+// quietAllowance is thresholds.quiet: the requests G1 and the status writes
+// G2 allow in one quiet window.
 func (in Input) quietAllowance() int { return max(in.Target.Thresholds.Quiet, 0) }
 
 // end is the instant the run stops being observed.

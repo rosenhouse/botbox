@@ -65,8 +65,8 @@ func must(err error) {
 	}
 }
 
-// counter is the request log of DESIGN.md §5.2, cut down to what this spike
-// reports: the verb and resource of every request the controller makes.
+// counter is botbox's proxy log cut down to what this spike reports: the verb
+// and resource of every request the controller makes.
 type counter struct {
 	mu   sync.Mutex
 	log  []string
@@ -272,7 +272,7 @@ func main() {
 
 	// Readiness must also prove the controller saw this generation. An
 	// ExternalSecret carries no observedGeneration; status.syncedResourceVersion
-	// is "<generation>-<hash of labels and annotations>" (DESIGN.md §8.4).
+	// is "<generation>-<hash of labels and annotations>".
 	ready := func(u *unstructured.Unstructured) bool {
 		synced, _, _ := unstructured.NestedString(u.Object, "status", "syncedResourceVersion")
 		if !strings.HasPrefix(synced, fmt.Sprintf("%d-", u.GetGeneration())) {
@@ -419,7 +419,7 @@ func main() {
 
 	// Delete: this spike runs no garbage collector, so whatever is left is
 	// either the controller's own cleanup or something botbox's collector
-	// would resolve from its ownerReferences (DESIGN.md §5.8).
+	// would resolve from its ownerReferences.
 	proxy.mark()
 	t1 = time.Now()
 	must(dyn.Resource(esGVR).Namespace(namespace).Delete(ctx, esName, metav1.DeleteOptions{}))

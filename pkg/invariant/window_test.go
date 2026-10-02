@@ -1,6 +1,7 @@
 package invariant_test
 
 import (
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -56,6 +57,18 @@ func TestSampleQuotesOneFromEachKindInTurnNewestFirst(t *testing.T) {
 	want := []string{"w-2", "s-2", "w-1", "s-1", "w-0", "s-0"}
 	if names := names(got); strings.Join(names, ",") != strings.Join(want, ",") {
 		t.Errorf("Sample quotes %v, want %v.", names, want)
+	}
+}
+
+// KindName orders the kinds, so toy.botbox/v1/Widget comes before
+// v1/ConfigMap.
+func TestSampleTakesTheKindsInTheOrderOfTheirNames(t *testing.T) {
+	managed := []observe.Version{version(configMapGVK, "c", 0), version(widgetGVK, "w", 0)}
+
+	got := names(invariant.Sample(managed).Quoted)
+
+	if want := []string{"w", "c"}; !slices.Equal(got, want) {
+		t.Errorf("Sample quotes %v, want %v.", got, want)
 	}
 }
 

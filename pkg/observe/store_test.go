@@ -249,6 +249,23 @@ func TestSnapshotAtReturnsTheLatestVersionAtOrBeforeTheMoment(t *testing.T) {
 	}
 }
 
+// KindName orders the kinds, so toy.botbox/v1/Widget comes before
+// v1/ConfigMap.
+func TestSnapshotsAndLiveObjectsAreOrderedByKindThenName(t *testing.T) {
+	s := observe.NewStore(managing(configMapGVK, widgetGVK))
+	s.Record(configMapGVK, object(configMapGVK, "child", "10"), at(0))
+	s.Record(widgetGVK, object(widgetGVK, "widget", "11"), at(0))
+	s.Record(configMapGVK, object(configMapGVK, "another", "12"), at(0))
+	want := []string{"widget", "another", "child"}
+
+	if got := snapshotNames(s.SnapshotAt(at(0))); !slices.Equal(got, want) {
+		t.Errorf("SnapshotAt returned %v, want %v.", got, want)
+	}
+	if got := names(s.Managed()); !slices.Equal(got, want) {
+		t.Errorf("Managed returned %v, want %v.", got, want)
+	}
+}
+
 func TestSnapshotAtIsEmptyBeforeTheFirstVersion(t *testing.T) {
 	s := observe.NewStore(managing(configMapGVK))
 	s.Record(configMapGVK, object(configMapGVK, "child", "10"), at(1))
@@ -464,5 +481,16 @@ func TestHistoryOfFillsInTheWatchedNamespace(t *testing.T) {
 
 	if got := resourceVersions(s.HistoryOf(widgetGVK, "widget")); !slices.Equal(got, []string{"10", "11"}) {
 		t.Errorf("HistoryOf holds resourceVersions %v, want the widget's 10 and 11 in order.", got)
+	}
+}
+
+func TestKindNameLeavesOutTheCoreGroup(t *testing.T) {
+	for gvk, want := range map[schema.GroupVersionKind]string{
+		configMapGVK: "v1/ConfigMap",
+		widgetGVK:    "toy.botbox/v1/Widget",
+	} {
+		if got := observe.KindName(gvk); got != want {
+			t.Errorf("KindName(%#v) is %q, want %q, as target.yaml writes it.", gvk, got, want)
+		}
 	}
 }

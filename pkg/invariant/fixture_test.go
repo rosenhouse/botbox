@@ -180,11 +180,23 @@ func (r *run) stayed() *run {
 	return r
 }
 
+// held has the proxy hold a request of the target's at the last checkpoint.
+func (r *run) held() *run {
+	r.in.Checkpoints[len(r.in.Checkpoints)-1].Held = true
+	return r
+}
+
 // settled ends the last op's settle wait at when, which is where §6's quiet
 // window opens. The teardown follows one T_stable later, because §5.5 step 4
 // waits that long before it deletes.
 func (r *run) settled(when time.Duration, result invariant.SettleResult) *run {
 	return r.checkpoint(when, result).teardown(when + stableWindow + 100*time.Millisecond)
+}
+
+// teardownCheckpoint follows the teardown's deletion window and no settle wait.
+func (r *run) teardownCheckpoint(when time.Duration) *run {
+	r.in.Checkpoints = append(r.in.Checkpoints, invariant.Checkpoint{Op: invariant.Teardown, Time: at(when)})
+	return r
 }
 
 // teardown is when botbox began emptying the namespace (DESIGN.md §5.5).
@@ -483,6 +495,12 @@ func lease(verb string) proxy.Request {
 		Verb: verb, Group: "coordination.k8s.io", Version: "v1", Resource: "leases",
 		Namespace: namespace, Name: "toy-widget", Status: 200,
 	}
+}
+
+func leaseAnswered(verb string, status int) proxy.Request {
+	answered := lease(verb)
+	answered.Status = status
+	return answered
 }
 
 // leaseCandidate is a request that coordinated leader election makes before the

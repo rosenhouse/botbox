@@ -37,7 +37,9 @@ func TestMarkdownEmbedsMatchTheirFiles(t *testing.T) {
 // A page shows the files it describes, and so cannot drift from them.
 func TestPagesEmbedTheFilesTheyShow(t *testing.T) {
 	for page, paths := range map[string][]string{
-		"README.md":         {"examples/cert-manager/quickstart.sh", "examples/ci/github-actions.yml", "examples/tools-module.sh", "targets/toy-widget/botbox_test.go"},
+		"README.md":         {"targets/toy-widget/target.yaml", "examples/ci/github-actions.yml", "examples/tools-module.sh", "targets/toy-widget/botbox_test.go"},
+		"docs/targets.md":   {"targets/toy-widget/sequences/fault.json"},
+		"docs/examples.md":  {"examples/cert-manager/quickstart.sh"},
 		"docs/reference.md": {"docs/reference/target.yaml", "docs/reference/sequence.json"},
 	} {
 		doc := readFile(t, page)

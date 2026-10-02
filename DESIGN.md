@@ -123,8 +123,7 @@ Implementations:
   supervision. The end of the context `Supervise` was given ends it too. `Status` says
   whether a supervised target is waiting to restart, and when the process now running
   started. botbox does not probe the target for health. A settle wait does not converge
-  until the process now running has requested a resource outside leader election, which
-  only a running target does (§5.5).
+  until the process now running has shown it runs (§5.5).
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
 - `Image` — run a container image against a kind cluster, with the proxy in-cluster or
   reached by port-forward. Phase 2 (§10, M8).
@@ -146,6 +145,11 @@ Responsibilities:
 - **Record** every request: verb, group/version/resource, namespace, name, status code,
   latency, timestamp. This log is the primary signal for G1.
 - **Stream** long-lived watch responses without buffering (`FlushInterval = -1`).
+- **Hold** a request a delay applies to, and report whether it holds one and when it
+  released the last. It releases a request when it forwards it, once the delay ends, or
+  when the target hangs up on one without a body. Go's server notices a hangup only
+  once it has read the body, so a held write is forwarded anyway. A watch counts as held
+  only until it is forwarded, however long it streams.
 - **Inject faults** according to an active `FaultSpec`:
 
 ```go
@@ -269,43 +273,58 @@ The Runner executes one sequence:
    out what changed. Where `Ready` held and nothing changed within `T_stable`, it says
    that. The Runner and the engine raise it with one function, so they agree. A fault
    excuses it while active, which is once the proxy has applied it and until the proxy
-   stops (D36), and while the target is still owed time to recover from it (§6). A
-   `recreate` whose old CR stays where no check reports it cannot go on, so the run ends
-   as a harness error.
+   stops applying it and has released every request it held (D36), and while the target
+   is still owed time to recover from it (§6). A `recreate` whose old CR stays where no
+   check reports it cannot go on, so the run ends as a harness error.
+   A request the proxy holds counts as a change until the proxy releases it (§5.2), since
+   it is about to change what the checks read. A request that reached the proxy before a
+   wait's time ran out holds the wait open until `T_settle` past its release. It holds a
+   `recreate`'s wait for its old CR open the same way.
    Until a settle wait has converged, normally op 0's, a wait also ends where the target's
    process exits, and the Runner checks the target is running before it applies each op. A
    target that stopped then ends the run as a harness error naming the op it was at (§11):
    a bad flag or a taken port reads the same way, and the ops behind it would run against
    nothing. The error quotes the line in `target.log` that says why: the line the last Go
-   panic opens with, or else the last line above any stack trace, since a logger's trace
-   ends in a frame. The log holds every process a `restart` started, and the last one is
-   the one that stopped. Where botbox had created the CR and the target had requested a
-   resource, the error says the CR may have crashed the target and names the run's
+   panic opens with, or else the last line above the last usage text, which Go's flag
+   package and cobra print below a flag error, or else the last line above any stack
+   trace, since a logger's trace ends in a frame. The log holds every process a `restart`
+   started, and the last one is the one that stopped. Where botbox had created the CR and
+   the target had requested a resource, the error says the CR may have crashed the target
+   and names the run's
    `sequence.json`, unless the target wrote that its port was taken. Once a wait has
    converged, the target has shown it runs, and the Launcher supervises it (§5.1). The run
    notes each exit and the line the target wrote as it stopped. A wait does not converge
-   while the target waits to restart, nor until the process now running has shown it runs
-   by requesting a resource outside leader election. botbox has no other sign that a target
-   is back, and a controller lists what it watches as it starts. A start and that first
-   request count as changes, so a restarted target runs for `T_stable` past its return
-   before a wait converges. A target that exits again within `T_stable` of each return
-   therefore never converges, even where it wrote its converged state first, and its wait
-   expires as a G4 that counts the exits since the target last converged and quotes the
-   last. A target that runs longer between exits can converge in between, until a backoff
-   outlasts a wait. A target that converges after an exit passes. botbox chose when to
-   restart the target after a `Restart` op and after an exit a fault excuses (§6), so a
-   wait gives it `T_settle` past its return from either, where it returns within `T_settle`
-   of the restart, and `T_settle` past the restart where it does not. While a fault is
-   active, only the first exit a fault excused during each op gets that time (§6). An exit
-   is during the last op stamped before it. An op stamped before the target has had that
-   time after an earlier exit gives it that time too. Before it stamps an op, the Runner
-   waits for any restart that follows an exit a fault excused, so the op never lands while
-   the target waits for it. Any other restart gives it no more time, and its startup
-   requests count toward G1 where they land in a quiet window (§6). A target not back when
-   a wait expires fails G4. A restart that fails ends the run as the harness error above.
-3. Evaluate invariants and properties at each checkpoint (§4). A run ends at its first
-   violation. More than `N_objects` (default 500) managed objects in the namespace ends
-   the run as a harness limit, reported as such rather than as a finding.
+   while the target waits to restart, nor until the process now running has shown it runs.
+   botbox takes a target that has read a Lease with a get to elect a leader, because
+   leader election reads its Lease that way to learn who holds it. A process of such a
+   target shows it runs once the API server accepts a create, update or patch of a lease
+   that follows the process's own get. A controller can start informers before it leads,
+   and the leader that botbox replaces renews its lease without a get while its renewals
+   succeed. A process of any other target shows it runs by requesting a resource outside
+   leader election, because a controller lists what it watches as it starts. botbox has no
+   other sign that a target is back. A start and that sign count as changes, so a
+   restarted target runs for `T_stable` past its return before a wait converges. A target
+   that exits again within `T_stable` of each return therefore never converges, even where
+   it wrote its converged state first, and its wait expires as a G4 that counts the exits
+   since the target last converged and quotes the last. A target that runs longer between
+   exits can converge in between, until a backoff outlasts a wait. A target that converges
+   after an exit passes. botbox chose when to restart the target after a `Restart` op and
+   after an exit a fault excuses (§6), so a wait gives it `T_settle` past its return from
+   either, where it returns within `T_settle` of the restart, and `T_settle` past the
+   restart where it does not. While a fault is active, only the first exit a fault excused
+   during each op gets that time (§6). An exit is during the last op stamped before it. An
+   op stamped before the target has had that time after an earlier exit gives it that time
+   too. Before it stamps an op, the Runner waits for any restart that follows an exit a
+   fault excused, so the op never lands while the target waits for it. Any other restart
+   gives it no more time, and its startup requests count toward G1 where they land in a
+   quiet window (§6). A target not back when a wait expires fails G4. A restart that fails
+   ends the run as the harness error above.
+3. Evaluate invariants and properties at each checkpoint (§4). Properties are not
+   evaluated where the proxy held a request of the target's, or released one within
+   `T_stable`, which may still change what they read, nor where the target was still
+   starting (§6). The run notes each such checkpoint. A run ends at its first violation.
+   More than `N_objects` (default 500) managed objects in the namespace ends the run as a
+   harness limit, reported as such rather than as a finding.
 4. Tear down. Clear every active fault. If the target is still owed time to recover from
    a fault, which is so for a fault the teardown just cleared, wait for convergence as
    step 2 does and checkpoint where the wait ends. This recovery wait is judged as an op's
@@ -485,7 +504,8 @@ step 4). A run judges one window per op whose settle wait it saw end, plus the t
 a sequence whose last op does not settle has only the teardown's, and where the last op
 did settle the two overlap, so traffic in the overlap breaks both. A window a later op or
 a fault reaches into is not judged, where a fault's window runs from the first request the
-proxy faulted with it to the request or the instant its trigger ran out (D36). The
+proxy faulted with it to the request or the instant its trigger ran out, or to the release
+of the last request it held where that is later (D36). The
 teardown clears every fault before its window opens, so a fault it cleared did not reach
 into it. It waits for convergence first only where the target is still owed time to
 recover from a fault (§5.5 step 4), so a sequence ends with an op that settles.
@@ -495,9 +515,10 @@ its delay retries within as long as it has been failing. Once faults stop, G4 th
 gives the target as long as they lasted plus `T_settle`. The faults are those whose
 windows reach past the last settle wait that converged, because a target that converged
 had recovered. They lasted from the first request the proxy faulted with any of them, or
-from that convergence if it came later, to the instant the last of them stopped. A settle
-wait does not give up before that time has passed, and one that expired is excused only
-while a fault is active or that time is still owed. A spec change made within that time is
+from that convergence if it came later, to the instant the last of them stopped, or
+released the last request it held where that is later. A settle wait does not give up
+before that time has passed, and one that expired is excused only while a fault is
+active or that time is still owed. A spec change made within that time is
 judged at the later of the two deadlines. A settle wait that converged sooner ends that
 time early. A target that exits while a fault excuses it, as controller-runtime with
 leader election on does when it loses its lease, then waits out the restart's backoff
@@ -506,13 +527,30 @@ as after a `Restart` (§5.5), and does not judge a window the exit falls in, as 
 judge one a fault reaches into. While a fault is active, only the target's first such exit
 during each op is owed that time, because owing each later exit would hold a crash loop's
 wait open for as long as the fault lasts. If the target exits again during the op, the
-wait can end before it restarts, and the properties are checked there. No op lands while
-the target waits to restart after an exit a fault excused, and an op that lands before
-the target has had its time after such an exit owes it that time too (§5.5). That time
-ends within `2 × T_settle` of the op, so it bounds the op's wait. Once no fault is active,
-every exit a fault excused is owed its time. Only a fault excuses an exit, so a crash loop
-that a fault set off still fails G4, at the latest in the wait the teardown gives the
-target once it has cleared the faults.
+wait can end before it restarts. No op lands while the target waits to restart after an
+exit a fault excused, and an op that lands before the target has had its time after such
+an exit owes it that time too (§5.5). That time ends within `2 × T_settle` of the op, so
+it bounds the op's wait. Once no fault is active, every exit a fault excused is owed its
+time. Only a fault excuses an exit, so a crash loop that a fault set off still fails G4,
+at the latest in the wait the teardown gives the target once it has cleared the faults.
+
+**A target still starting.** A wait converges only once the target is back since it last
+started and has run for `T_stable` after that (§5.5). A wait a fault excuses can end
+sooner: a later exit during the op is owed no time, and a target can take longer than
+`T_settle` past its restart to win its lease back. The target is then still starting: it
+is waiting to restart, restarted within `T_stable`, or has not shown it runs since it last
+started (§5.5), or first did within `T_stable`. G4's statement names the same states. The
+teardown's checkpoint can find the target so too. A target still starting may not yet
+have acted on what changed while it was down, so no property is evaluated at that
+checkpoint, under `checkpoint` or `end`, and the run notes each one.
+A wait that converged saw the target back for `T_stable`, so its checkpoint is judged,
+even where a `Restart` op replaced a target waiting out its backoff. A property evaluated
+`always` reads every event rather than a checkpoint. No invariant needs the rule. A target
+that does not come back fails G4 where a wait expires with no fault active, at the latest
+in the teardown's recovery wait. G7 asks more after a restart: the target must be back
+before the op. G1 and G2 judge no window a fault reaches into, so they skip the window
+after such a wait where a fault is active at its end. G3 judges deadlines, G5 converged
+states and G6 failing requests.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -662,10 +700,8 @@ fixture after the last settle wait that converged, since the target may then hav
 delete the object itself. It notes one where a fault was active during the op or its wait,
 or where the wait ended while the target was still owed time to recover from a fault. It
 also notes an op that follows a restart, by a `Restart` op or by `Supervise` after an exit,
-where the target requested nothing between the last restart and the op but leader
-election's leases and lease candidates, and paths that name no resource. botbox has no
-other sign that the target is back (§5.1), and a process starting up or waiting to lead
-requests only those. A settle wait that converged after the restart rules this out (§5.5).
+where the target had not shown it runs (§5.5) between the last restart and the op. A
+settle wait that converged after the restart rules this out.
 It notes an op where the target exited, or waited to restart, during the op or its wait.
 Where several of these apply, the note names the first. A violation quotes the object's
 history and the managed objects where the wait ended, which show an object recreated under
@@ -708,8 +744,7 @@ Details the example does not show:
   between them, and leaves out what a CR op, a fixture op or a `deleteManaged` between
   them may have changed (§6). Put a `settle` op after a `restart`, and one before it
   unless the op before it settles. G7 judges a `deleteManaged` after a `restart` only once
-  the target has requested a resource outside leader election, which a `settle` op
-  between them waits for.
+  the target has shown it runs (§5.5), which a `settle` op between them waits for.
 - A fault may outlast the sequence. The teardown then clears it and waits for the target
   to recover (§5.5).
 - A fault's `match.verb` is one of `get`, `list`, `watch`, `create`, `update`, `patch`,
@@ -753,6 +788,9 @@ Details the example does not show:
   `manages` is a configuration error. G7 judges a `deleteManaged` only once the run has
   converged since botbox last changed something (§6), so put a `settle` op between a
   `noSettle` op and a `deleteManaged`.
+
+botbox refuses an op that lacks a field its type needs, or carries one it does not take.
+The error names the fields the type needs.
 
 `botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
 embed the minimized sequence in this format. `docs/reference.md` lists every field, op and
@@ -931,7 +969,8 @@ and names the path with `[*]` in its place (§6).
 
 A property's `when` says where it is evaluated: `always` on every Observer event before
 the teardown boundary (§6), `checkpoint` at each checkpoint (§4), `end` at the last
-checkpoint only.
+checkpoint only. Neither of the last two judges a checkpoint §5.5 step 3 leaves
+unjudged.
 
 cert-manager v1.21.2 binds its healthz server to `0.0.0.0:9403`. The one flag that moves
 it, `--internal-healthz-listen-address`, is hidden, and upstream says the prefix and the
@@ -974,7 +1013,9 @@ JSONPath is not supported anywhere.
 `ready` binds `metadata`, `spec` and `status` to the corresponding top-level fields of a
 primary CR as dynamic maps; a missing field binds to an empty map. `Ready` holds where it
 holds on every primary CR. A property binds those three to each primary CR in turn, and
-holds where it holds on each. It also binds `managed`, the managed objects that name that
+holds where it holds on each. Where no primary CR exists, as at the teardown's checkpoint,
+it runs once with the three empty, over every managed object, and a violation there says
+that no CR existed. It also binds `managed`, the managed objects that name that
 CR in their ownerReferences or name no CR (§6), as dynamic maps, each carrying
 `apiVersion`, `kind`, `metadata` and the object's other top-level fields. The standard
 macros (`exists`, `all`, `has`, `map`, `filter`) and the string extensions are available. At a checkpoint the harness reads `managed` from the API server, not from the
@@ -1031,6 +1072,10 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   lease, as controller-runtime does. The envtest tier runs it at 3 s under a fault that
   fails most lease updates, so the toy can lose its lease and restart until the teardown
   clears the fault (§6, recovery from faults).
+- `--index` indexes Widgets by `spec.count`, as a controller indexes a field it lists by.
+  controller-runtime starts the informer an index needs before the manager leads, so with
+  `--lease` the toy watches Widgets while it waits out its lease. The envtest tier runs it
+  so under the same fault (§5.5).
 
 ### 9.1 Seeded bug catalog (`--bug=<id>`)
 
@@ -1067,9 +1112,9 @@ error (§5.5), and a restart that exits again more than `T_stable` after its fir
 looks converged to the wait it lands in. B14's row changes the label and then restarts the
 toy, which reconciles the Widget. B15's row creates a second Widget, then deletes a child,
 restarts the toy and deletes the second Widget, which the toy with no bug passes.
-`fault.json`, the README's fault example, holds a fault that outlasts the sequence. The
-envtest tier runs it, not the matrix: the toy with no bug recovers once the teardown
-clears the fault, and B11 fails G4 there.
+`fault.json`, the fault example of `docs/targets.md`, holds a fault that outlasts the
+sequence. The envtest tier runs it, not the matrix: the toy with no bug recovers once the
+teardown clears the fault, and B11 fails G4 there.
 
 Acceptance for M3: a matrix in `docs/bug-matrix.md` showing which invariant or property
 catches each bug, generated by CI, with no empty rows and no check firing on any sequence
@@ -1176,8 +1221,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   asset fails rather than passing quietly. Values live in the Makefile. The README's Install
   block and the CI recipe repeat the envtest pins for adopters to copy. The recipe also
   repeats go.mod's module and Go version, and the runner and action releases of
-  `.github/workflows/`. The Install section quotes go.mod's Go version and the k8s.io/api
-  and controller-runtime versions that requiring botbox forces on a module (D80).
+  `.github/workflows/`. The README's Install and tools module sections quote go.mod's Go
+  version and the k8s.io/api and controller-runtime versions that requiring botbox forces
+  on a module (D80).
   `make test` holds each copy to its source. Each `--deadline` in the
   recipe gives a run at least the time that the Makefile's example tiers give one. Bumps
   are their own PRs, never mixed with features.
@@ -1201,25 +1247,26 @@ the proxy; the `Image` launcher. Separate design addendum.
 
   `botbox matrix` generates the toy's bug matrix for `make bug-matrix`, so the top-level
   help leaves it out. `botbox help` and `botbox --help` print what botbox does, its
-  commands, the exit codes, `KUBEBUILDER_ASSETS` and the README's URL, because
-  `go install` ships no documentation. `botbox <command> --help` and
-  `botbox help <command>` print the command's synopsis and each flag with its meaning and
-  default. `-h`, `--h`, `-help` or `--help` after a sequence file asks for help too. Help
-  goes to stdout and exits 0. A bare `botbox` prints botbox's help to stderr and exits 2. A
-  usage error, such as an unknown flag, a missing required flag, another flag or `--` after
-  a sequence file or a wrong count of sequence files, exits 2 and prints the error and the
-  command's synopsis to stderr. It spells a flag with two dashes, as the help does, but
-  quotes a flag after a sequence file as given. No message botbox prints cites this
-  document or uses its symbols, such as `T_settle`. A message names the target.yaml key
-  and its value instead, as in `2s (timeouts.stable)`. A test scans the code's string
-  literals for them.
+  commands, the exit codes, `KUBEBUILDER_ASSETS`, the README's URL and the pages that list
+  every key and explain a failure, because `go install` ships no documentation.
+  `botbox <command> --help` and `botbox help <command>` print the command's synopsis and
+  each flag with its meaning and default. `-h`, `--h`, `-help` or `--help` after a sequence
+  file asks for help too. Help goes to stdout and exits 0. A bare `botbox` prints botbox's
+  help to stderr and exits 2. A usage error, such as an unknown flag, a missing required
+  flag, another flag or `--` after a sequence file or a wrong count of sequence files,
+  exits 2 and prints the error and the command's synopsis to stderr. It spells a flag with
+  two dashes, as the help does, but quotes a flag after a sequence file as given. No
+  message botbox prints cites this document or uses its symbols, such as `T_settle`. A
+  message names the target.yaml key and its value instead, as in `2s (timeouts.stable)`. A
+  test scans the code's string literals for them.
   `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. The deadline abandons the run under way (§5.5), and the
   shrinker stops there and reports the smallest failing sequence it found. Without
   `--deadline`, botbox prints and uses the longest the planned runs' waits can take at the
   target's timeouts, plus 4m to minimize a failure where botbox drew the sequences
-  (D64). `--launch-arg` appends to `launch.args` (repeatable; a later flag wins), which
-  is how the bug matrix selects `--bug=N`.
+  (D64). A shrink pass can take minutes, so botbox prints the failed check's ID before it
+  minimizes a drawn sequence of more than one op. `--launch-arg` appends to `launch.args`
+  (repeatable; a later flag wins), which is how the bug matrix selects `--bug=N`.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
   CRDs there (§5.8); `KUBEBUILDER_ASSETS` locates the envtest binaries. Exit codes: 0, all runs
   passed; 1, an invariant or property failed and a report was written; 2, configuration or
@@ -1307,23 +1354,38 @@ the proxy; the `Image` launcher. Separate design addendum.
   locally. External targets are obtained by shallow git clone at a tag plus `go build`, or
   as a GitHub release asset, and are pinned.
 - **Lint.** `gofmt` and `go vet` run in CI. golangci-lint may be added in its own PR.
-- **README.** Usage-first; internals live here and in `docs/`. Order: what botbox does
-  (five lines); what it cannot test yet; install, and a tools module that keeps botbox
-  out of an operator's go.mod, embedded from `examples/tools-module.sh`, which the envtest
-  tier runs (D80); a find in half a minute, a replay of a bug seeded into the toy, which
-  says that every find the README shows is seeded or a negative control and whose command
-  an envtest test runs as written; quickstart against cert-manager, then what the second
-  example adds; writing `target.yaml` for your own controller; reading a report; what to
-  change when botbox exits 2; a CI recipe for adopters, embedded from
-  `examples/ci/github-actions.yml`, and a test that runs botbox from `go test`, embedded
-  from `targets/toy-widget/botbox_test.go`, which the envtest tier runs (D81); a
+- **Comments.** A Go comment outside tests makes sense without this document open. It
+  cites no section or decision and uses none of this document's symbols. It names the
+  target.yaml key instead, as a message does. A test scans every such comment, the
+  spikes' included. Tests may cite this document, since they hold the code to it (D82).
+- **README.** Usage-first; internals live here and in `docs/`. Order: what botbox is and
+  is not, in a few sentences, which say that it runs the controller against a real
+  kube-apiserver and etcd behind a proxy; what it cannot test yet; install; a first run
+  and a first find, which draw runs on the toy and replay a bug seeded into it, say that
+  every find the README shows is seeded, and run as written in an envtest test, with the
+  botbox and the control plane that install leaves; writing `target.yaml` for your own
+  controller, around the toy's `target.yaml` embedded as the worked example, with how to
+  run it, a `ready` for a CR that reports a Ready condition, which `make test` evaluates,
+  and a sequence to pin per managed kind and per property, which the envtest tier runs;
+  reading a failure, with the usual cause of each check and a link to what to change
+  when botbox exits 2; a CI recipe for adopters,
+  embedded from `examples/ci/github-actions.yml`, a tools module that keeps botbox out of
+  an operator's go.mod, embedded from `examples/tools-module.sh`, which the envtest tier
+  runs (D80), and a test that runs botbox from `go test`, embedded from
+  `targets/toy-widget/botbox_test.go`, which the envtest tier runs (D81); a
   one-line-per-invariant table linking to §6; a closing "Development and internals"
-  section that links to this document and to `docs/bug-matrix.md`. Only the Invariants
-  section and that closing section link here, and only the closing section cites a
-  section, a decision or a symbol of this document. The README names no milestone.
-  `make test` enforces these rules. The limits section opens with each limit no issue
-  tracks. Each other limit is a `- ` bullet that links its issue, with its other lines
-  indented two spaces, and nothing follows the list. Each line's text begins with a
+  section that links to this document and to `docs/bug-matrix.md`. Detail lives in pages
+  the README links (D83): `docs/reference.md` lists every key and field,
+  `docs/targets.md` says how to write a target, `docs/failures.md` says what each file and
+  message of a failure means, and `docs/examples.md` runs the adopted examples and their
+  negative controls. Only the README's Invariants section and its closing section link
+  here, and only the closing section cites a section, a decision or a symbol of this
+  document. The three guide pages cite none. None of them names a milestone. Every
+  sequence they show loads, every link among them and `docs/reference.md` lands on a
+  file and a heading, and `docs/failures.md` names every check of the README's Invariants
+  table. `make test` enforces these rules. The limits section opens with each
+  limit no issue tracks. Each other limit is a `- ` bullet that links its issue, with its
+  other lines indented two spaces, and nothing follows the list. Each line's text begins with a
   letter, `[` or `(`. The section holds no HTML, footnote or link definition, and no
   bullet holds code or a backslash, so nothing hides a limit or its link. A test refuses
   any other line, lists the limits, holds each bullet to a listed limit, and holds the
@@ -1331,8 +1393,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   no other limit and that each linked issue is open (§12). A fenced block preceded by
   `<!-- embed: <path> -->` has content, excluding the two fence lines, byte-identical to
   that file including its trailing newline; `<path>` is relative to the repository root;
-  `make test` enforces it. It also runs the cert-manager quickstart command against a
-  fake session and requires the block after it to hold what botbox prints.
+  `make test` enforces it. It also runs the cert-manager quickstart command of
+  `docs/examples.md` against a fake session and requires the block after it to hold what
+  botbox prints.
 - **PRs.** Every PR description, issue, review and comment a Claude session posts begins
   with the line `🤖 Created by Claude 🤖` (CLAUDE.md). The description then names the
   milestone and the invariant/property IDs it touches, and carries a "Design change"
@@ -1827,11 +1890,11 @@ built from source and run as a black-box binary.
   fixture, cert-manager and external-secrets. It takes the example and kind tiers' seeds
   from the Makefile, and the fixture envtest fails unless it draws what the record holds. A
   change to generation or to rapid that moves a draw fails until the test is rerun with
-  `-update`. The README's quickstarts must run the Makefile's example seed, and the drawn
-  runs the README shows must start at that seed. Another test runs the README's cert-manager
-  quickstart command as `quickstart.sh` passes it on, and fails unless the README shows what
-  botbox prints. The README tells CI to pin botbox to a commit and to replay a failing
-  `sequence.json` against the base branch.
+  `-update`. The quickstarts of `docs/examples.md` must run the Makefile's example seed,
+  and the drawn runs that page shows must start at that seed. Another test runs its
+  cert-manager quickstart command as `quickstart.sh` passes it on, and fails unless the
+  page shows what botbox prints. The README tells CI to pin botbox to a commit and to
+  replay a failing `sequence.json` against the base branch.
 - **D55 Generation keeps the CRD's own rules, judged by the API server's code.** The
   generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
   rule `self.maxUnavailable <= self.count`, 15 of 100 drawn sequences broke it, and the
@@ -2008,7 +2071,10 @@ built from source and run as a black-box binary.
   first wait up to 5 min for a restart, and then owe `T_settle` past a return that can
   come `T_settle` after the op (§5.5). Faults that stopped are owed as long as they lasted
   plus `T_settle` (§6), so each time faults stop, the deadline doubles what the run had
-  and allows another exit. Faults with no trigger stop together, at the teardown.
+  and allows another exit. A request a delay holds can keep a wait open past its time,
+  so the deadline adds the longest delay so far and `T_settle` to each wait. A fault
+  lasts until the proxy releases what it held (§5.5), so the deadline adds that delay to
+  the faults' length too. Faults with no trigger stop together, at the teardown.
   Minimizing gets what the runs left plus 4m, so it may still stop early. At §6's
   timeouts, a create and an update get 3m50s, and ten drawn runs tens of minutes. A fault
   that stops before the update raises the 3m50s to 47 min. Four such faults, each before
@@ -2259,3 +2325,111 @@ built from source and run as a black-box binary.
   timeout too short for its runs, with one that leaves botbox no time, and with no
   controller to launch.
   Hooks stay in-repo (D2).
+- **D82 Go comments need no design document.** Comments outside tests cited this
+  document's sections about 290 times and its decisions 24 times, so a reader needed it
+  open to follow the code, and a renumbered section left each citation wrong. A comment
+  now says what it means and names the target.yaml key rather than a symbol, as D74 asks
+  of a message. A test scans every comment outside tests for what it scans string
+  literals for. Six packages each defined the same helper, which writes a kind as
+  target.yaml does. `observe.KindName` replaces them, because `observe` imports no other
+  botbox package.
+- **D83 The README walks a newcomer from install to CI, and `docs/` holds the detail.**
+  Two newcomers walked the README cold. One built botbox and fetched the control plane
+  twice, because the first find did not use what Install had set up. Both left the README
+  for `docs/reference.md` to learn that a property runs where no CR exists, and which
+  fields a `deleteManaged` takes. Neither drew a `deleteManaged` in a dozen runs, so a
+  controller with no watch on its children passed. A third walker's 13 drawn runs passed a
+  controller that never rewrote a child after a spec change, since none updated a CR that
+  had settled. The README now follows the order a newcomer needs: what botbox is, what it
+  cannot test, install, a first run and a first find with Install's botbox, the toy's
+  `target.yaml` as the worked example, reading a failure, and CI. It tells a reader to pin
+  a sequence per managed kind that deletes one of its objects, and one per property that
+  updates what the property reads. An envtest test runs the README's example against the
+  toy, with B7 and B8. The examples, the kind caveats, generation, faults, crash loops and
+  every message move to `docs/targets.md`, `docs/failures.md` and `docs/examples.md`.
+  Those pages keep the README's rule against this document's vocabulary, and the tests
+  that held the README to the examples' seeds and output now hold `docs/examples.md`. The
+  worked example is embedded, so it cannot drift from a target the envtest tier runs.
+  Keeping the cert-manager quickstart in the README was rejected, because it builds
+  cert-manager from source and a newcomer needs the toy first. The walks also changed
+  three messages. A property's violation where no CR existed now says so. An op that
+  carries a field it does not take names the fields it needs. A target that stops on a bad
+  flag has the line above its usage text quoted, since Go's flag package prints the error
+  first. A walker also waited eight silent minutes for a find, twice the 4m the derived
+  deadline's line seemed to promise. That line now says minimizing gets the rest of the
+  deadline, and botbox prints the failed check before it minimizes. The README says the
+  derived deadline is a worst case, and how to size a shorter one. `botbox --help` says
+  botbox runs a real kube-apiserver and etcd, and no longer that it injects faults, which
+  drawn sequences never do.
+- **D84 A settle wait outlasts the requests the proxy holds.** A delay fault held the
+  toy's create of a child it had lost for 3 s, longer than its 2 s `T_stable`. Nothing
+  changed while the proxy held the create, so the wait converged, and P1 failed the
+  correct toy in 3 of 3 runs. A held request now counts as a change until the proxy
+  releases it, so a wait converges no sooner than `T_stable` after the last release. The
+  proxy releases a request when it forwards it, or when the target hangs up on one without
+  a body. A watch therefore counts only until its response can start. Counting it while it
+  streams would keep every wait after a delayed watch from converging. Every held request
+  counts, leader election's too, because a target may manage Leases. A delay on lease
+  renewals can then keep waits from converging until the fault stops. Counting only writes
+  was rejected, because a held read delays the reaction it feeds as much. A request that
+  reached the proxy before a wait's time ran out holds the wait open until `T_settle` past
+  its release. Ending the wait sooner checks properties against a state the request is
+  about to change. A `recreate`'s wait for its old CR is held open the same way. Under a
+  12 s delay on the toy's Widget patches, that wait otherwise ended while the proxy held
+  the patch that clears the finalizer, and P1 failed the correct toy. A request that
+  arrives later does not hold the wait, so a wait under a proxy that holds one request
+  after another ends no later than the longest delay and `T_settle` past its time. Such a
+  wait can still end while the proxy holds a request. Under a 6 s delay on every ConfigMap
+  request, the wait after a `delete` of the toy's Widget ended while the proxy held the
+  toy's delete of its second child, and P1 failed the correct toy in 2 of 2 runs. So
+  properties are not evaluated at a checkpoint where the proxy held a request of the
+  target's, and the run notes each such checkpoint. A request released just before a wait
+  ends can still change what the checks read. Under a 5 s delay, the toy's `T_settle`, on
+  its ConfigMap deletes, the wait after a `delete` ended 9 ms after the proxy released the
+  toy's delete of its third child. The Widget, with `status.ready` 3, was still there,
+  since the toy had not yet removed its finalizer, and P1 failed the correct toy in 5 of
+  10 runs. So a checkpoint where the proxy released a request within `T_stable` counts as
+  held too. A wait that converged saw no release for `T_stable`, so it is never held. From
+  `T_stable` after every fault's window has closed, checkpoints judge properties as
+  before. A fault's window also lasts until the proxy releases what it held, because the
+  target still waits on the fault. The checks therefore excuse the target over that time,
+  and the time it owes runs from the release. The derived deadline allows for both. A
+  `recreate`'s wait under requests held one after another can end with the old CR still
+  there. Under a 5 s delay on every ConfigMap request, the toy's lists and deletes ran
+  past the wait, and the run ended as a harness error. Any fault that keeps the CR past
+  the wait does that, as a 500 on the toy's ConfigMap deletes does. Holding the wait open
+  while the proxy holds request after request was rejected. An active fault excuses the
+  target, so no check gives such a wait an end, and a target that renews a lease under a
+  delay would hold it open until the derived deadline.
+- **D85 No property is judged where the target is still starting.** Under a fault that
+  failed most lease updates, the toy with `--lease=3s` lost its lease, and botbox
+  restarted it. The restarted toy requested only leader election until it won the lease
+  back, in one run 5.5 s after the restart, past its 5 s `T_settle`. The wait after a
+  `deleteManaged` gave it `T_settle` past the restart and ended there. P1 read the
+  `status.ready` the toy wrote before botbox deleted a child, and failed the correct toy
+  in 3 of 3 runs. A property now skips, with a note, a checkpoint where the target was
+  still starting by the measure a wait converges on (§6). That covers a target waiting out
+  a backoff, where a wait can end after a later exit during the op. It covers the first
+  start, because a fault can keep a target from leading before any wait converges. Judging
+  a target that came back by the checkpoint, however late, was rejected: one first heard
+  from just before a wait ends has had no time to act (D60, D69). Owing the target time
+  until it is back was rejected, because an active fault can keep it from leading until
+  the teardown clears the fault, and no bound would then cover the wait. A wait that
+  converged is judged whatever the exits read, because a `Restart` op can replace a target
+  waiting out its backoff, and the restart the exit scheduled never comes. Skipping
+  properties at every wait a fault excuses was rejected, because properties are how botbox
+  sees a fault's transient states (§5.6). A target that elects a leader is back only once
+  the API server accepts its create, update or patch of a lease. Some leader-election
+  libraries win a Lease with a patch. controller-runtime starts the informers a field
+  index asks for before the manager leads. The toy with `--index` watched Widgets while it
+  waited out its lease, that watch counted as its return, the wait converged before the
+  toy led, and P1 failed in 3 of 3 runs. A get of a Lease by any of its processes marks a
+  target that elects, because leader election reads its Lease that way to learn who holds
+  it, and an informer lists and watches instead. A restarted process reads its lease only
+  once its caches sync, which a fault can delay, so its predecessor's get marks it first.
+  A win counts only after the process's own get, because botbox stamps a `Restart` op
+  before it kills the leader, which renews without a get while its renewals succeed. A
+  target that reads a Lease with a get and elects no leader therefore shows it runs only
+  once it writes a lease, and fails G4 where it never does. G4 and the property read only
+  the requests made by the checkpoint, as the wait did. Keeping the sign of D60 and D69
+  and stating the limit was rejected, because the wait itself converged too early.

@@ -6,6 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime/schema"
+
 	"github.com/rosenhouse/botbox/pkg/invariant"
 )
 
@@ -50,6 +52,25 @@ func TestG3FiresOnAnOrphanTheCollectorCannotReach(t *testing.T) {
 	}
 	if len(violation.Versions) == 0 || violation.Versions[0].Name != "w-0" {
 		t.Fatalf("The evidence holds %v, want the orphan's timeline.", violation.Versions)
+	}
+}
+
+// A run reports its first violation, and KindName orders the kinds, so
+// apps/v1/Deployment comes before v1/ConfigMap.
+func TestG3FiresOnTheLeftoversInTheOrderOfTheirKindsNames(t *testing.T) {
+	deploymentGVK := schema.GroupVersionKind{Group: "apps", Version: "v1", Kind: "Deployment"}
+	in := newRunManaging(configMapGVK, deploymentGVK).
+		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup))).
+		record(time.Second, object(configMapGVK, "c", "11"), object(deploymentGVK, "d", "12")).
+		op(invariant.OpDelete, 10*time.Second).
+		record(10*time.Second, widget("13", spec(1), status(1, 1), finalizers(cleanup), deleting(10*time.Second))).
+		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
+		through(21 * time.Second)
+
+	got := statements(evaluate(t, invariant.CleanDeletion, in))
+
+	if len(got) != 2 || !strings.HasPrefix(got[0], "the apps/v1/Deployment d ") || !strings.HasPrefix(got[1], "the v1/ConfigMap c ") {
+		t.Errorf("G3 reported %q, want the Deployment d and then the ConfigMap c.", got)
 	}
 }
 

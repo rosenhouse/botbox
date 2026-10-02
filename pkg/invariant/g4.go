@@ -10,10 +10,9 @@ import (
 	"github.com/rosenhouse/botbox/pkg/target"
 )
 
-// Convergence is G4: within T_settle after any spec change, and by what Owed
-// gives after faults stop, the target's Ready predicate holds (DESIGN.md §6).
-// A settle wait that expired while no fault excused it is a violation of its
-// own (§5.5).
+// Convergence is G4: within timeouts.settle after any spec change, and by what
+// Owed gives after faults stop, the target's Ready predicate holds. A settle
+// wait that expired while no fault excused it is a violation of its own.
 func Convergence(in Input) (Result, error) {
 	out := Result{ID: "G4"}
 	for _, from := range in.convergeAnchors() {
@@ -25,7 +24,7 @@ func Convergence(in Input) (Result, error) {
 		seen := in.stateAt(deadline)
 		for _, cr := range seen.crs(in.Target.Primary) {
 			if cr.DeletionTimestamp != nil {
-				continue // A CR under deletion need not be ready; G3 judges it (§6).
+				continue // A CR under deletion need not be ready; G3 judges it.
 			}
 			ready, err := in.Target.Ready(cr.Object)
 			if errors.Is(err, target.ErrNotBool) {
@@ -69,9 +68,9 @@ func (in Input) convergeAnchors() []anchor {
 	return anchors
 }
 
-// readyBy is when the target must be ready after at: T_settle later, or when
-// Owed or a Restart op before then says if that is later. A settle wait that
-// converged before then shows the target had recovered.
+// readyBy is when the target must be ready after at: timeouts.settle later,
+// or when Owed or a Restart op before then says if that is later. A settle
+// wait that converged before then shows the target had recovered.
 func (in Input) readyBy(at time.Time) time.Time {
 	settled := at.Add(in.timeouts().Settle)
 	owed := later(in.Owed(at), in.restartOwed(settled))
@@ -136,7 +135,7 @@ func later(a, b time.Time) time.Time {
 	return a
 }
 
-// quoted renders a predicate's error for the report (DESIGN.md §8.4).
+// quoted renders a predicate's error for the report.
 func quoted(err error) string {
 	if err == nil {
 		return ""

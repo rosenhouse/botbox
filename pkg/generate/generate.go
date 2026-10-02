@@ -1,8 +1,8 @@
-// Package generate draws the sequences a run executes (DESIGN.md §5.4). Values
-// come from the primary CRD's OpenAPI v3 schema, tightened by the target's
-// generate.mutate and generate.overlay. Generation starts from the target's
-// sample, so a generated CR carries the fields a webhook demands and the schema
-// does not describe (§8.3).
+// Package generate draws the sequences a run executes. Values come from the
+// primary CRD's OpenAPI v3 schema, tightened by the target's generate.mutate
+// and generate.overlay. Generation starts from the target's sample, so a
+// generated CR carries the fields a webhook demands and the schema does not
+// describe.
 package generate
 
 import (
@@ -13,9 +13,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
-	kschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"pgregory.net/rapid"
 
+	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
 )
@@ -29,8 +29,8 @@ const defaultMaxCRs = 3
 // Options tune generation.
 type Options struct {
 	// MaxOps bounds the ops a draw makes, counting the create it opens with.
-	// Generation adds the settle waits that leave those ops judged (DESIGN.md
-	// §6), at most two per drawn op, so a sequence holds at most 3*MaxOps.
+	// Generation adds the settle waits that leave those ops judged, at most
+	// two per drawn op, so a sequence holds at most 3*MaxOps.
 	// Zero takes the default.
 	MaxOps int
 }
@@ -53,7 +53,7 @@ type Generator struct {
 }
 
 // New reads the target's primary CRD and the constraints on generating from
-// it. Every error it returns is a configuration error (DESIGN.md §11).
+// it. Every error it returns is a configuration error.
 func New(t *target.Target, opts Options) (*Generator, error) {
 	g, err := build(t, opts)
 	if err != nil {
@@ -108,7 +108,7 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 		}
 	}
 	for _, gvk := range t.Manages {
-		g.managed = append(g.managed, kindName(gvk))
+		g.managed = append(g.managed, observe.KindName(gvk))
 	}
 	for _, fixture := range t.Generate.Fixtures {
 		if len(fixture.Mutate) > 0 {
@@ -117,14 +117,6 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 	}
 	g.sequences = rapid.Custom(g.sequence)
 	return g, nil
-}
-
-// kindName writes a kind as a sequence names it.
-func kindName(gvk kschema.GroupVersionKind) string {
-	if gvk.Group == "" {
-		return gvk.Version + "/" + gvk.Kind
-	}
-	return gvk.Group + "/" + gvk.Version + "/" + gvk.Kind
 }
 
 // drawable keeps the fields the CRD accepts a drawn value of in the sample. A
@@ -151,9 +143,9 @@ func drawable(t *target.Target, rules *crdRules, fields []field, leftAlone []str
 // target without generate.mutate has any.
 func (g *Generator) LeftAlone() []string { return g.leftAlone }
 
-// sequence draws one sequence, which starts by creating the primary CR
-// (DESIGN.md §5.5). It leaves Seed zero; Draw, the only way out of this
-// package, records the seed it was asked for.
+// sequence draws one sequence, which starts by creating the primary CR. It
+// leaves Seed zero; Draw, the only way out of this package, records the seed
+// it was asked for.
 func (g *Generator) sequence(t *rapid.T) run.Sequence {
 	var at state
 	create := run.Op{Index: 0, Type: run.OpCreate, Obj: g.cr(t, 0, &at), NoSettle: rapid.Bool().Draw(t, "noSettle")}
@@ -165,13 +157,12 @@ func (g *Generator) sequence(t *rapid.T) run.Sequence {
 	return run.Sequence{Target: g.target.Name, Ops: checkpointed(ops)}
 }
 
-// checkpointed inserts the settle waits that leave the drawn ops judged
-// (DESIGN.md §6). A restart is wrapped in them: G5 compares the converged
-// state either side of a restart, less what another op in between may have
-// changed. The last op takes one because nothing else judges the state the run
-// ends in. A noSettle elsewhere is left alone. A deleted fixture comes back
-// before the next op that settles, since the target may rightly not be ready
-// without it.
+// checkpointed inserts the settle waits that leave the drawn ops judged. A
+// restart is wrapped in them: G5 compares the converged state either side of
+// a restart, less what another op in between may have changed. The last op
+// takes one because nothing else judges the state the run ends in. A noSettle
+// elsewhere is left alone. A deleted fixture comes back before the next op
+// that settles, since the target may rightly not be ready without it.
 func checkpointed(ops []run.Op) []run.Op {
 	judged := make([]run.Op, 0, 3*len(ops))
 	settled := false
@@ -207,7 +198,7 @@ func checkpointed(ops []run.Op) []run.Op {
 
 // Draw returns the sequence the seed produces, recording the seed as the
 // sequence's own. One seed always draws the same sequence, so a replay needs
-// no rapid (DESIGN.md §5.4).
+// no rapid.
 func (g *Generator) Draw(seed int64) (sequence run.Sequence, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
@@ -289,7 +280,7 @@ func (g *Generator) patch(t *rapid.T, n int, at *state) map[string]any {
 }
 
 // draw is one value for the field, or its removal where the schema allows the
-// field to be absent (DESIGN.md §5.4).
+// field to be absent.
 func (f field) draw(t *rapid.T) (any, bool) {
 	if f.optional && rapid.Bool().Draw(t, "remove "+f.dotted) {
 		return nil, false
@@ -374,15 +365,15 @@ func (g *Generator) op(t *rapid.T, index int, at *state) run.Op {
 		op.Kind = rapid.SampledFrom(g.managed).Draw(t, "kind")
 		// The first managed object of its kind: generation cannot know how many
 		// the run will hold, and a later index would often resolve to nothing
-		// and be skipped (DESIGN.md §7).
+		// and be skipped.
 		op.Nth = new(int)
 	case run.OpUpdateFixture:
 		fixture := rapid.SampledFrom(g.updatable).Draw(t, "fixture")
-		op.Kind, op.Name = kindName(fixture.GVK), fixture.Name
+		op.Kind, op.Name = observe.KindName(fixture.GVK), fixture.Name
 		op.Patch = nest(rapid.SampledFrom(fixture.Mutate).Draw(t, "path").Keys(), fixtureWords.Draw(t, "value"))
 	case run.OpDeleteFixture:
 		fixture := rapid.SampledFrom(g.present(at)).Draw(t, "fixture")
-		op.Kind, op.Name = kindName(fixture.GVK), fixture.Name
+		op.Kind, op.Name = observe.KindName(fixture.GVK), fixture.Name
 	}
 	if op.Type.OnCR() {
 		if op.Type != run.OpCreate && n > 0 {
@@ -424,7 +415,7 @@ func (g *Generator) legal(at *state) []run.OpType {
 // present are the fixtures generation may delete and has not.
 func (g *Generator) present(at *state) []target.MutableFixture {
 	return slices.DeleteFunc(slices.Clone(g.target.Generate.Fixtures), func(fixture target.MutableFixture) bool {
-		return slices.Contains(at.gone, kindName(fixture.GVK)+" "+fixture.Name)
+		return slices.Contains(at.gone, observe.KindName(fixture.GVK)+" "+fixture.Name)
 	})
 }
 
@@ -459,7 +450,7 @@ func (at *state) advance(op run.Op, n int) {
 }
 
 // nest wraps a value in the objects its path names, which is the merge patch
-// that changes that one field (DESIGN.md §7).
+// that changes that one field.
 func nest(path []string, value any) map[string]any {
 	nested := value
 	for i := len(path) - 1; i >= 0; i-- {

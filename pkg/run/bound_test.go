@@ -34,10 +34,14 @@ type waitingHarness struct {
 	// each restart, at back.
 	returnsLate bool
 	back        time.Time
-	// goesLate has held, the CR botbox deleted last, go just before the wait
-	// for it ends.
+	// goesLate has deleting, the CR botbox deleted last, go just before the
+	// wait for it ends.
 	goesLate bool
-	held     *unstructured.Unstructured
+	deleting *unstructured.Unstructured
+	// delay has the proxy hold a request for that long from just before each
+	// wait's time runs out, once a fault op has run, and one from just before
+	// each fault retires.
+	delay time.Duration
 }
 
 func newWaitingHarness(timeouts target.Timeouts) *waitingHarness {
@@ -66,6 +70,9 @@ func (w *waitingHarness) settle(ctx context.Context, owed func() time.Time) (boo
 		if owes := owed(); owes.After(deadline) {
 			deadline = owes
 		}
+		if w.delay > 0 && w.added > 0 {
+			deadline = deadline.Add(w.delay + w.timeouts.Settle)
+		}
 		if w.returnBefore(deadline) {
 			continue
 		}
@@ -89,6 +96,32 @@ func (w *waitingHarness) settle(ctx context.Context, owed func() time.Time) (boo
 		w.remove(proxy.FaultID(w.ranOut))
 		w.ranOut++
 	}
+}
+
+// held has the proxy hold, once a fault op has run, a request that arrives
+// just before before.
+func (w *waitingHarness) held(before time.Time) (bool, time.Time) {
+	arrived := before.Add(-time.Millisecond)
+	if w.delay == 0 || w.added == 0 || w.at.Before(arrived) {
+		return false, time.Time{}
+	}
+	if released := arrived.Add(w.delay); !w.at.Before(released) {
+		return false, released
+	}
+	return true, time.Time{}
+}
+
+// faultWindow keeps each fault open until it releases the request it held as
+// it retired.
+func (w *waitingHarness) faultWindow(id proxy.FaultID) proxy.FaultWindow {
+	window := w.fakeHarness.faultWindow(id)
+	if w.delay > 0 && !window.Retired.IsZero() {
+		window.Retired = window.Retired.Add(w.delay)
+		if w.at.Before(window.Retired) {
+			window.Retired = time.Time{}
+		}
+	}
+	return window
 }
 
 // returnLate has a target that returns late show it runs just before T_settle
@@ -121,13 +154,13 @@ func (w *waitingHarness) sleep(ctx context.Context, d time.Duration) error {
 
 // deleteCR leaves the CR under deletion, as a finalizer would hold it.
 func (w *waitingHarness) deleteCR(ctx context.Context, name string) error {
-	w.held = widget(name)
-	w.held.SetNamespace(fakeNamespace)
-	w.held.SetResourceVersion(w.at.Format(time.RFC3339Nano))
-	w.held.SetUID(types.UID(w.held.GetResourceVersion()))
-	w.held.SetFinalizers([]string{"toy.botbox/cleanup"})
-	w.held.SetDeletionTimestamp(&metav1.Time{Time: w.at})
-	w.store.Record(widgetKind, w.held, w.at)
+	w.deleting = widget(name)
+	w.deleting.SetNamespace(fakeNamespace)
+	w.deleting.SetResourceVersion(w.at.Format(time.RFC3339Nano))
+	w.deleting.SetUID(types.UID(w.deleting.GetResourceVersion()))
+	w.deleting.SetFinalizers([]string{"toy.botbox/cleanup"})
+	w.deleting.SetDeletionTimestamp(&metav1.Time{Time: w.at})
+	w.store.Record(widgetKind, w.deleting, w.at)
 	return w.fakeHarness.deleteCR(ctx, name)
 }
 
@@ -144,7 +177,7 @@ func (w *waitingHarness) awaitCRGone(ctx context.Context, name string, until fun
 		}
 	}
 	if w.goesLate {
-		w.store.RecordDeletion(widgetKind, w.held, w.at)
+		w.store.RecordDeletion(widgetKind, w.deleting, w.at)
 	}
 	return w.fakeHarness.awaitCRGone(ctx, name, until)
 }
@@ -189,6 +222,14 @@ func faultUntil(op int) Op {
 	return Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Op: &op}}}
 }
 
+// heldFor is how long delayed holds a request.
+const heldFor = 15 * time.Minute
+
+// delayed is a fault that holds requests for heldFor.
+func delayed(until Trigger) Op {
+	return Op{Type: OpFault, Fault: &Fault{Action: Action{Delay: Duration(heldFor)}, Until: until}}
+}
+
 func TestBoundCoversTheRunnersWaits(t *testing.T) {
 	// Long beside the harness's own margins, so that a wait Bound leaves out
 	// shows.
@@ -208,6 +249,7 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 		runsOut     []int
 		returnsLate bool
 		goesLate    bool
+		delay       time.Duration
 		// waits is what the Runner's waits take, which shows the case holds
 		// what it names.
 		waits time.Duration
@@ -273,11 +315,23 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 			ops: []Op{createOp, {Type: OpRestart}, recreateOp}, returnsLate: true, waits: time.Hour + 12*time.Minute + 10*time.Second},
 		{name: "a recreate right after a CR went", timeouts: settlesLonger,
 			ops: []Op{createOp, recreateOp, recreateOp}, goesLate: true, waits: 53*time.Minute + 10*time.Second},
+		{name: "a delay the teardown stops", timeouts: long,
+			ops: []Op{createOp, delayed(Trigger{}), updateOp, updateOp}, settles: []bool{true, false, false}, delay: heldFor,
+			waits: 6*time.Hour + 16*time.Minute + 11*time.Second},
+		{name: "delays whose triggers run out as a wait would end", timeouts: long,
+			ops:     []Op{createOp, delayed(Trigger{Count: 3}), delayed(Trigger{Count: 3}), updateOp},
+			settles: []bool{true, false}, runsOut: []int{2, 2}, delay: heldFor, waits: 4*time.Hour + 26*time.Minute + 11*time.Second},
+		{name: "a recreate under a delay", timeouts: settlesLonger,
+			ops: []Op{createOp, delayed(Trigger{}), recreateOp, settleOp}, settles: []bool{true, false, false}, delay: heldFor,
+			waits: 4*time.Hour + 59*time.Minute + 10*time.Second},
+		{name: "exits under a delay", timeouts: target.DefaultTimeouts,
+			ops: []Op{createOp, delayed(Trigger{}), updateOp}, settles: []bool{true, false}, exitsLate: []int{2, 3}, delay: heldFor,
+			waits: 2*time.Hour + 2*time.Minute + 50*time.Second},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newWaitingHarness(test.timeouts)
 			h.settles, h.exitsLate, h.restartsIn, h.runsOut = test.settles, test.exitsLate, launch.MaxBackoff, test.runsOut
-			h.returnsLate, h.goesLate = test.returnsLate, test.goesLate
+			h.returnsLate, h.goesLate, h.delay = test.returnsLate, test.goesLate, test.delay
 			exercised, sequence := withTimeouts(test.timeouts), sequenceOf(test.ops...)
 			exercised.Fixtures = withSecret().Fixtures
 
@@ -408,6 +462,41 @@ func TestBoundDoublesTheRunEachTimeFaultsStop(t *testing.T) {
 		// The recreate waits T_delete of 60s for its CR to go.
 		{"ops that do not settle after a fault", []Op{createOp, faultOp, noSettle(updateOp), noSettle(Op{Type: OpRecreate, Obj: widget("widget")}), updateOp},
 			stop(run+time.Minute+4*exit+3*guard) + teardown},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if bound := Bound(defaults, sequenceOf(test.ops...)); bound != test.want {
+				t.Errorf("Bound is %v, want %v.", bound, test.want)
+			}
+		})
+	}
+}
+
+// A request the proxy holds when a wait's time runs out holds the wait open
+// for up to the delay and T_settle more, which can come after what the faults
+// owe. A fault lasts until the proxy releases what it held, which can be the
+// delay past its trigger.
+func TestBoundAllowsForTheRequestsAFaultHolds(t *testing.T) {
+	defaults := withTimeouts(target.DefaultTimeouts)
+	const settle, deletion, teardown, delay = 30 * time.Second, time.Minute, 140 * time.Second, 2 * time.Minute
+	const hold = delay + settle
+	exit := launch.MaxBackoff + 2*settle
+	stop := func(before time.Duration) time.Duration { return 2*(before+delay) + settle + hold + exit }
+	const guard = launch.MaxBackoff + settle
+	const run = 90 * time.Second
+	held := Op{Type: OpFault, Fault: &Fault{Action: Action{Delay: Duration(delay)}}}
+	shorter := Op{Type: OpFault, Fault: &Fault{Action: Action{Delay: Duration(time.Second)}}}
+	for _, test := range []struct {
+		name string
+		ops  []Op
+		want time.Duration
+	}{
+		{"a delay", []Op{createOp, held, updateOp}, stop(run+2*exit+guard+hold) + teardown},
+		{"the longest of two delays", []Op{createOp, shorter, held, shorter, updateOp},
+			stop(run+4*exit+3*guard+hold) + teardown},
+		{"a wait before the delay", []Op{createOp, updateOp, held, settleOp},
+			stop(run+settle+2*exit+guard+hold) + teardown},
+		{"a recreate's wait for its CR", []Op{createOp, held, {Type: OpRecreate, Obj: widget("widget"), NoSettle: true}, settleOp},
+			stop(run+deletion+3*exit+2*guard+2*hold) + teardown},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			if bound := Bound(defaults, sequenceOf(test.ops...)); bound != test.want {

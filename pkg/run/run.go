@@ -116,11 +116,11 @@ type Harness struct {
 	logQuoted int64
 }
 
-// Start brings the run up in this order: a cluster, unless opts.Config reaches
-// one; the namespace; the proxy; the Observer; botbox's garbage collector,
-// unless the cluster runs a controller manager; the fixtures; and the target,
-// which it leaves running. A failure takes back down whatever came up. The
-// caller must call Stop.
+// Start creates the run directory, then brings up in order: a cluster, unless
+// opts.Config reaches one; the namespace; the proxy; the Observer; botbox's
+// garbage collector, unless the cluster runs a controller manager; the
+// fixtures; and the target, which it leaves running. A failure takes back down
+// whatever came up. The caller must call Stop.
 func Start(ctx context.Context, t *target.Target, opts Options) (*Harness, error) {
 	if err := validate(t, opts); err != nil {
 		return nil, fmt.Errorf("starting the run: %w", err)

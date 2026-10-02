@@ -314,9 +314,9 @@ The Runner executes one sequence:
    a wait expires fails G4. A restart that fails ends the run as the harness error above.
 3. Evaluate invariants and properties at each checkpoint (§4). Properties are not
    evaluated where the proxy held a request of the target's, or released one within
-   `T_stable`, which may still change what they read, nor where the target was not back
-   (§6). The run notes each such checkpoint. A run ends at its first violation. More
-   than `N_objects` (default 500) managed objects in the namespace ends the run as a
+   `T_stable`, which may still change what they read, nor where the target was still
+   starting (§6). The run notes each such checkpoint. A run ends at its first violation.
+   More than `N_objects` (default 500) managed objects in the namespace ends the run as a
    harness limit, reported as such rather than as a finding.
 4. Tear down. Clear every active fault. If the target is still owed time to recover from
    a fault, which is so for a fault the teardown just cleared, wait for convergence as
@@ -528,17 +528,20 @@ every exit a fault excused is owed its time. Only a fault excuses an exit, so a 
 that a fault set off still fails G4, at the latest in the wait the teardown gives the
 target once it has cleared the faults.
 
-**A target that is not back.** A checkpoint can find the target waiting to restart, or not
-back since it last started (§5.5). A wait a fault excuses can end there: a later exit
-during the op is owed no time, and a target can take longer than `T_settle` past its
-restart to win its lease back. Such a target has not acted on what changed while it was
-down. So no property is evaluated at that checkpoint, under `checkpoint` or `end`, and the
-run notes each one. A property evaluated `always` reads every event rather than a
-checkpoint. No invariant needs the rule. G4 judges whether the target came back: a wait
-that expires with the target not back and no fault active fails it, at the latest in the
-teardown's recovery wait. G7 asks more than the rule: the target must be back before the
-op. G1 and G2 judge the window after a wait, which a fault active where the wait ended
-reaches into. G3, G5 and G6 judge deadlines, converged states and failing requests.
+**A target still starting.** A wait converges only once the target is back since it last
+started and has run for `T_stable` after that (§5.5). A wait a fault excuses can end
+sooner: a later exit during the op is owed no time, and a target can take longer than
+`T_settle` past its restart to win its lease back. The target is then still starting: it
+is waiting to restart, restarted within `T_stable`, or has requested no resource outside
+leader election since it last started, or first did within `T_stable`. G4's statement
+names the same states. A target still starting may not yet have acted on what changed
+while it was down, so no property is evaluated at that checkpoint, under `checkpoint` or
+`end`, and the run notes each one. A property evaluated `always` reads every event rather
+than a checkpoint. No invariant needs the rule. A target that does not come back fails G4
+where a wait expires with no fault active, at the latest in the teardown's recovery wait.
+G7 asks more after a restart: the target must be back before the op. G1 and G2 judge no
+window a fault reaches into, so they skip the window after such a wait where a fault is
+active at its end. G3 judges deadlines, G5 converged states and G6 failing requests.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
 begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
@@ -958,7 +961,7 @@ and names the path with `[*]` in its place (§6).
 A property's `when` says where it is evaluated: `always` on every Observer event before
 the teardown boundary (§6), `checkpoint` at each checkpoint (§4), `end` at the last
 checkpoint only. Neither of the last two judges a checkpoint where the proxy held a
-request or the target was not back (§5.5 step 3).
+request or the target was still starting (§5.5 step 3).
 
 cert-manager v1.21.2 binds its healthz server to `0.0.0.0:9403`. The one flag that moves
 it, `--internal-healthz-listen-address`, is hidden, and upstream says the prefix and the
@@ -2329,21 +2332,19 @@ built from source and run as a black-box binary.
   request was rejected. An active fault excuses the target, so no check gives such a wait
   an end, and a target that renews a lease under a delay would hold it open until the
   derived deadline.
-- **D@84 No property is judged where the target is not back.** Under a fault that failed
-  most lease updates, the toy with `--lease=3s` lost its lease, and botbox restarted it.
-  The restarted toy requested only leader election until it won the lease back, in one
-  run 5.5 s after the restart, past its 5 s `T_settle`. The wait after a `deleteManaged`
-  gave it `T_settle` past the restart and ended there. P1 read the `status.ready` the toy
-  wrote before botbox deleted a child, and failed the correct toy in 3 of 3 runs. A
-  property is now not evaluated at a checkpoint where the target was waiting to restart,
-  or had requested no resource outside leader election since it last started, and the
-  run notes each such checkpoint. A target waiting out a backoff has not acted either,
-  and a wait can end there after a later exit during the op. The first start counts too,
-  because a fault can keep a target from leading before any wait has converged. Owing the
-  target time until it is back was rejected: an active fault can keep it from leading
-  until the teardown clears the fault, so no bound would cover the wait. Skipping
+- **D@84 No property is judged where the target is still starting.** Under a fault that
+  failed most lease updates, the toy with `--lease=3s` lost its lease, and botbox
+  restarted it. The restarted toy requested only leader election until it won the lease
+  back, in one run 5.5 s after the restart, past its 5 s `T_settle`. The wait after a
+  `deleteManaged` gave it `T_settle` past the restart and ended there. P1 read the
+  `status.ready` the toy wrote before botbox deleted a child, and failed the correct toy
+  in 3 of 3 runs. A property now skips, with a note, a checkpoint where the target was
+  still starting by the measure a wait converges on (§6). That covers a target waiting
+  out a backoff, where a wait can end after a later exit during the op. It covers the
+  first start, because a fault can keep a target from leading before any wait converges.
+  Judging a target that came back by the checkpoint, however late, was rejected: one first
+  heard from just before a wait ends has had no time to act (D60). Owing the target time
+  until it is back was rejected, because an active fault can keep it from leading until
+  the teardown clears the fault, and no bound would then cover the wait. Skipping
   properties at every wait a fault excuses was rejected, because properties are how
-  botbox sees a fault's transient states (§5.6). A target that is back but has not yet
-  caught up is judged as before. G7 keeps its own rule, which asks that the target be
-  back before the op. A target that never comes back still fails G4 where a wait expires
-  with no fault active, at the latest in the teardown's recovery wait.
+  botbox sees a fault's transient states (§5.6).

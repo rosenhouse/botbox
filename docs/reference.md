@@ -194,9 +194,9 @@ runs out keeps the wait open until `timeouts.settle` past its release. It keeps 
 `recreate`'s wait for its old CR open the same way. The checks run where it ends. botbox does
 not check your properties where a wait ends with a request held, or released within
 `timeouts.stable`, and the run notes it. Nor does it where your controller waits to restart,
-or has requested no resource outside leader election since it last started. botbox exits 2
-where a `recreate`'s old CR outlasts the wait and no check fails, because the op cannot go
-on. A fault active during the
+or has not yet requested a resource outside leader election since it last started and run
+for `timeouts.stable` after that. botbox exits 2 where a `recreate`'s old CR outlasts the
+wait and no check fails, because the op cannot go on. A fault active during the
 `recreate` can do that to a correct controller, as a delay on each request it makes can. End
 the fault before the `recreate` with `until.op`.
 

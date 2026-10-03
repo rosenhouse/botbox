@@ -1,12 +1,12 @@
 # cert-manager v1.21.2 can give a recreated Certificate the deleted Certificate's private key
 
-This draft is for botbox's maintainer to file at cert-manager. The agents that wrote it may
-not search cert-manager's tracker, so the maintainer searches it before filing. No agent may
-file it. The agents had no registry and only a Kubernetes 1.37.0 node image, while
-cert-manager v1.21.2 tests on 1.33 to 1.36. So the maintainer also reruns the documented
-command on 1.36, against the released chart with `enableCertificateOwnerRef: true`. The
-issue body starts below the horizontal rule. Its links are relative to this file, so they
-need botbox's URL before filing.
+This draft is for botbox's maintainer to file at cert-manager. Triage did not search
+cert-manager's tracker, so the maintainer searches it before filing. No agent may file it.
+The agents had no registry and only a Kubernetes 1.37.0 node image, while cert-manager
+v1.21.2 tests on 1.33 to 1.36. So the maintainer also reruns the documented command on
+1.36, against the released chart with `enableCertificateOwnerRef: true`. The issue body
+starts below the horizontal rule. Its links are relative to this file, so they need
+botbox's URL before filing.
 
 ---
 
@@ -40,14 +40,8 @@ What follows depends on the new Certificate's spec:
   `Ready=False` with reason `SecretMismatch`, waiting for a user.
 
 So a client that recreates a Certificate to get a new key can keep the old one. How quickly
-it must recreate depends on how far cert-manager's Secret informer lags. On an idle kind
-cluster, only a create within about 10 ms of the delete kept the key, so
-`kubectl replace --force` kept none. A foreground cascade
-(`kubectl delete --cascade=foreground`) kept none there either. It deletes the Secret
-before the Certificate, but cert-manager's cache does not wait for the garbage collector.
-So the cascade adds only its own duration, 15 to 41 ms on that cluster. With
-cert-manager's Secret watch held 100 ms at each delete, `kubectl replace --force` kept the
-key in 19 of 20 tries, and a foreground cascade in 39 of 40 runs.
+it must recreate depends on how far cert-manager's Secret informer lags. On an idle cluster
+the window is short. It widens as the informer lags, as the tables under Reproduction show.
 
 ## Code path
 
@@ -170,8 +164,9 @@ turns.
 - Under the foreground cascade, cert-manager never logged `applying Secret data`.
 - No run ended with the old Secret uncollected.
 
-On this idle cluster the window is short. With `-policy Always -algorithm RSA`, a pause
-before the create kept the key in fewer runs:
+On this idle cluster the window is short: only a create within about 10 ms of the delete
+kept the key. With `-policy Always -algorithm RSA`, a pause before the create kept the key
+in fewer runs:
 
 | `-pause` | runs | key kept |
 | --- | --- | --- |
@@ -186,12 +181,14 @@ The 50 runs without a pause are the first row's 30 and 20 that took turns with t
 creates it 35 to 58 ms after the delete. With the first row's Certificate, it kept the key
 in none of 20 tries.
 
-cert-manager's Secret informer sets the window, not the client. In the batches below,
-cert-manager ran out of cluster behind a proxy. At each `DELETED` event on one of
-cert-manager's Secret watches, the proxy held that watch for a set time, and later events
-queued behind it. The reproducer and kubectl went to the API server directly. The
-reproducer ran with `-algorithm RSA -propagation Foreground`, and kubectl replaced the first
-row's Certificate. Each cell counts the runs that kept the key:
+cert-manager's Secret informer sets the window, not the client. A foreground cascade
+(`kubectl delete --cascade=foreground`) deletes the Secret before the Certificate, but
+cert-manager's cache does not wait for the garbage collector. So the cascade adds only its
+own duration. In the batches below, cert-manager ran out of cluster behind a proxy. At each
+`DELETED` event on one of cert-manager's Secret watches, the proxy held that watch for a set
+time, and later events queued behind it. The reproducer and kubectl went to the API server
+directly. The reproducer ran with `-algorithm RSA -propagation Foreground`, and kubectl
+replaced the first row's Certificate. Each cell counts the runs that kept the key:
 
 | cert-manager's Secret watch | `-policy Always` | `-policy Never` | `kubectl replace --force` |
 | --- | --- | --- | --- |
@@ -316,7 +313,6 @@ No run tested either change.
 - Every run used an idle cluster. A garbage collector that lags would widen the re-point
   window, and no run measured that. No run measured how far cert-manager's Secret informer
   lags on a busy cluster, such as one with many Secrets.
-- No run used the released image, or a Kubernetes version that v1.21.2 tests on (1.33 to
-  1.36).
+- No run used the released image, or a Kubernetes version that v1.21.2 tests on.
 - Only the tests of `pkg/controller/certificates/issuing/...` ran against the patch, and
   they pass.

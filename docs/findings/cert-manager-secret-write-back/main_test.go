@@ -354,7 +354,7 @@ func TestRunReadsEachSecretOnceItsCertificateSettles(t *testing.T) {
 func TestRunReturnsTheErrorOfACallThatFails(t *testing.T) {
 	for _, c := range []struct {
 		call, verb, resource string
-		// created is how many Certificates exist before the call.
+		// The first such call fails once created Certificates exist.
 		created int
 		collect bool
 	}{
@@ -415,11 +415,11 @@ func TestRunWaitsForTheNewCertificateAsLongAsWaitSays(t *testing.T) {
 }
 
 // fakeCertManager plays cert-manager and a garbage collector. A Certificate
-// whose Issuer exists is Ready with an issuance in flight on its first two
-// reads, and settles from then on. Under "never Ready", the second one waits
-// for a user instead. The Secret is missing until the first Certificate
-// settles. It holds a new key until the second settles, is missing on the next
-// read, and then holds the old key as kept says.
+// whose selfSigned Issuer exists is Ready with an issuance in flight on its
+// first two reads, and settles from then on. Under "never Ready", the second
+// one waits for a user instead. The Secret is missing until the first
+// Certificate settles. It holds a new key until the second settles, is missing
+// on the next read, and then holds the old key as kept says.
 type fakeCertManager struct {
 	core        *kubefake.Clientset
 	dyn         *dynamicfake.FakeDynamicClient
@@ -451,8 +451,10 @@ func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
 		}
 		crt := o.(*unstructured.Unstructured)
 		issuerName, _, _ := unstructured.NestedString(crt.Object, "spec", "issuerRef", "name")
-		issuer, err := f.dyn.Tracker().Get(issuers, action.GetNamespace(), issuerName)
-		_, selfSigned, _ := unstructured.NestedMap(objectOrEmpty(issuer, err), "spec", "selfSigned")
+		selfSigned := false
+		if issuer, err := f.dyn.Tracker().Get(issuers, action.GetNamespace(), issuerName); err == nil {
+			_, selfSigned, _ = unstructured.NestedMap(issuer.(*unstructured.Unstructured).Object, "spec", "selfSigned")
+		}
 		f.reads[crt.GetUID()]++
 		ready, reason, issuing := "True", "Ready", f.reads[crt.GetUID()] <= 2
 		switch {
@@ -496,13 +498,6 @@ func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
 func (f *fakeCertManager) repro(timeout time.Duration) repro {
 	return repro{core: f.core, dyn: f.dyn, poll: time.Millisecond, settle: f.settle, timeout: timeout,
 		policy: "Always", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationBackground}
-}
-
-func objectOrEmpty(o runtime.Object, err error) map[string]any {
-	if err != nil {
-		return nil
-	}
-	return o.(*unstructured.Unstructured).Object
 }
 
 func tlsSecret(uid, owner types.UID, key string) *corev1.Secret {

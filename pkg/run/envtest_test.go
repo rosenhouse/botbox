@@ -390,8 +390,8 @@ func createCollectedConfigMap(t *testing.T, ctx context.Context, h *run.Harness,
 }
 
 // requireCollected asserts that collector.jsonl in dir records the collector's
-// delete of collected after the deletion of widget. A sweep that read the
-// namespace before a delete reached it can also have lost a race.
+// delete of collected after the deletion of widget. Any other line is a delete
+// that lost a race and ended not found.
 func requireCollected(t *testing.T, dir string, collected *corev1.ConfigMap, widget *unstructured.Unstructured, after time.Time) {
 	t.Helper()
 	written, err := os.ReadFile(filepath.Join(dir, "collector.jsonl"))

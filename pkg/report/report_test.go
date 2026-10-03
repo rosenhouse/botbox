@@ -215,7 +215,7 @@ func TestReportNamesTheCollectorsDeletesWhereItRan(t *testing.T) {
 	}
 }
 
-// report.json names none of the files beside it.
+// Only report.md says which recordings the run directory holds.
 func TestReportJSONIsTheSameWhetherTheCollectorRan(t *testing.T) {
 	ran := failingRun()
 	ran.Collector = true

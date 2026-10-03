@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -11,7 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	goruntime "runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -331,9 +329,10 @@ func TestRecreateCreatesNothingWhileTheOldCertificateRemains(t *testing.T) {
 	}
 }
 
-// Under -collect, the collector starts once the old Certificate is gone and
-// races the create, as kube-controller-manager's would. So the collector's
-// list can wait for the create, and the create for the list.
+// Under -collect, the collector starts once the old Certificate's delete
+// returns, and races the create, as kube-controller-manager's would. So the
+// collector's list can wait for the create to be sent, and the create for the
+// list to begin.
 func TestRecreateCollectsWhatTheOldCertificateControlsAlongsideTheCreate(t *testing.T) {
 	old := certificate("Always", "", "")
 	old.SetNamespace("ns")
@@ -342,18 +341,19 @@ func TestRecreateCollectsWhatTheOldCertificateControlsAlongsideTheCreate(t *test
 	listed, created := sync.OnceFunc(func() { close(listing) }), sync.OnceFunc(func() { close(creating) })
 	interleaved := hooked{client, func(ctx context.Context, verb string, resource schema.GroupVersionResource) error {
 		switch {
-		case verb == "list" && resource == secrets:
-			if _, err := client.Tracker().Get(certificates, "ns", "example"); !apierrors.IsNotFound(err) {
-				return fmt.Errorf("the collector listed Secrets while getting the old Certificate returned %v", err)
+		case verb == "delete" && resource == certificates:
+			// A collector started before the delete lists in this time.
+			select {
+			case <-listing:
+				return errors.New("the collector listed Secrets before the old Certificate's delete")
+			case <-time.After(100 * time.Millisecond):
 			}
+		case verb == "list" && resource == secrets:
 			listed()
 			return closed(ctx, creating)
 		case verb == "create" && resource == certificates:
 			defer created()
 			return closed(ctx, listing)
-		case verb == "delete" && resource == certificates:
-			// A collector started before the delete lists first.
-			goruntime.Gosched()
 		}
 		return nil
 	}}
@@ -361,7 +361,7 @@ func TestRecreateCollectsWhatTheOldCertificateControlsAlongsideTheCreate(t *test
 	defer cancel()
 	r := repro{dyn: interleaved, ns: "ns", poll: time.Millisecond, setupWait: time.Minute, collect: true}
 	if _, err := r.recreate(ctx, "old"); err != nil {
-		t.Fatalf("recreate returned %v, want the collector's list of Secrets to begin before the create and end after it", err)
+		t.Fatalf("recreate returned %v, want the collector to list Secrets after the delete, while the create is sent", err)
 	}
 	if _, err := client.Tracker().Get(secrets, "ns", "example-tls"); !apierrors.IsNotFound(err) {
 		t.Errorf("after recreate under -collect, getting the old Certificate's Secret returned %v, want NotFound", err)
@@ -377,8 +377,9 @@ func closed(ctx context.Context, c <-chan struct{}) error {
 	}
 }
 
-// hooked calls before ahead of each list and create it sends. A reactor of
-// the fake cannot block, since the fake holds its lock while it reacts.
+// hooked calls before ahead of each list, create and delete it sends. A
+// reactor of the fake cannot block, since the fake holds its lock while it
+// reacts.
 type hooked struct {
 	dynamic.Interface
 	before func(ctx context.Context, verb string, resource schema.GroupVersionResource) error
@@ -425,8 +426,10 @@ func (h hookedResource) Create(ctx context.Context, obj *unstructured.Unstructur
 }
 
 func TestRunReadsEachSecretOnceItsCertificateSettles(t *testing.T) {
+	// The fake ignores the policy. Each outcome takes one, so that a run that
+	// sets either in place of -policy fails.
 	for kept, policy := range map[string]string{"write-back": "Never", "re-point": "Always"} {
-		t.Run(kept, func(t *testing.T) {
+		t.Run(kept+" under "+policy, func(t *testing.T) {
 			cluster := newFakeCertManager(kept, 50*time.Millisecond)
 			r := cluster.repro(5 * time.Second)
 			r.policy = policy

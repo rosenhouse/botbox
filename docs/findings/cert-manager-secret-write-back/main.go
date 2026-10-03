@@ -56,7 +56,7 @@ func parse(args []string) (repro, int, error) {
 	kubeconfig := flags.String("kubeconfig", os.Getenv("KUBECONFIG"), "the cluster's kubeconfig")
 	runs := flags.Int("runs", 10, "how many runs to make")
 	collect := flags.Bool("collect", false, "once the old Certificate is deleted, delete what it owns as a garbage collector would, on a cluster that runs none")
-	timeout := flags.Duration("wait", 30*time.Second, "how long the new Certificate has to become Ready")
+	timeout := flags.Duration("wait", 30*time.Second, "how long the new Certificate has to become and stay Ready")
 	algorithm := flags.String("algorithm", "ECDSA", "the new Certificate's key algorithm")
 	policy := flags.String("policy", "Never", "both Certificates' rotationPolicy")
 	propagation := flags.String("propagation", "Background", "the old Certificate's delete propagation policy")
@@ -75,6 +75,7 @@ type repro struct {
 	core        kubernetes.Interface
 	dyn         dynamic.Interface
 	poll        time.Duration
+	settle      time.Duration
 	collect     bool
 	timeout     time.Duration
 	algorithm   string
@@ -99,7 +100,7 @@ func newRepro(kubeconfig string) (repro, error) {
 		return repro{}, err
 	}
 	dyn, err := dynamic.NewForConfig(config)
-	return repro{core: core, dyn: dyn, poll: 10 * time.Millisecond}, err
+	return repro{core: core, dyn: dyn, poll: 10 * time.Millisecond, settle: 2 * time.Second}, err
 }
 
 type finding struct {
@@ -211,23 +212,40 @@ func (r repro) collectGarbage(ctx context.Context, owner types.UID) error {
 	return nil
 }
 
-// ready waits for the Certificate to be Ready, and returns the status and
-// reason of the Ready condition it saw last.
+// ready waits until the Certificate has been Ready, with no issuance in flight,
+// for r.settle. It returns the status and reason of the Ready condition it saw
+// last, and says whether an issuance was in flight.
 func (r repro) ready(ctx context.Context, timeout time.Duration) string {
 	seen := "unset"
+	var since time.Time
 	_ = wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, timeout, true, func(context.Context) (bool, error) {
 		crt, err := r.dyn.Resource(certificates).Namespace(r.ns).Get(ctx, "example", metav1.GetOptions{})
 		if err != nil {
 			seen = err.Error()
 			return false, nil
 		}
+		ready, issuing := "unset", false
 		conditions, _, _ := unstructured.NestedSlice(crt.Object, "status", "conditions")
 		for _, c := range conditions {
-			if c, _ := c.(map[string]any); c["type"] == "Ready" {
-				seen = fmt.Sprintf("%v %v", c["status"], c["reason"])
+			switch c, _ := c.(map[string]any); c["type"] {
+			case "Ready":
+				ready = fmt.Sprintf("%v %v", c["status"], c["reason"])
+			case "Issuing":
+				issuing = c["status"] == "True"
 			}
 		}
-		return seen == "True Ready", nil
+		seen = ready
+		if issuing {
+			seen += ", Issuing"
+		}
+		if seen != "True Ready" {
+			since = time.Time{}
+			return false, nil
+		}
+		if since.IsZero() {
+			since = time.Now()
+		}
+		return time.Since(since) >= r.settle, nil
 	})
 	return seen
 }

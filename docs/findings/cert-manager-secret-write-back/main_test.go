@@ -32,10 +32,10 @@ func TestParseReadsEveryFlag(t *testing.T) {
 		want repro
 		runs int
 	}{
-		{nil, repro{poll: 10 * time.Millisecond, timeout: 30 * time.Second, algorithm: "ECDSA", policy: "Never", propagation: metav1.DeletePropagationBackground, dnsName: "example.test"}, 10},
+		{nil, repro{poll: 10 * time.Millisecond, settle: 2 * time.Second, timeout: 30 * time.Second, algorithm: "ECDSA", policy: "Never", propagation: metav1.DeletePropagationBackground, dnsName: "example.test"}, 10},
 		{
 			[]string{"-runs", "3", "-collect", "-wait", "5s", "-algorithm", "RSA", "-policy", "Always", "-propagation", "Foreground", "-pause", "200ms", "-dns", "other.test"},
-			repro{poll: 10 * time.Millisecond, collect: true, timeout: 5 * time.Second, algorithm: "RSA", policy: "Always", propagation: metav1.DeletePropagationForeground, pause: 200 * time.Millisecond, dnsName: "other.test"},
+			repro{poll: 10 * time.Millisecond, settle: 2 * time.Second, collect: true, timeout: 5 * time.Second, algorithm: "RSA", policy: "Always", propagation: metav1.DeletePropagationForeground, pause: 200 * time.Millisecond, dnsName: "other.test"},
 			3,
 		},
 	} {
@@ -262,32 +262,71 @@ func TestReadyWaitsForReadyAndReportsTheLastCondition(t *testing.T) {
 	becomesReady.PrependReactor("get", "certificates", func(k8stesting.Action) (bool, runtime.Object, error) {
 		gets++
 		if gets < 3 {
-			return true, withReady("False", "SecretMismatch"), nil
+			return true, withConditions("False", "SecretMismatch", "True"), nil
 		}
-		return true, withReady("True", "Ready"), nil
+		return true, withConditions("True", "Ready", "False"), nil
 	})
 	if got := (repro{dyn: becomesReady, ns: "ns"}).ready(context.Background(), time.Minute); got != "True Ready" || gets != 3 {
 		t.Errorf("ready() = %q after %d reads, want \"True Ready\" after 3", got, gets)
 	}
 
-	stuck := fakeDynamic(withReady("False", "SecretMismatch"))
-	if got := (repro{dyn: stuck, ns: "ns"}).ready(context.Background(), 300*time.Millisecond); got != "False SecretMismatch" {
-		t.Errorf("ready() = %q, want the last Ready condition, \"False SecretMismatch\"", got)
+	stuck := fakeDynamic(withConditions("False", "SecretMismatch", "True"))
+	if got := (repro{dyn: stuck, ns: "ns"}).ready(context.Background(), 300*time.Millisecond); got != "False SecretMismatch, Issuing" {
+		t.Errorf("ready() = %q, want the last Ready condition and the issuance, \"False SecretMismatch, Issuing\"", got)
 	}
 
 	gone := fakeDynamic()
 	if got := (repro{dyn: gone, ns: "ns"}).ready(context.Background(), 300*time.Millisecond); !strings.Contains(got, "not found") {
 		t.Errorf("ready() = %q, want the error that kept it from reading the Certificate", got)
 	}
+
+	noStatus := certificate("Never", "", "")
+	noStatus.SetNamespace("ns")
+	appears := fakeDynamic(noStatus)
+	reads := 0
+	appears.PrependReactor("get", "certificates", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if reads++; reads == 1 {
+			return true, nil, apierrors.NewNotFound(certificates.GroupResource(), "example")
+		}
+		return false, nil, nil
+	})
+	if got := (repro{dyn: appears, ns: "ns"}).ready(context.Background(), 300*time.Millisecond); got != "unset" {
+		t.Errorf("ready() = %q, want \"unset\" for a Certificate without conditions", got)
+	}
 }
 
-func withReady(status, reason string) *unstructured.Unstructured {
+// A Certificate can be Ready while an issuance replaces its Secret.
+func TestReadyWaitsOutIssuancesAndTheSettlePeriod(t *testing.T) {
+	gets := 0
+	var lastIssuanceEnded time.Time
+	client := fakeDynamic()
+	client.PrependReactor("get", "certificates", func(k8stesting.Action) (bool, runtime.Object, error) {
+		gets++
+		switch gets {
+		case 1, 3:
+			return true, withConditions("True", "Ready", "True"), nil
+		case 4:
+			lastIssuanceEnded = time.Now()
+		}
+		return true, withConditions("True", "Ready", ""), nil
+	})
+	r := repro{dyn: client, ns: "ns", settle: 250 * time.Millisecond}
+
+	got := r.ready(context.Background(), time.Minute)
+	if after := time.Since(lastIssuanceEnded); got != "True Ready" || gets < 4 || after < r.settle {
+		t.Errorf("ready() = %q after %d reads and %v after the last issuance ended, want \"True Ready\" at least %v after the 4th read", got, gets, after, r.settle)
+	}
+}
+
+// withConditions has no Issuing condition where issuing is empty.
+func withConditions(status, reason, issuing string) *unstructured.Unstructured {
 	crt := certificate("Never", "", "")
 	crt.SetNamespace("ns")
-	crt.Object["status"] = map[string]any{"conditions": []any{
-		map[string]any{"type": "Ready", "status": status, "reason": reason},
-		map[string]any{"type": "Issuing", "status": "True", "reason": "Other"},
-	}}
+	conditions := []any{map[string]any{"type": "Ready", "status": status, "reason": reason}}
+	if issuing != "" {
+		conditions = append(conditions, map[string]any{"type": "Issuing", "status": issuing, "reason": "Other"})
+	}
+	crt.Object["status"] = map[string]any{"conditions": conditions}
 	return crt
 }
 

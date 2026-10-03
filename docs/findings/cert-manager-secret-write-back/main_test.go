@@ -4,6 +4,8 @@ import (
 	"cmp"
 	"context"
 	"maps"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -24,16 +26,16 @@ import (
 )
 
 func TestParseReadsEveryFlag(t *testing.T) {
-	kubeconfig := writeKubeconfig(t)
+	kubeconfig := writeKubeconfig(t, "https://127.0.0.1:1")
 	for _, c := range []struct {
 		args []string
 		want repro
 		runs int
 	}{
-		{nil, repro{timeout: 30 * time.Second, algorithm: "ECDSA", policy: "Never", propagation: metav1.DeletePropagationBackground, dnsName: "example.test"}, 10},
+		{nil, repro{poll: 10 * time.Millisecond, timeout: 30 * time.Second, algorithm: "ECDSA", policy: "Never", propagation: metav1.DeletePropagationBackground, dnsName: "example.test"}, 10},
 		{
 			[]string{"-runs", "3", "-collect", "-wait", "5s", "-algorithm", "RSA", "-policy", "Always", "-propagation", "Foreground", "-pause", "200ms", "-dns", "other.test"},
-			repro{collect: true, timeout: 5 * time.Second, algorithm: "RSA", policy: "Always", propagation: metav1.DeletePropagationForeground, pause: 200 * time.Millisecond, dnsName: "other.test"},
+			repro{poll: 10 * time.Millisecond, collect: true, timeout: 5 * time.Second, algorithm: "RSA", policy: "Always", propagation: metav1.DeletePropagationForeground, pause: 200 * time.Millisecond, dnsName: "other.test"},
 			3,
 		},
 	} {
@@ -48,21 +50,36 @@ func TestParseReadsEveryFlag(t *testing.T) {
 	}
 }
 
-func TestNewReproLeavesTheClientUnthrottled(t *testing.T) {
-	r, err := newRepro(writeKubeconfig(t))
+// client-go's default limit allows 10 requests at once and then 5 a second,
+// so a throttled client cannot make 50 requests in 5 s.
+func TestNewReproLeavesBothClientsUnthrottled(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}`))
+	}))
+	defer server.Close()
+	r, err := newRepro(writeKubeconfig(t, server.URL))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if limiter := r.core.CoreV1().RESTClient().GetRateLimiter(); limiter != nil {
-		t.Errorf("the client is rate limited (%T); a throttled create misses the window the bug needs", limiter)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	for i := range 50 {
+		if _, err := r.dyn.Resource(certificates).Namespace("ns").Get(ctx, "example", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Fatalf("the dynamic client's get %d returned %v; a throttled client misses the window the bug needs", i, err)
+		}
+		if _, err := r.core.CoreV1().Secrets("ns").Get(ctx, "example-tls", metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+			t.Fatalf("the core client's get %d returned %v; a throttled client misses the window the bug needs", i, err)
+		}
 	}
 }
 
-func writeKubeconfig(t *testing.T) string {
+func writeKubeconfig(t *testing.T, server string) string {
 	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
 	if err := os.WriteFile(kubeconfig, []byte(`apiVersion: v1
 kind: Config
-clusters: [{name: c, cluster: {server: "https://127.0.0.1:1"}}]
+clusters: [{name: c, cluster: {server: "`+server+`"}}]
 users: [{name: u, user: {token: t}}]
 contexts: [{name: c, context: {cluster: c, user: u}}]
 current-context: c
@@ -145,8 +162,13 @@ func TestRecreateDeletesWithThePolicyAndCreatesAfterThePause(t *testing.T) {
 	old := certificate("Always", "", "")
 	old.SetNamespace("ns")
 	client := fakeDynamic(old)
+	gets := 0
 	var gone, created time.Time
 	client.PrependReactor("get", "certificates", func(k8stesting.Action) (bool, runtime.Object, error) {
+		gets++
+		if gets < 3 {
+			return true, old, nil
+		}
 		gone = time.Now()
 		return false, nil, nil
 	})
@@ -154,11 +176,14 @@ func TestRecreateDeletesWithThePolicyAndCreatesAfterThePause(t *testing.T) {
 		created = time.Now()
 		return false, nil, nil
 	})
-	r := repro{dyn: client, ns: "ns", policy: "Never", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationForeground, pause: 50 * time.Millisecond}
+	r := repro{dyn: client, ns: "ns", poll: time.Millisecond, policy: "Never", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationForeground, pause: 50 * time.Millisecond}
 
 	crt, err := r.recreate(context.Background(), "old")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if gets != 3 {
+		t.Errorf("recreate read the old Certificate %d times, want until it was gone on the third", gets)
 	}
 	var del k8stesting.DeleteAction
 	for _, a := range client.Actions() {
@@ -177,6 +202,19 @@ func TestRecreateDeletesWithThePolicyAndCreatesAfterThePause(t *testing.T) {
 	}
 	if got, _, _ := unstructured.NestedString(crt.Object, "spec", "commonName"); got != "other.test" {
 		t.Errorf("recreate created a Certificate for %q, want other.test", got)
+	}
+}
+
+// The bug needs the create within about 10 ms of the delete, so recreate looks
+// for the old Certificate before its first poll interval.
+func TestRecreateLooksForTheOldCertificateAtOnce(t *testing.T) {
+	old := certificate("Always", "", "")
+	old.SetNamespace("ns")
+	r := repro{dyn: fakeDynamic(old), ns: "ns", poll: time.Hour}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if _, err := r.recreate(ctx, "old"); err != nil {
+		t.Errorf("recreate returned %v, want the new Certificate before a poll interval passed", err)
 	}
 }
 

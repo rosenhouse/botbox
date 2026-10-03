@@ -74,6 +74,7 @@ func parse(args []string) (repro, int, error) {
 type repro struct {
 	core        kubernetes.Interface
 	dyn         dynamic.Interface
+	poll        time.Duration
 	collect     bool
 	timeout     time.Duration
 	algorithm   string
@@ -98,7 +99,7 @@ func newRepro(kubeconfig string) (repro, error) {
 		return repro{}, err
 	}
 	dyn, err := dynamic.NewForConfig(config)
-	return repro{core: core, dyn: dyn}, err
+	return repro{core: core, dyn: dyn, poll: 10 * time.Millisecond}, err
 }
 
 type finding struct {
@@ -162,15 +163,15 @@ func (r repro) run(ctx context.Context) (finding, error) {
 	return finding{mechanism(old, now, string(second.GetUID())), string(first.GetUID()), string(second.GetUID()), ready, old, now}, nil
 }
 
-// recreate deletes the Certificate, polls every 10 ms until it is gone, waits
-// for -pause, and creates the new one.
+// recreate deletes the Certificate, polls until it is gone, waits for -pause,
+// and creates the new one.
 func (r repro) recreate(ctx context.Context, old types.UID) (*unstructured.Unstructured, error) {
 	if err := r.dyn.Resource(certificates).Namespace(r.ns).Delete(ctx, "example", metav1.DeleteOptions{PropagationPolicy: &r.propagation}); err != nil {
 		return nil, err
 	}
 	collected := make(chan error, 1)
 	go func() { collected <- r.collectGarbage(ctx, old) }()
-	if err := wait.PollUntilContextTimeout(ctx, 10*time.Millisecond, time.Minute, true, func(ctx context.Context) (bool, error) {
+	if err := wait.PollUntilContextTimeout(ctx, r.poll, time.Minute, true, func(ctx context.Context) (bool, error) {
 		_, err := r.dyn.Resource(certificates).Namespace(r.ns).Get(ctx, "example", metav1.GetOptions{})
 		return apierrors.IsNotFound(err), nil
 	}); err != nil {

@@ -383,15 +383,42 @@ func TestSequencesOnDiskWriteCRsTheirCRDAccepts(t *testing.T) {
 		if err := rules[write.target].refusal(write.after, nil); err != nil {
 			t.Errorf("%s op %d writes a CR the CRD refuses: %v", write.file, write.op.Index, err)
 		}
-		_, _, dropped, err := objectmeta.GetObjectMetaWithOptions(write.after, objectmeta.ObjectMetaOptions{ReturnUnknownFieldPaths: true})
+		dropped, err := droppedFields(rules[write.target].structural, write.after)
 		if err != nil {
 			t.Errorf("%s op %d writes metadata the API server refuses: %v", write.file, write.op.Index, err)
 		}
-		dropped = append(dropped, pruning.PruneWithOptions(runtime.DeepCopyJSON(write.after), rules[write.target].structural, true,
-			structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true})...)
 		if len(dropped) > 0 {
 			t.Errorf("%s op %d writes %v, which the API server drops.", write.file, write.op.Index, dropped)
 		}
+	}
+}
+
+// droppedFields are the unknown metadata fields of cr and the fields its CRD
+// does not declare. The error says why the API server refuses its metadata.
+func droppedFields(structural *structuralschema.Structural, cr map[string]any) ([]string, error) {
+	_, _, dropped, err := objectmeta.GetObjectMetaWithOptions(cr, objectmeta.ObjectMetaOptions{ReturnUnknownFieldPaths: true})
+	return append(dropped, pruning.PruneWithOptions(runtime.DeepCopyJSON(cr), structural, true,
+		structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true})...), err
+}
+
+func TestDroppedFieldsAreWhatTheAPIServerDrops(t *testing.T) {
+	schema, err := openAPISchema(loadTarget(t, certManagerTarget))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules, err := newCRDRules(schema)
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate := map[string]any{"apiVersion": "cert-manager.io/v1", "kind": "Certificate",
+		"metadata": map[string]any{"name": "example", "labelz": map[string]any{}},
+		"spec":     map[string]any{"secretName": "example-tls", "colour": "blue"}}
+	if got, err := droppedFields(rules.structural, certificate); err != nil || !slices.Equal(got, []string{"metadata.labelz", "spec.colour"}) {
+		t.Errorf("droppedFields = %v, %v; want [metadata.labelz spec.colour]", got, err)
+	}
+	certificate["metadata"] = map[string]any{"name": "example", "labels": []any{"a"}}
+	if _, err := droppedFields(rules.structural, certificate); err == nil {
+		t.Error("droppedFields took labels that are a list")
 	}
 }
 

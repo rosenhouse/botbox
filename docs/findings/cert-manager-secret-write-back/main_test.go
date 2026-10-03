@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"maps"
 	"os"
@@ -60,6 +61,15 @@ func TestMechanismTellsHowTheOldKeySurvived(t *testing.T) {
 	}
 }
 
+func TestFindingPrintsBothSecretsHashes(t *testing.T) {
+	f := finding{mechanism: "write-back", old: secret{Key: "oldkey", Cert: "oldcert"}, now: secret{Key: "newkey", Cert: "newcert"}}
+	for _, hash := range []string{"oldkey", "newkey", "oldcert", "newcert"} {
+		if !strings.Contains(f.String(), hash) {
+			t.Errorf("%q lacks %s", f, hash)
+		}
+	}
+}
+
 func TestCollectGarbageDeletesWhatTheOldCertificateControls(t *testing.T) {
 	orphan := controlled("CertificateRequest", "example-3", "old")
 	orphan.SetOwnerReferences(nil)
@@ -103,7 +113,7 @@ func TestCollectGarbageReportsADeleteItCannotMake(t *testing.T) {
 }
 
 func TestRecreateDeletesWithThePolicyAndCreatesAfterThePause(t *testing.T) {
-	old := certificate("Always", "")
+	old := certificate("Always", "", "")
 	old.SetNamespace("ns")
 	client := fakeDynamic(old)
 	var gone, created time.Time
@@ -115,7 +125,7 @@ func TestRecreateDeletesWithThePolicyAndCreatesAfterThePause(t *testing.T) {
 		created = time.Now()
 		return false, nil, nil
 	})
-	r := repro{dyn: client, ns: "ns", policy: "Never", algorithm: "ECDSA", propagation: metav1.DeletePropagationForeground, pause: 50 * time.Millisecond}
+	r := repro{dyn: client, ns: "ns", policy: "Never", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationForeground, pause: 50 * time.Millisecond}
 
 	crt, err := r.recreate(context.Background(), "old")
 	if err != nil {
@@ -135,6 +145,9 @@ func TestRecreateDeletesWithThePolicyAndCreatesAfterThePause(t *testing.T) {
 	}
 	if got, _, _ := unstructured.NestedString(crt.Object, "spec", "privateKey", "algorithm"); got != "ECDSA" {
 		t.Errorf("recreate created a Certificate with algorithm %q, want ECDSA", got)
+	}
+	if got, _, _ := unstructured.NestedString(crt.Object, "spec", "commonName"); got != "other.test" {
+		t.Errorf("recreate created a Certificate for %q, want other.test", got)
 	}
 }
 
@@ -156,7 +169,7 @@ func controlled(kind, name string, owner types.UID) *unstructured.Unstructured {
 	return o
 }
 
-func TestSecretRecordsUIDControllerAndKeyHash(t *testing.T) {
+func TestSecretRecordsUIDControllerAndHashes(t *testing.T) {
 	controller := true
 	s := &corev1.Secret{
 		ObjectMeta: metav1.ObjectMeta{Name: "example-tls", Namespace: "ns", UID: "secret-uid", OwnerReferences: []metav1.OwnerReference{
@@ -167,7 +180,7 @@ func TestSecretRecordsUIDControllerAndKeyHash(t *testing.T) {
 	}
 	r := repro{core: kubefake.NewClientset(s), ns: "ns"}
 	got, err := r.secret(context.Background())
-	want := secret{UID: "secret-uid", Owner: "certificate-uid", Key: "2c70e12b7a0646f92279f427c7b38e7334d8e5389cff167a1dc30e73f826b683"}
+	want := secret{UID: "secret-uid", Owner: "certificate-uid", Key: "2c70e12b7a0646f92279f427c7b38e7334d8e5389cff167a1dc30e73f826b683", Cert: "793ff64f83b41b5d467a0d017c4cb99bc56e969a028ca7ea65a8795724f16bd1"}
 	if err != nil || got != want {
 		t.Errorf("secret() = %+v, %v; want %+v", got, err, want)
 	}
@@ -202,7 +215,7 @@ func TestReadyWaitsForReadyAndReportsTheLastCondition(t *testing.T) {
 }
 
 func withReady(status, reason string) *unstructured.Unstructured {
-	crt := certificate("Never", "")
+	crt := certificate("Never", "", "")
 	crt.SetNamespace("ns")
 	crt.Object["status"] = map[string]any{"conditions": []any{
 		map[string]any{"type": "Ready", "status": status, "reason": reason},
@@ -211,17 +224,23 @@ func withReady(status, reason string) *unstructured.Unstructured {
 	return crt
 }
 
-func TestCertificateSetsTheKeysPolicyAndAlgorithm(t *testing.T) {
+func TestCertificateSetsTheKeysPolicyAndAlgorithmAndTheDNSName(t *testing.T) {
 	for _, c := range []struct {
-		policy, algorithm string
-		want              map[string]any
+		policy, algorithm, dnsName string
+		want                       map[string]any
 	}{
-		{"Never", "", map[string]any{"rotationPolicy": "Never"}},
-		{"Always", "ECDSA", map[string]any{"rotationPolicy": "Always", "algorithm": "ECDSA"}},
+		{"Never", "", "", map[string]any{"rotationPolicy": "Never"}},
+		{"Always", "ECDSA", "other.test", map[string]any{"rotationPolicy": "Always", "algorithm": "ECDSA"}},
 	} {
-		got, _, _ := unstructured.NestedMap(certificate(c.policy, c.algorithm).Object, "spec", "privateKey")
+		crt := certificate(c.policy, c.algorithm, c.dnsName)
+		got, _, _ := unstructured.NestedMap(crt.Object, "spec", "privateKey")
 		if !maps.Equal(got, c.want) {
-			t.Errorf("certificate(%q, %q) has privateKey %v, want %v", c.policy, c.algorithm, got, c.want)
+			t.Errorf("certificate(%q, %q, %q) has privateKey %v, want %v", c.policy, c.algorithm, c.dnsName, got, c.want)
+		}
+		wantName := cmp.Or(c.dnsName, "example.test")
+		names, _, _ := unstructured.NestedStringSlice(crt.Object, "spec", "dnsNames")
+		if common, _, _ := unstructured.NestedString(crt.Object, "spec", "commonName"); common != wantName || !slices.Equal(names, []string{wantName}) {
+			t.Errorf("certificate(%q, %q, %q) has commonName %q and dnsNames %v, want %s for both", c.policy, c.algorithm, c.dnsName, common, names, wantName)
 		}
 	}
 }

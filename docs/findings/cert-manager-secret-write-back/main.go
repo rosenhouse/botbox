@@ -4,11 +4,12 @@
 //
 // Each run creates a Certificate with an RSA key under the rotationPolicy
 // -policy names, and waits for it to be Ready. It then deletes the Certificate,
-// waits until it is gone, and at once creates one of the same name whose key
-// algorithm -algorithm names.
+// waits until it is gone, and creates one of the same name whose key algorithm
+// -algorithm names.
 package main
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"flag"
@@ -45,11 +46,12 @@ func main() {
 	policy := flag.String("policy", "Never", "both Certificates' rotationPolicy")
 	propagation := flag.String("propagation", "Background", "the old Certificate's delete propagation policy")
 	pause := flag.Duration("pause", 0, "how long to wait between seeing the old Certificate gone and creating the new one")
+	dnsName := flag.String("dns", "example.test", "the new Certificate's commonName and DNS name")
 	flag.Parse()
 	r, err := newRepro(*kubeconfig)
 	check(err)
 	r.collect, r.timeout, r.algorithm, r.policy = *collect, *timeout, *algorithm, *policy
-	r.propagation, r.pause = metav1.DeletionPropagation(*propagation), *pause
+	r.propagation, r.pause, r.dnsName = metav1.DeletionPropagation(*propagation), *pause, *dnsName
 	counts := map[string]int{}
 	for i := 1; i <= *runs; i++ {
 		found, err := r.run(context.Background())
@@ -69,6 +71,7 @@ type repro struct {
 	policy      string
 	propagation metav1.DeletionPropagation
 	pause       time.Duration
+	dnsName     string
 	ns          string
 }
 
@@ -95,13 +98,13 @@ type finding struct {
 }
 
 func (f finding) String() string {
-	return fmt.Sprintf("%s. Certificate %.8s, then %.8s, Ready %s. Secret %.8s, then %.8s owned by %.8s. tls.key sha256 %.12s, then %.12s.",
-		f.mechanism, f.oldCertificate, f.newCertificate, f.ready, f.old.UID, f.now.UID, f.now.Owner, f.old.Key, f.now.Key)
+	return fmt.Sprintf("%s. Certificate %.8s, then %.8s, Ready %s. Secret %.8s, then %.8s owned by %.8s. tls.key sha256 %.12s, then %.12s. tls.crt sha256 %.12s, then %.12s.",
+		f.mechanism, f.oldCertificate, f.newCertificate, f.ready, f.old.UID, f.now.UID, f.now.Owner, f.old.Key, f.now.Key, f.old.Cert, f.now.Cert)
 }
 
 // secret is what a run records of the Certificate's Secret. Its UID is empty
 // where there is none.
-type secret struct{ UID, Owner, Key string }
+type secret struct{ UID, Owner, Key, Cert string }
 
 func mechanism(old, now secret, newCertificate string) string {
 	switch {
@@ -127,7 +130,7 @@ func (r repro) run(ctx context.Context) (finding, error) {
 	if _, err := r.dyn.Resource(issuers).Namespace(r.ns).Create(ctx, object("Issuer", "selfsigned", map[string]any{"selfSigned": map[string]any{}}), metav1.CreateOptions{}); err != nil {
 		return finding{}, err
 	}
-	first, err := r.dyn.Resource(certificates).Namespace(r.ns).Create(ctx, certificate(r.policy, ""), metav1.CreateOptions{})
+	first, err := r.dyn.Resource(certificates).Namespace(r.ns).Create(ctx, certificate(r.policy, "", ""), metav1.CreateOptions{})
 	if err != nil {
 		return finding{}, err
 	}
@@ -165,7 +168,7 @@ func (r repro) recreate(ctx context.Context, old types.UID) (*unstructured.Unstr
 		return nil, err
 	}
 	time.Sleep(r.pause)
-	created, err := r.dyn.Resource(certificates).Namespace(r.ns).Create(ctx, certificate(r.policy, r.algorithm), metav1.CreateOptions{})
+	created, err := r.dyn.Resource(certificates).Namespace(r.ns).Create(ctx, certificate(r.policy, r.algorithm, r.dnsName), metav1.CreateOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -246,18 +249,19 @@ func (r repro) secret(ctx context.Context) (secret, error) {
 	if ref := metav1.GetControllerOf(s); ref != nil {
 		owner = string(ref.UID)
 	}
-	return secret{string(s.UID), owner, fmt.Sprintf("%x", sha256.Sum256(s.Data[corev1.TLSPrivateKeyKey]))}, nil
+	return secret{string(s.UID), owner, fmt.Sprintf("%x", sha256.Sum256(s.Data[corev1.TLSPrivateKeyKey])), fmt.Sprintf("%x", sha256.Sum256(s.Data[corev1.TLSCertKey]))}, nil
 }
 
-func certificate(policy, algorithm string) *unstructured.Unstructured {
+func certificate(policy, algorithm, dnsName string) *unstructured.Unstructured {
 	key := map[string]any{"rotationPolicy": policy}
 	if algorithm != "" {
 		key["algorithm"] = algorithm
 	}
+	dnsName = cmp.Or(dnsName, "example.test")
 	return object("Certificate", "example", map[string]any{
 		"secretName": "example-tls",
-		"commonName": "example.test",
-		"dnsNames":   []any{"example.test"},
+		"commonName": dnsName,
+		"dnsNames":   []any{dnsName},
 		"issuerRef":  map[string]any{"kind": "Issuer", "name": "selfsigned"},
 		"privateKey": key,
 	})

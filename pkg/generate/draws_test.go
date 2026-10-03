@@ -185,12 +185,47 @@ func TestCertManagersPinnedSequencesReissueUnderRotationPolicyNever(t *testing.T
 	// Draws never set Never, so the example tier runs it only from the
 	// sequences it pins.
 	for _, change := range certificateChanges(t, certManagerSequences) {
-		renames := change.op.Type == run.OpUpdate && !slices.Equal(namesOf(change.before), namesOf(change.after))
-		if renames && privateKeyOf(change.before).rotationPolicy == "Never" && privateKeyOf(change.after).rotationPolicy == "Never" {
+		if renamesUnderNever(change) {
 			return
 		}
 	}
 	t.Errorf("No sequence in %s updates the names of a Certificate that stays under rotationPolicy Never.", certManagerSequences)
+}
+
+func renamesUnderNever(change crWrite) bool {
+	renames := change.op.Type == run.OpUpdate && !slices.Equal(namesOf(change.before), namesOf(change.after))
+	return renames && privateKeyOf(change.before).rotationPolicy == "Never" && privateKeyOf(change.after).rotationPolicy == "Never"
+}
+
+func TestRenamesUnderNeverNeedsAnUpdateOfTheNamesThatKeepsNever(t *testing.T) {
+	with := func(certificate map[string]any, value any, path ...string) map[string]any {
+		changed := runtime.DeepCopyJSON(certificate)
+		if err := unstructured.SetNestedField(changed, value, path...); err != nil {
+			t.Fatal(err)
+		}
+		return changed
+	}
+	never := map[string]any{"spec": map[string]any{
+		"commonName": "a.test", "dnsNames": []any{"a.test", "b.test"}, "privateKey": map[string]any{"rotationPolicy": "Never"},
+	}}
+	always := with(never, "Always", "spec", "privateKey", "rotationPolicy")
+	for _, c := range []struct {
+		name          string
+		op            run.OpType
+		before, after map[string]any
+		want          bool
+	}{
+		{"an update of dnsNames", run.OpUpdate, never, with(never, []any{"a.test"}, "spec", "dnsNames"), true},
+		{"an update of commonName", run.OpUpdate, never, with(never, "b.test", "spec", "commonName"), true},
+		{"an update that reorders dnsNames", run.OpUpdate, never, with(never, []any{"b.test", "a.test"}, "spec", "dnsNames"), false},
+		{"a recreate with other dnsNames", run.OpRecreate, never, with(never, []any{"a.test"}, "spec", "dnsNames"), false},
+		{"an update of dnsNames into Always", run.OpUpdate, never, with(always, []any{"a.test"}, "spec", "dnsNames"), false},
+		{"an update of dnsNames out of Always", run.OpUpdate, always, with(never, []any{"a.test"}, "spec", "dnsNames"), false},
+	} {
+		if got := renamesUnderNever(crWrite{op: run.Op{Type: c.op}, before: c.before, after: c.after}); got != c.want {
+			t.Errorf("renamesUnderNever(%s) = %t, want %t.", c.name, got, c.want)
+		}
+	}
 }
 
 // namesOf are the names a Certificate asks its certificate to carry.

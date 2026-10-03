@@ -1342,14 +1342,15 @@ the proxy; the `Image` launcher. Separate design addendum.
   family is checked in only once it passes the pinned controller.
 - **Triage.** A hunt run that fails is a candidate, not a bug. Triage replays it three
   times, reproduces it by hand against envtest unless only botbox's proxy can inject its
-  faults, reads upstream's code path and searches upstream's tracker. A candidate that no
-  replay reproduces, or that breaks a botbox rule and no upstream contract, becomes a
-  botbox issue. A candidate that breaks an upstream contract becomes a draft under
-  `docs/findings/`, with how many replays failed, for botbox's maintainer to file
-  upstream. The draft's directory holds its `sequence.json`, which `make test` loads
-  against the example it names, and the by-hand reproducer where there is one. One that
-  upstream's tracker already holds needs no draft. A draft says whether triage searched
-  the tracker. Where it did not, the maintainer searches before filing.
+  faults, and reads upstream's code path. It searches upstream's tracker where the
+  maintainer allows that. A candidate that no replay reproduces, or that breaks a botbox
+  rule and no upstream contract, becomes a botbox issue. A candidate that breaks an
+  upstream contract becomes a draft under `docs/findings/`, with how many replays failed,
+  for botbox's maintainer to file upstream. The draft's directory holds its
+  `sequence.json`, which `make test` loads against the example it names, and the by-hand
+  reproducer where there is one. One that upstream's tracker already holds needs no
+  draft. A draft says whether triage searched the tracker. Where it did not, the
+  maintainer searches before filing.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code

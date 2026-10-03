@@ -1,9 +1,9 @@
 # cert-manager v1.21.2 can give a recreated Certificate the deleted Certificate's private key
 
-This draft is for botbox's maintainer to file at cert-manager. Nobody has searched
-cert-manager's tracker for it, so the maintainer searches before filing. No agent may file
-it. The issue body starts below the horizontal rule. Its links are relative to this file,
-so they need botbox's URL before filing.
+This draft is for botbox's maintainer to file at cert-manager. The agents that wrote it may
+not search cert-manager's tracker, so the maintainer searches it before filing. No agent may
+file it. The issue body starts below the horizontal rule. Its links are relative to this
+file, so they need botbox's URL before filing.
 
 ---
 
@@ -14,24 +14,31 @@ so they need botbox's URL before filing.
 botbox, a black-box test harness for Kubernetes controllers, found this in cert-manager
 v1.21.2 with `--enable-certificate-owner-ref=true`.
 
-A user deletes a Certificate and at once creates one with the same name and `secretName`.
-Sometimes the new Certificate's Secret then holds the deleted Certificate's private key. It
-gets there in one of two ways:
+A client deletes a Certificate with the default background cascade. Within about 10 ms it
+creates one with the same name and `secretName`. The new Certificate's Secret then often
+holds the deleted Certificate's private key. It gets there in one of two ways:
 
 - **Write-back.** The garbage collector deletes the Secret. The issuing controller then
-  applies the data of the Secret it read before the delete, with the new Certificate as
+  applies the data of the Secret still in its informer cache, with the new Certificate as
   owner. The apply creates the Secret again, with a new UID and the old key.
 - **Re-point.** The issuing controller's apply lands before the garbage collector's delete.
   The Secret then names a live owner, so the garbage collector keeps it.
 
 What follows depends on the new Certificate's spec:
 
-- If it matches the old spec, the new Certificate becomes Ready with the old key. This
-  happens under `rotationPolicy: Always`, the default, as under `Never`.
-- If it asks for another key algorithm under `Never`, the new Certificate stays
+- If the spec is unchanged, the new Certificate becomes Ready with the old key. Under
+  `rotationPolicy: Always`, the default, cert-manager issues nothing, so the policy never
+  applies, and the Secret keeps the deleted Certificate's certificate too.
+- If a field such as `dnsNames` changes, cert-manager issues a new certificate. Under
+  `Never` it signs the old key. Under `Always` it generates a new key.
+- If the spec asks for another key algorithm under `Never`, the new Certificate stays
   `Ready=False` with reason `SecretMismatch`, waiting for a user.
 
 So a user who recreates a Certificate to get a new key can keep the old one.
+
+On an idle kind cluster the window is about 10 ms, too short for `kubectl replace --force`.
+A foreground cascade (`kubectl delete --cascade=foreground`) closes it. The old Certificate
+then goes only after the garbage collector has deleted its Secret.
 
 ## Code path
 
@@ -50,10 +57,22 @@ Paths are relative to cert-manager v1.21.2.
   ownerReference to the new Certificate
   (`pkg/controller/certificates/issuing/internal/secret.go:108-127`). Its doc says "If the
   Secret resource does not exist, it will be created on Apply" (`internal/secret.go:92`).
-- Under `Never`, the key manager generates a key when the Secret is gone, holds no key or
-  holds one it cannot decode. Otherwise it reuses the stored key, or waits for a user when
-  that key does not fit the spec
-  (`pkg/controller/certificates/keymanager/keymanager_controller.go:248-281`).
+
+Whether the new Certificate is issued depends on the trigger policy chain
+(`internal/controller/certificates/policies/policies.go:71-84`):
+
+- With an unchanged spec, the old Secret passes every check. No CertificateRequest belongs
+  to the new Certificate, so `CurrentCertificateRequestMismatchesSpec` compares the Secret's
+  certificate with the spec instead (`checks.go:214-223`). The readiness chain
+  (`policies.go:89-102`) passes the same way, so the Certificate becomes Ready. Only
+  `SecretDoesNotExist` can start an issuance, when the trigger controller runs while the
+  Secret is gone.
+- The key manager acts only while a Certificate is `Issuing`
+  (`pkg/controller/certificates/keymanager/keymanager_controller.go:178-187`), so
+  `rotationPolicy` never applies.
+- When the spec changes, the trigger chain starts an issuance. Under `Never`, the key
+  manager then reuses the stored key, or waits for a user when that key does not fit the
+  spec (`keymanager_controller.go:248-281`).
 
 kube-controller-manager's garbage collector reads the dependent, checks each owner, and
 deletes it with UID and resourceVersion preconditions. After a Conflict, it retries without
@@ -67,21 +86,21 @@ names a live owner. See Kubernetes v1.37.0,
 - The help for `--enable-certificate-owner-ref`
   (`cmd/controller/app/options/options.go:181-183`): "When this flag is enabled, the secret
   will be automatically removed when the certificate resource is deleted."
-- The comment where `ensureSecretData` finds no Secret (`secret_manager.go:42-43`): "Secret
-  doesn't exist so we can't do anything. The Certificate will be marked for a re-issuance
-  and the resulting Secret will be evaluated again."
 - The doc of `rotationPolicy` (`pkg/apis/certmanager/v1/types_certificate.go:353-356`): "If
   set to `Never`, a private key will only be generated if one does not already exist in the
   target `spec.secretName`."
 
-The write-back contradicts the first two. The Secret is removed, and cert-manager creates it
-again from data it read before the removal. The new Certificate then finds a key that its
-`secretName` should no longer hold.
+Under the default background cascade, the garbage collector does delete the Secret. The
+write-back then creates it again from cert-manager's cache, which breaks the flag's promise.
+The comment where `ensureSecretData` finds no Secret (`secret_manager.go:42-43`) states the
+intent: "Secret doesn't exist so we can't do anything." The stale cache never reaches that
+branch, because the lister still returns the deleted Secret.
 
-The re-point may be intended. `CertificateOwnsSecret` decides which Certificate owns a
-Secret by the `cert-manager.io/certificate-name` annotation, not by ownerReferences
-(`internal/controller/certificates/certificates.go:32-46`). It still breaks the flag's
-promise, because the Secret outlives the Certificate it was issued for.
+The re-point may count as the race a background cascade leaves open.
+`CertificateOwnsSecret` decides which Certificate owns a Secret by the
+`cert-manager.io/certificate-name` annotation, not by ownerReferences
+(`internal/controller/certificates/certificates.go:32-46`). Still, the Secret outlives the
+Certificate it was issued for.
 
 ## Reproduction
 
@@ -90,45 +109,74 @@ cluster with cert-manager's CRDs and cert-manager running with
 `--enable-certificate-owner-ref=true`. Each run makes a namespace and a self-signed Issuer.
 Then:
 
-1. It creates Certificate `example` with `secretName: example-tls`, the default RSA key and
-   the `-policy` given, and waits for Ready.
-2. It records the Secret's UID and the sha256 of its `tls.key`.
-3. It deletes the Certificate and polls until it is gone.
-4. At once it creates `example` again with the `-algorithm` and `-policy` given.
+1. It creates Certificate `example` with `secretName: example-tls`, DNS name
+   `example.test`, the default RSA key and the `-policy` given, and waits for Ready.
+2. It records the Secret's UID and the sha256 of its `tls.key` and `tls.crt`.
+3. It deletes the Certificate with the `-propagation` given, `Background` by default, and
+   polls every 10 ms until the Certificate is gone.
+4. It waits for `-pause`, none by default. Then it creates `example` again with the
+   `-algorithm`, `-policy` and `-dns` given. Its client has no rate limit, so the create
+   follows within milliseconds.
 5. It waits up to 30 s for Ready and up to 30 s more for the Secret. Then it reads the
-   Secret's UID, controller owner and key hash.
+   Secret's UID, controller owner and hashes.
 
 A run keeps the key when the Secret still holds the old one. The UID tells the mechanism: a
 new UID is a write-back, and the old UID owned by the new Certificate is a re-point.
 Without `-collect`, the program never writes the Secret. From a botbox checkout:
 
 ```sh
-go run ./docs/findings/cert-manager-secret-write-back -kubeconfig "$KUBECONFIG" -runs 1 -algorithm RSA -policy Always
+go run ./docs/findings/cert-manager-secret-write-back -kubeconfig "$KUBECONFIG" -runs 10 -algorithm RSA -policy Always
 ```
 
-cert-manager ran out of cluster with `--leader-elect=false`.
+The cluster was kind v0.33.0 with node v1.37.0. cert-manager ran out of cluster with
+`--leader-elect=false`. Each batch of 10 runs had one cert-manager process and one
+reproducer process, and the batches took turns.
 
-| cluster | garbage collector | new Certificate | runs | key kept | write-back | re-point |
-| --- | --- | --- | --- | --- | --- | --- |
-| kind v0.33.0, node v1.37.0 | kube-controller-manager | `Never`, ECDSA | 72 | 4 | 2 | 2 |
-| kind v0.33.0, node v1.37.0 | kube-controller-manager | `Never`, RSA | 28 | 6 | 5 | 1 |
-| kind v0.33.0, node v1.37.0 | kube-controller-manager | `Always`, RSA | 18 | 11 | 11 | 0 |
-| envtest 1.37.0 | the program's `-collect` | `Never`, ECDSA | 10 | 8 | 0 | 8 |
-| envtest 1.37.0, through botbox | botbox's | `Never`, ECDSA: [`sequence.json`](cert-manager-secret-write-back/sequence.json) | 8 | 3 | 3 | 0 |
-| envtest 1.37.0, through botbox | botbox's | `Never`, ECDSA: the hunt's seed 1043 | 17 | 5 | 4 | 1 |
+| flags beside `-runs 10` | runs | key kept | write-back | re-point |
+| --- | --- | --- | --- | --- |
+| `-policy Always -algorithm RSA` | 30 | 17 | 16 | 1 |
+| `-policy Never -algorithm RSA` | 30 | 17 | 15 | 2 |
+| `-policy Never -algorithm ECDSA` | 30 | 19 | 10 | 9 |
+| `-policy Never -algorithm RSA -dns other.test` | 20 | 7 | 6 | 1 |
+| `-policy Always -algorithm RSA -dns other.test` | 20 | 0 | 0 | 0 |
+| `-policy Always -algorithm RSA -propagation Foreground` | 20 | 0 | 0 | 0 |
 
-- With ECDSA, every run that kept the key ended `Ready=False` with reason `SecretMismatch`.
-  With RSA, every one ended `Ready=True`. No run ended with the old Secret uncollected.
-- On kind, every kept key came on the first recreate after cert-manager started: 21 of 35
-  such runs kept it, and none of the 83 later runs did. Restart cert-manager before each run
-  to see it.
-- envtest runs no garbage collector. There, `-collect` starts once the old Certificate is
-  deleted. It lists the Secret and the CertificateRequests that Certificate controls, and
-  deletes each with UID and resourceVersion preconditions. It does not retry.
-- botbox's garbage collector also deletes with UID and resourceVersion preconditions.
-  botbox's proxy sits between cert-manager and the API server. Seed 1043's first two ops
-  are the recreate above with other `dnsNames` and `duration`. The hunt run that found it
-  kept the key by re-point.
+- With the same spec under `Always`, every kept key came with the deleted Certificate's
+  `tls.crt`, byte for byte, and `Ready=True`. Under `Never`, 14 of 17 did, and 3 got a new
+  `tls.crt` for the old key.
+- With another DNS name under `Never`, every kept key came with a new `tls.crt` and
+  `Ready=True`.
+- With ECDSA under `Never`, every kept key ended `Ready=False` with reason
+  `SecretMismatch`.
+- Under the foreground cascade, cert-manager never logged `applying Secret data`.
+- In the four rows that kept keys, the first run of a batch kept it in 7 of 11, and later
+  runs in 53 of 99.
+- No run ended with the old Secret uncollected.
+
+The window is short. With `-policy Always -algorithm RSA`, these pauses before the create
+kept the key in:
+
+- none: 40 of 70 runs, the first row and the batches interleaved with the pauses below;
+- 5 ms: 3 of 20;
+- 10 ms: 1 of 20;
+- 20 ms, 50 ms, 100 ms and 200 ms: none of 20 each.
+
+`kubectl replace --force` (kubectl v1.37.0) deletes, reads the Certificate gone, and creates
+it 35 to 55 ms after the delete. With the first row's Certificate, it kept the key in none
+of 20 tries.
+
+## How botbox found it
+
+botbox ran cert-manager against envtest, which has no garbage collector. botbox's own
+collector deletes dependents with UID and resourceVersion preconditions, within 1 s of the
+owner's deletion. Hunt seed 1043 recreates a `Never` Certificate with ECDSA and other
+`dnsNames` and `duration`. It kept the key in 5 of 17 replays: 4 by write-back and 1 by
+re-point. [`sequence.json`](cert-manager-secret-write-back/sequence.json), the recreate in
+the table's ECDSA row, kept it in 3 of 8 botbox runs, all by write-back.
+
+On a cluster without a garbage collector, the program's `-collect` deletes what the old
+Certificate controls, as kube-controller-manager would. On envtest with
+`-policy Always -algorithm RSA`, it kept the key in 7 of 10 runs.
 
 ## Possible fix
 
@@ -184,13 +232,10 @@ missing Secret.
  	// Check whether the Certificate's Secret has correct output format and
 ```
 
-On kind, with `-runs 1 -algorithm RSA -policy Always` and a fresh cert-manager for each
-run, the stock and the patched controller took turns for 20 runs:
-
-- The stock controller kept the key in 6 of 10 runs, all by write-back. One more run read
-  the Secret before cert-manager's apply landed, so it went unclassified.
-- The patched controller kept it in none of 10. In 8 of them it logged the Conflict above,
-  and then generated a new key.
+A build of v1.21.2 with this patch took turns with the stock batches above, with
+`-policy Always -algorithm RSA`. It kept the key in none of 20 runs, where the stock build
+kept it in 17 of 30. In 12 of the 20 it logged the Conflict above, and then generated a new
+key.
 
 Against kube-apiserver 1.37.0, a forced apply of a Secret behaved like this:
 
@@ -206,8 +251,8 @@ collector deletes it.
 ## Unknown
 
 - cert-manager may mean to adopt a Secret whose owner was deleted.
-- On kind, only the first recreate after cert-manager started kept the key. The cause is
-  unknown.
+- Every run used an idle cluster. A garbage collector that lags, as on a busy cluster, may
+  widen the window. No run measured that.
 - No run put cert-manager in cluster or under leader election.
 - Only the tests of `pkg/controller/certificates/issuing/...` ran against the patch, and
   they pass.

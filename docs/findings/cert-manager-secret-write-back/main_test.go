@@ -36,10 +36,10 @@ func TestParseReadsEveryFlag(t *testing.T) {
 		want repro
 		runs int
 	}{
-		{nil, repro{poll: 10 * time.Millisecond, settle: 2 * time.Second, setupWait: time.Minute, timeout: 30 * time.Second, algorithm: "ECDSA", policy: "Never", propagation: metav1.DeletePropagationBackground, dnsName: "example.test"}, 10},
+		{nil, repro{poll: 10 * time.Millisecond, settle: 2 * time.Second, setupWait: time.Minute, wait: 30 * time.Second, algorithm: "ECDSA", policy: "Never", propagation: metav1.DeletePropagationBackground, dnsName: "example.test"}, 10},
 		{
 			[]string{"-runs", "3", "-collect", "-wait", "5s", "-algorithm", "RSA", "-policy", "Always", "-propagation", "Foreground", "-pause", "200ms", "-dns", "other.test"},
-			repro{poll: 10 * time.Millisecond, settle: 2 * time.Second, setupWait: time.Minute, collect: true, timeout: 5 * time.Second, algorithm: "RSA", policy: "Always", propagation: metav1.DeletePropagationForeground, pause: 200 * time.Millisecond, dnsName: "other.test"},
+			repro{poll: 10 * time.Millisecond, settle: 2 * time.Second, setupWait: time.Minute, collect: true, wait: 5 * time.Second, algorithm: "RSA", policy: "Always", propagation: metav1.DeletePropagationForeground, pause: 200 * time.Millisecond, dnsName: "other.test"},
 			3,
 		},
 	} {
@@ -137,7 +137,7 @@ func TestMainExitsWithWhatStoppedIt(t *testing.T) {
 		exit       int
 	}{
 		{"-kubeconfig " + forbidden + " -runs 0", "map[]", 0},
-		{"-h", "-collect", 0},
+		{"-h", "Ready, and again for its Secret", 0},
 		{"-kubeconfig " + filepath.Join(t.TempDir(), "missing") + " -runs 0", "no such file", 1},
 		{"-kubeconfig " + forbidden + " -runs 1", "namespaces is forbidden", 1},
 	} {
@@ -490,7 +490,7 @@ func TestRunCollectsWhatTheFirstCertificateControlsOnceItIsDeleted(t *testing.T)
 func TestRunReturnsTheErrorOfACallThatFails(t *testing.T) {
 	for _, c := range []struct {
 		call, verb, resource string
-		// The first such call fails once created Certificates exist.
+		// created is how many Certificates exist before the call fails.
 		created int
 		collect bool
 	}{
@@ -558,7 +558,7 @@ func TestRunWaitsForTheNewCertificateAsLongAsWaitSays(t *testing.T) {
 // first two reads, and settles from then on. Under "never Ready", the second
 // one waits for a user instead. The Secret is missing until the first
 // Certificate settles. It holds a new key until the second settles, is missing
-// on the next read, and then holds the old key as kept says.
+// on the next read, and then holds the old key as outcome says.
 type fakeCertManager struct {
 	core        *kubefake.Clientset
 	dyn         *dynamicfake.FakeDynamicClient
@@ -570,7 +570,7 @@ type fakeCertManager struct {
 	wentMissing bool
 }
 
-func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
+func newFakeCertManager(outcome string, settle time.Duration) *fakeCertManager {
 	f := &fakeCertManager{core: kubefake.NewClientset(), dyn: fakeDynamic(), settle: settle, reads: map[types.UID]int{}, settled: map[types.UID]time.Time{}}
 	f.core.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		ns := action.(k8stesting.CreateAction).GetObject().(*corev1.Namespace)
@@ -599,7 +599,7 @@ func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
 		switch {
 		case !selfSigned:
 			ready, reason, issuing = "False", "IssuerNotFound", false
-		case kept == "never Ready" && crt.GetUID() == "certificate-2":
+		case outcome == "never Ready" && crt.GetUID() == "certificate-2":
 			ready, reason, issuing = "False", "SecretMismatch", true
 		case !issuing && f.settled[crt.GetUID()].IsZero():
 			f.settled[crt.GetUID()] = time.Now()
@@ -626,7 +626,7 @@ func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
 		case !f.wentMissing:
 			f.wentMissing = true
 			return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "example-tls")
-		case kept == "write-back":
+		case outcome == "write-back":
 			return true, tlsSecret("secret-2", "certificate-2", "old key"), nil
 		}
 		return true, tlsSecret("secret-1", "certificate-2", "old key"), nil
@@ -634,8 +634,8 @@ func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
 	return f
 }
 
-func (f *fakeCertManager) repro(timeout time.Duration) repro {
-	return repro{core: f.core, dyn: f.dyn, poll: time.Millisecond, settle: f.settle, setupWait: time.Minute, timeout: timeout,
+func (f *fakeCertManager) repro(wait time.Duration) repro {
+	return repro{core: f.core, dyn: f.dyn, poll: time.Millisecond, settle: f.settle, setupWait: time.Minute, wait: wait,
 		policy: "Never", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationBackground}
 }
 
@@ -769,12 +769,12 @@ func TestSecretOnceThereWaitsForTheSecret(t *testing.T) {
 		}
 		return true, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "example-tls", Namespace: "ns", UID: "secret-uid"}}, nil
 	})
-	if got, err := (repro{core: client, ns: "ns", timeout: time.Minute}).secretOnceThere(context.Background()); err != nil || got.UID != "secret-uid" {
+	if got, err := (repro{core: client, ns: "ns", wait: time.Minute}).secretOnceThere(context.Background()); err != nil || got.UID != "secret-uid" {
 		t.Errorf("secretOnceThere() = %+v, %v; want the Secret once it exists", got, err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
 	defer cancel()
-	if got, err := (repro{core: kubefake.NewClientset(), ns: "ns", timeout: 100 * time.Millisecond}).secretOnceThere(ctx); err != nil || got != (secret{}) || ctx.Err() != nil {
+	if got, err := (repro{core: kubefake.NewClientset(), ns: "ns", wait: 100 * time.Millisecond}).secretOnceThere(ctx); err != nil || got != (secret{}) || ctx.Err() != nil {
 		t.Errorf("secretOnceThere() without a Secret = %+v, %v, and its context ended: %v; want none and no error after -wait", got, err, ctx.Err())
 	}
 }

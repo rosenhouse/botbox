@@ -65,17 +65,15 @@ func parse(args []string) (repro, int, error) {
 	kubeconfig := flags.String("kubeconfig", os.Getenv("KUBECONFIG"), "the cluster's kubeconfig")
 	runs := flags.Int("runs", 10, "how many runs to make")
 	collect := flags.Bool("collect", false, "once the old Certificate is deleted, delete what it owns as a garbage collector would, on a cluster that runs none")
-	timeout := flags.Duration("wait", 30*time.Second, "how long the new Certificate has to become and stay Ready")
+	wait := flags.Duration("wait", 30*time.Second, "how long to wait for the new Certificate to stay Ready, and again for its Secret")
 	algorithm := flags.String("algorithm", "ECDSA", "the new Certificate's key algorithm")
 	policy := flags.String("policy", "Never", "both Certificates' rotationPolicy")
 	propagation := flags.String("propagation", "Background", "the old Certificate's delete propagation policy")
 	pause := flags.Duration("pause", 0, "how long to wait between seeing the old Certificate gone and creating the new one")
 	dnsName := flags.String("dns", "example.test", "the new Certificate's commonName and DNS name")
-	if err := flags.Parse(args); err != nil {
-		return repro{}, 0, err
-	}
+	flags.Parse(args)
 	r, err := newRepro(*kubeconfig)
-	r.collect, r.timeout, r.algorithm, r.policy = *collect, *timeout, *algorithm, *policy
+	r.collect, r.wait, r.algorithm, r.policy = *collect, *wait, *algorithm, *policy
 	r.propagation, r.pause, r.dnsName = metav1.DeletionPropagation(*propagation), *pause, *dnsName
 	return r, *runs, err
 }
@@ -89,7 +87,7 @@ type repro struct {
 	// Certificate to be Ready, and for it to go.
 	setupWait   time.Duration
 	collect     bool
-	timeout     time.Duration
+	wait        time.Duration
 	algorithm   string
 	policy      string
 	propagation metav1.DeletionPropagation
@@ -168,7 +166,7 @@ func (r repro) run(ctx context.Context) (finding, error) {
 	if err != nil {
 		return finding{}, err
 	}
-	ready := r.ready(ctx, r.timeout)
+	ready := r.ready(ctx, r.wait)
 	now, err := r.secretOnceThere(ctx)
 	if err != nil {
 		return finding{}, err
@@ -266,7 +264,7 @@ func (r repro) ready(ctx context.Context, timeout time.Duration) string {
 // Ready while cert-manager still applies its Secret.
 func (r repro) secretOnceThere(ctx context.Context) (secret, error) {
 	var s secret
-	err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, r.timeout, true, func(context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, r.wait, true, func(context.Context) (bool, error) {
 		var err error
 		s, err = r.secret(ctx)
 		return s.UID != "", err

@@ -2500,4 +2500,4 @@ built from source and run as a black-box binary.
   rejected: it would pin the same libraries a second time. `make test` loads each
   draft's sequence against the example it names, and judges its CRs by the example's
   CRD, as it does each example's sequences. It fails once either refuses the sequence. With
-  no draft left, both checks fail and say what to delete.
+  no draft left, both checks fail and say what to change.

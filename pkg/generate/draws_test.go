@@ -186,7 +186,7 @@ const (
 func TestCertManagersPinnedSequencesReissueUnderRotationPolicyNever(t *testing.T) {
 	// Draws never set Never, so the example tier runs it only from the
 	// sequences it pins.
-	for _, change := range certificateChanges(t, certManagerSequences) {
+	for _, change := range certificateChanges(t, glob(t, certManagerSequences)...) {
 		if renamesUnderNever(change) {
 			return
 		}
@@ -239,7 +239,7 @@ func namesOf(certificate map[string]any) []string {
 }
 
 func TestCertManagersSequencesKeepTheAlgorithmUnderRotationPolicyNever(t *testing.T) {
-	for _, change := range certificateChanges(t, certManagerSequences, certManagerHuntSequences) {
+	for _, change := range certificateChanges(t, glob(t, certManagerSequences, certManagerHuntSequences)...) {
 		if changesAlgorithmUnderNever(change) {
 			t.Errorf("%s op %d moves spec.privateKey.algorithm from %s to %s under rotationPolicy Never.",
 				change.file, change.op.Index, privateKeyOf(change.before).algorithm, privateKeyOf(change.after).algorithm)
@@ -284,12 +284,11 @@ func privateKeyOf(certificate map[string]any) privateKey {
 	return privateKey{cmp.Or(policy, "Always"), cmp.Or(algorithm, "RSA")}
 }
 
-// certificateChanges are the writes to a Certificate that is there, in the
-// sequences that patterns match.
-func certificateChanges(t *testing.T, patterns ...string) []crWrite {
+// certificateChanges are the writes to a Certificate that is there.
+func certificateChanges(t *testing.T, sequences ...string) []crWrite {
 	t.Helper()
 	var changes []crWrite
-	for _, write := range crWrites(t, patterns...) {
+	for _, write := range crWrites(t, sequences...) {
 		if write.before != nil {
 			changes = append(changes, write)
 		}
@@ -352,53 +351,62 @@ type crWrite struct {
 	before, after map[string]any
 }
 
-// crWrites replays the CRs of the sequences that patterns match.
-func crWrites(t *testing.T, patterns ...string) []crWrite {
+// glob returns the sequences that patterns match, each of which matches one
+// or more.
+func glob(t *testing.T, patterns ...string) []string {
 	t.Helper()
-	targets := map[string]*target.Target{}
-	var writes []crWrite
+	var sequences []string
 	for _, pattern := range patterns {
 		files, err := filepath.Glob(pattern)
 		if err != nil || len(files) == 0 {
 			t.Fatalf("%s matches no sequence: %v", pattern, err)
 		}
-		for _, file := range files {
-			sequence, err := run.ReadSequence(file)
-			if err != nil {
-				t.Fatal(err)
+		sequences = append(sequences, files...)
+	}
+	return sequences
+}
+
+// crWrites replays the CRs of the sequences.
+func crWrites(t *testing.T, sequences ...string) []crWrite {
+	t.Helper()
+	targets := map[string]*target.Target{}
+	var writes []crWrite
+	for _, file := range sequences {
+		sequence, err := run.ReadSequence(file)
+		if err != nil {
+			t.Fatal(err)
+		}
+		declared := targets[sequence.Target]
+		if declared == nil {
+			declared = loadTarget(t, filepath.Join("../../examples", sequence.Target, "target.yaml"))
+			targets[sequence.Target] = declared
+		}
+		// unsettled holds each CR a delete removed since the Runner last
+		// settled.
+		crs, unsettled := map[string]map[string]any{}, map[string]map[string]any{}
+		for _, op := range sequence.Ops {
+			name := cmp.Or(op.CR, declared.Sample.GetName())
+			if op.Type == run.OpCreate {
+				name = op.Obj.GetName()
 			}
-			declared := targets[sequence.Target]
-			if declared == nil {
-				declared = loadTarget(t, filepath.Join("../../examples", sequence.Target, "target.yaml"))
-				targets[sequence.Target] = declared
+			before := crs[name]
+			if before == nil {
+				before = unsettled[name]
 			}
-			// unsettled holds each CR a delete removed since the Runner last
-			// settled.
-			crs, unsettled := map[string]map[string]any{}, map[string]map[string]any{}
-			for _, op := range sequence.Ops {
-				name := cmp.Or(op.CR, declared.Sample.GetName())
-				if op.Type == run.OpCreate {
-					name = op.Obj.GetName()
-				}
-				before := crs[name]
-				if before == nil {
-					before = unsettled[name]
-				}
-				switch op.Type {
-				case run.OpCreate, run.OpRecreate:
-					crs[name] = op.Obj.Object
-				case run.OpUpdate:
-					crs[name] = run.MergePatch(runtime.DeepCopyJSON(before), op.Patch)
-				case run.OpDelete:
-					unsettled[name] = crs[name]
-					delete(crs, name)
-				}
-				if op.Settles() {
-					clear(unsettled)
-				}
-				if op.Type.OnCR() && op.Type != run.OpDelete {
-					writes = append(writes, crWrite{file, declared, op, before, crs[name]})
-				}
+			switch op.Type {
+			case run.OpCreate, run.OpRecreate:
+				crs[name] = op.Obj.Object
+			case run.OpUpdate:
+				crs[name] = run.MergePatch(runtime.DeepCopyJSON(before), op.Patch)
+			case run.OpDelete:
+				unsettled[name] = crs[name]
+				delete(crs, name)
+			}
+			if op.Settles() {
+				clear(unsettled)
+			}
+			if op.Type.OnCR() && op.Type != run.OpDelete {
+				writes = append(writes, crWrite{file, declared, op, before, crs[name]})
 			}
 		}
 	}
@@ -438,25 +446,26 @@ func TestSequencesOnDiskWriteCRsTheirCRDAccepts(t *testing.T) {
 // sequences, and each finding's.
 func sequencesOnDisk(t *testing.T) []string {
 	t.Helper()
-	findings, err := filepath.Glob("../../docs/findings/*/sequence.json")
-	if err != nil || len(findings) == 0 {
-		t.Fatalf("found finding sequences %v: %v; delete this glob with the last findings draft", findings, err)
-	}
 	examples, err := filepath.Glob("../../examples/*/sequences")
 	if err != nil || len(examples) == 0 {
 		t.Fatalf("found example sequences %v: %v", examples, err)
 	}
 	var files []string
 	for _, dir := range examples {
+		found := len(files)
 		err := filepath.WalkDir(dir, func(file string, _ fs.DirEntry, err error) error {
 			if err == nil && strings.HasSuffix(file, ".json") {
 				files = append(files, file)
 			}
 			return err
 		})
-		if err != nil {
-			t.Fatal(err)
+		if err != nil || len(files) == found {
+			t.Fatalf("%s holds no sequence: %v", dir, err)
 		}
+	}
+	findings, err := filepath.Glob("../../docs/findings/*/sequence.json")
+	if err != nil || len(findings) == 0 {
+		t.Fatalf("found finding sequences %v: %v; with the last findings draft, return before this glob", findings, err)
 	}
 	return append(files, findings...)
 }

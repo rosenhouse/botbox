@@ -103,7 +103,7 @@ func TestSecretRecordsUIDControllerAndKeyHash(t *testing.T) {
 
 func TestReadyWaitsForReadyAndReportsTheLastCondition(t *testing.T) {
 	for _, c := range []struct{ status, reason string }{{"True", "Ready"}, {"False", "SecretMismatch"}} {
-		crt := certificate("")
+		crt := certificate("Never", "")
 		crt.SetNamespace("ns")
 		crt.Object["status"] = map[string]any{"conditions": []any{
 			map[string]any{"type": "Ready", "status": c.status, "reason": c.reason},
@@ -121,14 +121,17 @@ func TestReadyWaitsForReadyAndReportsTheLastCondition(t *testing.T) {
 	}
 }
 
-func TestCertificateKeepsItsKeyUnderNever(t *testing.T) {
-	for algorithm, want := range map[string]map[string]any{
-		"":      {"rotationPolicy": "Never"},
-		"ECDSA": {"rotationPolicy": "Never", "algorithm": "ECDSA"},
+func TestCertificateSetsTheKeysPolicyAndAlgorithm(t *testing.T) {
+	for _, c := range []struct {
+		policy, algorithm string
+		want              map[string]any
+	}{
+		{"Never", "", map[string]any{"rotationPolicy": "Never"}},
+		{"Always", "ECDSA", map[string]any{"rotationPolicy": "Always", "algorithm": "ECDSA"}},
 	} {
-		got, _, _ := unstructured.NestedMap(certificate(algorithm).Object, "spec", "privateKey")
-		if !maps.Equal(got, want) {
-			t.Errorf("certificate(%q) has privateKey %v, want %v", algorithm, got, want)
+		got, _, _ := unstructured.NestedMap(certificate(c.policy, c.algorithm).Object, "spec", "privateKey")
+		if !maps.Equal(got, c.want) {
+			t.Errorf("certificate(%q, %q) has privateKey %v, want %v", c.policy, c.algorithm, got, c.want)
 		}
 	}
 }

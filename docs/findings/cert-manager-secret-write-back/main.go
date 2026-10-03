@@ -2,10 +2,10 @@
 // recreated Certificate the deleted Certificate's private key. It needs a
 // cluster where cert-manager runs with --enable-certificate-owner-ref=true.
 //
-// Each run creates a Certificate under rotationPolicy Never with an RSA key and
-// waits for it to be Ready. It then deletes the Certificate, waits until it is
-// gone, and at once creates one of the same name whose key algorithm -algorithm
-// names.
+// Each run creates a Certificate with an RSA key under the rotationPolicy
+// -policy names, and waits for it to be Ready. It then deletes the Certificate,
+// waits until it is gone, and at once creates one of the same name whose key
+// algorithm -algorithm names.
 package main
 
 import (
@@ -42,10 +42,11 @@ func main() {
 	collect := flag.Bool("collect", false, "once the old Certificate is deleted, delete what it owns as a garbage collector would, on a cluster that runs none")
 	timeout := flag.Duration("wait", 30*time.Second, "how long the new Certificate has to become Ready")
 	algorithm := flag.String("algorithm", "ECDSA", "the new Certificate's key algorithm")
+	policy := flag.String("policy", "Never", "both Certificates' rotationPolicy")
 	flag.Parse()
 	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
 	check(err)
-	r := repro{core: kubernetes.NewForConfigOrDie(config), dyn: dynamic.NewForConfigOrDie(config), collect: *collect, timeout: *timeout, algorithm: *algorithm}
+	r := repro{core: kubernetes.NewForConfigOrDie(config), dyn: dynamic.NewForConfigOrDie(config), collect: *collect, timeout: *timeout, algorithm: *algorithm, policy: *policy}
 	counts := map[string]int{}
 	for i := 1; i <= *runs; i++ {
 		found, err := r.run(context.Background())
@@ -62,6 +63,7 @@ type repro struct {
 	collect   bool
 	timeout   time.Duration
 	algorithm string
+	policy    string
 	ns        string
 }
 
@@ -103,7 +105,7 @@ func (r repro) run(ctx context.Context) (finding, error) {
 	if _, err := r.dyn.Resource(issuers).Namespace(r.ns).Create(ctx, object("Issuer", "selfsigned", map[string]any{"selfSigned": map[string]any{}}), metav1.CreateOptions{}); err != nil {
 		return finding{}, err
 	}
-	first, err := r.dyn.Resource(certificates).Namespace(r.ns).Create(ctx, certificate(""), metav1.CreateOptions{})
+	first, err := r.dyn.Resource(certificates).Namespace(r.ns).Create(ctx, certificate(r.policy, ""), metav1.CreateOptions{})
 	if err != nil {
 		return finding{}, err
 	}
@@ -125,7 +127,7 @@ func (r repro) run(ctx context.Context) (finding, error) {
 	}); err != nil {
 		return finding{}, err
 	}
-	second, err := r.dyn.Resource(certificates).Namespace(r.ns).Create(ctx, certificate(r.algorithm), metav1.CreateOptions{})
+	second, err := r.dyn.Resource(certificates).Namespace(r.ns).Create(ctx, certificate(r.policy, r.algorithm), metav1.CreateOptions{})
 	if err != nil {
 		return finding{}, err
 	}
@@ -201,8 +203,8 @@ func (r repro) secret(ctx context.Context) (secret, error) {
 	return secret{string(s.UID), owner, fmt.Sprintf("%x", sha256.Sum256(s.Data[corev1.TLSPrivateKeyKey]))}, nil
 }
 
-func certificate(algorithm string) *unstructured.Unstructured {
-	key := map[string]any{"rotationPolicy": "Never"}
+func certificate(policy, algorithm string) *unstructured.Unstructured {
+	key := map[string]any{"rotationPolicy": policy}
 	if algorithm != "" {
 		key["algorithm"] = algorithm
 	}

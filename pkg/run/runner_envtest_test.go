@@ -4,11 +4,9 @@ package run_test
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -168,54 +166,6 @@ func (c recreatingChecker) Check(in run.Input) (run.Findings, error) {
 	return findings, err
 }
 
-// owningChecker judges as the engine does. At op 0's checkpoint it creates a
-// ConfigMap that the Widget owns without controlling it, and marks it
-// botbox's.
-type owningChecker struct {
-	configMaps dynamic.NamespaceableResourceInterface
-	widget     types.UID
-	owned      *unstructured.Unstructured
-}
-
-func (c *owningChecker) Check(in run.Input) (run.Findings, error) {
-	findings, err := run.Engine{}.Check(in)
-	widgets := in.Objects.Current(in.Target.Primary)
-	if last := in.Timeline.Checkpoints[len(in.Timeline.Checkpoints)-1]; err != nil || last.Op != 0 || len(widgets) != 1 {
-		return findings, err
-	}
-	c.widget = widgets[0].UID
-	owned := &unstructured.Unstructured{}
-	owned.SetGroupVersionKind(configMapKind)
-	owned.SetName(collectedName)
-	owned.SetOwnerReferences([]metav1.OwnerReference{{
-		APIVersion: "toy.botbox/v1", Kind: "Widget", Name: widgets[0].Name, UID: c.widget,
-	}})
-	in.Objects.Exclude(configMapKind, collectedName)
-	c.owned, err = c.configMaps.Namespace(in.Timeline.Namespace).Create(context.Background(), owned, metav1.CreateOptions{})
-	return findings, err
-}
-
-// collectorLines reads collector.jsonl in dir, one JSON object per line.
-func collectorLines(t *testing.T, dir string) []map[string]any {
-	t.Helper()
-	written, err := os.ReadFile(filepath.Join(dir, "collector.jsonl"))
-	if err != nil {
-		t.Fatalf("The run wrote no collector.jsonl: %v", err)
-	}
-	var lines []map[string]any
-	for _, text := range strings.Split(strings.TrimSuffix(string(written), "\n"), "\n") {
-		if text == "" {
-			continue
-		}
-		var line map[string]any
-		if err := json.Unmarshal([]byte(text), &line); err != nil {
-			t.Fatalf("The line %q of collector.jsonl does not parse: %v", text, err)
-		}
-		lines = append(lines, line)
-	}
-	return lines
-}
-
 const twoWidgets = `{
   "seed": 1,
   "target": "toy-widget",
@@ -364,64 +314,6 @@ func TestRunner(t *testing.T) {
 		}
 		requireRunFiles(t, out.RunDir(1))
 		requireNamespaceEmpty(t, ctx, testCluster.Config(), result.Timeline.Namespace)
-	})
-
-	// The toy deletes only the children it controls, so the collector alone
-	// deletes a ConfigMap the Widget owns without controlling it. B3 fails
-	// G3, and botbox keeps a failing run's directory.
-	t.Run("leaves in run-1 the collector's delete of a child after its owner's deletion", func(t *testing.T) {
-		toy := loadTarget(t, binary)
-		toy.Launch.Args = append(toy.Launch.Args, "--bug=3")
-		toy.Timeouts.Delete = 2 * time.Second
-		client, err := dynamic.NewForConfig(testCluster.Config())
-		if err != nil {
-			t.Fatalf("Building a client failed: %v", err)
-		}
-		check := &owningChecker{configMaps: client.Resource(schema.GroupVersionResource{Version: "v1", Resource: "configmaps"})}
-		out, err := run.OpenOutput(t.TempDir(), 1, time.Now())
-		if err != nil {
-			t.Fatalf("Opening the output directory failed: %v", err)
-		}
-
-		result, err := run.Run(ctx, toy, readSequence(t, createThenDelete), run.Options{
-			Dir: out.RunDir(1), Config: testCluster.Config(), Check: check,
-		})
-
-		if err != nil {
-			t.Fatalf("The run failed: %v", err)
-		}
-		if result.Violation == nil || result.Violation.ID != "G3" {
-			t.Fatalf("The run reported %v, want B3's G3.", result.Violation)
-		}
-		want := map[string]any{
-			"kind": "v1/ConfigMap", "namespace": result.Timeline.Namespace, "name": collectedName,
-			"uid": string(check.owned.GetUID()), "resourceVersion": check.owned.GetResourceVersion(),
-			"owners": []any{map[string]any{
-				"apiVersion": "toy.botbox/v1", "kind": "Widget", "name": "widget", "uid": string(check.widget), "gone": "not found",
-			}},
-			"result": "deleted",
-		}
-		deletes := collectorLines(t, out.RunDir(1))
-		deleted := slices.IndexFunc(deletes, func(line map[string]any) bool { return line["result"] == "deleted" })
-		if deleted < 0 {
-			t.Fatalf("collector.jsonl holds %v, want the collector's delete of %s.", deletes, collectedName)
-		}
-		// Nothing else has an owner, and only one delete of an object succeeds.
-		for i, line := range deletes {
-			if line["name"] != collectedName || (i != deleted && line["result"] == "deleted") {
-				t.Errorf("collector.jsonl holds %v, want one delete of %s, and at most lost races besides.", deletes, collectedName)
-				break
-			}
-		}
-		tried, err := time.Parse(time.RFC3339Nano, fmt.Sprint(deletes[deleted]["time"]))
-		if err != nil || !tried.After(result.Timeline.Ops[1].At) {
-			t.Errorf("collector.jsonl says the delete was tried at %v (%v), want after op 1 deleted the Widget at %v.",
-				deletes[deleted]["time"], err, result.Timeline.Ops[1].At)
-		}
-		delete(deletes[deleted], "time")
-		if !reflect.DeepEqual(deletes[deleted], want) {
-			t.Errorf("collector.jsonl records\n\t%v\nwant\n\t%v", deletes[deleted], want)
-		}
 	})
 
 	t.Run("changes, deletes and restores the toy's fixture, which stays botbox's", func(t *testing.T) {

@@ -3,12 +3,15 @@ package main
 import (
 	"cmp"
 	"context"
+	"errors"
+	"io"
 	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +90,31 @@ current-context: c
 		t.Fatal(err)
 	}
 	return kubeconfig
+}
+
+func TestReportPrintsEachRunAndCountsMechanisms(t *testing.T) {
+	found := []finding{{mechanism: "write-back"}, {mechanism: "new key"}, {mechanism: "write-back"}}
+	var out strings.Builder
+	runs := 0
+	err := report(&out, len(found), func() (finding, error) {
+		runs++
+		return found[runs-1], nil
+	})
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if err != nil || len(lines) != 4 || !strings.HasPrefix(lines[1], "run 2: new key.") || lines[3] != "map[new key:1 write-back:2]" {
+		t.Errorf("report() printed\n%s\nand returned %v; want a line for each run, then map[new key:1 write-back:2]", out.String(), err)
+	}
+}
+
+func TestReportStopsAtARunsError(t *testing.T) {
+	runs := 0
+	err := report(io.Discard, 3, func() (finding, error) {
+		runs++
+		return finding{}, errors.New("no Issuer")
+	})
+	if err == nil || err.Error() != "no Issuer" || runs != 1 {
+		t.Errorf("report() made %d runs and returned %v, want 1 run and the run's error", runs, err)
+	}
 }
 
 func TestMechanismTellsHowTheOldKeySurvived(t *testing.T) {
@@ -215,6 +243,119 @@ func TestRecreateLooksForTheOldCertificateAtOnce(t *testing.T) {
 	defer cancel()
 	if _, err := r.recreate(ctx, "old"); err != nil {
 		t.Errorf("recreate returned %v, want the new Certificate before a poll interval passed", err)
+	}
+}
+
+func TestRecreateCollectsWhatTheOldCertificateControls(t *testing.T) {
+	old := certificate("Always", "", "")
+	old.SetNamespace("ns")
+	client := fakeDynamic(old, controlled("Secret", "example-tls", "old"))
+	r := repro{dyn: client, ns: "ns", poll: time.Millisecond, collect: true}
+	if _, err := r.recreate(context.Background(), "old"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Tracker().Get(secrets, "ns", "example-tls"); !apierrors.IsNotFound(err) {
+		t.Errorf("after recreate under -collect, getting the old Certificate's Secret returned %v, want NotFound", err)
+	}
+}
+
+func TestRunReadsEachSecretOnceItsCertificateSettles(t *testing.T) {
+	for _, kept := range []string{"write-back", "re-point"} {
+		t.Run(kept, func(t *testing.T) {
+			cluster := newFakeCertManager(kept, 50*time.Millisecond)
+			r := repro{core: cluster.core, dyn: cluster.dyn, poll: time.Millisecond, settle: cluster.settle, timeout: 5 * time.Second,
+				policy: "Always", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationBackground}
+
+			got, err := r.run(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(cluster.early) > 0 {
+				t.Errorf("run read the Secret while %v had not settled", cluster.early)
+			}
+			wantNow := map[string]string{"write-back": "secret-2", "re-point": "secret-1"}[kept]
+			if got.mechanism != kept || got.oldCertificate != "certificate-1" || got.newCertificate != "certificate-2" || got.ready != "True Ready" || got.old.UID != "secret-1" || got.now.UID != wantNow {
+				t.Errorf("run() = %v, want %s from certificate-1 to certificate-2, Ready True Ready, Secret secret-1 then %s", got, kept, wantNow)
+			}
+			for i, want := range []map[string]any{{"rotationPolicy": "Always"}, {"rotationPolicy": "Always", "algorithm": "ECDSA"}} {
+				if got, _, _ := unstructured.NestedMap(cluster.created[i].Object, "spec", "privateKey"); !maps.Equal(got, want) {
+					t.Errorf("run created Certificate %d with privateKey %v, want %v", i+1, got, want)
+				}
+			}
+		})
+	}
+}
+
+// fakeCertManager plays cert-manager and a garbage collector. A Certificate is
+// Ready with an issuance in flight on its first two reads, and settles from
+// then on. The Secret is missing until the first Certificate settles. It holds
+// a new key until the second settles, and then the old key as kept says.
+type fakeCertManager struct {
+	core    *kubefake.Clientset
+	dyn     *dynamicfake.FakeDynamicClient
+	settle  time.Duration
+	created []*unstructured.Unstructured
+	reads   map[types.UID]int
+	settled map[types.UID]time.Time
+	early   []types.UID
+}
+
+func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
+	f := &fakeCertManager{core: kubefake.NewClientset(), dyn: fakeDynamic(), settle: settle, reads: map[types.UID]int{}, settled: map[types.UID]time.Time{}}
+	f.core.PrependReactor("create", "namespaces", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		ns := action.(k8stesting.CreateAction).GetObject().(*corev1.Namespace)
+		ns.Name = ns.GenerateName + "1"
+		return false, nil, nil
+	})
+	f.dyn.PrependReactor("create", "certificates", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		crt := action.(k8stesting.CreateAction).GetObject().(*unstructured.Unstructured)
+		crt.SetUID(types.UID("certificate-" + strconv.Itoa(len(f.created)+1)))
+		f.created = append(f.created, crt.DeepCopy())
+		return false, nil, nil
+	})
+	f.dyn.PrependReactor("get", "certificates", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		o, err := f.dyn.Tracker().Get(certificates, action.GetNamespace(), "example")
+		if err != nil {
+			return true, nil, err
+		}
+		crt := o.(*unstructured.Unstructured)
+		f.reads[crt.GetUID()]++
+		issuing := f.reads[crt.GetUID()] <= 2
+		if !issuing && f.settled[crt.GetUID()].IsZero() {
+			f.settled[crt.GetUID()] = time.Now()
+		}
+		crt.Object["status"] = map[string]any{"conditions": []any{
+			map[string]any{"type": "Ready", "status": "True", "reason": "Ready"},
+			map[string]any{"type": "Issuing", "status": map[bool]string{true: "True", false: "False"}[issuing]},
+		}}
+		return true, crt, nil
+	})
+	f.core.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		current := f.created[len(f.created)-1].GetUID()
+		settled := !f.settled[current].IsZero() && time.Since(f.settled[current]) >= f.settle
+		if !settled {
+			f.early = append(f.early, current)
+		}
+		switch {
+		case current == "certificate-1" && settled:
+			return true, tlsSecret("secret-1", "certificate-1", "old key"), nil
+		case current == "certificate-1":
+			return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "example-tls")
+		case !settled:
+			return true, tlsSecret("secret-2", "certificate-2", "new key"), nil
+		case kept == "write-back":
+			return true, tlsSecret("secret-2", "certificate-2", "old key"), nil
+		}
+		return true, tlsSecret("secret-1", "certificate-2", "old key"), nil
+	})
+	return f
+}
+
+func tlsSecret(uid, owner types.UID, key string) *corev1.Secret {
+	controller := true
+	return &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "example-tls", Namespace: "write-back-1", UID: uid, OwnerReferences: []metav1.OwnerReference{{UID: owner, Controller: &controller}}},
+		Data:       map[string][]byte{"tls.key": []byte(key)},
 	}
 }
 

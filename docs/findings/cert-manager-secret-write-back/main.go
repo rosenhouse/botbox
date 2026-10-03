@@ -14,6 +14,7 @@ import (
 	"crypto/sha256"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"time"
@@ -40,14 +41,22 @@ var (
 func main() {
 	r, runs, err := parse(os.Args[1:])
 	check(err)
+	check(report(os.Stdout, runs, func() (finding, error) { return r.run(context.Background()) }))
+}
+
+// report prints each run's finding, then how many runs found each mechanism.
+func report(w io.Writer, runs int, run func() (finding, error)) error {
 	counts := map[string]int{}
 	for i := 1; i <= runs; i++ {
-		found, err := r.run(context.Background())
-		check(err)
-		fmt.Printf("run %d: %s\n", i, found)
+		found, err := run()
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "run %d: %s\n", i, found)
 		counts[found.mechanism]++
 	}
-	fmt.Println(counts)
+	fmt.Fprintln(w, counts)
+	return nil
 }
 
 // parse returns the repro and the number of runs that args ask for.

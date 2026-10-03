@@ -303,7 +303,8 @@ func TestCRWritesCountADeletedCRAsThereUntilTheRunnerSettles(t *testing.T) {
 		return `{"apiVersion": "cert-manager.io/v1", "kind": "Certificate", "metadata": {"name": "` + name + `"},
 			"spec": {"secretName": "` + name + `-tls", "commonName": "` + commonName + `", "issuerRef": {"name": "selfsigned"}}}`
 	}
-	file := filepath.Join(t.TempDir(), "sequence.json")
+	// crWrites reads the file by name, not as a pattern.
+	file := filepath.Join(t.TempDir(), "sequence[1].json")
 	if err := os.WriteFile(file, []byte(`{"seed": 1, "target": "cert-manager", "ops": [
 		{"i": 0, "t": "create", "obj": `+certificate("example", "a.test")+`},
 		{"i": 1, "t": "create", "obj": `+certificate("example-2", "b.test")+`},
@@ -459,13 +460,16 @@ func sequencesOnDisk(t *testing.T) []string {
 			}
 			return err
 		})
-		if err != nil || len(files) == found {
-			t.Fatalf("%s holds no sequence: %v", dir, err)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(files) == found {
+			t.Fatalf("%s holds no sequence", dir)
 		}
 	}
 	findings, err := filepath.Glob("../../docs/findings/*/sequence.json")
 	if err != nil || len(findings) == 0 {
-		t.Fatalf("found finding sequences %v: %v; with the last findings draft, return before this glob", findings, err)
+		t.Fatalf("found finding sequences %v: %v; with the last findings draft, delete this glob and return files", findings, err)
 	}
 	return append(files, findings...)
 }

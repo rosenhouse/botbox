@@ -38,10 +38,10 @@ A passing run leaves only its entry in the summary. A failing run writes its evi
   the object was already gone. `conflict` says the object changed after the collector read it,
   and the line's `error` names the precondition that failed: the UID or the resourceVersion.
   The result `error` covers every other failure. Where the line's `error` then names
-  `context canceled`, botbox stopped the collector while the delete was in flight. These
-  deletes never pass the proxy, so `requests.jsonl` lacks them. The last lines can race
-  botbox's own cleanup as the run ends. The file is empty where the collector tried no delete,
-  and absent on a cluster with a garbage collector of its own.
+  `context canceled`, botbox stopped the collector while the delete was in flight. The
+  collector's deletes never pass the proxy, so `requests.jsonl` lacks them. The last lines can
+  race botbox's own cleanup as the run ends. The file is empty where the collector tried no
+  delete, and absent on a cluster with a garbage collector of its own.
 - `target.log` holds your controller's own output.
 - `kubeconfig` is the kubeconfig your controller was given. It points at the proxy rather than
   the API server, and names the run's namespace.

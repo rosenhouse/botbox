@@ -39,7 +39,7 @@ var (
 func main() {
 	kubeconfig := flag.String("kubeconfig", os.Getenv("KUBECONFIG"), "the cluster's kubeconfig")
 	runs := flag.Int("runs", 10, "how many runs to make")
-	collect := flag.Bool("collect", false, "delete what the old Certificate owns while the new one is created, as a garbage collector would, on a cluster that runs none")
+	collect := flag.Bool("collect", false, "once the old Certificate is deleted, delete what it owns as a garbage collector would, on a cluster that runs none")
 	timeout := flag.Duration("wait", 30*time.Second, "how long the new Certificate has to become Ready")
 	algorithm := flag.String("algorithm", "ECDSA", "the new Certificate's key algorithm")
 	flag.Parse()
@@ -117,14 +117,14 @@ func (r repro) run(ctx context.Context) (finding, error) {
 	if err := r.dyn.Resource(certificates).Namespace(r.ns).Delete(ctx, "example", metav1.DeleteOptions{}); err != nil {
 		return finding{}, err
 	}
+	collected := make(chan error, 1)
+	go func() { collected <- r.collectGarbage(ctx, first.GetUID()) }()
 	if err := wait.PollUntilContextTimeout(ctx, 10*time.Millisecond, time.Minute, true, func(ctx context.Context) (bool, error) {
 		_, err := r.dyn.Resource(certificates).Namespace(r.ns).Get(ctx, "example", metav1.GetOptions{})
 		return apierrors.IsNotFound(err), nil
 	}); err != nil {
 		return finding{}, err
 	}
-	collected := make(chan error, 1)
-	go func() { collected <- r.collectGarbage(ctx, first.GetUID()) }()
 	second, err := r.dyn.Resource(certificates).Namespace(r.ns).Create(ctx, certificate(r.algorithm), metav1.CreateOptions{})
 	if err != nil {
 		return finding{}, err

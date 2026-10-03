@@ -26,9 +26,10 @@ KIND_NODE_IMAGE ?= kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405
 # the seeds, so that a failing tier means the change under review and not a new
 # draw, and so a tier stays inside the ten minutes §11 budgets. The nightly
 # workflow draws its own seeds. Against cert-manager, these seeds draw a second
-# Certificate, a recreate and a restart between them, and the pinned sequences
-# delete the Certificate and its managed objects. Its negative control runs the
-# first seed alone, which draws a single op and so costs no replay to minimize.
+# Certificate, a recreate and a restart between them. The pinned sequences
+# delete the Certificate and its managed objects, and run the rotationPolicy
+# Never that draws leave out. Its negative control runs the first seed alone,
+# which draws a single op and so costs no replay to minimize.
 EXAMPLE_SEED ?= 23
 EXAMPLE_RUNS ?= 5
 EXAMPLE_DEADLINE ?= 5m

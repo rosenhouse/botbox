@@ -843,6 +843,7 @@ generate:
   overlay:                                    # per-path schema tightening
     spec.dnsNames: {minItems: 1, maxItems: 3}
     spec.duration: {enum: ["1h", "24h", "2160h"]}
+    spec.privateKey.rotationPolicy: {enum: ["Always"]}
 launch:
   binary: bin/cert-manager-controller
   args:
@@ -999,10 +1000,14 @@ generator. For cert-manager these include: a Certificate needs at least one of
 parse as a Go duration; `renewBefore` must be shorter than `duration`; a `dnsNames` entry
 must be a DNS name, which neither the CRD schema nor the API server checks, so the
 overlay spells out an RFC 1123 label. The target keeps generation inside the valid subset
-with `sample`, `generate.mutate` and `generate.overlay`. A generated spec that the target rejects or ignores because it
-violates such a rule is a target-declaration bug, not a finding; the journal records each
-rule that had to be encoded this way. A CR op the API server refuses ends the invocation as
-a configuration error that names the run and the sequence file holding the op.
+with `sample`, `generate.mutate` and `generate.overlay`. A rule may also span ops, which
+`target.yaml` cannot state. Under `rotationPolicy: Never`, cert-manager keeps a stored key
+that a later `algorithm` does not match, and waits for a user, as its CRD documents. So the
+overlay leaves `Never` out, and a pinned sequence runs it (D@89). A generated spec that the
+target rejects, ignores or leaves for a user because it violates such a rule is a
+target-declaration bug, not a finding; the journal records each rule that had to be encoded
+this way. A CR op the API server refuses ends the invocation as a configuration error that
+names the run and the sequence file holding the op.
 
 ### 8.4 Predicates
 
@@ -2436,3 +2441,31 @@ built from source and run as a black-box binary.
 - **D86 The envtest tier's CI budget is ten minutes.** On CI, `pkg/run` alone took 309 s,
   past the five minutes the tier had. The maintainer chose a larger budget over shorter
   tests or a tier split across jobs.
+- **D@89 The cert-manager example draws `rotationPolicy` only as `Always`.** The example
+  mutated `spec.privateKey.rotationPolicy` and `spec.privateKey.algorithm`. Under `Never`,
+  cert-manager keeps a stored key that a later algorithm does not match, and waits for a
+  user, as its CRD documents, so G4 cannot hold. Seed 266 creates a Certificate under
+  `Never` and later updates its algorithm, and it failed G4 in 3 of 3 runs. A scan of
+  seeds 0-1999 finds 10 that update their way there. Hunt seed 1043 got there through a
+  recreate, when cert-manager kept the deleted Certificate's Secret or wrote it back.
+  Triage classified the write-back as an upstream contract break, and
+  `docs/findings/cert-manager-secret-write-back.md` drafts its report. Under `Always`,
+  and under `Never` with the same algorithm, the write-back still happens but G4 passes,
+  so draws no longer catch it. `target.yaml` cannot state a rule across ops, so an overlay
+  draws the policy only as `Always`. Of seeds 0-1999, 414 draws change, each only from
+  `Never` to `Always`, and no draw's ops change. The example tier's seed 27 loses its
+  `Never`, so `sequences/rotation-never.json` runs `Never` on every pull request. It
+  creates a Certificate under `Never` and reissues it with the stored key. It recreates the
+  Certificate under `Never` with the same algorithm, which passes whether cert-manager
+  generates a key or reuses the deleted Certificate's. It deletes the Secret, after which
+  `Never` lets cert-manager generate a key, and moves to ECDSA under `Always`. It passed 12
+  of 12 runs. No pinned sequence reaches the branch where cert-manager waits for a user,
+  because G4 fails there. A unit test refuses a pinned or hunt sequence that changes the
+  algorithm under `Never`. Dropping `algorithm` from `mutate` was rejected, because it
+  loses ECDSA and Ed25519, which 544 of the 2000 draws set, and changes the ops of 1877
+  draws. Overlaying it to `RSA` was rejected, because it loses them too and changes the
+  ops of 150 draws. Dropping `rotationPolicy` from `mutate` was rejected, because it covers
+  what the overlay covers and changes the ops of 1877 draws. Widening `ready` to accept
+  `SecretMismatch` was rejected, because it would pass a Certificate whose key never
+  matches its spec. Changing the collector was rejected, because an update reaches that
+  state with nothing for the collector to delete.

@@ -50,6 +50,9 @@ generate:
   overlay:
     spec.dnsNames: {minItems: 1, maxItems: 3, items: {pattern: "^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?\\.example\\.test$"}}
     spec.duration: {enum: ["1h", "24h", "2160h"]}
+    # Under Never, cert-manager keeps a stored key that a later algorithm does
+    # not match, and waits for a user. sequences/rotation-never.json covers Never.
+    spec.privateKey.rotationPolicy: {enum: ["Always"]}
 launch:
   binary: bin/cert-manager-controller
   args:

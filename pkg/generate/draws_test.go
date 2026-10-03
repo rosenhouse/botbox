@@ -2,10 +2,12 @@ package generate
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"flag"
 	"maps"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -14,6 +16,8 @@ import (
 
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	kinds "k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -168,6 +172,101 @@ func TestCertManagersExampleSeedsDrawWhatTheMakefileSays(t *testing.T) {
 			t.Errorf("Seeds %v draw no %s, and the Makefile says they do.", seeds, want)
 		}
 	}
+}
+
+const (
+	certManagerSequences     = "../../examples/cert-manager/sequences/*.json"
+	certManagerHuntSequences = "../../examples/cert-manager/sequences/hunt/*.json"
+)
+
+func TestCertManagersPinnedSequencesReissueUnderRotationPolicyNever(t *testing.T) {
+	// Draws never set Never, so the example tier runs it only from the
+	// sequences it pins.
+	for _, change := range certificateChanges(t, certManagerSequences) {
+		renames := change.op.Type == run.OpUpdate && !slices.Equal(namesOf(change.before), namesOf(change.after))
+		if renames && privateKeyOf(change.before).rotationPolicy == "Never" && privateKeyOf(change.after).rotationPolicy == "Never" {
+			return
+		}
+	}
+	t.Errorf("No sequence in %s updates the names of a Certificate that stays under rotationPolicy Never.", certManagerSequences)
+}
+
+// namesOf are the names a Certificate asks its certificate to carry.
+// cert-manager reissues when they change, and ignores their order.
+func namesOf(certificate map[string]any) []string {
+	commonName, _, _ := unstructured.NestedString(certificate, "spec", "commonName")
+	dnsNames, _, _ := unstructured.NestedStringSlice(certificate, "spec", "dnsNames")
+	return append([]string{commonName}, slices.Sorted(slices.Values(dnsNames))...)
+}
+
+func TestCertManagersSequencesKeepTheAlgorithmUnderRotationPolicyNever(t *testing.T) {
+	// Under Never, cert-manager keeps a stored key that another algorithm
+	// does not match, and waits for a user.
+	for _, change := range certificateChanges(t, certManagerSequences, certManagerHuntSequences) {
+		before, after := privateKeyOf(change.before), privateKeyOf(change.after)
+		if after.rotationPolicy == "Never" && after.algorithm != before.algorithm {
+			t.Errorf("%s op %d moves spec.privateKey.algorithm from %s to %s under rotationPolicy Never.",
+				change.file, change.op.Index, before.algorithm, after.algorithm)
+		}
+	}
+}
+
+// privateKey is what a Certificate asks of its key, with cert-manager's
+// defaults filled in.
+type privateKey struct{ rotationPolicy, algorithm string }
+
+func privateKeyOf(certificate map[string]any) privateKey {
+	policy, _, _ := unstructured.NestedString(certificate, "spec", "privateKey", "rotationPolicy")
+	algorithm, _, _ := unstructured.NestedString(certificate, "spec", "privateKey", "algorithm")
+	return privateKey{cmp.Or(policy, "Always"), cmp.Or(algorithm, "RSA")}
+}
+
+// certificateChange is an update or recreate of a Certificate, and the
+// Certificate before and after it.
+type certificateChange struct {
+	file          string
+	op            run.Op
+	before, after map[string]any
+}
+
+// certificateChanges replays the Certificates of the sequences that patterns
+// match.
+func certificateChanges(t *testing.T, patterns ...string) []certificateChange {
+	t.Helper()
+	sample := loadTarget(t, certManagerTarget).Sample.GetName()
+	var changes []certificateChange
+	for _, pattern := range patterns {
+		files, err := filepath.Glob(pattern)
+		if err != nil || len(files) == 0 {
+			t.Fatalf("%s matches no sequence: %v", pattern, err)
+		}
+		for _, file := range files {
+			sequence, err := run.ReadSequence(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			certificates := map[string]map[string]any{}
+			for _, op := range sequence.Ops {
+				name := cmp.Or(op.CR, sample)
+				if op.Type == run.OpCreate {
+					name = op.Obj.GetName()
+				}
+				before, existed := certificates[name]
+				switch op.Type {
+				case run.OpCreate, run.OpRecreate:
+					certificates[name] = op.Obj.Object
+				case run.OpUpdate:
+					certificates[name] = run.MergePatch(runtime.DeepCopyJSON(before), op.Patch)
+				case run.OpDelete:
+					delete(certificates, name)
+				}
+				if existed && (op.Type == run.OpRecreate || op.Type == run.OpUpdate) {
+					changes = append(changes, certificateChange{file, op, before, certificates[name]})
+				}
+			}
+		}
+	}
+	return changes
 }
 
 func TestTheToysSeed2DrawsMoreThanTheShrunkB2Reproducer(t *testing.T) {

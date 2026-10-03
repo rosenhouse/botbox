@@ -258,21 +258,51 @@ func privateKeyOf(certificate map[string]any) privateKey {
 	return privateKey{cmp.Or(policy, "Always"), cmp.Or(algorithm, "RSA")}
 }
 
-// certificateChanges are the updates and recreates of a Certificate in the
+// certificateChanges are the writes to a Certificate that is there, in the
 // sequences that patterns match.
 func certificateChanges(t *testing.T, patterns ...string) []crWrite {
 	t.Helper()
 	var changes []crWrite
 	for _, write := range crWrites(t, patterns...) {
-		if write.op.Type == run.OpRecreate || write.op.Type == run.OpUpdate {
+		if write.before != nil {
 			changes = append(changes, write)
 		}
 	}
 	return changes
 }
 
+// A recreate soon after a delete can keep the deleted Certificate's key. Once
+// the Runner settles, the key is gone.
+func TestCertificateChangesCountARecreateAfterADeleteUntilTheRunnerSettles(t *testing.T) {
+	certificate := `{"apiVersion": "cert-manager.io/v1", "kind": "Certificate", "metadata": {"name": "example"},
+		"spec": {"secretName": "example-tls", "commonName": "example.test", "issuerRef": {"name": "selfsigned"},
+		"privateKey": {"rotationPolicy": "Never", "algorithm": "ECDSA"}}}`
+	file := filepath.Join(t.TempDir(), "sequence.json")
+	if err := os.WriteFile(file, []byte(`{"seed": 1, "target": "cert-manager", "ops": [
+		{"i": 0, "t": "create", "obj": `+certificate+`},
+		{"i": 1, "t": "delete"},
+		{"i": 2, "t": "recreate", "obj": `+certificate+`},
+		{"i": 3, "t": "recreate", "obj": `+certificate+`},
+		{"i": 4, "t": "update", "patch": {"spec": {"dnsNames": ["example.test"]}}},
+		{"i": 5, "t": "delete", "noSettle": true},
+		{"i": 6, "t": "recreate", "obj": `+certificate+`},
+		{"i": 7, "t": "delete", "noSettle": true},
+		{"i": 8, "t": "settle"},
+		{"i": 9, "t": "recreate", "obj": `+certificate+`}]}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var changed []int
+	for _, change := range certificateChanges(t, file) {
+		changed = append(changed, change.op.Index)
+	}
+	if want := []int{3, 4, 6}; !slices.Equal(changed, want) {
+		t.Errorf("certificateChanges finds ops %v, want %v.", changed, want)
+	}
+}
+
 // crWrite is a create, update or recreate of a CR, and the CR before and
-// after it. Before is nil where the CR did not exist.
+// after it. A deleted CR counts as there until the Runner settles. Before is
+// nil where the CR is not there.
 type crWrite struct {
 	file          string
 	target        *target.Target
@@ -300,25 +330,33 @@ func crWrites(t *testing.T, patterns ...string) []crWrite {
 				declared = loadTarget(t, filepath.Join("../../examples", sequence.Target, "target.yaml"))
 				targets[sequence.Target] = declared
 			}
-			crs := map[string]map[string]any{}
+			// unsettled holds each CR a delete removed since the Runner last
+			// settled.
+			crs, unsettled := map[string]map[string]any{}, map[string]map[string]any{}
 			for _, op := range sequence.Ops {
 				name := cmp.Or(op.CR, declared.Sample.GetName())
 				if op.Type == run.OpCreate {
 					name = op.Obj.GetName()
 				}
 				before := crs[name]
+				if before == nil {
+					before = unsettled[name]
+				}
 				switch op.Type {
 				case run.OpCreate, run.OpRecreate:
 					crs[name] = op.Obj.Object
 				case run.OpUpdate:
 					crs[name] = run.MergePatch(runtime.DeepCopyJSON(before), op.Patch)
 				case run.OpDelete:
+					unsettled[name] = crs[name]
 					delete(crs, name)
-					continue
-				default:
-					continue
 				}
-				writes = append(writes, crWrite{file, declared, op, before, crs[name]})
+				if op.Settles() {
+					clear(unsettled)
+				}
+				if op.Type.OnCR() && op.Type != run.OpDelete {
+					writes = append(writes, crWrite{file, declared, op, before, crs[name]})
+				}
 			}
 		}
 	}

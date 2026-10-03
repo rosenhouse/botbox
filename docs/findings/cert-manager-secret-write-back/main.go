@@ -81,10 +81,13 @@ func parse(args []string) (repro, int, error) {
 }
 
 type repro struct {
-	core        kubernetes.Interface
-	dyn         dynamic.Interface
-	poll        time.Duration
-	settle      time.Duration
+	core   kubernetes.Interface
+	dyn    dynamic.Interface
+	poll   time.Duration
+	settle time.Duration
+	// setupWait bounds the waits that -wait does not: for the first
+	// Certificate to be Ready, and for it to go.
+	setupWait   time.Duration
 	collect     bool
 	timeout     time.Duration
 	algorithm   string
@@ -109,7 +112,7 @@ func newRepro(kubeconfig string) (repro, error) {
 		return repro{}, err
 	}
 	dyn, err := dynamic.NewForConfig(config)
-	return repro{core: core, dyn: dyn, poll: 10 * time.Millisecond, settle: 2 * time.Second}, err
+	return repro{core: core, dyn: dyn, poll: 10 * time.Millisecond, settle: 2 * time.Second, setupWait: time.Minute}, err
 }
 
 type finding struct {
@@ -154,7 +157,7 @@ func (r repro) run(ctx context.Context) (finding, error) {
 	if err != nil {
 		return finding{}, err
 	}
-	if ready := r.ready(ctx, time.Minute); ready != "True Ready" {
+	if ready := r.ready(ctx, r.setupWait); ready != "True Ready" {
 		return finding{}, fmt.Errorf("the first Certificate is not Ready: %s", ready)
 	}
 	old, err := r.secret(ctx)
@@ -181,7 +184,7 @@ func (r repro) recreate(ctx context.Context, old types.UID) (*unstructured.Unstr
 	}
 	collected := make(chan error, 1)
 	go func() { collected <- r.collectGarbage(ctx, old) }()
-	if err := wait.PollUntilContextTimeout(ctx, r.poll, time.Minute, true, func(ctx context.Context) (bool, error) {
+	if err := wait.PollUntilContextTimeout(ctx, r.poll, r.setupWait, true, func(ctx context.Context) (bool, error) {
 		_, err := r.dyn.Resource(certificates).Namespace(r.ns).Get(ctx, "example", metav1.GetOptions{})
 		return apierrors.IsNotFound(err), nil
 	}); err != nil {

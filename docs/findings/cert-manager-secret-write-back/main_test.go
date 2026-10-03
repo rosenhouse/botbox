@@ -37,10 +37,10 @@ func TestParseReadsEveryFlag(t *testing.T) {
 		want repro
 		runs int
 	}{
-		{nil, repro{poll: 10 * time.Millisecond, settle: 2 * time.Second, timeout: 30 * time.Second, algorithm: "ECDSA", policy: "Never", propagation: metav1.DeletePropagationBackground, dnsName: "example.test"}, 10},
+		{nil, repro{poll: 10 * time.Millisecond, settle: 2 * time.Second, setupWait: time.Minute, timeout: 30 * time.Second, algorithm: "ECDSA", policy: "Never", propagation: metav1.DeletePropagationBackground, dnsName: "example.test"}, 10},
 		{
 			[]string{"-runs", "3", "-collect", "-wait", "5s", "-algorithm", "RSA", "-policy", "Always", "-propagation", "Foreground", "-pause", "200ms", "-dns", "other.test"},
-			repro{poll: 10 * time.Millisecond, settle: 2 * time.Second, collect: true, timeout: 5 * time.Second, algorithm: "RSA", policy: "Always", propagation: metav1.DeletePropagationForeground, pause: 200 * time.Millisecond, dnsName: "other.test"},
+			repro{poll: 10 * time.Millisecond, settle: 2 * time.Second, setupWait: time.Minute, collect: true, timeout: 5 * time.Second, algorithm: "RSA", policy: "Always", propagation: metav1.DeletePropagationForeground, pause: 200 * time.Millisecond, dnsName: "other.test"},
 			3,
 		},
 	} {
@@ -246,7 +246,7 @@ func TestRecreateDeletesWithThePolicyAndCreatesAfterThePause(t *testing.T) {
 		created = time.Now()
 		return false, nil, nil
 	})
-	r := repro{dyn: client, ns: "ns", poll: time.Millisecond, policy: "Never", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationForeground, pause: 50 * time.Millisecond}
+	r := repro{dyn: client, ns: "ns", poll: time.Millisecond, setupWait: time.Minute, policy: "Never", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationForeground, pause: 50 * time.Millisecond}
 
 	crt, err := r.recreate(context.Background(), "old")
 	if err != nil {
@@ -303,7 +303,7 @@ func TestRecreateReadsAgainAfterAReadFails(t *testing.T) {
 		readsBeforeCreate = reads
 		return false, nil, nil
 	})
-	r := repro{dyn: client, ns: "ns", poll: time.Millisecond}
+	r := repro{dyn: client, ns: "ns", poll: time.Millisecond, setupWait: time.Minute}
 	if _, err := r.recreate(context.Background(), "old"); err != nil || readsBeforeCreate != 2 {
 		t.Errorf("recreate returned %v and created after %d reads, want the new Certificate after the second read found the old one gone", err, readsBeforeCreate)
 	}
@@ -316,16 +316,16 @@ func TestRecreateCreatesNothingWhileTheOldCertificateRemains(t *testing.T) {
 	client.PrependReactor("delete", "certificates", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
 	defer cancel()
-	_, err := (repro{dyn: client, ns: "ns", poll: time.Millisecond}).recreate(ctx, "old")
+	_, err := (repro{dyn: client, ns: "ns", poll: time.Millisecond, setupWait: 50 * time.Millisecond}).recreate(ctx, "old")
 	for _, a := range client.Actions() {
 		if a.GetVerb() == "create" {
 			t.Errorf("recreate created a Certificate while the old one remained, and returned %v", err)
 		}
 	}
-	if !errors.Is(err, context.DeadlineExceeded) {
-		t.Errorf("recreate returned %v, want the context's error", err)
+	if !errors.Is(err, context.DeadlineExceeded) || ctx.Err() != nil {
+		t.Errorf("recreate returned %v, and its context ended: %v; want it to stop after setupWait", err, ctx.Err())
 	}
 }
 
@@ -461,14 +461,17 @@ func TestRunStopsWhenTheFirstCertificateIsNotReady(t *testing.T) {
 	cluster.dyn.PrependReactor("create", "issuers", func(k8stesting.Action) (bool, runtime.Object, error) {
 		return true, nil, nil
 	})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	r := cluster.repro(5 * time.Second)
+	r.setupWait = 50 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
 	defer cancel()
-	if _, err := cluster.repro(5 * time.Second).run(ctx); err == nil || err.Error() != "the first Certificate is not Ready: False IssuerNotFound" {
-		t.Errorf("run() returned %v, want the first Certificate's Ready condition", err)
+	if _, err := r.run(ctx); err == nil || err.Error() != "the first Certificate is not Ready: False IssuerNotFound" || ctx.Err() != nil {
+		t.Errorf("run() returned %v, and its context ended: %v; want the first Certificate's Ready condition after setupWait", err, ctx.Err())
 	}
 }
 
-// -wait bounds the wait for the new Certificate. The first one has a minute.
+// -wait bounds the wait for the new Certificate. setupWait bounds the first
+// one's.
 func TestRunWaitsForTheNewCertificateAsLongAsWaitSays(t *testing.T) {
 	cluster := newFakeCertManager("never Ready", 50*time.Millisecond)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -561,7 +564,7 @@ func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
 }
 
 func (f *fakeCertManager) repro(timeout time.Duration) repro {
-	return repro{core: f.core, dyn: f.dyn, poll: time.Millisecond, settle: f.settle, timeout: timeout,
+	return repro{core: f.core, dyn: f.dyn, poll: time.Millisecond, settle: f.settle, setupWait: time.Minute, timeout: timeout,
 		policy: "Always", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationBackground}
 }
 

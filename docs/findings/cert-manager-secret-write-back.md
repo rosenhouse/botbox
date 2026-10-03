@@ -39,9 +39,9 @@ What follows depends on the new Certificate's spec:
 - If the spec asks for another key algorithm under `Never`, the new Certificate stays
   `Ready=False` with reason `SecretMismatch`, waiting for a user.
 
-So a client that recreates a Certificate to get a new key can keep the old one. How quickly
-it must recreate depends on how far cert-manager's Secret informer lags. On an idle cluster
-the window is short. It widens as the informer lags, as the tables under Reproduction show.
+So a client that recreates a Certificate to get a new key can keep the old one, if the
+create follows the delete within a window. The window is short on an idle cluster and
+widens as cert-manager's Secret informer lags, as the tables under Reproduction show.
 
 ## Code path
 

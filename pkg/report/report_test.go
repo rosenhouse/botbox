@@ -215,6 +215,19 @@ func TestReportNamesTheCollectorsDeletesWhereItRan(t *testing.T) {
 	}
 }
 
+// report.json names none of the files beside it.
+func TestReportJSONIsTheSameWhetherTheCollectorRan(t *testing.T) {
+	ran := failingRun()
+	ran.Collector = true
+
+	_, with := write(t, ran)
+	_, without := write(t, failingRun())
+
+	if with != without {
+		t.Errorf("report.json holds\n%s\nwhere the collector ran, and\n%s\nwhere it did not.", with, without)
+	}
+}
+
 func TestReportNamesWhatRanWhereNoVersionIsDeclared(t *testing.T) {
 	failure := failingRun()
 	failure.Target.Version, failure.Botbox = "", ""

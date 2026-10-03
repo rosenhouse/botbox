@@ -677,9 +677,25 @@ func tlsSecret(uid, owner types.UID, key string) *corev1.Secret {
 	}
 }
 
+var kinds = map[schema.GroupVersionResource]string{certificates: "Certificate", issuers: "Issuer", requests: "CertificateRequest", secrets: "Secret"}
+
+// fakeDynamic, like an API server, refuses to create an object whose kind is
+// not its resource's.
 func fakeDynamic(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
-	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
-		map[schema.GroupVersionResource]string{secrets: "SecretList", requests: "CertificateRequestList"}, objects...)
+	lists := map[schema.GroupVersionResource]string{}
+	for resource, kind := range kinds {
+		lists[resource] = kind + "List"
+	}
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), lists, objects...)
+	client.PrependReactor("create", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		resource := action.GetResource()
+		got := action.(k8stesting.CreateAction).GetObject().GetObjectKind().GroupVersionKind()
+		if want := resource.GroupVersion().WithKind(kinds[resource]); got != want {
+			return true, nil, apierrors.NewBadRequest(got.String() + " is not a " + want.String())
+		}
+		return false, nil, nil
+	})
+	return client
 }
 
 func controlled(kind, name string, owner types.UID) *unstructured.Unstructured {

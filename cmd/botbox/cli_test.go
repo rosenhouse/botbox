@@ -1901,6 +1901,37 @@ func TestAnEnvtestInvocationWarnsOnceOfTheWorkloadsItManages(t *testing.T) {
 	}
 }
 
+// A kubeconfig cluster runs its own garbage collector, and botbox none.
+func TestOnlyAReportFromEnvtestNamesCollectorJSONL(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		args  []string
+		names bool
+	}{
+		{name: "on envtest", names: true},
+		{name: "on a kubeconfig cluster", args: []string{"--kubeconfig", "kind.kubeconfig"}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			violation := run.Violation{ID: "G3"}
+			session := &fakeSession{results: []run.Result{{Violation: &violation}}}
+			args := append([]string{"replay", "--target", toyTargetYAML, "--out", t.TempDir()}, test.args...)
+
+			code, _, stderr := invoke(t, session, append(args, writeSequence(t, 1))...)
+
+			if code != exitViolation {
+				t.Fatalf("botbox replay exited %d, want %d: %s", code, exitViolation, stderr)
+			}
+			written, err := os.ReadFile(filepath.Join(session.dirs[0], report.MarkdownFile))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if names := strings.Contains(string(written), "collector.jsonl"); names != test.names {
+				t.Errorf("The report names collector.jsonl: %t, want %t.\n%s", names, test.names, written)
+			}
+		})
+	}
+}
+
 func TestAG4ReportFromEnvtestRepeatsTheWorkloadWarning(t *testing.T) {
 	const runNote = "G3 is not evaluated for the deletion of widget"
 	for _, test := range []struct {

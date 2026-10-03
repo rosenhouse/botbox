@@ -70,7 +70,8 @@ binds a free one, such as `127.0.0.1:0`, so that two invocations do not collide.
 envtest runs no garbage collector, so botbox runs its own over the kinds your target declares.
 It deletes an object once every owner the object names is gone. It treats a foreground or
 orphan delete as a background one. It finds an owner by group, kind and name, at any version
-the API server serves, and then compares the UID.
+the API server serves, and then compares the UID. A failing run's `collector.jsonl` records
+each delete it tried and how the delete ended.
 
 botbox counts as live an owner it cannot resolve: one of a kind your target does not declare,
 or one named at a version the API server does not serve. It never deletes an object that names
@@ -113,6 +114,10 @@ narrow what generation draws to what your controller and your webhooks accept:
 - `generate.overlay` tightens one path's schema, as `examples/cert-manager/target.yaml` does.
   An int-or-string field needs an overlay that says which it is: `type: integer`, or
   `type: string` with a `pattern` or an `enum`.
+- Leave out a value under which a later change leaves your controller waiting for a user,
+  because `ready` must hold within `timeouts.settle` of each change. Under
+  `rotationPolicy: Never`, cert-manager keeps a stored key that a later `algorithm` does not
+  match. So its example draws the policy only as `Always`, and a pinned sequence runs `Never`.
 
 botbox exits 2 on a path or an overlay keyword it cannot draw from, and on a path where the CRD
 refuses every value botbox draws into your sample. If the API server still refuses a CR, as a

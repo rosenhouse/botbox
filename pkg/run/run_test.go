@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
 
+	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -816,6 +817,44 @@ func TestTheRunNamespaceIsDeletedOnTheBudgetBoundGivesIt(t *testing.T) {
 		}
 	default:
 		t.Error("The API server got no request to delete the namespace on a budget.")
+	}
+}
+
+// A target sends requests as it stops, and the collector tries deletes until
+// it stops.
+func TestStopWritesTheRecordingsOnceTheRunIsDown(t *testing.T) {
+	dir := t.TempDir()
+	p := proxyThatSaw(t)
+	h := &Harness{dir: dir, Proxy: p, Observer: &observe.Observer{Store: observe.NewStore(observe.Options{})}}
+	h.down.push("stopping the target", func(context.Context) error {
+		resp, err := http.Get(p.URL() + listConfigMaps)
+		if err != nil {
+			return err
+		}
+		return resp.Body.Close()
+	})
+
+	if err := h.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop returned an error: %v", err)
+	}
+
+	written, err := os.ReadFile(filepath.Join(dir, requestsFile))
+	if err != nil || !strings.Contains(string(written), listConfigMaps) {
+		t.Errorf("requests.jsonl holds %q (%v), want the request the target sent as it stopped.", written, err)
+	}
+}
+
+func TestStopReportsARecordingItCannotWrite(t *testing.T) {
+	for _, file := range []string{requestsFile, objectsFile, collectorFile} {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		h := &Harness{dir: dir, Proxy: proxyThatSaw(t), Observer: &observe.Observer{Store: observe.NewStore(observe.Options{})},
+			collector: &cluster.Collector{}}
+		if err := h.Stop(t.Context()); err == nil || !strings.Contains(err.Error(), file) {
+			t.Errorf("With a directory at %s, Stop returned %v, want an error that names it.", file, err)
+		}
 	}
 }
 

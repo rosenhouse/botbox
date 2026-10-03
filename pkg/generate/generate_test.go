@@ -550,6 +550,11 @@ func TestGeneratedValuesObeyTheOverlay(t *testing.T) {
 				rt.Fatalf("spec.dnsNames holds %d names, outside the overlay's 1 to 3.", length)
 			}
 		}
+		for _, policy := range carriedAt(sequence, "spec", "privateKey", "rotationPolicy") {
+			if policy != "Always" {
+				rt.Fatalf("spec.privateKey.rotationPolicy is %#v. Under Never, cert-manager waits for a user once a later op changes the algorithm.", policy)
+			}
+		}
 	})
 }
 
@@ -614,6 +619,12 @@ func generatedAt(sequence run.Sequence, sample *unstructured.Unstructured, path 
 		}
 	}
 	return values
+}
+
+// carriedAt collects what a sequence's CRs and patches hold at a path, the
+// sample's values included.
+func carriedAt(sequence run.Sequence, path ...string) []any {
+	return generatedAt(sequence, &unstructured.Unstructured{}, path...)
 }
 
 // differences are the dotted paths where two objects disagree.

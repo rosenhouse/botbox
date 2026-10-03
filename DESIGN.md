@@ -89,7 +89,8 @@ external-secrets, upstream open-source projects, unmodified and pinned by versio
 ```
 
 In envtest mode the test cluster also includes botbox's garbage-collector emulation
-(§5.8). It writes to the API server directly, never through the proxy.
+(§5.8). It writes to the API server directly, never through the proxy, and records its
+own deletes.
 
 ### 5.1 Launcher
 
@@ -454,8 +455,12 @@ Consequences:
   per object that carries it (§6). The emulator is watch-driven and deletes within 1 s of
   the owner's deletion event. It does not patch dangling ownerReferences off a dependent
   that still has a live owner. `blockOwnerDeletion`, foreground and orphan policies are
-  not modelled. Its writes bypass the proxy and never count as target traffic. On a
-  kubeconfig cluster it is off.
+  not modelled. Its writes bypass the proxy and never count as target traffic. It records
+  each delete it sends in `collector.jsonl` (§11, D88): when, the object with the UID
+  and resourceVersion it read, which are the delete's preconditions, each owner and
+  whether it was not found or held by another UID, and how the delete ended, a 404 or a
+  409 included. It stops once the Runner has emptied the namespace (§5.5, step 4), so its
+  last deletes can race that cleanup. On a kubeconfig cluster it is off.
 - **Self-cleanup.** The Runner empties the run namespace itself (§5.5, step 4).
 - **No workloads.** A kind that runs Pods, and a claim Pods mount, keep the status they
   were created with: Deployment, StatefulSet, DaemonSet, ReplicaSet, Job, CronJob,
@@ -843,6 +848,7 @@ generate:
   overlay:                                    # per-path schema tightening
     spec.dnsNames: {minItems: 1, maxItems: 3}
     spec.duration: {enum: ["1h", "24h", "2160h"]}
+    spec.privateKey.rotationPolicy: {enum: ["Always"]}
 launch:
   binary: bin/cert-manager-controller
   args:
@@ -999,10 +1005,14 @@ generator. For cert-manager these include: a Certificate needs at least one of
 parse as a Go duration; `renewBefore` must be shorter than `duration`; a `dnsNames` entry
 must be a DNS name, which neither the CRD schema nor the API server checks, so the
 overlay spells out an RFC 1123 label. The target keeps generation inside the valid subset
-with `sample`, `generate.mutate` and `generate.overlay`. A generated spec that the target rejects or ignores because it
-violates such a rule is a target-declaration bug, not a finding; the journal records each
-rule that had to be encoded this way. A CR op the API server refuses ends the invocation as
-a configuration error that names the run and the sequence file holding the op.
+with `sample`, `generate.mutate` and `generate.overlay`. A rule may also span ops, which
+`target.yaml` cannot state. Under `rotationPolicy: Never`, cert-manager keeps a stored key
+that a later `algorithm` does not match, and waits for a user, as its CRD documents. So the
+overlay leaves `Never` out, and a pinned sequence runs it (D87). A generated spec that the
+target rejects, ignores or leaves for a user because it violates such a rule is a
+target-declaration bug, not a finding; the journal records each rule that had to be encoded
+this way. A CR op the API server refuses ends the invocation as a configuration error that
+names the run and the sequence file holding the op.
 
 ### 8.4 Predicates
 
@@ -1283,10 +1293,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   `<out>/<timestamp>-<seed>/`, taking the next free name where a second invocation of one
   seed opens a directory in the same second. Each failing run writes `run-<n>/` under it
   with `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl`,
-  `target.log` and the `kubeconfig` the target was given, plus `sequence.shrunk.json`
-  where the deadline or an interrupt ended the shrink pass before its result could be
-  run there. The `kubeconfig` names the proxy and the run namespace. A passing run's
-  recordings are not kept.
+  `target.log`, the `kubeconfig` the target was given and, on envtest, `collector.jsonl`,
+  plus `sequence.shrunk.json` where the deadline or an interrupt ended the shrink pass
+  before its result could be run there. The `kubeconfig` names the proxy and the run
+  namespace. A passing run's recordings are not kept.
   Once `run` or `replay` has read or drawn its sequences, it writes `summary.json` and
   `summary.md` into the invocation's directory. It writes them again as each run starts,
   once a run finds a violation, before it runs a minimized sequence again, and when the
@@ -1342,11 +1352,15 @@ the proxy; the `Image` launcher. Separate design addendum.
   family is checked in only once it passes the pinned controller.
 - **Triage.** A hunt run that fails is a candidate, not a bug. Triage replays it three
   times, reproduces it by hand against envtest unless only botbox's proxy can inject its
-  faults, reads upstream's code path and searches upstream's tracker. A candidate that no
-  replay reproduces, or that breaks a botbox rule and no upstream contract, becomes a
-  botbox issue. A candidate that breaks an upstream contract becomes a draft under
-  `docs/findings/`, with its sequence and how many replays failed, for botbox's
-  maintainer to file upstream. One that upstream's tracker already holds needs no draft.
+  faults, and reads upstream's code path. It searches upstream's tracker where the
+  maintainer allows that. A candidate that no replay reproduces, or that breaks a botbox
+  rule and no upstream contract, becomes a botbox issue. A candidate that breaks an
+  upstream contract becomes a draft under `docs/findings/`, with how many replays failed,
+  for botbox's maintainer to file upstream. The draft's directory holds its
+  `sequence.json`, which `make test` checks against the example it names and its CRD,
+  and the by-hand reproducer where there is one. One that upstream's tracker already
+  holds needs no draft. A draft says whether triage searched the tracker. Where it did
+  not, the maintainer searches before filing.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
@@ -2436,3 +2450,54 @@ built from source and run as a black-box binary.
 - **D86 The envtest tier's CI budget is ten minutes.** On CI, `pkg/run` alone took 309 s,
   past the five minutes the tier had. The maintainer chose a larger budget over shorter
   tests or a tier split across jobs.
+- **D87 The cert-manager example draws `rotationPolicy` only as `Always`.** The example
+  mutated `spec.privateKey.rotationPolicy` and `spec.privateKey.algorithm`. Under `Never`,
+  cert-manager keeps a stored key that a later algorithm does not match, and waits for a
+  user, as its CRD documents, so G4 cannot hold. Seed 266 creates a Certificate under
+  `Never` and later updates its algorithm, and it failed G4 in 3 of 3 runs. A scan of
+  seeds 0-1999 finds 10 that update their way there. Hunt seed 1043 got there through a
+  recreate, when cert-manager kept the deleted Certificate's Secret or wrote it back.
+  Triage classified the write-back as an upstream contract break, and
+  `docs/findings/cert-manager-secret-write-back.md` drafts its report. Under `Always`,
+  and under `Never` with the same algorithm, the write-back still happens but G4 passes,
+  so draws no longer catch it. `target.yaml` cannot state a rule across ops, so an overlay
+  draws the policy only as `Always`. Of seeds 0-1999, 414 draws change, each only from
+  `Never` to `Always`, and no draw's ops change. The example tier's seed 27 loses its
+  `Never`, so `sequences/rotation-never.json` runs `Never` on every pull request. It
+  creates a Certificate under `Never` and reissues it with the stored key. It recreates the
+  Certificate under `Never` with the same algorithm, which passes whether cert-manager
+  generates a key or reuses the deleted Certificate's. It deletes the Secret, after which
+  `Never` lets cert-manager generate a key, and moves to ECDSA under `Always`. It passed 12
+  of 12 runs. No pinned sequence reaches the branch where cert-manager waits for a user,
+  because G4 fails there. A unit test refuses a pinned or hunt sequence that changes the
+  algorithm under `Never`. A recreate after a delete counts as a change unless the Runner
+  settled between them. Dropping `algorithm` from `mutate` was rejected, because it
+  loses ECDSA and Ed25519, which 544 of the 2000 draws set, and changes the ops of 1877
+  draws. Overlaying it to `RSA` was rejected, because it loses them too and changes the
+  ops of 150 draws. Dropping `rotationPolicy` from `mutate` was rejected, because it gains
+  nothing over the overlay and changes the ops of 1877 draws. Widening `ready` to accept
+  `SecretMismatch` was rejected, because it would pass a Certificate whose key never
+  matches its spec. Changing the collector was rejected, because an update reaches that
+  state with nothing for the collector to delete.
+- **D88 A run records each delete of botbox's garbage collector.** Hunt seed 1043 failed
+  where cert-manager re-pointed a Secret's ownerReference just before the collector's
+  delete, which then failed its precondition. The collector's writes bypass the proxy,
+  and it dropped a 404 or a 409 silently, so the evidence showed the Secret go but not
+  who deleted it. On envtest a run now writes `collector.jsonl` (§5.8), a line per delete
+  the collector sends, a retry included, and a report names it. Adding the lines to
+  `requests.jsonl` was rejected, because the checks read it as the target's traffic.
+  `objects.jsonl` holds versions, and a delete that lost its race changes none. Owner
+  reads are not recorded, because a sweep reads every owner on each event and the
+  delete's line says what the read found. An empty file says the collector tried no
+  delete. A kubeconfig cluster runs its own garbage collector, so botbox writes no file
+  there. The lines are kept in memory and written as the run ends, as the other
+  recordings are.
+- **D89 A findings draft carries its reproducers.** Upstream readers do not run botbox.
+  So a draft's directory holds, beside the botbox sequence, a program that reproduces
+  the find on any cluster, unless only botbox's proxy can inject its faults. The first
+  such program needs only client-go, so it lives in the root module, where `go build`,
+  `go vet` and `make test` reach it. A module of its own, as each spike has, was
+  rejected: it would pin the same libraries a second time. `make test` loads each
+  draft's sequence against the example it names, and judges its CRs by the example's
+  CRD, as it does each example's sequences. It fails once either refuses the sequence. With
+  no draft left, both checks fail and say what to change.

@@ -81,8 +81,10 @@ deadline gives minimizing at least 4 minutes, and a longer `--deadline` gives it
 
 `make test-example` runs this control. It fails unless the default configuration passes, the
 control fails on G3 naming that Secret, and the control's evidence hides the Secret's private
-key. It also runs each `examples/cert-manager/sequences/*.json` as written, so none can rot. A
-nightly workflow draws its own seeds.
+key. It also runs each `examples/cert-manager/sequences/*.json` as written, so none can rot.
+Drawn sequences set `spec.privateKey.rotationPolicy` only to `Always`, because under `Never`
+cert-manager waits for a user once a later op changes the algorithm. `rotation-never.json` runs
+`Never` instead. A nightly workflow draws its own seeds.
 
 ## external-secrets
 

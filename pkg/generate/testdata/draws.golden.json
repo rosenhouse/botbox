@@ -120,7 +120,7 @@
                 "name": "selfsigned"
               },
               "privateKey": {
-                "rotationPolicy": "Never"
+                "rotationPolicy": "Always"
               },
               "secretName": "example-tls"
             }
@@ -324,7 +324,7 @@
                 "name": "selfsigned"
               },
               "privateKey": {
-                "rotationPolicy": "Never"
+                "rotationPolicy": "Always"
               },
               "secretName": "example-tls"
             }
@@ -601,7 +601,7 @@
                 "name": "selfsigned"
               },
               "privateKey": {
-                "rotationPolicy": "Never"
+                "rotationPolicy": "Always"
               },
               "secretName": "example-tls"
             }

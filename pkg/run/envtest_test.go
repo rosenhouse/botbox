@@ -3,6 +3,7 @@
 package run_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -81,20 +83,25 @@ func TestHarness(t *testing.T) {
 		requireJSONLines(t, filepath.Join(dir, "requests.jsonl"))
 		requireJSONLines(t, filepath.Join(dir, "objects.jsonl"))
 		requireTargetLog(t, filepath.Join(dir, "target.log"))
+		// An empty file says the collector ran and tried no delete.
+		if deletes, err := os.ReadFile(filepath.Join(dir, "collector.jsonl")); err != nil || len(deletes) > 0 {
+			t.Errorf("collector.jsonl holds %q (%v), want it empty: nothing lost its owner.", deletes, err)
+		}
 	})
 
 	// What the Runner of M3 builds on: a Restart that G5 compares across, and
 	// a namespace that empties itself when the CR goes.
 	t.Run("restarts the target and empties the namespace on a delete", func(t *testing.T) {
 		toy := loadTarget(t, binary)
-		h := startHarness(t, ctx, toy, testCluster.Config(), t.TempDir())
+		dir := t.TempDir()
+		h := startHarness(t, ctx, toy, testCluster.Config(), dir)
 
 		widget := createWidget(t, ctx, h, toy)
 		requireSettled(t, ctx, h, toy)
 		// A ConfigMap botbox owns to the Widget without controlling it. The
 		// target only ever touches what it controls, so this one leaves the
 		// namespace by the collector alone (DESIGN.md §5.8).
-		createCollectedConfigMap(t, ctx, h, widget)
+		collected := createCollectedConfigMap(t, ctx, h, widget)
 		before := convergedState(t, h, toy)
 
 		if err := h.Launcher.Restart(ctx); err != nil {
@@ -106,8 +113,14 @@ func TestHarness(t *testing.T) {
 			t.Errorf("The restart changed the converged state from\n\t%v\nto\n\t%v", before, after)
 		}
 
+		deleted := time.Now()
 		deleteWidget(t, ctx, h, widget)
 		requireNamespaceEmptied(t, ctx, h, toy, widget)
+
+		if err := h.Stop(ctx); err != nil {
+			t.Fatalf("Stopping the harness failed: %v", err)
+		}
+		requireCollected(t, dir, collected, widget, deleted)
 	})
 
 	t.Run("hands the target the run namespace", func(t *testing.T) {
@@ -357,7 +370,7 @@ func fixtureSecret() *unstructured.Unstructured {
 	return fixture
 }
 
-func createCollectedConfigMap(t *testing.T, ctx context.Context, h *run.Harness, widget *unstructured.Unstructured) {
+func createCollectedConfigMap(t *testing.T, ctx context.Context, h *run.Harness, widget *unstructured.Unstructured) *corev1.ConfigMap {
 	t.Helper()
 	owned := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{
 		Name: collectedName,
@@ -368,10 +381,53 @@ func createCollectedConfigMap(t *testing.T, ctx context.Context, h *run.Harness,
 			UID:        widget.GetUID(),
 		}},
 	}}
-	if _, err := configMaps(t, h).Create(ctx, owned, metav1.CreateOptions{}); err != nil {
+	created, err := configMaps(t, h).Create(ctx, owned, metav1.CreateOptions{})
+	if err != nil {
 		t.Fatalf("Creating the owned ConfigMap failed: %v", err)
 	}
 	h.Observer.Exclude(configMapKind, collectedName)
+	return created
+}
+
+// requireCollected asserts that collector.jsonl in dir records the collector's
+// delete of collected after the deletion of widget. Any other line is a delete
+// that lost a race and ended not found.
+func requireCollected(t *testing.T, dir string, collected *corev1.ConfigMap, widget *unstructured.Unstructured, after time.Time) {
+	t.Helper()
+	written, err := os.ReadFile(filepath.Join(dir, "collector.jsonl"))
+	if err != nil {
+		t.Fatalf("The harness wrote no collector.jsonl: %v", err)
+	}
+	var deletes []map[string]any
+	for decoder := json.NewDecoder(bytes.NewReader(written)); decoder.More(); {
+		var line map[string]any
+		if err := decoder.Decode(&line); err != nil {
+			t.Fatalf("collector.jsonl does not parse: %v\n%s", err, written)
+		}
+		if line["result"] != "not found" {
+			deletes = append(deletes, line)
+		}
+	}
+	if len(deletes) != 1 {
+		t.Fatalf("collector.jsonl holds\n%s\nwant one delete of %s, and at most lost races besides.", written, collectedName)
+	}
+	tried, err := time.Parse(time.RFC3339Nano, fmt.Sprint(deletes[0]["time"]))
+	if err != nil || !tried.After(after) {
+		t.Errorf("collector.jsonl says the delete was tried at %v (%v), want after the Widget's deletion at %v.",
+			deletes[0]["time"], err, after)
+	}
+	delete(deletes[0], "time")
+	want := map[string]any{
+		"kind": "v1/ConfigMap", "namespace": collected.Namespace, "name": collectedName,
+		"uid": string(collected.UID), "resourceVersion": collected.ResourceVersion,
+		"owners": []any{map[string]any{
+			"apiVersion": "toy.botbox/v1", "kind": "Widget", "name": widget.GetName(), "uid": string(widget.GetUID()), "gone": "not found",
+		}},
+		"result": "deleted",
+	}
+	if !reflect.DeepEqual(deletes[0], want) {
+		t.Errorf("collector.jsonl records\n\t%v\nwant\n\t%v", deletes[0], want)
+	}
 }
 
 // requireReconcileRecorded asserts that the target's traffic reached the API

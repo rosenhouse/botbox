@@ -3,9 +3,12 @@ package cluster
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -228,6 +231,12 @@ func configMapObject(name string, uid types.UID, owners ...metav1.OwnerReference
 	}
 }
 
+func widgetObject(name string, uid types.UID, owners ...metav1.OwnerReference) object {
+	obj := configMapObject(name, uid, owners...)
+	obj.kind, obj.resource = widgetKind, widgetResource
+	return obj
+}
+
 func deletions(t *testing.T, client *fake.FakeMetadataClient) []k8stesting.DeleteActionImpl {
 	t.Helper()
 	var deleted []k8stesting.DeleteActionImpl
@@ -354,6 +363,141 @@ func TestSweepIgnoresADeleteItLost(t *testing.T) {
 	}
 }
 
+func TestSweepRecordsEachDeleteItTriesAndHowItEnded(t *testing.T) {
+	configMaps := schema.GroupResource{Resource: "configmaps"}
+	for _, tc := range []struct {
+		name   string
+		err    error
+		result string
+	}{
+		{"the delete succeeds", nil, "deleted"},
+		{"the object is already gone", apierrors.NewNotFound(configMaps, "child"), "not found"},
+		{"the object changed since the collector read it", apierrors.NewConflict(configMaps, "child",
+			errors.New("Precondition failed: ResourceVersion in precondition: 7, ResourceVersion in object meta: 8")), "conflict"},
+		{"the API server fails", apierrors.NewInternalError(errors.New("the API server is unwell")), "error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, client, logged := fakeCollector(t)
+			var sent time.Time
+			client.PrependReactor("delete", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
+				sent = time.Now()
+				return true, nil, tc.err
+			})
+			before := time.Now()
+
+			c.sweep(context.Background(), []object{
+				configMapObject("child", "uid-child", configMapOwner("parent", "uid-parent")),
+			})
+
+			want := map[string]any{
+				"kind": "v1/ConfigMap", "namespace": runNamespace, "name": "child", "uid": "uid-child", "resourceVersion": "7",
+				"owners": []any{map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "name": "parent", "uid": "uid-parent", "gone": "not found"}},
+				"result": tc.result,
+			}
+			if tc.err != nil {
+				want["error"] = tc.err.Error()
+			}
+			lines, tried := recorded(t, c)
+			if len(lines) != 1 {
+				t.Fatalf("The collector recorded %v, want the one delete it tried.", lines)
+			}
+			if !reflect.DeepEqual(lines[0], want) {
+				t.Errorf("The collector recorded\n\t%v\nwant\n\t%v", lines[0], want)
+			}
+			if tried[0].Before(before) || tried[0].After(sent) {
+				t.Errorf("The collector recorded the delete at %v, want when it sent it, between %v and %v.", tried[0], before, sent)
+			}
+			if failed := tc.result == "error"; (logged.Len() > 0) != failed {
+				t.Errorf("The collector logged %q, want a failure logged only where the API server failed.", logged.String())
+			}
+		})
+	}
+}
+
+func TestSweepRecordsWhyEachOwnerIsGone(t *testing.T) {
+	c, client, _ := fakeCollector(t)
+	replaced := configMapOwner("replaced", "uid-replaced")
+	if err := client.Tracker().Add(&metav1.PartialObjectMetadata{
+		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ConfigMap"},
+		ObjectMeta: metav1.ObjectMeta{Namespace: runNamespace, Name: replaced.Name, UID: "uid-replaced-again"},
+	}); err != nil {
+		t.Fatalf("Seeding the owner's successor failed: %v", err)
+	}
+
+	c.sweep(context.Background(), []object{
+		configMapObject("child", "uid-child", configMapOwner("deleted", "uid-deleted"), replaced),
+	})
+
+	want := []any{
+		map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "name": "deleted", "uid": "uid-deleted", "gone": "not found"},
+		map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "name": "replaced", "uid": "uid-replaced",
+			"gone": "another UID", "foundUID": "uid-replaced-again"},
+	}
+	lines, _ := recorded(t, c)
+	if len(lines) != 1 || !reflect.DeepEqual(lines[0]["owners"], want) {
+		t.Errorf("The collector recorded %v, want one delete whose owners are\n\t%v", lines, want)
+	}
+}
+
+func TestWriteLogWritesEachDeleteInTheOrderTried(t *testing.T) {
+	c, _, _ := fakeCollector(t)
+	parent := configMapOwner("parent", "uid-parent")
+
+	c.sweep(context.Background(), []object{widgetObject("first", "uid-first", parent)})
+	c.sweep(context.Background(), []object{configMapObject("second", "uid-second", parent)})
+
+	lines, _ := recorded(t, c)
+	var got []string
+	for _, line := range lines {
+		got = append(got, fmt.Sprint(line["kind"], " ", line["name"]))
+	}
+	if want := []string{"toy.botbox/v1/Widget first", "v1/ConfigMap second"}; !slices.Equal(got, want) {
+		t.Errorf("The collector recorded the deletes %q, want %q.", got, want)
+	}
+}
+
+func TestWriteLogReportsAWriteThatFails(t *testing.T) {
+	c, _, _ := fakeCollector(t)
+	c.sweep(context.Background(), []object{configMapObject("child", "uid-child", configMapOwner("parent", "uid-parent"))})
+
+	if err := c.WriteLog(failingWriter{}); err == nil {
+		t.Error("WriteLog returned no error, although nothing it wrote was written.")
+	}
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("the disk is full") }
+
+// recorded decodes the collector's log, one JSON object per line, and takes
+// out when each delete was tried.
+func recorded(t *testing.T, c *Collector) ([]map[string]any, []time.Time) {
+	t.Helper()
+	var written bytes.Buffer
+	if err := c.WriteLog(&written); err != nil {
+		t.Fatalf("WriteLog returned an error: %v", err)
+	}
+	var lines []map[string]any
+	var tried []time.Time
+	for _, text := range strings.Split(strings.TrimSuffix(written.String(), "\n"), "\n") {
+		if text == "" {
+			continue
+		}
+		var line map[string]any
+		if err := json.Unmarshal([]byte(text), &line); err != nil {
+			t.Fatalf("The line %q of the collector's log does not parse: %v", text, err)
+		}
+		at, err := time.Parse(time.RFC3339Nano, fmt.Sprint(line["time"]))
+		if err != nil {
+			t.Fatalf("The line %q of the collector's log says no time: %v", text, err)
+		}
+		delete(line, "time")
+		lines = append(lines, line)
+		tried = append(tried, at)
+	}
+	return lines, tried
+}
+
 func TestASweepCutShortByStopReportsNoFailure(t *testing.T) {
 	c, client, logged := fakeCollector(t)
 	client.PrependReactor("get", "configmaps", func(k8stesting.Action) (bool, runtime.Object, error) {
@@ -366,6 +510,21 @@ func TestASweepCutShortByStopReportsNoFailure(t *testing.T) {
 
 	if logged.Len() != 0 {
 		t.Errorf("The collector reported its own shutdown as a failure: %s", logged.String())
+	}
+}
+
+func TestAStoppedCollectorSendsAndRecordsNoDelete(t *testing.T) {
+	c, client, _ := fakeCollector(t)
+	stopped, stop := context.WithCancel(context.Background())
+	stop()
+
+	c.sweep(stopped, []object{configMapObject("child", "uid-child", configMapOwner("parent", "uid-parent"))})
+
+	if deleted := deletions(t, client); len(deleted) != 0 {
+		t.Errorf("The stopped collector sent the deletes %v.", deleted)
+	}
+	if lines, _ := recorded(t, c); len(lines) != 0 {
+		t.Errorf("The stopped collector recorded %v, want no delete.", lines)
 	}
 }
 

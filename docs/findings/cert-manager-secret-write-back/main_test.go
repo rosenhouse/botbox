@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -38,11 +39,12 @@ func TestMechanismTellsHowTheOldKeySurvived(t *testing.T) {
 }
 
 func TestCollectGarbageDeletesWhatTheOldCertificateControls(t *testing.T) {
-	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
-		map[schema.GroupVersionResource]string{secrets: "SecretList", requests: "CertificateRequestList"},
-		controlled("Secret", "example-tls", "old"),
+	orphan := controlled("CertificateRequest", "example-3", "old")
+	orphan.SetOwnerReferences(nil)
+	client := fakeDynamic(controlled("Secret", "example-tls", "old"),
 		controlled("CertificateRequest", "example-1", "old"),
-		controlled("CertificateRequest", "example-2", "new"))
+		controlled("CertificateRequest", "example-2", "new"),
+		orphan)
 	var deleted []string
 	client.PrependReactor("delete", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		del := action.(k8stesting.DeleteAction)
@@ -66,6 +68,21 @@ func TestCollectGarbageDeletesWhatTheOldCertificateControls(t *testing.T) {
 	if want := []string{"example-tls", "example-1"}; !slices.Equal(deleted, want) {
 		t.Errorf("collectGarbage deleted %v, want %v", deleted, want)
 	}
+}
+
+func TestCollectGarbageReportsADeleteItCannotMake(t *testing.T) {
+	client := fakeDynamic(controlled("Secret", "example-tls", "old"))
+	client.PrependReactor("delete", "*", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(secrets.GroupResource(), "example-tls", nil)
+	})
+	if err := (repro{dyn: client, ns: "ns", collect: true}).collectGarbage(context.Background(), "old"); !apierrors.IsForbidden(err) {
+		t.Errorf("collectGarbage returned %v, want the Forbidden error", err)
+	}
+}
+
+func fakeDynamic(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{secrets: "SecretList", requests: "CertificateRequestList"}, objects...)
 }
 
 func controlled(kind, name string, owner types.UID) *unstructured.Unstructured {
@@ -102,23 +119,38 @@ func TestSecretRecordsUIDControllerAndKeyHash(t *testing.T) {
 }
 
 func TestReadyWaitsForReadyAndReportsTheLastCondition(t *testing.T) {
-	for _, c := range []struct{ status, reason string }{{"True", "Ready"}, {"False", "SecretMismatch"}} {
-		crt := certificate("Never", "")
-		crt.SetNamespace("ns")
-		crt.Object["status"] = map[string]any{"conditions": []any{
-			map[string]any{"type": "Ready", "status": c.status, "reason": c.reason},
-			map[string]any{"type": "Issuing", "status": "True", "reason": "Other"},
-		}}
-		r := repro{dyn: dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), crt), ns: "ns"}
-		start := time.Now()
-		got := r.ready(context.Background(), time.Second)
-		if want := c.status + " " + c.reason; got != want {
-			t.Errorf("ready() = %q, want %q", got, want)
+	gets := 0
+	becomesReady := fakeDynamic()
+	becomesReady.PrependReactor("get", "certificates", func(k8stesting.Action) (bool, runtime.Object, error) {
+		gets++
+		if gets < 3 {
+			return true, withReady("False", "SecretMismatch"), nil
 		}
-		if waited := time.Since(start); (c.status == "True") != (waited < 500*time.Millisecond) {
-			t.Errorf("ready() returned %q after %v; it waits until Ready or the timeout", got, waited)
-		}
+		return true, withReady("True", "Ready"), nil
+	})
+	if got := (repro{dyn: becomesReady, ns: "ns"}).ready(context.Background(), time.Minute); got != "True Ready" || gets != 3 {
+		t.Errorf("ready() = %q after %d reads, want \"True Ready\" after 3", got, gets)
 	}
+
+	stuck := fakeDynamic(withReady("False", "SecretMismatch"))
+	if got := (repro{dyn: stuck, ns: "ns"}).ready(context.Background(), 300*time.Millisecond); got != "False SecretMismatch" {
+		t.Errorf("ready() = %q, want the last Ready condition, \"False SecretMismatch\"", got)
+	}
+
+	gone := fakeDynamic()
+	if got := (repro{dyn: gone, ns: "ns"}).ready(context.Background(), 300*time.Millisecond); !strings.Contains(got, "not found") {
+		t.Errorf("ready() = %q, want the error that kept it from reading the Certificate", got)
+	}
+}
+
+func withReady(status, reason string) *unstructured.Unstructured {
+	crt := certificate("Never", "")
+	crt.SetNamespace("ns")
+	crt.Object["status"] = map[string]any{"conditions": []any{
+		map[string]any{"type": "Ready", "status": status, "reason": reason},
+		map[string]any{"type": "Issuing", "status": "True", "reason": "Other"},
+	}}
+	return crt
 }
 
 func TestCertificateSetsTheKeysPolicyAndAlgorithm(t *testing.T) {

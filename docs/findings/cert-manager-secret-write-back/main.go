@@ -175,6 +175,7 @@ func (r repro) ready(ctx context.Context, timeout time.Duration) string {
 	_ = wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, timeout, true, func(context.Context) (bool, error) {
 		crt, err := r.dyn.Resource(certificates).Namespace(r.ns).Get(ctx, "example", metav1.GetOptions{})
 		if err != nil {
+			seen = err.Error()
 			return false, nil
 		}
 		conditions, _, _ := unstructured.NestedSlice(crt.Object, "status", "conditions")

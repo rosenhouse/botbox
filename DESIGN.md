@@ -2447,10 +2447,10 @@ built from source and run as a black-box binary.
   and it dropped a 404 or a 409 silently, so the evidence showed the Secret go but not
   who deleted it. On envtest a run now writes `collector.jsonl`, a line per delete the
   collector sends, a retry included (§5.8), and a report names it. Adding the lines to
-  `requests.jsonl` was rejected, because G1, G2 and G6 read it as the target's traffic.
+  `requests.jsonl` was rejected, because the checks read it as the target's traffic.
   `objects.jsonl` holds versions, and a delete that lost its race changes none. Owner
   reads are not recorded, because a sweep reads every owner on each event and the
-  delete's line says what the read found. An empty file says the collector deleted
-  nothing. A kubeconfig cluster runs its own garbage collector, so botbox writes no file
+  delete's line says what the read found. An empty file says the collector tried no
+  delete. A kubeconfig cluster runs its own garbage collector, so botbox writes no file
   there. The lines are kept in memory and written as the run ends, as the other
   recordings are.

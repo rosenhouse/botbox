@@ -363,7 +363,7 @@ type goneOwner struct {
 	FoundUID types.UID `json:"foundUID,omitempty"`
 }
 
-// What a deletion says of a delete and of an owner.
+// A deletion's Result and an owner's Gone take these values.
 const (
 	deleted    = "deleted"
 	notFound   = "not found"

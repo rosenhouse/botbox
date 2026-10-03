@@ -456,7 +456,7 @@ Consequences:
   the owner's deletion event. It does not patch dangling ownerReferences off a dependent
   that still has a live owner. `blockOwnerDeletion`, foreground and orphan policies are
   not modelled. Its writes bypass the proxy and never count as target traffic. It records
-  each delete it sends in `collector.jsonl` (§11, D@90): when, the object with the UID
+  each delete it sends in `collector.jsonl` (§11, D88): when, the object with the UID
   and resourceVersion it read, which are the delete's preconditions, each owner and
   whether it was not found or held by another UID, and how the delete ended, a 404 or a
   409 included. It stops once the Runner has emptied the namespace (§5.5, step 4), so its
@@ -1008,7 +1008,7 @@ overlay spells out an RFC 1123 label. The target keeps generation inside the val
 with `sample`, `generate.mutate` and `generate.overlay`. A rule may also span ops, which
 `target.yaml` cannot state. Under `rotationPolicy: Never`, cert-manager keeps a stored key
 that a later `algorithm` does not match, and waits for a user, as its CRD documents. So the
-overlay leaves `Never` out, and a pinned sequence runs it (D@89). A generated spec that the
+overlay leaves `Never` out, and a pinned sequence runs it (D87). A generated spec that the
 target rejects, ignores or leaves for a user because it violates such a rule is a
 target-declaration bug, not a finding; the journal records each rule that had to be encoded
 this way. A CR op the API server refuses ends the invocation as a configuration error that
@@ -2450,7 +2450,7 @@ built from source and run as a black-box binary.
 - **D86 The envtest tier's CI budget is ten minutes.** On CI, `pkg/run` alone took 309 s,
   past the five minutes the tier had. The maintainer chose a larger budget over shorter
   tests or a tier split across jobs.
-- **D@89 The cert-manager example draws `rotationPolicy` only as `Always`.** The example
+- **D87 The cert-manager example draws `rotationPolicy` only as `Always`.** The example
   mutated `spec.privateKey.rotationPolicy` and `spec.privateKey.algorithm`. Under `Never`,
   cert-manager keeps a stored key that a later algorithm does not match, and waits for a
   user, as its CRD documents, so G4 cannot hold. Seed 266 creates a Certificate under
@@ -2478,7 +2478,7 @@ built from source and run as a black-box binary.
   `SecretMismatch` was rejected, because it would pass a Certificate whose key never
   matches its spec. Changing the collector was rejected, because an update reaches that
   state with nothing for the collector to delete.
-- **D@90 A run records each delete of botbox's garbage collector.** Hunt seed 1043 failed
+- **D88 A run records each delete of botbox's garbage collector.** Hunt seed 1043 failed
   where cert-manager re-pointed a Secret's ownerReference just before the collector's
   delete, which then failed its precondition. The collector's writes bypass the proxy,
   and it dropped a 404 or a 409 silently, so the evidence showed the Secret go but not
@@ -2491,7 +2491,7 @@ built from source and run as a black-box binary.
   delete. A kubeconfig cluster runs its own garbage collector, so botbox writes no file
   there. The lines are kept in memory and written as the run ends, as the other
   recordings are.
-- **D@63 A findings draft carries its reproducers.** Upstream readers do not run botbox.
+- **D89 A findings draft carries its reproducers.** Upstream readers do not run botbox.
   So a draft's directory holds, beside the botbox sequence, a program that reproduces
   the find on any cluster, unless only botbox's proxy can inject its faults. The first
   such program needs only client-go, so it lives in the root module, where `go build`,

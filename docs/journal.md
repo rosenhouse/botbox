@@ -260,7 +260,7 @@ re-run so the run directory's evidence is of the sequence botbox prints.
   waits for a user, as its CRD documents, so G4 failed a correct cert-manager. Triage of a
   hunt found it on 2026-10-02. No key of `target.yaml` states a rule across ops, so the
   overlay draws the policy only as `Always`, and `sequences/rotation-never.json` runs
-  `Never` (D@89).
+  `Never` (D87).
 - A Widget created at `spec.count: 0` went Ready 0 to 0, so its status merge patch carried
   only `observedGeneration` and never wrote `status.ready`. Its own `ready` expression then
   never held. About 13% of toy draws set count 0, and every one of them failed G4.

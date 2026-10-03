@@ -408,10 +408,11 @@ func (h hookedCalls) Create(ctx context.Context, obj *unstructured.Unstructured,
 }
 
 func TestRunReadsEachSecretOnceItsCertificateSettles(t *testing.T) {
-	for _, kept := range []string{"write-back", "re-point"} {
+	for kept, policy := range map[string]string{"write-back": "Never", "re-point": "Always"} {
 		t.Run(kept, func(t *testing.T) {
 			cluster := newFakeCertManager(kept, 50*time.Millisecond)
 			r := cluster.repro(5 * time.Second)
+			r.policy = policy
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
@@ -429,9 +430,9 @@ func TestRunReadsEachSecretOnceItsCertificateSettles(t *testing.T) {
 			issuer := map[string]any{"kind": "Issuer", "name": "selfsigned"}
 			for i, want := range []map[string]any{
 				{"secretName": "example-tls", "commonName": "example.test", "dnsNames": []any{"example.test"}, "issuerRef": issuer,
-					"privateKey": map[string]any{"rotationPolicy": "Never"}},
+					"privateKey": map[string]any{"rotationPolicy": policy}},
 				{"secretName": "example-tls", "commonName": "other.test", "dnsNames": []any{"other.test"}, "issuerRef": issuer,
-					"privateKey": map[string]any{"rotationPolicy": "Never", "algorithm": "ECDSA"}},
+					"privateKey": map[string]any{"rotationPolicy": policy, "algorithm": "ECDSA"}},
 			} {
 				if got := cluster.created[i].Object["spec"]; !reflect.DeepEqual(got, want) {
 					t.Errorf("run created Certificate %d with spec %v, want %v", i+1, got, want)
@@ -490,7 +491,7 @@ func TestRunCollectsWhatTheFirstCertificateControlsOnceItIsDeleted(t *testing.T)
 func TestRunReturnsTheErrorOfACallThatFails(t *testing.T) {
 	for _, c := range []struct {
 		call, verb, resource string
-		// created is how many Certificates exist before the call fails.
+		// created is how many Certificates run creates before the call fails.
 		created int
 		collect bool
 	}{

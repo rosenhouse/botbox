@@ -2474,8 +2474,8 @@ built from source and run as a black-box binary.
   settled between them. Dropping `algorithm` from `mutate` was rejected, because it
   loses ECDSA and Ed25519, which 544 of the 2000 draws set, and changes the ops of 1877
   draws. Overlaying it to `RSA` was rejected, because it loses them too and changes the
-  ops of 150 draws. Dropping `rotationPolicy` from `mutate` was rejected, because it covers
-  what the overlay covers and changes the ops of 1877 draws. Widening `ready` to accept
+  ops of 150 draws. Dropping `rotationPolicy` from `mutate` was rejected, because it gains
+  nothing over the overlay and changes the ops of 1877 draws. Widening `ready` to accept
   `SecretMismatch` was rejected, because it would pass a Certificate whose key never
   matches its spec. Changing the collector was rejected, because an update reaches that
   state with nothing for the collector to delete.
@@ -2483,8 +2483,8 @@ built from source and run as a black-box binary.
   where cert-manager re-pointed a Secret's ownerReference just before the collector's
   delete, which then failed its precondition. The collector's writes bypass the proxy,
   and it dropped a 404 or a 409 silently, so the evidence showed the Secret go but not
-  who deleted it. On envtest a run now writes `collector.jsonl`, a line per delete the
-  collector sends, a retry included (§5.8), and a report names it. Adding the lines to
+  who deleted it. On envtest a run now writes `collector.jsonl` (§5.8), a line per delete
+  the collector sends, a retry included, and a report names it. Adding the lines to
   `requests.jsonl` was rejected, because the checks read it as the target's traffic.
   `objects.jsonl` holds versions, and a delete that lost its race changes none. Owner
   reads are not recorded, because a sweep reads every owner on each event and the
@@ -2499,4 +2499,5 @@ built from source and run as a black-box binary.
   `go vet` and `make test` reach it. A module of its own, as each spike has, was
   rejected: it would pin the same libraries a second time. `make test` loads each
   draft's sequence against the example it names, and judges its CRs by the example's
-  CRD, as it does each example's sequences. It fails once either refuses the sequence.
+  CRD, as it does each example's sequences. It fails once either refuses the sequence. With
+  no draft left, both checks fail and say what to delete.

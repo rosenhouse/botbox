@@ -43,10 +43,13 @@ func main() {
 	timeout := flag.Duration("wait", 30*time.Second, "how long the new Certificate has to become Ready")
 	algorithm := flag.String("algorithm", "ECDSA", "the new Certificate's key algorithm")
 	policy := flag.String("policy", "Never", "both Certificates' rotationPolicy")
+	propagation := flag.String("propagation", "Background", "the old Certificate's delete propagation policy")
+	pause := flag.Duration("pause", 0, "how long to wait between seeing the old Certificate gone and creating the new one")
 	flag.Parse()
 	r, err := newRepro(*kubeconfig)
 	check(err)
 	r.collect, r.timeout, r.algorithm, r.policy = *collect, *timeout, *algorithm, *policy
+	r.propagation, r.pause = metav1.DeletionPropagation(*propagation), *pause
 	counts := map[string]int{}
 	for i := 1; i <= *runs; i++ {
 		found, err := r.run(context.Background())
@@ -58,13 +61,15 @@ func main() {
 }
 
 type repro struct {
-	core      kubernetes.Interface
-	dyn       dynamic.Interface
-	collect   bool
-	timeout   time.Duration
-	algorithm string
-	policy    string
-	ns        string
+	core        kubernetes.Interface
+	dyn         dynamic.Interface
+	collect     bool
+	timeout     time.Duration
+	algorithm   string
+	policy      string
+	propagation metav1.DeletionPropagation
+	pause       time.Duration
+	ns          string
 }
 
 // newRepro's clients are unthrottled. client-go's default of 5 requests a second
@@ -133,22 +138,8 @@ func (r repro) run(ctx context.Context) (finding, error) {
 	if err != nil {
 		return finding{}, err
 	}
-	if err := r.dyn.Resource(certificates).Namespace(r.ns).Delete(ctx, "example", metav1.DeleteOptions{}); err != nil {
-		return finding{}, err
-	}
-	collected := make(chan error, 1)
-	go func() { collected <- r.collectGarbage(ctx, first.GetUID()) }()
-	if err := wait.PollUntilContextTimeout(ctx, 10*time.Millisecond, time.Minute, true, func(ctx context.Context) (bool, error) {
-		_, err := r.dyn.Resource(certificates).Namespace(r.ns).Get(ctx, "example", metav1.GetOptions{})
-		return apierrors.IsNotFound(err), nil
-	}); err != nil {
-		return finding{}, err
-	}
-	second, err := r.dyn.Resource(certificates).Namespace(r.ns).Create(ctx, certificate(r.policy, r.algorithm), metav1.CreateOptions{})
+	second, err := r.recreate(ctx, first.GetUID())
 	if err != nil {
-		return finding{}, err
-	}
-	if err := <-collected; err != nil {
 		return finding{}, err
 	}
 	ready := r.ready(ctx, r.timeout)
@@ -157,6 +148,28 @@ func (r repro) run(ctx context.Context) (finding, error) {
 		return finding{}, err
 	}
 	return finding{mechanism(old, now, string(second.GetUID())), string(first.GetUID()), string(second.GetUID()), ready, old, now}, nil
+}
+
+// recreate deletes the Certificate, polls every 10 ms until it is gone, waits
+// for -pause, and creates the new one.
+func (r repro) recreate(ctx context.Context, old types.UID) (*unstructured.Unstructured, error) {
+	if err := r.dyn.Resource(certificates).Namespace(r.ns).Delete(ctx, "example", metav1.DeleteOptions{PropagationPolicy: &r.propagation}); err != nil {
+		return nil, err
+	}
+	collected := make(chan error, 1)
+	go func() { collected <- r.collectGarbage(ctx, old) }()
+	if err := wait.PollUntilContextTimeout(ctx, 10*time.Millisecond, time.Minute, true, func(ctx context.Context) (bool, error) {
+		_, err := r.dyn.Resource(certificates).Namespace(r.ns).Get(ctx, "example", metav1.GetOptions{})
+		return apierrors.IsNotFound(err), nil
+	}); err != nil {
+		return nil, err
+	}
+	time.Sleep(r.pause)
+	created, err := r.dyn.Resource(certificates).Namespace(r.ns).Create(ctx, certificate(r.policy, r.algorithm), metav1.CreateOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return created, <-collected
 }
 
 // collectGarbage, under -collect, deletes what the old Certificate controls as

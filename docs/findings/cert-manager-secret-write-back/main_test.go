@@ -102,6 +102,42 @@ func TestCollectGarbageReportsADeleteItCannotMake(t *testing.T) {
 	}
 }
 
+func TestRecreateDeletesWithThePolicyAndCreatesAfterThePause(t *testing.T) {
+	old := certificate("Always", "")
+	old.SetNamespace("ns")
+	client := fakeDynamic(old)
+	var gone, created time.Time
+	client.PrependReactor("get", "certificates", func(k8stesting.Action) (bool, runtime.Object, error) {
+		gone = time.Now()
+		return false, nil, nil
+	})
+	client.PrependReactor("create", "certificates", func(k8stesting.Action) (bool, runtime.Object, error) {
+		created = time.Now()
+		return false, nil, nil
+	})
+	r := repro{dyn: client, ns: "ns", policy: "Never", algorithm: "ECDSA", propagation: metav1.DeletePropagationForeground, pause: 50 * time.Millisecond}
+
+	crt, err := r.recreate(context.Background(), "old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var del k8stesting.DeleteAction
+	for _, a := range client.Actions() {
+		if d, ok := a.(k8stesting.DeleteAction); ok {
+			del = d
+		}
+	}
+	if del == nil || del.GetDeleteOptions().PropagationPolicy == nil || *del.GetDeleteOptions().PropagationPolicy != metav1.DeletePropagationForeground {
+		t.Errorf("recreate deleted with %+v, want propagation Foreground", del)
+	}
+	if pause := created.Sub(gone); pause < r.pause {
+		t.Errorf("recreate created %v after it saw the old Certificate gone, want at least %v", pause, r.pause)
+	}
+	if got, _, _ := unstructured.NestedString(crt.Object, "spec", "privateKey", "algorithm"); got != "ECDSA" {
+		t.Errorf("recreate created a Certificate with algorithm %q, want ECDSA", got)
+	}
+}
+
 func fakeDynamic(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
 		map[schema.GroupVersionResource]string{secrets: "SecretList", requests: "CertificateRequestList"}, objects...)

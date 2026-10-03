@@ -65,7 +65,7 @@ func parse(args []string) (repro, int, error) {
 	kubeconfig := flags.String("kubeconfig", os.Getenv("KUBECONFIG"), "the cluster's kubeconfig")
 	runs := flags.Int("runs", 10, "how many runs to make")
 	collect := flags.Bool("collect", false, "once the old Certificate is deleted, delete what it owns as a garbage collector would, on a cluster that runs none")
-	wait := flags.Duration("wait", 30*time.Second, "how long to wait for the new Certificate to stay Ready, and again for its Secret")
+	waitFor := flags.Duration("wait", 30*time.Second, "how long to wait for the new Certificate to stay Ready, and again for its Secret")
 	algorithm := flags.String("algorithm", "ECDSA", "the new Certificate's key algorithm")
 	policy := flags.String("policy", "Never", "both Certificates' rotationPolicy")
 	propagation := flags.String("propagation", "Background", "the old Certificate's delete propagation policy")
@@ -73,7 +73,7 @@ func parse(args []string) (repro, int, error) {
 	dnsName := flags.String("dns", "example.test", "the new Certificate's commonName and DNS name")
 	flags.Parse(args)
 	r, err := newRepro(*kubeconfig)
-	r.collect, r.wait, r.algorithm, r.policy = *collect, *wait, *algorithm, *policy
+	r.collect, r.wait, r.algorithm, r.policy = *collect, *waitFor, *algorithm, *policy
 	r.propagation, r.pause, r.dnsName = metav1.DeletionPropagation(*propagation), *pause, *dnsName
 	return r, *runs, err
 }

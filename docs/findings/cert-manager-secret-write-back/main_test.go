@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/dynamic"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
@@ -327,17 +328,83 @@ func TestRecreateCreatesNothingWhileTheOldCertificateRemains(t *testing.T) {
 	}
 }
 
-func TestRecreateCollectsWhatTheOldCertificateControls(t *testing.T) {
+// Under -collect, the collector races the create, as kube-controller-manager's
+// would. So the collector's list can wait for the create, and the create for
+// the list.
+func TestRecreateCollectsWhatTheOldCertificateControlsAlongsideTheCreate(t *testing.T) {
 	old := certificate("Always", "", "")
 	old.SetNamespace("ns")
 	client := fakeDynamic(old, controlled("Secret", "example-tls", "old"))
-	r := repro{dyn: client, ns: "ns", poll: time.Millisecond, collect: true}
-	if _, err := r.recreate(context.Background(), "old"); err != nil {
-		t.Fatal(err)
+	listing, creating := make(chan struct{}), make(chan struct{})
+	interleaved := hooked{client, func(ctx context.Context, verb string, resource schema.GroupVersionResource) error {
+		switch {
+		case verb == "list" && resource == secrets:
+			close(listing)
+			return closed(ctx, creating)
+		case verb == "create" && resource == certificates:
+			defer close(creating)
+			return closed(ctx, listing)
+		}
+		return nil
+	}}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	r := repro{dyn: interleaved, ns: "ns", poll: time.Millisecond, setupWait: time.Minute, collect: true}
+	if _, err := r.recreate(ctx, "old"); err != nil {
+		t.Fatalf("recreate returned %v, want the collector's list of Secrets to begin before the create and end after it", err)
 	}
 	if _, err := client.Tracker().Get(secrets, "ns", "example-tls"); !apierrors.IsNotFound(err) {
 		t.Errorf("after recreate under -collect, getting the old Certificate's Secret returned %v, want NotFound", err)
 	}
+}
+
+func closed(ctx context.Context, c <-chan struct{}) error {
+	select {
+	case <-c:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// hooked calls before ahead of each list and create it sends. A reactor of
+// the fake cannot block, since the fake holds its lock while it reacts.
+type hooked struct {
+	dynamic.Interface
+	before func(ctx context.Context, verb string, resource schema.GroupVersionResource) error
+}
+
+func (h hooked) Resource(resource schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
+	return hookedResource{h.Interface.Resource(resource), h, resource}
+}
+
+type hookedResource struct {
+	dynamic.NamespaceableResourceInterface
+	client   hooked
+	resource schema.GroupVersionResource
+}
+
+func (h hookedResource) Namespace(ns string) dynamic.ResourceInterface {
+	return hookedCalls{h.NamespaceableResourceInterface.Namespace(ns), h}
+}
+
+type hookedCalls struct {
+	dynamic.ResourceInterface
+	of hookedResource
+}
+
+func (h hookedCalls) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	if err := h.of.client.before(ctx, "list", h.of.resource); err != nil {
+		return nil, err
+	}
+	return h.ResourceInterface.List(ctx, opts)
+}
+
+func (h hookedCalls) Create(ctx context.Context, obj *unstructured.Unstructured, opts metav1.CreateOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	if err := h.of.client.before(ctx, "create", h.of.resource); err != nil {
+		return nil, err
+	}
+	return h.ResourceInterface.Create(ctx, obj, opts, subresources...)
 }
 
 func TestRunReadsEachSecretOnceItsCertificateSettles(t *testing.T) {

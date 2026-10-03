@@ -183,12 +183,20 @@ func TestCertManagersPinnedSequencesReissueUnderRotationPolicyNever(t *testing.T
 	// Draws never set Never, so the example tier runs it only from the
 	// sequences it pins.
 	for _, change := range certificateChanges(t, certManagerSequences) {
-		respecs := change.op.Type == run.OpUpdate && !equalJSON(change.before["spec"], change.after["spec"])
-		if respecs && privateKeyOf(change.before).rotationPolicy == "Never" && privateKeyOf(change.after).rotationPolicy == "Never" {
+		renames := change.op.Type == run.OpUpdate && !slices.Equal(namesOf(change.before), namesOf(change.after))
+		if renames && privateKeyOf(change.before).rotationPolicy == "Never" && privateKeyOf(change.after).rotationPolicy == "Never" {
 			return
 		}
 	}
-	t.Errorf("No sequence in %s updates the spec of a Certificate that stays under rotationPolicy Never.", certManagerSequences)
+	t.Errorf("No sequence in %s updates the names of a Certificate that stays under rotationPolicy Never.", certManagerSequences)
+}
+
+// namesOf are the names a Certificate asks its certificate to carry.
+// cert-manager reissues when they change, and ignores their order.
+func namesOf(certificate map[string]any) []string {
+	commonName, _, _ := unstructured.NestedString(certificate, "spec", "commonName")
+	dnsNames, _, _ := unstructured.NestedStringSlice(certificate, "spec", "dnsNames")
+	return append([]string{commonName}, slices.Sorted(slices.Values(dnsNames))...)
 }
 
 func TestCertManagersSequencesKeepTheAlgorithmUnderRotationPolicyNever(t *testing.T) {

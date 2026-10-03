@@ -231,6 +231,12 @@ func configMapObject(name string, uid types.UID, owners ...metav1.OwnerReference
 	}
 }
 
+func widgetObject(name string, uid types.UID, owners ...metav1.OwnerReference) object {
+	obj := configMapObject(name, uid, owners...)
+	obj.kind, obj.resource = widgetKind, widgetResource
+	return obj
+}
+
 func deletions(t *testing.T, client *fake.FakeMetadataClient) []k8stesting.DeleteActionImpl {
 	t.Helper()
 	var deleted []k8stesting.DeleteActionImpl
@@ -430,6 +436,23 @@ func TestSweepRecordsWhyEachOwnerIsGone(t *testing.T) {
 	lines, _ := recorded(t, c)
 	if len(lines) != 1 || !reflect.DeepEqual(lines[0]["owners"], want) {
 		t.Errorf("The collector recorded %v, want one delete whose owners are\n\t%v", lines, want)
+	}
+}
+
+func TestWriteLogWritesEachDeleteInTheOrderTried(t *testing.T) {
+	c, _, _ := fakeCollector(t)
+	parent := configMapOwner("parent", "uid-parent")
+
+	c.sweep(context.Background(), []object{widgetObject("first", "uid-first", parent)})
+	c.sweep(context.Background(), []object{configMapObject("second", "uid-second", parent)})
+
+	lines, _ := recorded(t, c)
+	var got []string
+	for _, line := range lines {
+		got = append(got, fmt.Sprint(line["kind"], " ", line["name"]))
+	}
+	if want := []string{"toy.botbox/v1/Widget first", "v1/ConfigMap second"}; !slices.Equal(got, want) {
+		t.Errorf("The collector recorded the deletes %q, want %q.", got, want)
 	}
 }
 

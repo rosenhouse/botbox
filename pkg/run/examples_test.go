@@ -22,10 +22,6 @@ func TestEveryExampleSequenceSuitsItsTarget(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		fixtures := map[string]bool{}
-		for _, fixture := range declared.Fixtures {
-			fixtures[observe.KindName(fixture.GroupVersionKind())+" "+fixture.GetName()] = true
-		}
 		hunted := 0
 		err = filepath.WalkDir(filepath.Join(filepath.Dir(path), "sequences"), func(file string, _ fs.DirEntry, err error) error {
 			if err != nil || !strings.HasSuffix(file, ".json") {
@@ -35,24 +31,11 @@ func TestEveryExampleSequenceSuitsItsTarget(t *testing.T) {
 				hunted++
 			}
 			sequence, err := ReadSequence(file)
-			if err == nil {
-				err = validateRun(declared, sequence, Options{Dir: t.TempDir(), Check: Engine{}})
-			}
 			if err != nil {
 				t.Errorf("%s: %v", file, err)
+				return nil
 			}
-			for _, op := range sequence.Ops {
-				switch op.Type {
-				case OpDeleteManaged:
-					if _, err := managedKind(declared, op.Kind); err != nil {
-						t.Errorf("%s: op %d: %v", file, op.Index, err)
-					}
-				case OpUpdateFixture, OpDeleteFixture:
-					if !fixtures[op.fixture()] {
-						t.Errorf("%s: op %d acts on %s, which the target declares no fixture of", file, op.Index, op.fixture())
-					}
-				}
-			}
+			checkSequenceSuits(t, declared, file, sequence)
 			return nil
 		})
 		if err != nil {
@@ -77,11 +60,33 @@ func TestEveryFindingSequenceSuitsItsExample(t *testing.T) {
 			continue
 		}
 		declared, err := target.Load(filepath.Join("../../examples", sequence.Target, "target.yaml"))
-		if err == nil {
-			err = validateRun(declared, sequence, Options{Dir: t.TempDir(), Check: Engine{}})
-		}
 		if err != nil {
 			t.Errorf("%s: %v", path, err)
+			continue
+		}
+		checkSequenceSuits(t, declared, path, sequence)
+	}
+}
+
+func checkSequenceSuits(t *testing.T, declared *target.Target, file string, sequence Sequence) {
+	t.Helper()
+	if err := validateRun(declared, sequence, Options{Dir: t.TempDir(), Check: Engine{}}); err != nil {
+		t.Errorf("%s: %v", file, err)
+	}
+	fixtures := map[string]bool{}
+	for _, fixture := range declared.Fixtures {
+		fixtures[observe.KindName(fixture.GroupVersionKind())+" "+fixture.GetName()] = true
+	}
+	for _, op := range sequence.Ops {
+		switch op.Type {
+		case OpDeleteManaged:
+			if _, err := managedKind(declared, op.Kind); err != nil {
+				t.Errorf("%s: op %d: %v", file, op.Index, err)
+			}
+		case OpUpdateFixture, OpDeleteFixture:
+			if !fixtures[op.fixture()] {
+				t.Errorf("%s: op %d acts on %s, which the target declares no fixture of", file, op.Index, op.fixture())
+			}
 		}
 	}
 }

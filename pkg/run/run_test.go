@@ -819,6 +819,30 @@ func TestTheRunNamespaceIsDeletedOnTheBudgetBoundGivesIt(t *testing.T) {
 	}
 }
 
+// A target sends requests as it stops, and the collector tries deletes until
+// it stops.
+func TestStopWritesTheRecordingsOnceTheRunIsDown(t *testing.T) {
+	dir := t.TempDir()
+	p := proxyThatSaw(t)
+	h := &Harness{dir: dir, Proxy: p, Observer: &observe.Observer{Store: observe.NewStore(observe.Options{})}}
+	h.down.push("stopping the target", func(context.Context) error {
+		resp, err := http.Get(p.URL() + listConfigMaps)
+		if err != nil {
+			return err
+		}
+		return resp.Body.Close()
+	})
+
+	if err := h.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop returned an error: %v", err)
+	}
+
+	written, err := os.ReadFile(filepath.Join(dir, requestsFile))
+	if err != nil || !strings.Contains(string(written), listConfigMaps) {
+		t.Errorf("requests.jsonl holds %q (%v), want the request the target sent as it stopped.", written, err)
+	}
+}
+
 type roundTripper func(*http.Request) (*http.Response, error)
 
 func (f roundTripper) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }

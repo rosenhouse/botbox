@@ -240,7 +240,7 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 }
 
 // Stop takes the run down in the reverse of the order Start brought it up, and
-// writes the run's recordings. Emptying the namespace is the Runner's own
+// then writes the run's recordings. Emptying the namespace is the Runner's own
 // step.
 func (h *Harness) Stop(ctx context.Context) error {
 	return errors.Join(h.down.run(ctx), h.writeRecordings())

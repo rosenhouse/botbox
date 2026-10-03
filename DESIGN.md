@@ -1357,10 +1357,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   rule and no upstream contract, becomes a botbox issue. A candidate that breaks an
   upstream contract becomes a draft under `docs/findings/`, with how many replays failed,
   for botbox's maintainer to file upstream. The draft's directory holds its
-  `sequence.json`, which `make test` loads against the example it names, and the by-hand
-  reproducer where there is one. One that upstream's tracker already holds needs no
-  draft. A draft says whether triage searched the tracker. Where it did not, the
-  maintainer searches before filing.
+  `sequence.json`, which `make test` checks against the example it names and its CRD,
+  and the by-hand reproducer where there is one. One that upstream's tracker already
+  holds needs no draft. A draft says whether triage searched the tracker. Where it did
+  not, the maintainer searches before filing.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
@@ -2497,5 +2497,5 @@ built from source and run as a black-box binary.
   such program needs only client-go, so it lives in the root module, where `go build`,
   `go vet` and `make test` reach it. A module of its own, as each spike has, was
   rejected: it would pin the same libraries a second time. `make test` loads each
-  draft's sequence against the example it names, and fails once the example no longer
-  accepts it.
+  draft's sequence against the example it names, and judges its CRs by the example's
+  CRD, as it does each example's sequences. It fails once either refuses the sequence.

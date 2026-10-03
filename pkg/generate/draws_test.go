@@ -16,6 +16,8 @@ import (
 
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
+	structuralschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
+	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/pruning"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	kinds "k8s.io/apimachinery/pkg/runtime/schema"
@@ -221,20 +223,33 @@ func privateKeyOf(certificate map[string]any) privateKey {
 	return privateKey{cmp.Or(policy, "Always"), cmp.Or(algorithm, "RSA")}
 }
 
-// certificateChange is an update or recreate of a Certificate, and the
-// Certificate before and after it.
-type certificateChange struct {
+// certificateChanges are the updates and recreates of a Certificate in the
+// sequences that patterns match.
+func certificateChanges(t *testing.T, patterns ...string) []crWrite {
+	t.Helper()
+	var changes []crWrite
+	for _, write := range crWrites(t, patterns...) {
+		if write.op.Type == run.OpRecreate || write.op.Type == run.OpUpdate {
+			changes = append(changes, write)
+		}
+	}
+	return changes
+}
+
+// crWrite is a create, update or recreate of a CR, and the CR before and
+// after it. Before is nil where the CR did not exist.
+type crWrite struct {
 	file          string
+	target        *target.Target
 	op            run.Op
 	before, after map[string]any
 }
 
-// certificateChanges replays the Certificates of the sequences that patterns
-// match.
-func certificateChanges(t *testing.T, patterns ...string) []certificateChange {
+// crWrites replays the CRs of the sequences that patterns match.
+func crWrites(t *testing.T, patterns ...string) []crWrite {
 	t.Helper()
-	sample := loadTarget(t, certManagerTarget).Sample.GetName()
-	var changes []certificateChange
+	targets := map[string]*target.Target{}
+	var writes []crWrite
 	for _, pattern := range patterns {
 		files, err := filepath.Glob(pattern)
 		if err != nil || len(files) == 0 {
@@ -245,28 +260,60 @@ func certificateChanges(t *testing.T, patterns ...string) []certificateChange {
 			if err != nil {
 				t.Fatal(err)
 			}
-			certificates := map[string]map[string]any{}
+			declared := targets[sequence.Target]
+			if declared == nil {
+				declared = loadTarget(t, filepath.Join("../../examples", sequence.Target, "target.yaml"))
+				targets[sequence.Target] = declared
+			}
+			crs := map[string]map[string]any{}
 			for _, op := range sequence.Ops {
-				name := cmp.Or(op.CR, sample)
+				name := cmp.Or(op.CR, declared.Sample.GetName())
 				if op.Type == run.OpCreate {
 					name = op.Obj.GetName()
 				}
-				before, existed := certificates[name]
+				before := crs[name]
 				switch op.Type {
 				case run.OpCreate, run.OpRecreate:
-					certificates[name] = op.Obj.Object
+					crs[name] = op.Obj.Object
 				case run.OpUpdate:
-					certificates[name] = run.MergePatch(runtime.DeepCopyJSON(before), op.Patch)
+					crs[name] = run.MergePatch(runtime.DeepCopyJSON(before), op.Patch)
 				case run.OpDelete:
-					delete(certificates, name)
+					delete(crs, name)
+					continue
+				default:
+					continue
 				}
-				if existed && (op.Type == run.OpRecreate || op.Type == run.OpUpdate) {
-					changes = append(changes, certificateChange{file, op, before, certificates[name]})
-				}
+				writes = append(writes, crWrite{file, declared, op, before, crs[name]})
 			}
 		}
 	}
-	return changes
+	return writes
+}
+
+// The Runner stops at an op whose CR the API server refuses, and the API
+// server drops a field the CRD does not declare. Only the example tier runs
+// an example's sequences, and nothing runs a finding's.
+func TestSequencesOnDiskWriteCRsTheirCRDAccepts(t *testing.T) {
+	rules := map[*target.Target]*crdRules{}
+	for _, write := range crWrites(t, "../../examples/*/sequences/*.json", "../../examples/*/sequences/hunt/*.json", "../../docs/findings/*/sequence.json") {
+		if rules[write.target] == nil {
+			schema, err := openAPISchema(write.target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if rules[write.target], err = newCRDRules(schema); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := rules[write.target].refusal(write.after, nil); err != nil {
+			t.Errorf("%s op %d writes a CR the CRD refuses: %v", write.file, write.op.Index, err)
+		}
+		undeclared := pruning.PruneWithOptions(runtime.DeepCopyJSON(write.after), rules[write.target].structural, true,
+			structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true})
+		if len(undeclared) > 0 {
+			t.Errorf("%s op %d writes %v, which the CRD does not declare.", write.file, write.op.Index, undeclared)
+		}
+	}
 }
 
 func TestTheToysSeed2DrawsMoreThanTheShrunkB2Reproducer(t *testing.T) {

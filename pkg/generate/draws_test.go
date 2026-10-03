@@ -17,6 +17,7 @@ import (
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
 	structuralschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
+	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/objectmeta"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/pruning"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -364,8 +365,9 @@ func crWrites(t *testing.T, patterns ...string) []crWrite {
 }
 
 // The Runner stops at an op whose CR the API server refuses, and the API
-// server drops a field the CRD does not declare. Only the example tier runs
-// an example's sequences, and nothing runs a finding's.
+// server drops an unknown metadata field and a field the CRD does not declare.
+// Only the example tier runs an example's sequences, and nothing runs a
+// finding's.
 func TestSequencesOnDiskWriteCRsTheirCRDAccepts(t *testing.T) {
 	rules := map[*target.Target]*crdRules{}
 	for _, write := range crWrites(t, "../../examples/*/sequences/*.json", "../../examples/*/sequences/hunt/*.json", "../../docs/findings/*/sequence.json") {
@@ -381,10 +383,14 @@ func TestSequencesOnDiskWriteCRsTheirCRDAccepts(t *testing.T) {
 		if err := rules[write.target].refusal(write.after, nil); err != nil {
 			t.Errorf("%s op %d writes a CR the CRD refuses: %v", write.file, write.op.Index, err)
 		}
-		undeclared := pruning.PruneWithOptions(runtime.DeepCopyJSON(write.after), rules[write.target].structural, true,
-			structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true})
-		if len(undeclared) > 0 {
-			t.Errorf("%s op %d writes %v, which the CRD does not declare.", write.file, write.op.Index, undeclared)
+		_, _, dropped, err := objectmeta.GetObjectMetaWithOptions(write.after, objectmeta.ObjectMetaOptions{ReturnUnknownFieldPaths: true})
+		if err != nil {
+			t.Errorf("%s op %d writes metadata the API server refuses: %v", write.file, write.op.Index, err)
+		}
+		dropped = append(dropped, pruning.PruneWithOptions(runtime.DeepCopyJSON(write.after), rules[write.target].structural, true,
+			structuralschema.UnknownFieldPathOptions{TrackUnknownFieldPaths: true})...)
+		if len(dropped) > 0 {
+			t.Errorf("%s op %d writes %v, which the API server drops.", write.file, write.op.Index, dropped)
 		}
 	}
 }

@@ -1348,7 +1348,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   `docs/findings/`, with how many replays failed, for botbox's maintainer to file
   upstream. The draft's directory holds its `sequence.json`, which `make test` loads
   against the example it names, and the by-hand reproducer where there is one. One that
-  upstream's tracker already holds needs no draft.
+  upstream's tracker already holds needs no draft. A draft says whether triage searched
+  the tracker. Where it did not, the maintainer searches before filing.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code

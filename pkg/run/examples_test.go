@@ -51,7 +51,7 @@ func TestEveryExampleSequenceSuitsItsTarget(t *testing.T) {
 func TestEveryFindingSequenceSuitsItsExample(t *testing.T) {
 	paths, err := filepath.Glob("../../docs/findings/*/sequence.json")
 	if err != nil || len(paths) == 0 {
-		t.Fatalf("found finding sequences %v: %v", paths, err)
+		t.Fatalf("found finding sequences %v: %v; this test goes with the last draft", paths, err)
 	}
 	for _, path := range paths {
 		sequence, err := ReadSequence(path)

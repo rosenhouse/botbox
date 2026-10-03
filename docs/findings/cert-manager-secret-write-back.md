@@ -1,8 +1,9 @@
 # cert-manager v1.21.2 can give a recreated Certificate the deleted Certificate's private key
 
 This draft is for botbox's maintainer to file at cert-manager. Nobody has searched
-cert-manager's tracker for it. No agent may file it. The issue body follows the rule. Its
-links are relative to this file, so they need botbox's URL before filing.
+cert-manager's tracker for it, so the maintainer searches before filing. No agent may file
+it. The issue body starts below the horizontal rule. Its links are relative to this file,
+so they need botbox's URL before filing.
 
 ---
 
@@ -49,13 +50,15 @@ Paths are relative to cert-manager v1.21.2.
   ownerReference to the new Certificate
   (`pkg/controller/certificates/issuing/internal/secret.go:108-127`). Its doc says "If the
   Secret resource does not exist, it will be created on Apply" (`internal/secret.go:92`).
-- Under `Never`, the key manager generates a key only when the Secret is gone or holds no
-  key. Otherwise it reuses the stored key, or waits for a user when that key does not fit
-  the spec (`pkg/controller/certificates/keymanager/keymanager_controller.go:248-272`).
+- Under `Never`, the key manager generates a key when the Secret is gone, holds no key or
+  holds one it cannot decode. Otherwise it reuses the stored key, or waits for a user when
+  that key does not fit the spec
+  (`pkg/controller/certificates/keymanager/keymanager_controller.go:248-281`).
 
 kube-controller-manager's garbage collector reads the dependent, checks each owner, and
-deletes it with UID and resourceVersion preconditions. It keeps a dependent that names a
-live owner. See Kubernetes v1.37.0,
+deletes it with UID and resourceVersion preconditions. After a Conflict, it retries without
+the resourceVersion only if the ownerReferences did not change. It keeps a dependent that
+names a live owner. See Kubernetes v1.37.0,
 `pkg/controller/garbagecollector/garbagecollector.go:521-577` and `:654`, and
 `operations.go:53-80`.
 
@@ -84,19 +87,20 @@ promise, because the Secret outlives the Certificate it was issued for.
 
 [`cert-manager-secret-write-back/main.go`](cert-manager-secret-write-back/main.go) needs a
 cluster with cert-manager's CRDs and cert-manager running with
-`--enable-certificate-owner-ref=true`. Each run makes a namespace and a self-signed Issuer,
-then:
+`--enable-certificate-owner-ref=true`. Each run makes a namespace and a self-signed Issuer.
+Then:
 
-1. creates Certificate `example` (`secretName: example-tls`, the default RSA key, the
-   `-policy` given) and waits for Ready;
-2. records the Secret's UID and the sha256 of its `tls.key`;
-3. deletes the Certificate and polls until it is gone;
-4. at once creates `example` again with the `-algorithm` and `-policy` given;
-5. waits 30 s for Ready, then reads the Secret's UID, controller owner and key hash.
+1. It creates Certificate `example` with `secretName: example-tls`, the default RSA key and
+   the `-policy` given, and waits for Ready.
+2. It records the Secret's UID and the sha256 of its `tls.key`.
+3. It deletes the Certificate and polls until it is gone.
+4. At once it creates `example` again with the `-algorithm` and `-policy` given.
+5. It waits up to 30 s for Ready and up to 30 s more for the Secret. Then it reads the
+   Secret's UID, controller owner and key hash.
 
 A run keeps the key when the Secret still holds the old one. The UID tells the mechanism: a
-new UID is a write-back, and the old UID owned by the new Certificate is a re-point. The
-program never writes the Secret itself. From a botbox checkout:
+new UID is a write-back, and the old UID owned by the new Certificate is a re-point.
+Without `-collect`, the program never writes the Secret. From a botbox checkout:
 
 ```sh
 go run ./docs/findings/cert-manager-secret-write-back -kubeconfig "$KUBECONFIG" -runs 1 -algorithm RSA -policy Always
@@ -120,13 +124,11 @@ cert-manager ran out of cluster with `--leader-elect=false`.
   to see it.
 - envtest runs no garbage collector. There, `-collect` starts once the old Certificate is
   deleted. It lists the Secret and the CertificateRequests that Certificate controls, and
-  deletes each with UID and resourceVersion preconditions. A version of `-collect` that
-  deleted the Secret before the create began kept the key in none of 20 runs. One that
-  started with the create kept it in 9 of 10, all by re-point.
-- botbox's garbage collector also deletes with UID and resourceVersion preconditions. Its
-  proxy sits between cert-manager and the API server. Seed 1043's first two ops are the
-  recreate above with other `dnsNames` and `duration`. The hunt run that found it kept the
-  key by re-point.
+  deletes each with UID and resourceVersion preconditions. It does not retry.
+- botbox's garbage collector also deletes with UID and resourceVersion preconditions.
+  botbox's proxy sits between cert-manager and the API server. Seed 1043's first two ops
+  are the recreate above with other `dnsNames` and `duration`. The hunt run that found it
+  kept the key by re-point.
 
 ## Possible fix
 
@@ -185,8 +187,8 @@ missing Secret.
 On kind, with `-runs 1 -algorithm RSA -policy Always` and a fresh cert-manager for each
 run, the stock and the patched controller took turns for 20 runs:
 
-- The stock controller kept the key in 6 of 10 runs, all by write-back. One more run ended
-  `Ready=True` with no Secret.
+- The stock controller kept the key in 6 of 10 runs, all by write-back. One more run read
+  the Secret before cert-manager's apply landed, so it went unclassified.
 - The patched controller kept it in none of 10. In 8 of them it logged the Conflict above,
   and then generated a new key.
 
@@ -203,10 +205,9 @@ collector deletes it.
 
 ## Unknown
 
-- Nobody has searched cert-manager's tracker for this.
 - cert-manager may mean to adopt a Secret whose owner was deleted.
 - On kind, only the first recreate after cert-manager started kept the key. The cause is
   unknown.
 - No run put cert-manager in cluster or under leader election.
-- With the patch, the tests of `pkg/controller/certificates/issuing/...` pass. No other
-  cert-manager test ran against it.
+- Only the tests of `pkg/controller/certificates/issuing/...` ran against the patch, and
+  they pass.

@@ -167,3 +167,21 @@ func TestCertificateSetsTheKeysPolicyAndAlgorithm(t *testing.T) {
 		}
 	}
 }
+
+func TestSecretOnceThereWaitsForTheSecret(t *testing.T) {
+	client := kubefake.NewClientset()
+	gets := 0
+	client.PrependReactor("get", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		gets++
+		if gets < 3 {
+			return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "example-tls")
+		}
+		return true, &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: "example-tls", Namespace: "ns", UID: "secret-uid"}}, nil
+	})
+	if got, err := (repro{core: client, ns: "ns", timeout: time.Minute}).secretOnceThere(context.Background()); err != nil || got.UID != "secret-uid" {
+		t.Errorf("secretOnceThere() = %+v, %v; want the Secret once it exists", got, err)
+	}
+	if got, err := (repro{core: kubefake.NewClientset(), ns: "ns", timeout: 300 * time.Millisecond}).secretOnceThere(context.Background()); err != nil || got != (secret{}) {
+		t.Errorf("secretOnceThere() without a Secret = %+v, %v; want none and no error", got, err)
+	}
+}

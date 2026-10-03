@@ -135,7 +135,7 @@ func (r repro) run(ctx context.Context) (finding, error) {
 		return finding{}, err
 	}
 	ready := r.ready(ctx, r.timeout)
-	now, err := r.secret(ctx)
+	now, err := r.secretOnceThere(ctx)
 	if err != nil {
 		return finding{}, err
 	}
@@ -187,6 +187,21 @@ func (r repro) ready(ctx context.Context, timeout time.Duration) string {
 		return seen == "True Ready", nil
 	})
 	return seen
+}
+
+// secretOnceThere waits for the Secret to exist, because a Certificate can turn
+// Ready while cert-manager still applies its Secret.
+func (r repro) secretOnceThere(ctx context.Context) (secret, error) {
+	var s secret
+	err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, r.timeout, true, func(context.Context) (bool, error) {
+		var err error
+		s, err = r.secret(ctx)
+		return s.UID != "", err
+	})
+	if wait.Interrupted(err) {
+		err = nil
+	}
+	return s, err
 }
 
 func (r repro) secret(ctx context.Context) (secret, error) {

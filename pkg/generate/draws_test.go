@@ -238,13 +238,37 @@ func namesOf(certificate map[string]any) []string {
 }
 
 func TestCertManagersSequencesKeepTheAlgorithmUnderRotationPolicyNever(t *testing.T) {
-	// Under Never, cert-manager keeps a stored key that another algorithm
-	// does not match, and waits for a user.
 	for _, change := range certificateChanges(t, certManagerSequences, certManagerHuntSequences) {
-		before, after := privateKeyOf(change.before), privateKeyOf(change.after)
-		if after.rotationPolicy == "Never" && after.algorithm != before.algorithm {
+		if changesAlgorithmUnderNever(change) {
 			t.Errorf("%s op %d moves spec.privateKey.algorithm from %s to %s under rotationPolicy Never.",
-				change.file, change.op.Index, before.algorithm, after.algorithm)
+				change.file, change.op.Index, privateKeyOf(change.before).algorithm, privateKeyOf(change.after).algorithm)
+		}
+	}
+}
+
+// Under Never, cert-manager keeps a stored key that another algorithm does not
+// match, and waits for a user.
+func changesAlgorithmUnderNever(change crWrite) bool {
+	before, after := privateKeyOf(change.before), privateKeyOf(change.after)
+	return after.rotationPolicy == "Never" && after.algorithm != before.algorithm
+}
+
+func TestChangesAlgorithmUnderNeverReadsAnUnsetAlgorithmAsRSA(t *testing.T) {
+	key := func(privateKey map[string]any) map[string]any {
+		return map[string]any{"spec": map[string]any{"privateKey": privateKey}}
+	}
+	for _, c := range []struct {
+		name          string
+		before, after map[string]any
+		want          bool
+	}{
+		{"an unset algorithm, then RSA", key(map[string]any{"rotationPolicy": "Never"}), key(map[string]any{"rotationPolicy": "Never", "algorithm": "RSA"}), false},
+		{"an unset algorithm, then ECDSA", key(map[string]any{"rotationPolicy": "Never"}), key(map[string]any{"rotationPolicy": "Never", "algorithm": "ECDSA"}), true},
+		{"ECDSA, then RSA into Never", key(map[string]any{"algorithm": "ECDSA"}), key(map[string]any{"rotationPolicy": "Never"}), true},
+		{"ECDSA, then RSA out of Never", key(map[string]any{"rotationPolicy": "Never", "algorithm": "ECDSA"}), key(map[string]any{}), false},
+	} {
+		if got := changesAlgorithmUnderNever(crWrite{before: c.before, after: c.after}); got != c.want {
+			t.Errorf("changesAlgorithmUnderNever(%s) = %t, want %t.", c.name, got, c.want)
 		}
 	}
 }
@@ -274,29 +298,45 @@ func certificateChanges(t *testing.T, patterns ...string) []crWrite {
 
 // A recreate soon after a delete can keep the deleted Certificate's key. Once
 // the Runner settles, the key is gone.
-func TestCertificateChangesCountARecreateAfterADeleteUntilTheRunnerSettles(t *testing.T) {
-	certificate := `{"apiVersion": "cert-manager.io/v1", "kind": "Certificate", "metadata": {"name": "example"},
-		"spec": {"secretName": "example-tls", "commonName": "example.test", "issuerRef": {"name": "selfsigned"},
-		"privateKey": {"rotationPolicy": "Never", "algorithm": "ECDSA"}}}`
+func TestCRWritesCountADeletedCRAsThereUntilTheRunnerSettles(t *testing.T) {
+	certificate := func(name, commonName string) string {
+		return `{"apiVersion": "cert-manager.io/v1", "kind": "Certificate", "metadata": {"name": "` + name + `"},
+			"spec": {"secretName": "` + name + `-tls", "commonName": "` + commonName + `", "issuerRef": {"name": "selfsigned"}}}`
+	}
 	file := filepath.Join(t.TempDir(), "sequence.json")
 	if err := os.WriteFile(file, []byte(`{"seed": 1, "target": "cert-manager", "ops": [
-		{"i": 0, "t": "create", "obj": `+certificate+`},
-		{"i": 1, "t": "delete"},
-		{"i": 2, "t": "recreate", "obj": `+certificate+`},
-		{"i": 3, "t": "recreate", "obj": `+certificate+`},
-		{"i": 4, "t": "update", "patch": {"spec": {"dnsNames": ["example.test"]}}},
-		{"i": 5, "t": "delete", "noSettle": true},
-		{"i": 6, "t": "recreate", "obj": `+certificate+`},
-		{"i": 7, "t": "delete", "noSettle": true},
-		{"i": 8, "t": "settle"},
-		{"i": 9, "t": "recreate", "obj": `+certificate+`}]}`), 0o644); err != nil {
+		{"i": 0, "t": "create", "obj": `+certificate("example", "a.test")+`},
+		{"i": 1, "t": "create", "obj": `+certificate("example-2", "b.test")+`},
+		{"i": 2, "t": "update", "cr": "example-2", "patch": {"spec": {"commonName": "c.test"}}},
+		{"i": 3, "t": "delete"},
+		{"i": 4, "t": "recreate", "obj": `+certificate("example", "a.test")+`},
+		{"i": 5, "t": "recreate", "obj": `+certificate("example", "d.test")+`},
+		{"i": 6, "t": "delete", "noSettle": true},
+		{"i": 7, "t": "recreate", "noSettle": true, "obj": `+certificate("example", "a.test")+`},
+		{"i": 8, "t": "update", "patch": {"spec": {"commonName": "e.test"}}},
+		{"i": 9, "t": "delete", "noSettle": true},
+		{"i": 10, "t": "settle"},
+		{"i": 11, "t": "recreate", "obj": `+certificate("example", "a.test")+`}]}`), 0o644); err != nil {
 		t.Fatal(err)
+	}
+	commonName := func(certificate map[string]any) string {
+		name, _, _ := unstructured.NestedString(certificate, "spec", "commonName")
+		return cmp.Or(name, "none")
+	}
+	var writes []string
+	for _, write := range crWrites(t, file) {
+		writes = append(writes, strconv.Itoa(write.op.Index)+": "+commonName(write.before)+" to "+commonName(write.after))
+	}
+	want := []string{"0: none to a.test", "1: none to b.test", "2: b.test to c.test", "4: none to a.test",
+		"5: a.test to d.test", "7: d.test to a.test", "8: a.test to e.test", "11: none to a.test"}
+	if !slices.Equal(writes, want) {
+		t.Errorf("crWrites finds\n%s\nwant\n%s", strings.Join(writes, "\n"), strings.Join(want, "\n"))
 	}
 	var changed []int
 	for _, change := range certificateChanges(t, file) {
 		changed = append(changed, change.op.Index)
 	}
-	if want := []int{3, 4, 6}; !slices.Equal(changed, want) {
+	if want := []int{2, 5, 7, 8}; !slices.Equal(changed, want) {
 		t.Errorf("certificateChanges finds ops %v, want %v.", changed, want)
 	}
 }

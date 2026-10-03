@@ -38,28 +38,37 @@ var (
 )
 
 func main() {
-	kubeconfig := flag.String("kubeconfig", os.Getenv("KUBECONFIG"), "the cluster's kubeconfig")
-	runs := flag.Int("runs", 10, "how many runs to make")
-	collect := flag.Bool("collect", false, "once the old Certificate is deleted, delete what it owns as a garbage collector would, on a cluster that runs none")
-	timeout := flag.Duration("wait", 30*time.Second, "how long the new Certificate has to become Ready")
-	algorithm := flag.String("algorithm", "ECDSA", "the new Certificate's key algorithm")
-	policy := flag.String("policy", "Never", "both Certificates' rotationPolicy")
-	propagation := flag.String("propagation", "Background", "the old Certificate's delete propagation policy")
-	pause := flag.Duration("pause", 0, "how long to wait between seeing the old Certificate gone and creating the new one")
-	dnsName := flag.String("dns", "example.test", "the new Certificate's commonName and DNS name")
-	flag.Parse()
-	r, err := newRepro(*kubeconfig)
+	r, runs, err := parse(os.Args[1:])
 	check(err)
-	r.collect, r.timeout, r.algorithm, r.policy = *collect, *timeout, *algorithm, *policy
-	r.propagation, r.pause, r.dnsName = metav1.DeletionPropagation(*propagation), *pause, *dnsName
 	counts := map[string]int{}
-	for i := 1; i <= *runs; i++ {
+	for i := 1; i <= runs; i++ {
 		found, err := r.run(context.Background())
 		check(err)
 		fmt.Printf("run %d: %s\n", i, found)
 		counts[found.mechanism]++
 	}
 	fmt.Println(counts)
+}
+
+// parse returns the repro and the number of runs that args ask for.
+func parse(args []string) (repro, int, error) {
+	flags := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	kubeconfig := flags.String("kubeconfig", os.Getenv("KUBECONFIG"), "the cluster's kubeconfig")
+	runs := flags.Int("runs", 10, "how many runs to make")
+	collect := flags.Bool("collect", false, "once the old Certificate is deleted, delete what it owns as a garbage collector would, on a cluster that runs none")
+	timeout := flags.Duration("wait", 30*time.Second, "how long the new Certificate has to become Ready")
+	algorithm := flags.String("algorithm", "ECDSA", "the new Certificate's key algorithm")
+	policy := flags.String("policy", "Never", "both Certificates' rotationPolicy")
+	propagation := flags.String("propagation", "Background", "the old Certificate's delete propagation policy")
+	pause := flags.Duration("pause", 0, "how long to wait between seeing the old Certificate gone and creating the new one")
+	dnsName := flags.String("dns", "example.test", "the new Certificate's commonName and DNS name")
+	if err := flags.Parse(args); err != nil {
+		return repro{}, 0, err
+	}
+	r, err := newRepro(*kubeconfig)
+	r.collect, r.timeout, r.algorithm, r.policy = *collect, *timeout, *algorithm, *policy
+	r.propagation, r.pause, r.dnsName = metav1.DeletionPropagation(*propagation), *pause, *dnsName
+	return r, *runs, err
 }
 
 type repro struct {

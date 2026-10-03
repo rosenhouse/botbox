@@ -23,7 +23,42 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 )
 
+func TestParseReadsEveryFlag(t *testing.T) {
+	kubeconfig := writeKubeconfig(t)
+	for _, c := range []struct {
+		args []string
+		want repro
+		runs int
+	}{
+		{nil, repro{timeout: 30 * time.Second, algorithm: "ECDSA", policy: "Never", propagation: metav1.DeletePropagationBackground, dnsName: "example.test"}, 10},
+		{
+			[]string{"-runs", "3", "-collect", "-wait", "5s", "-algorithm", "RSA", "-policy", "Always", "-propagation", "Foreground", "-pause", "200ms", "-dns", "other.test"},
+			repro{collect: true, timeout: 5 * time.Second, algorithm: "RSA", policy: "Always", propagation: metav1.DeletePropagationForeground, pause: 200 * time.Millisecond, dnsName: "other.test"},
+			3,
+		},
+	} {
+		r, runs, err := parse(append([]string{"-kubeconfig", kubeconfig}, c.args...))
+		if err != nil || r.core == nil || r.dyn == nil {
+			t.Fatalf("parse(%q) = %+v, %v; want clients for the kubeconfig", c.args, r, err)
+		}
+		r.core, r.dyn = nil, nil
+		if r != c.want || runs != c.runs {
+			t.Errorf("parse(%q) = %+v and %d runs, want %+v and %d", c.args, r, runs, c.want, c.runs)
+		}
+	}
+}
+
 func TestNewReproLeavesTheClientUnthrottled(t *testing.T) {
+	r, err := newRepro(writeKubeconfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limiter := r.core.CoreV1().RESTClient().GetRateLimiter(); limiter != nil {
+		t.Errorf("the client is rate limited (%T); a throttled create misses the window the bug needs", limiter)
+	}
+}
+
+func writeKubeconfig(t *testing.T) string {
 	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
 	if err := os.WriteFile(kubeconfig, []byte(`apiVersion: v1
 kind: Config
@@ -34,13 +69,7 @@ current-context: c
 `), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	r, err := newRepro(kubeconfig)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if limiter := r.core.CoreV1().RESTClient().GetRateLimiter(); limiter != nil {
-		t.Errorf("the client is rate limited (%T); a throttled create misses the window the bug needs", limiter)
-	}
+	return kubeconfig
 }
 
 func TestMechanismTellsHowTheOldKeySurvived(t *testing.T) {

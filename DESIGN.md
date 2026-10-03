@@ -1352,11 +1352,15 @@ the proxy; the `Image` launcher. Separate design addendum.
   family is checked in only once it passes the pinned controller.
 - **Triage.** A hunt run that fails is a candidate, not a bug. Triage replays it three
   times, reproduces it by hand against envtest unless only botbox's proxy can inject its
-  faults, reads upstream's code path and searches upstream's tracker. A candidate that no
-  replay reproduces, or that breaks a botbox rule and no upstream contract, becomes a
-  botbox issue. A candidate that breaks an upstream contract becomes a draft under
-  `docs/findings/`, with its sequence and how many replays failed, for botbox's
-  maintainer to file upstream. One that upstream's tracker already holds needs no draft.
+  faults, and reads upstream's code path. It searches upstream's tracker where the
+  maintainer allows that. A candidate that no replay reproduces, or that breaks a botbox
+  rule and no upstream contract, becomes a botbox issue. A candidate that breaks an
+  upstream contract becomes a draft under `docs/findings/`, with how many replays failed,
+  for botbox's maintainer to file upstream. The draft's directory holds its
+  `sequence.json`, which `make test` loads against the example it names, and the by-hand
+  reproducer where there is one. One that upstream's tracker already holds needs no
+  draft. A draft says whether triage searched the tracker. Where it did not, the
+  maintainer searches before filing.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
@@ -2487,3 +2491,11 @@ built from source and run as a black-box binary.
   delete. A kubeconfig cluster runs its own garbage collector, so botbox writes no file
   there. The lines are kept in memory and written as the run ends, as the other
   recordings are.
+- **D@63 A findings draft carries its reproducers.** Upstream readers do not run botbox.
+  So a draft's directory holds, beside the botbox sequence, a program that reproduces
+  the find on any cluster, unless only botbox's proxy can inject its faults. The first
+  such program needs only client-go, so it lives in the root module, where `go build`,
+  `go vet` and `make test` reach it. A module of its own, as each spike has, was
+  rejected: it would pin the same libraries a second time. `make test` loads each
+  draft's sequence against the example it names, and fails once the example no longer
+  accepts it.

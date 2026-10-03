@@ -1,7 +1,8 @@
 # cert-manager v1.21.2 can give a recreated Certificate the deleted Certificate's private key
 
 This draft is for botbox's maintainer to file at cert-manager. Nobody has searched
-cert-manager's tracker for it. No agent may file it. The issue body follows the rule.
+cert-manager's tracker for it. No agent may file it. The issue body follows the rule. Its
+links are relative to this file, so they need botbox's URL before filing.
 
 ---
 
@@ -95,7 +96,7 @@ then:
 
 A run keeps the key when the Secret still holds the old one. The UID tells the mechanism: a
 new UID is a write-back, and the old UID owned by the new Certificate is a re-point. The
-program never writes the Secret itself.
+program never writes the Secret itself. From a botbox checkout:
 
 ```sh
 go run ./docs/findings/cert-manager-secret-write-back -kubeconfig "$KUBECONFIG" -runs 1 -algorithm RSA -policy Always
@@ -107,21 +108,21 @@ cert-manager ran out of cluster with `--leader-elect=false`.
 | --- | --- | --- | --- | --- | --- | --- |
 | kind v0.33.0, node v1.37.0 | kube-controller-manager | `Never`, ECDSA | 72 | 4 | 2 | 2 |
 | kind v0.33.0, node v1.37.0 | kube-controller-manager | `Never`, RSA | 28 | 6 | 5 | 1 |
-| kind v0.33.0, node v1.37.0 | kube-controller-manager | `Always`, RSA | 8 | 5 | 5 | 0 |
+| kind v0.33.0, node v1.37.0 | kube-controller-manager | `Always`, RSA | 18 | 11 | 11 | 0 |
 | envtest 1.37.0 | the program's `-collect` | `Never`, ECDSA | 10 | 8 | 0 | 8 |
 | envtest 1.37.0, through botbox | botbox's | `Never`, ECDSA: [`sequence.json`](cert-manager-secret-write-back/sequence.json) | 8 | 3 | 3 | 0 |
 | envtest 1.37.0, through botbox | botbox's | `Never`, ECDSA: the hunt's seed 1043 | 17 | 5 | 4 | 1 |
 
 - With ECDSA, every run that kept the key ended `Ready=False` with reason `SecretMismatch`.
-  With RSA, every one ended `Ready=True`.
-- On kind, every kept key came on the first recreate after cert-manager started: 15 of 25
+  With RSA, every one ended `Ready=True`. No run ended with the old Secret uncollected.
+- On kind, every kept key came on the first recreate after cert-manager started: 21 of 35
   such runs kept it, and none of the 83 later runs did. Restart cert-manager before each run
   to see it.
 - envtest runs no garbage collector. There, `-collect` starts once the old Certificate is
   deleted. It lists the Secret and the CertificateRequests that Certificate controls, and
-  deletes each with UID and resourceVersion preconditions. When `-collect` instead deleted
-  the Secret before the create began, none of 20 runs kept the key. When it started with
-  the create, 9 of 10 did, all by re-point.
+  deletes each with UID and resourceVersion preconditions. A version of `-collect` that
+  deleted the Secret before the create began kept the key in none of 20 runs. One that
+  started with the create kept it in 9 of 10, all by re-point.
 - botbox's garbage collector also deletes with UID and resourceVersion preconditions. Its
   proxy sits between cert-manager and the API server. Seed 1043's first two ops are the
   recreate above with other `dnsNames` and `duration`. The hunt run that found it kept the
@@ -130,12 +131,65 @@ cert-manager ran out of cluster with `--leader-elect=false`.
 ## Possible fix
 
 `ensureSecretData` can hand `UpdateData` the UID of the Secret it read at
-`secret_manager.go:40`, and `UpdateData` can put that UID in the apply
-(`applyCnf.WithUID(...)`). An apply that names a UID and finds no object fails with
-Conflict: "uid mismatch: the provided object specified uid %s, and no existing object was
-found" (k8s.io/apiserver v0.37.0, `pkg/endpoints/handlers/patch.go:612-618`). The
-controller's retry then reads that the Secret is gone. Issuance
-(`issuing_controller.go:464`) would pass no UID, so it still creates a missing Secret.
+`secret_manager.go:40`, and `UpdateData` can put that UID in the apply. An apply that names
+a UID and finds no object fails with Conflict: "uid mismatch: the provided object specified
+uid %s, and no existing object was found" (k8s.io/apiserver v0.37.0,
+`pkg/endpoints/handlers/patch.go:612-618`). The controller's retry then reads that the
+Secret is gone. Issuance (`issuing_controller.go:464`) passes no UID, so it still creates a
+missing Secret.
+
+```diff
+--- a/pkg/controller/certificates/issuing/internal/secret.go
++++ b/pkg/controller/certificates/issuing/internal/secret.go
+@@ -25,6 +25,7 @@
+ 	corev1 "k8s.io/api/core/v1"
+ 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+ 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
++	"k8s.io/apimachinery/pkg/types"
+ 	applycorev1 "k8s.io/client-go/applyconfigurations/core/v1"
+ 	applymetav1 "k8s.io/client-go/applyconfigurations/meta/v1"
+ 	coreclient "k8s.io/client-go/kubernetes/typed/core/v1"
+@@ -66,6 +67,9 @@
+ 	PrivateKey, Certificate, CA         []byte // #nosec G117 -- holds runtime certificate material; not a hardcoded secret
+ 	CertificateName                     string
+ 	IssuerName, IssuerKind, IssuerGroup string
++	// UID, if set, is the UID of the Secret the data was read from. The apply
++	// then fails rather than create a Secret that has since been deleted.
++	UID types.UID
+ }
+ 
+ // NewSecretsManager returns a new SecretsManager. Setting
+@@ -122,6 +126,10 @@
+ 		})
+ 	}
+ 
++	if data.UID != "" {
++		applyCnf = applyCnf.WithUID(data.UID)
++	}
++
+ 	log.V(logf.DebugLevel).Info("applying secret")
+ 
+ 	_, err = s.secretClient.Secrets(secret.Namespace).Apply(ctx, applyCnf, applyOpts)
+--- a/pkg/controller/certificates/issuing/secret_manager.go
++++ b/pkg/controller/certificates/issuing/secret_manager.go
+@@ -73,6 +73,7 @@
+ 		IssuerName:      secret.Annotations[cmapi.IssuerNameAnnotationKey],
+ 		IssuerKind:      secret.Annotations[cmapi.IssuerKindAnnotationKey],
+ 		IssuerGroup:     secret.Annotations[cmapi.IssuerGroupAnnotationKey],
++		UID:             secret.UID,
+ 	}
+ 
+ 	// Check whether the Certificate's Secret has correct output format and
+```
+
+On kind, with `-runs 1 -algorithm RSA -policy Always` and a fresh cert-manager for each
+run, the stock and the patched controller took turns for 20 runs:
+
+- The stock controller kept the key in 6 of 10 runs, all by write-back. One more run ended
+  `Ready=True` with no Secret.
+- The patched controller kept it in none of 10. In 8 of them it logged the Conflict above,
+  and then generated a new key.
+
 Against kube-apiserver 1.37.0, a forced apply of a Secret behaved like this:
 
 - with the live Secret's UID, it updated the Secret;
@@ -143,14 +197,16 @@ Against kube-apiserver 1.37.0, a forced apply of a Secret behaved like this:
 - with the UID of a Secret that another of the same name had replaced, it failed with
   `metadata.uid: field is immutable`.
 
-This stops the write-back only. A fix for the re-point would have cert-manager leave a
+The patch does not stop the re-point. A fix for that would have cert-manager leave a
 Secret alone while its controller ownerReference names another UID, so that the garbage
 collector deletes it.
 
 ## Unknown
 
-- Whether cert-manager's tracker already holds this.
-- Whether cert-manager means to adopt a Secret whose owner was deleted.
-- Why, on kind, only the first recreate after cert-manager started kept the key.
-- How often this happens with cert-manager in cluster, under leader election.
-- Whether the fix works in cert-manager. Nobody built a patched cert-manager.
+- Nobody has searched cert-manager's tracker for this.
+- cert-manager may mean to adopt a Secret whose owner was deleted.
+- On kind, only the first recreate after cert-manager started kept the key. The cause is
+  unknown.
+- No run put cert-manager in cluster or under leader election.
+- With the patch, the tests of `pkg/controller/certificates/issuing/...` pass. No other
+  cert-manager test ran against it.

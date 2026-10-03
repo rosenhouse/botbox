@@ -91,11 +91,11 @@ names a live owner. See Kubernetes v1.37.0,
 ## Documented behaviour
 
 - The help for `--enable-certificate-owner-ref`
-  (`cmd/controller/app/options/options.go:181-183`): "When this flag is enabled, the secret
-  will be automatically removed when the certificate resource is deleted."
-- The doc of `rotationPolicy` (`pkg/apis/certmanager/v1/types_certificate.go:353-356`): "If
-  set to `Never`, a private key will only be generated if one does not already exist in the
-  target `spec.secretName`."
+  (`cmd/controller/app/options/options.go:181-183`) says: "When this flag is enabled, the
+  secret will be automatically removed when the certificate resource is deleted."
+- The doc of `rotationPolicy` (`pkg/apis/certmanager/v1/types_certificate.go:353-356`) says:
+  "If set to `Never`, a private key will only be generated if one does not already exist in
+  the target `spec.secretName`."
 
 Under the default background cascade, the garbage collector does delete the Secret. The
 write-back then creates it again from cert-manager's cache, which breaks the flag's promise.
@@ -162,17 +162,19 @@ turns.
 - With ECDSA under `Never`, every kept key ended `Ready=False` with reason
   `SecretMismatch`, and still `Issuing`.
 - Under the foreground cascade, cert-manager never logged `applying Secret data`.
-- In the out-of-cluster rows that kept keys, the first run of a batch kept it in 12 of 17,
-  and later runs in 85 of 153.
 - No run ended with the old Secret uncollected.
 
-The window is short. With `-policy Always -algorithm RSA`, these pauses before the create
-kept the key in:
+On this idle cluster the window is short. With `-policy Always -algorithm RSA`, a pause
+before the create kept the key in fewer runs:
 
-- none: 29 of 50 runs, the first row and the batches interleaved with the pauses below;
-- 5 ms: 2 of 20;
-- 10 ms: 1 of 20;
-- 20 ms, 50 ms, 100 ms and 200 ms: none of 20 each.
+| `-pause` | runs | key kept |
+| --- | --- | --- |
+| none | 50 | 29 |
+| `5ms` | 20 | 2 |
+| `10ms` | 20 | 1 |
+| `20ms`, `50ms`, `100ms` or `200ms` | 20 each | 0 |
+
+The 50 runs without a pause are the first row's 30 and 20 that took turns with the pauses.
 
 `kubectl replace --force` (kubectl v1.37.0) deletes the Certificate, sees it gone, and
 creates it 35 to 55 ms after the delete. With the first row's Certificate, it kept the key
@@ -188,8 +190,8 @@ re-point. [`sequence.json`](cert-manager-secret-write-back/sequence.json), the r
 the table's ECDSA row, kept it in 3 of 8 botbox runs, all by write-back.
 
 On a cluster without a garbage collector, the program's `-collect` deletes what the old
-Certificate controls, as kube-controller-manager would. On envtest with
-`-policy Always -algorithm RSA`, it kept the key in 3 of 10 runs.
+Certificate controls, much as kube-controller-manager would, but without its retry after a
+Conflict. On envtest with `-policy Always -algorithm RSA`, it kept the key in 3 of 10 runs.
 
 ## Possible fix
 
@@ -247,9 +249,9 @@ missing Secret.
 
 Against kube-apiserver 1.37.0, a forced apply of a Secret behaved like this:
 
-- with the live Secret's UID, it updated the Secret;
-- with the UID of a deleted Secret, it failed with that Conflict and created nothing;
-- with the UID of a Secret that another of the same name had replaced, it failed with
+- With the live Secret's UID, it updated the Secret.
+- With the UID of a deleted Secret, it failed with that Conflict and created nothing.
+- With the UID of a Secret that another of the same name had replaced, it failed with
   `metadata.uid: field is immutable`.
 
 The patch closes only the issuing controller's write-back. A build of v1.21.2 with it took
@@ -271,10 +273,11 @@ turns with the stock batches above, on the table's first five rows:
 
 Two paths stay open:
 
-- The key manager's cached read (`keymanager_controller.go:250`). The key manager could read
-  the Secret from the API server before it reuses a key under `Never`.
-- The re-point. cert-manager could leave a Secret alone while its controller ownerReference
-  names another UID, so that the garbage collector deletes it.
+- The key manager still reads the Secret from its cache (`keymanager_controller.go:250`). It
+  could read the Secret from the API server before it reuses a key under `Never`.
+- The issuing controller still re-points a Secret that the garbage collector has yet to
+  delete. cert-manager could leave a Secret alone while its controller ownerReference names
+  another UID, so that the garbage collector deletes it.
 
 No run tested either change.
 

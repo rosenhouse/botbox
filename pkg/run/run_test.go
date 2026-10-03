@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
 
+	"github.com/rosenhouse/botbox/pkg/cluster"
 	"github.com/rosenhouse/botbox/pkg/launch"
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
@@ -840,6 +841,20 @@ func TestStopWritesTheRecordingsOnceTheRunIsDown(t *testing.T) {
 	written, err := os.ReadFile(filepath.Join(dir, requestsFile))
 	if err != nil || !strings.Contains(string(written), listConfigMaps) {
 		t.Errorf("requests.jsonl holds %q (%v), want the request the target sent as it stopped.", written, err)
+	}
+}
+
+func TestStopReportsARecordingItCannotWrite(t *testing.T) {
+	for _, file := range []string{requestsFile, objectsFile, collectorFile} {
+		dir := t.TempDir()
+		if err := os.Mkdir(filepath.Join(dir, file), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		h := &Harness{dir: dir, Proxy: proxyThatSaw(t), Observer: &observe.Observer{Store: observe.NewStore(observe.Options{})},
+			collector: &cluster.Collector{}}
+		if err := h.Stop(t.Context()); err == nil || !strings.Contains(err.Error(), file) {
+			t.Errorf("With a directory at %s, Stop returned %v, want an error that names it.", file, err)
+		}
 	}
 }
 

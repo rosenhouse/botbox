@@ -1,11 +1,9 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"io"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -361,9 +359,15 @@ func TestRunReadsEachSecretOnceItsCertificateSettles(t *testing.T) {
 			if got.mechanism != kept || got.oldCertificate != "certificate-1" || got.newCertificate != "certificate-2" || got.ready != "True Ready" || got.old.UID != "secret-1" || got.now.UID != wantNow {
 				t.Errorf("run() = %v, want %s from certificate-1 to certificate-2, Ready True Ready, Secret secret-1 then %s", got, kept, wantNow)
 			}
-			for i, want := range []*unstructured.Unstructured{certificate("Always", "", "example.test"), certificate("Always", "ECDSA", "other.test")} {
-				if got := cluster.created[i].Object["spec"]; !reflect.DeepEqual(got, want.Object["spec"]) {
-					t.Errorf("run created Certificate %d with spec %v, want %v", i+1, got, want.Object["spec"])
+			issuer := map[string]any{"kind": "Issuer", "name": "selfsigned"}
+			for i, want := range []map[string]any{
+				{"secretName": "example-tls", "commonName": "example.test", "dnsNames": []any{"example.test"}, "issuerRef": issuer,
+					"privateKey": map[string]any{"rotationPolicy": "Never"}},
+				{"secretName": "example-tls", "commonName": "other.test", "dnsNames": []any{"other.test"}, "issuerRef": issuer,
+					"privateKey": map[string]any{"rotationPolicy": "Never", "algorithm": "ECDSA"}},
+			} {
+				if got := cluster.created[i].Object["spec"]; !reflect.DeepEqual(got, want) {
+					t.Errorf("run created Certificate %d with spec %v, want %v", i+1, got, want)
 				}
 			}
 			for _, a := range slices.Concat(cluster.core.Actions(), cluster.dyn.Actions()) {
@@ -565,7 +569,7 @@ func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
 
 func (f *fakeCertManager) repro(timeout time.Duration) repro {
 	return repro{core: f.core, dyn: f.dyn, poll: time.Millisecond, settle: f.settle, setupWait: time.Minute, timeout: timeout,
-		policy: "Always", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationBackground}
+		policy: "Never", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationBackground}
 }
 
 func tlsSecret(uid, owner types.UID, key string) *corev1.Secret {
@@ -686,27 +690,6 @@ func withConditions(status, reason, issuing string) *unstructured.Unstructured {
 	}
 	crt.Object["status"] = map[string]any{"conditions": conditions}
 	return crt
-}
-
-func TestCertificateSetsTheKeysPolicyAndAlgorithmAndTheDNSName(t *testing.T) {
-	for _, c := range []struct {
-		policy, algorithm, dnsName string
-		want                       map[string]any
-	}{
-		{"Never", "", "", map[string]any{"rotationPolicy": "Never"}},
-		{"Always", "ECDSA", "other.test", map[string]any{"rotationPolicy": "Always", "algorithm": "ECDSA"}},
-	} {
-		crt := certificate(c.policy, c.algorithm, c.dnsName)
-		got, _, _ := unstructured.NestedMap(crt.Object, "spec", "privateKey")
-		if !maps.Equal(got, c.want) {
-			t.Errorf("certificate(%q, %q, %q) has privateKey %v, want %v", c.policy, c.algorithm, c.dnsName, got, c.want)
-		}
-		wantName := cmp.Or(c.dnsName, "example.test")
-		names, _, _ := unstructured.NestedStringSlice(crt.Object, "spec", "dnsNames")
-		if common, _, _ := unstructured.NestedString(crt.Object, "spec", "commonName"); common != wantName || !slices.Equal(names, []string{wantName}) {
-			t.Errorf("certificate(%q, %q, %q) has commonName %q and dnsNames %v, want %s for both", c.policy, c.algorithm, c.dnsName, common, names, wantName)
-		}
-	}
 }
 
 func TestSecretOnceThereWaitsForTheSecret(t *testing.T) {

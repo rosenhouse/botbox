@@ -1345,8 +1345,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   faults, reads upstream's code path and searches upstream's tracker. A candidate that no
   replay reproduces, or that breaks a botbox rule and no upstream contract, becomes a
   botbox issue. A candidate that breaks an upstream contract becomes a draft under
-  `docs/findings/`, with its sequence and how many replays failed, for botbox's
-  maintainer to file upstream. One that upstream's tracker already holds needs no draft.
+  `docs/findings/`, with how many replays failed, for botbox's maintainer to file
+  upstream. The draft's directory holds its `sequence.json`, which `make test` loads
+  against the example it names, and the by-hand reproducer where there is one. One that
+  upstream's tracker already holds needs no draft.
 - **Network assumptions.** Every tier below kind reaches only `proxy.golang.org`,
   `sum.golang.org`, `github.com`, `raw.githubusercontent.com` and GitHub's release-asset
   hosts (`*.githubusercontent.com`). No tier assumes a container registry: the Claude Code
@@ -2436,3 +2438,11 @@ built from source and run as a black-box binary.
 - **D86 The envtest tier's CI budget is ten minutes.** On CI, `pkg/run` alone took 309 s,
   past the five minutes the tier had. The maintainer chose a larger budget over shorter
   tests or a tier split across jobs.
+- **D@63 A findings draft carries its reproducers.** Upstream readers do not run botbox.
+  So a draft's directory holds, beside the botbox sequence, a program that reproduces
+  the find on any cluster, unless only botbox's proxy can inject its faults. The first
+  such program needs only client-go, so it lives in the root module, where `go build`,
+  `go vet` and `make test` reach it. A module of its own, as each spike has, was
+  rejected: it would pin the same libraries a second time. `make test` loads each
+  draft's sequence against the example it names, and fails once the example no longer
+  accepts it.

@@ -513,6 +513,21 @@ func TestASweepCutShortByStopReportsNoFailure(t *testing.T) {
 	}
 }
 
+func TestAStoppedCollectorSendsAndRecordsNoDelete(t *testing.T) {
+	c, client, _ := fakeCollector(t)
+	stopped, stop := context.WithCancel(context.Background())
+	stop()
+
+	c.sweep(stopped, []object{configMapObject("child", "uid-child", configMapOwner("parent", "uid-parent"))})
+
+	if deleted := deletions(t, client); len(deleted) != 0 {
+		t.Errorf("The stopped collector sent the deletes %v.", deleted)
+	}
+	if lines, _ := recorded(t, c); len(lines) != 0 {
+		t.Errorf("The stopped collector recorded %v, want no delete.", lines)
+	}
+}
+
 // An owner the collector cannot read counts as live for every dependent that
 // names it, whatever UID each of them carries.
 func TestSweepKeepsChildrenOfAnUnreadableOwner(t *testing.T) {

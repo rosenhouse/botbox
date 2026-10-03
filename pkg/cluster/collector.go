@@ -310,8 +310,12 @@ func (c *Collector) liveOwners(ctx context.Context, objects []object) owners {
 // delete removes obj unless it changed since the collector read it, and
 // records the attempt. The preconditions catch a name taken over by another
 // object, and a dependent adopted by a live owner in the meantime; either
-// change brings a watch event of its own, and with it another sweep.
+// change brings a watch event of its own, and with it another sweep. A
+// stopped collector sends no delete.
 func (c *Collector) delete(ctx context.Context, obj object, owners []goneOwner) {
+	if ctx.Err() != nil {
+		return
+	}
 	uid, version := obj.meta.UID, obj.meta.ResourceVersion
 	preconditions := metav1.Preconditions{UID: &uid, ResourceVersion: &version}
 	at := time.Now()
@@ -349,7 +353,8 @@ type deletion struct {
 	// server accepted the delete, which a finalizer can still hold. Conflict
 	// says the object changed since the collector read it.
 	Result string `json:"result"`
-	// Error is what the API server answered, unless it accepted the delete.
+	// Error says why the delete failed: the API server's answer, or the
+	// cancellation where Stop cut the call short.
 	Error string `json:"error,omitempty"`
 }
 

@@ -2,6 +2,7 @@ package generate
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"flag"
 	"maps"
@@ -15,6 +16,8 @@ import (
 
 	"github.com/rosenhouse/botbox/pkg/run"
 	"github.com/rosenhouse/botbox/pkg/target"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	kinds "k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -171,23 +174,88 @@ func TestCertManagersExampleSeedsDrawWhatTheMakefileSays(t *testing.T) {
 	}
 }
 
-func TestCertManagersPinnedSequencesSetRotationPolicyNever(t *testing.T) {
+const (
+	certManagerSequences     = "../../examples/cert-manager/sequences/*.json"
+	certManagerHuntSequences = "../../examples/cert-manager/sequences/hunt/*.json"
+)
+
+func TestCertManagersPinnedSequencesReissueUnderRotationPolicyNever(t *testing.T) {
 	// Draws never set Never, so the example tier runs it only from the
 	// sequences it pins.
-	files, err := filepath.Glob("../../examples/cert-manager/sequences/*.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range files {
-		sequence, err := run.ReadSequence(file)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if slices.Contains(carriedAt(sequence, "spec", "privateKey", "rotationPolicy"), any("Never")) {
+	for _, change := range keyChanges(t, certManagerSequences) {
+		if change.op.Type == run.OpUpdate && change.before.rotationPolicy == "Never" && change.after.rotationPolicy == "Never" {
 			return
 		}
 	}
-	t.Errorf("None of %v sets spec.privateKey.rotationPolicy to Never.", files)
+	t.Errorf("No sequence in %s updates a Certificate that stays under rotationPolicy Never.", certManagerSequences)
+}
+
+func TestCertManagersSequencesKeepTheAlgorithmUnderRotationPolicyNever(t *testing.T) {
+	// Under Never, cert-manager keeps a stored key that another algorithm
+	// does not match, and waits for a user.
+	for _, change := range keyChanges(t, certManagerSequences, certManagerHuntSequences) {
+		if change.after.rotationPolicy == "Never" && change.after.algorithm != change.before.algorithm {
+			t.Errorf("%s op %d moves spec.privateKey.algorithm from %s to %s under rotationPolicy Never.",
+				change.file, change.op.Index, change.before.algorithm, change.after.algorithm)
+		}
+	}
+}
+
+// privateKey is what a Certificate asks of its key, with cert-manager's
+// defaults filled in.
+type privateKey struct{ rotationPolicy, algorithm string }
+
+func privateKeyOf(certificate map[string]any) privateKey {
+	policy, _, _ := unstructured.NestedString(certificate, "spec", "privateKey", "rotationPolicy")
+	algorithm, _, _ := unstructured.NestedString(certificate, "spec", "privateKey", "algorithm")
+	return privateKey{cmp.Or(policy, "Always"), cmp.Or(algorithm, "RSA")}
+}
+
+// keyChange is an update or recreate of a Certificate, and its key before
+// and after.
+type keyChange struct {
+	file          string
+	op            run.Op
+	before, after privateKey
+}
+
+// keyChanges replays the Certificates of the sequences that patterns match.
+func keyChanges(t *testing.T, patterns ...string) []keyChange {
+	t.Helper()
+	sample := loadTarget(t, certManagerTarget).Sample.GetName()
+	var changes []keyChange
+	for _, pattern := range patterns {
+		files, err := filepath.Glob(pattern)
+		if err != nil || len(files) == 0 {
+			t.Fatalf("%s matches no sequence: %v", pattern, err)
+		}
+		for _, file := range files {
+			sequence, err := run.ReadSequence(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			certificates := map[string]map[string]any{}
+			for _, op := range sequence.Ops {
+				name := cmp.Or(op.CR, sample)
+				if op.Obj != nil {
+					name = op.Obj.GetName()
+				}
+				before, existed := certificates[name]
+				switch op.Type {
+				case run.OpCreate, run.OpRecreate:
+					certificates[name] = op.Obj.Object
+				case run.OpUpdate:
+					certificates[name] = run.MergePatch(runtime.DeepCopyJSON(before), op.Patch)
+				case run.OpDelete:
+					delete(certificates, name)
+				}
+				if existed && (op.Type == run.OpRecreate || op.Type == run.OpUpdate) {
+					changes = append(changes, keyChange{file, op, privateKeyOf(before), privateKeyOf(certificates[name])})
+				}
+			}
+		}
+	}
+	return changes
 }
 
 func TestTheToysSeed2DrawsMoreThanTheShrunkB2Reproducer(t *testing.T) {

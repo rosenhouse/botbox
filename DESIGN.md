@@ -2460,7 +2460,7 @@ built from source and run as a black-box binary.
   generates a key or reuses the deleted Certificate's. It deletes the Secret, after which
   `Never` lets cert-manager generate a key, and moves to ECDSA under `Always`. It passed 12
   of 12 runs. No pinned sequence reaches the branch where cert-manager waits for a user,
-  because G4 fails there. A unit test refuses a checked-in sequence that changes the
+  because G4 fails there. A unit test refuses a pinned or hunt sequence that changes the
   algorithm under `Never`. Dropping `algorithm` from `mutate` was rejected, because it
   loses ECDSA and Ed25519, which 544 of the 2000 draws set, and changes the ops of 1877
   draws. Overlaying it to `RSA` was rejected, because it loses them too and changes the

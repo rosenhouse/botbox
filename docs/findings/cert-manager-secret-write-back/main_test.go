@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"maps"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -19,6 +21,26 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 )
+
+func TestNewReproLeavesTheClientUnthrottled(t *testing.T) {
+	kubeconfig := filepath.Join(t.TempDir(), "kubeconfig")
+	if err := os.WriteFile(kubeconfig, []byte(`apiVersion: v1
+kind: Config
+clusters: [{name: c, cluster: {server: "https://127.0.0.1:1"}}]
+users: [{name: u, user: {token: t}}]
+contexts: [{name: c, context: {cluster: c, user: u}}]
+current-context: c
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r, err := newRepro(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if limiter := r.core.CoreV1().RESTClient().GetRateLimiter(); limiter != nil {
+		t.Errorf("the client is rate limited (%T); a throttled create misses the window the bug needs", limiter)
+	}
+}
 
 func TestMechanismTellsHowTheOldKeySurvived(t *testing.T) {
 	old := secret{UID: "old-secret", Owner: "old-certificate", Key: "rsa"}

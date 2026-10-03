@@ -44,9 +44,9 @@ func main() {
 	algorithm := flag.String("algorithm", "ECDSA", "the new Certificate's key algorithm")
 	policy := flag.String("policy", "Never", "both Certificates' rotationPolicy")
 	flag.Parse()
-	config, err := clientcmd.BuildConfigFromFlags("", *kubeconfig)
+	r, err := newRepro(*kubeconfig)
 	check(err)
-	r := repro{core: kubernetes.NewForConfigOrDie(config), dyn: dynamic.NewForConfigOrDie(config), collect: *collect, timeout: *timeout, algorithm: *algorithm, policy: *policy}
+	r.collect, r.timeout, r.algorithm, r.policy = *collect, *timeout, *algorithm, *policy
 	counts := map[string]int{}
 	for i := 1; i <= *runs; i++ {
 		found, err := r.run(context.Background())
@@ -65,6 +65,23 @@ type repro struct {
 	algorithm string
 	policy    string
 	ns        string
+}
+
+// newRepro's clients are unthrottled. client-go's default of 5 requests a second
+// would put about 200 ms between the delete and the create, and that closes
+// the window.
+func newRepro(kubeconfig string) (repro, error) {
+	config, err := clientcmd.BuildConfigFromFlags("", kubeconfig)
+	if err != nil {
+		return repro{}, err
+	}
+	config.QPS = -1
+	core, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return repro{}, err
+	}
+	dyn, err := dynamic.NewForConfig(config)
+	return repro{core: core, dyn: dyn}, err
 }
 
 type finding struct {

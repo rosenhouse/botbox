@@ -812,14 +812,12 @@ func TestEachWaitEndsAReadThatHangs(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.ns, r.wait = "ns", 100*time.Millisecond
-	for name, wait := range map[string]func(context.Context) error{
-		"ready":           func(ctx context.Context) error { r.ready(ctx, r.wait); return nil },
-		"secretOnceThere": func(ctx context.Context) error { _, err := r.secretOnceThere(ctx); return err },
-	} {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		if err := wait(ctx); err != nil || ctx.Err() != nil {
-			t.Errorf("%s returned %v, and its context ended: %v; want it to end a read that hangs after -wait", name, err, ctx.Err())
-		}
-		cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	if got := r.ready(ctx, r.wait); got != "unset" || ctx.Err() != nil {
+		t.Errorf("ready() = %q, and its context ended: %v; want \"unset\" once -wait ends a read that hangs", got, ctx.Err())
+	}
+	if got, err := r.secretOnceThere(ctx); err != nil || got != (secret{}) || ctx.Err() != nil {
+		t.Errorf("secretOnceThere() = %+v, %v, and its context ended: %v; want no Secret and no error once -wait ends a read that hangs", got, err, ctx.Err())
 	}
 }

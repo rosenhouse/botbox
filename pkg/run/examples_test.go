@@ -63,3 +63,25 @@ func TestEveryExampleSequenceSuitsItsTarget(t *testing.T) {
 		}
 	}
 }
+
+// A findings draft keeps the sequence that replays its find on an example.
+func TestEveryFindingSequenceSuitsItsExample(t *testing.T) {
+	paths, err := filepath.Glob("../../docs/findings/*/sequence.json")
+	if err != nil || len(paths) == 0 {
+		t.Fatalf("found finding sequences %v: %v", paths, err)
+	}
+	for _, path := range paths {
+		sequence, err := ReadSequence(path)
+		if err != nil {
+			t.Errorf("%s: %v", path, err)
+			continue
+		}
+		declared, err := target.Load(filepath.Join("../../examples", sequence.Target, "target.yaml"))
+		if err == nil {
+			err = validateRun(declared, sequence, Options{Dir: t.TempDir(), Check: Engine{}})
+		}
+		if err != nil {
+			t.Errorf("%s: %v", path, err)
+		}
+	}
+}

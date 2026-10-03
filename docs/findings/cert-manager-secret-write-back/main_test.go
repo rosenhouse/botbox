@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -114,6 +115,41 @@ func TestReportStopsAtARunsError(t *testing.T) {
 	})
 	if err == nil || err.Error() != "no Issuer" || runs != 1 {
 		t.Errorf("report() made %d runs and returned %v, want 1 run and the run's error", runs, err)
+	}
+}
+
+// main exits, so it runs in a child process.
+func TestMainExitsWithWhatStoppedIt(t *testing.T) {
+	if args := os.Getenv("REPRO_ARGS"); args != "" {
+		os.Args = append([]string{"repro"}, strings.Fields(args)...)
+		main()
+		return
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"Forbidden","message":"namespaces is forbidden","code":403}`))
+	}))
+	defer server.Close()
+	forbidden := writeKubeconfig(t, server.URL)
+	for _, c := range []struct {
+		args, want string
+		exit       int
+	}{
+		{"-kubeconfig " + forbidden + " -runs 0", "map[]", 0},
+		{"-kubeconfig " + filepath.Join(t.TempDir(), "missing") + " -runs 0", "no such file", 1},
+		{"-kubeconfig " + forbidden + " -runs 1", "namespaces is forbidden", 1},
+	} {
+		child := exec.Command(os.Args[0], "-test.run=^TestMainExitsWithWhatStoppedIt$")
+		child.Env = append(os.Environ(), "REPRO_ARGS="+c.args, "KUBECONFIG=", "HOME="+t.TempDir(), "KUBERNETES_SERVICE_HOST=")
+		out, err := child.CombinedOutput()
+		exit := 0
+		if failed := (*exec.ExitError)(nil); errors.As(err, &failed) {
+			exit = failed.ExitCode()
+		}
+		if exit != c.exit || !strings.Contains(string(out), c.want) {
+			t.Errorf("main with %s exited %d and wrote\n%s\nwant exit %d and %q", c.args, exit, out, c.exit, c.want)
+		}
 	}
 }
 
@@ -246,6 +282,26 @@ func TestRecreateLooksForTheOldCertificateAtOnce(t *testing.T) {
 	}
 }
 
+func TestRecreateCreatesNothingWhileTheOldCertificateRemains(t *testing.T) {
+	old := certificate("Always", "", "")
+	old.SetNamespace("ns")
+	client := fakeDynamic(old)
+	client.PrependReactor("delete", "certificates", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, nil
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_, err := (repro{dyn: client, ns: "ns", poll: time.Millisecond}).recreate(ctx, "old")
+	for _, a := range client.Actions() {
+		if a.GetVerb() == "create" {
+			t.Errorf("recreate created a Certificate while the old one remained, and returned %v", err)
+		}
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("recreate returned %v, want the context's error", err)
+	}
+}
+
 func TestRecreateCollectsWhatTheOldCertificateControls(t *testing.T) {
 	old := certificate("Always", "", "")
 	old.SetNamespace("ns")
@@ -263,10 +319,11 @@ func TestRunReadsEachSecretOnceItsCertificateSettles(t *testing.T) {
 	for _, kept := range []string{"write-back", "re-point"} {
 		t.Run(kept, func(t *testing.T) {
 			cluster := newFakeCertManager(kept, 50*time.Millisecond)
-			r := repro{core: cluster.core, dyn: cluster.dyn, poll: time.Millisecond, settle: cluster.settle, timeout: 5 * time.Second,
-				policy: "Always", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationBackground}
+			r := cluster.repro(5 * time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
 
-			got, err := r.run(context.Background())
+			got, err := r.run(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -282,22 +339,96 @@ func TestRunReadsEachSecretOnceItsCertificateSettles(t *testing.T) {
 					t.Errorf("run created Certificate %d with privateKey %v, want %v", i+1, got, want)
 				}
 			}
+			for _, a := range slices.Concat(cluster.core.Actions(), cluster.dyn.Actions()) {
+				if a.GetResource().Resource != "namespaces" && a.GetNamespace() != "write-back-1" {
+					t.Errorf("run sent %s %s to namespace %q, want write-back-1", a.GetVerb(), a.GetResource().Resource, a.GetNamespace())
+				}
+			}
+			if _, err := cluster.core.Tracker().Get(corev1.SchemeGroupVersion.WithResource("namespaces"), "", "write-back-1"); !apierrors.IsNotFound(err) {
+				t.Errorf("after run, getting its namespace returned %v, want NotFound", err)
+			}
 		})
 	}
 }
 
-// fakeCertManager plays cert-manager and a garbage collector. A Certificate is
-// Ready with an issuance in flight on its first two reads, and settles from
-// then on. The Secret is missing until the first Certificate settles. It holds
-// a new key until the second settles, and then the old key as kept says.
+func TestRunReturnsTheErrorOfACallThatFails(t *testing.T) {
+	for _, c := range []struct {
+		call, verb, resource string
+		// created is how many Certificates exist before the call.
+		created int
+		collect bool
+	}{
+		{"namespace create", "create", "namespaces", 0, false},
+		{"Issuer create", "create", "issuers", 0, false},
+		{"first Certificate create", "create", "certificates", 0, false},
+		{"old Secret read", "get", "secrets", 1, false},
+		{"Certificate delete", "delete", "certificates", 1, false},
+		{"new Certificate create", "create", "certificates", 1, false},
+		{"collector's list", "list", "secrets", 1, true},
+		{"new Secret read", "get", "secrets", 2, false},
+	} {
+		t.Run(c.call, func(t *testing.T) {
+			cluster := newFakeCertManager("write-back", 50*time.Millisecond)
+			failed := false
+			fail := func(k8stesting.Action) (bool, runtime.Object, error) {
+				if failed || len(cluster.created) < c.created {
+					return false, nil, nil
+				}
+				failed = true
+				return true, nil, apierrors.NewForbidden(corev1.Resource(c.resource), "", errors.New("denied"))
+			}
+			cluster.core.PrependReactor(c.verb, c.resource, fail)
+			cluster.dyn.PrependReactor(c.verb, c.resource, fail)
+			r := cluster.repro(5 * time.Second)
+			r.collect = c.collect
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			if _, err := r.run(ctx); !apierrors.IsForbidden(err) {
+				t.Errorf("run() returned %v, want the Forbidden error", err)
+			}
+		})
+	}
+}
+
+func TestRunStopsWhenTheFirstCertificateIsNotReady(t *testing.T) {
+	cluster := newFakeCertManager("write-back", 50*time.Millisecond)
+	cluster.dyn.PrependReactor("create", "issuers", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, nil
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if _, err := cluster.repro(5 * time.Second).run(ctx); err == nil || err.Error() != "the first Certificate is not Ready: False IssuerNotFound" {
+		t.Errorf("run() returned %v, want the first Certificate's Ready condition", err)
+	}
+}
+
+// -wait bounds the wait for the new Certificate. The first one has a minute.
+func TestRunWaitsForTheNewCertificateAsLongAsWaitSays(t *testing.T) {
+	cluster := newFakeCertManager("never Ready", 50*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	got, err := cluster.repro(150 * time.Millisecond).run(ctx)
+	if err != nil || got.ready != "False SecretMismatch, Issuing" || ctx.Err() != nil {
+		t.Errorf("run() = %v, %v, and its context ended: %v; want the new Certificate's last Ready condition after -wait", got, err, ctx.Err())
+	}
+}
+
+// fakeCertManager plays cert-manager and a garbage collector. A Certificate
+// whose Issuer exists is Ready with an issuance in flight on its first two
+// reads, and settles from then on. Under "never Ready", the second one waits
+// for a user instead. The Secret is missing until the first Certificate
+// settles. It holds a new key until the second settles, is missing on the next
+// read, and then holds the old key as kept says.
 type fakeCertManager struct {
-	core    *kubefake.Clientset
-	dyn     *dynamicfake.FakeDynamicClient
-	settle  time.Duration
-	created []*unstructured.Unstructured
-	reads   map[types.UID]int
-	settled map[types.UID]time.Time
-	early   []types.UID
+	core        *kubefake.Clientset
+	dyn         *dynamicfake.FakeDynamicClient
+	settle      time.Duration
+	created     []*unstructured.Unstructured
+	reads       map[types.UID]int
+	settled     map[types.UID]time.Time
+	early       []types.UID
+	wentMissing bool
 }
 
 func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
@@ -319,13 +450,21 @@ func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
 			return true, nil, err
 		}
 		crt := o.(*unstructured.Unstructured)
+		issuerName, _, _ := unstructured.NestedString(crt.Object, "spec", "issuerRef", "name")
+		issuer, err := f.dyn.Tracker().Get(issuers, action.GetNamespace(), issuerName)
+		_, selfSigned, _ := unstructured.NestedMap(objectOrEmpty(issuer, err), "spec", "selfSigned")
 		f.reads[crt.GetUID()]++
-		issuing := f.reads[crt.GetUID()] <= 2
-		if !issuing && f.settled[crt.GetUID()].IsZero() {
+		ready, reason, issuing := "True", "Ready", f.reads[crt.GetUID()] <= 2
+		switch {
+		case !selfSigned:
+			ready, reason, issuing = "False", "IssuerNotFound", false
+		case kept == "never Ready" && crt.GetUID() == "certificate-2":
+			ready, reason, issuing = "False", "SecretMismatch", true
+		case !issuing && f.settled[crt.GetUID()].IsZero():
 			f.settled[crt.GetUID()] = time.Now()
 		}
 		crt.Object["status"] = map[string]any{"conditions": []any{
-			map[string]any{"type": "Ready", "status": "True", "reason": "Ready"},
+			map[string]any{"type": "Ready", "status": ready, "reason": reason},
 			map[string]any{"type": "Issuing", "status": map[bool]string{true: "True", false: "False"}[issuing]},
 		}}
 		return true, crt, nil
@@ -343,12 +482,27 @@ func newFakeCertManager(kept string, settle time.Duration) *fakeCertManager {
 			return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "example-tls")
 		case !settled:
 			return true, tlsSecret("secret-2", "certificate-2", "new key"), nil
+		case !f.wentMissing:
+			f.wentMissing = true
+			return true, nil, apierrors.NewNotFound(corev1.Resource("secrets"), "example-tls")
 		case kept == "write-back":
 			return true, tlsSecret("secret-2", "certificate-2", "old key"), nil
 		}
 		return true, tlsSecret("secret-1", "certificate-2", "old key"), nil
 	})
 	return f
+}
+
+func (f *fakeCertManager) repro(timeout time.Duration) repro {
+	return repro{core: f.core, dyn: f.dyn, poll: time.Millisecond, settle: f.settle, timeout: timeout,
+		policy: "Always", algorithm: "ECDSA", dnsName: "other.test", propagation: metav1.DeletePropagationBackground}
+}
+
+func objectOrEmpty(o runtime.Object, err error) map[string]any {
+	if err != nil {
+		return nil
+	}
+	return o.(*unstructured.Unstructured).Object
 }
 
 func tlsSecret(uid, owner types.UID, key string) *corev1.Secret {

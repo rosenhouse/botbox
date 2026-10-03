@@ -114,9 +114,9 @@ narrow what generation draws to what your controller and your webhooks accept:
   An int-or-string field needs an overlay that says which it is: `type: integer`, or
   `type: string` with a `pattern` or an `enum`.
 - Leave out a value under which a later change leaves your controller waiting for a user,
-  because `ready` must hold after each op. Under `rotationPolicy: Never`, cert-manager keeps
-  a stored key that a later `algorithm` does not match. So its example draws the policy only
-  as `Always`, and a pinned sequence runs `Never`.
+  because `ready` must hold within `timeouts.settle` of each change. Under
+  `rotationPolicy: Never`, cert-manager keeps a stored key that a later `algorithm` does not
+  match. So its example draws the policy only as `Always`, and a pinned sequence runs `Never`.
 
 botbox exits 2 on a path or an overlay keyword it cannot draw from, and on a path where the CRD
 refuses every value botbox draws into your sample. If the API server still refuses a CR, as a

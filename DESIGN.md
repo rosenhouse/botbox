@@ -2448,16 +2448,20 @@ built from source and run as a black-box binary.
   `Never` and later updates its algorithm, and it failed G4 in 3 of 3 runs. A scan of
   seeds 0-1999 finds 10 that update their way there. Hunt seed 1043 got there through a
   recreate, when cert-manager kept the deleted Certificate's Secret or wrote it back.
-  `target.yaml` cannot state a rule across ops, so an overlay draws the policy only as
-  `Always`. Of seeds 0-1999, 414 draws change, each only from `Never` to `Always`, and no
-  draw's ops change. The example tier's seed 27 loses its `Never`, so
-  `sequences/rotation-never.json` runs `Never` on every pull request. It creates a
-  Certificate under `Never` and reissues it with the stored key. It recreates the
+  Triage classified the write-back as an upstream contract break, and
+  `docs/findings/cert-manager-secret-write-back.md` drafts its report. Under `Always`,
+  and under `Never` with the same algorithm, the write-back still happens but G4 passes,
+  so draws no longer catch it. `target.yaml` cannot state a rule across ops, so an overlay
+  draws the policy only as `Always`. Of seeds 0-1999, 414 draws change, each only from
+  `Never` to `Always`, and no draw's ops change. The example tier's seed 27 loses its
+  `Never`, so `sequences/rotation-never.json` runs `Never` on every pull request. It
+  creates a Certificate under `Never` and reissues it with the stored key. It recreates the
   Certificate under `Never` with the same algorithm, which passes whether cert-manager
   generates a key or reuses the deleted Certificate's. It deletes the Secret, after which
   `Never` lets cert-manager generate a key, and moves to ECDSA under `Always`. It passed 12
   of 12 runs. No pinned sequence reaches the branch where cert-manager waits for a user,
-  because G4 fails there. Dropping `algorithm` from `mutate` was rejected, because it
+  because G4 fails there. A unit test refuses a checked-in sequence that changes the
+  algorithm under `Never`. Dropping `algorithm` from `mutate` was rejected, because it
   loses ECDSA and Ed25519, which 544 of the 2000 draws set, and changes the ops of 1877
   draws. Overlaying it to `RSA` was rejected, because it loses them too and changes the
   ops of 150 draws. Dropping `rotationPolicy` from `mutate` was rejected, because it covers

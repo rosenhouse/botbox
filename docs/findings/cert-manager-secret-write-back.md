@@ -17,9 +17,10 @@ need botbox's URL before filing.
 botbox, a black-box test harness for Kubernetes controllers, found this in cert-manager
 v1.21.2 with `--enable-certificate-owner-ref=true`.
 
-A client deletes a Certificate with the default background cascade. Within about 10 ms it
-creates one with the same name and `secretName`. The new Certificate's Secret then often
-holds the deleted Certificate's private key. It gets there in one of two ways:
+A client deletes a Certificate and creates one with the same name and `secretName`. The new
+Certificate can reach cert-manager before cert-manager's Secret informer has seen the
+garbage collector delete the Secret. The new Certificate's Secret then often holds the
+deleted Certificate's private key. It gets there in one of two ways:
 
 - **Write-back.** The garbage collector deletes the Secret. cert-manager then creates it
   again, with a new UID, from the copy still in its informer cache. Either the issuing
@@ -38,10 +39,15 @@ What follows depends on the new Certificate's spec:
 - If the spec asks for another key algorithm under `Never`, the new Certificate stays
   `Ready=False` with reason `SecretMismatch`, waiting for a user.
 
-So a client that recreates a Certificate within about 10 ms, to get a new key, can keep the
-old one. On an idle kind cluster, `kubectl replace --force` is too slow for that. A
-foreground cascade (`kubectl delete --cascade=foreground`) closes the window. The old
-Certificate then goes only after the garbage collector has deleted its Secret.
+So a client that recreates a Certificate to get a new key can keep the old one. How quickly
+it must recreate depends on how far cert-manager's Secret informer lags. On an idle kind
+cluster, only a create within about 10 ms of the delete kept the key, so
+`kubectl replace --force` kept none. A foreground cascade
+(`kubectl delete --cascade=foreground`) kept none there either. It deletes the Secret
+before the Certificate, but cert-manager's cache does not wait for the garbage collector.
+So the cascade adds only its own duration, 15 to 41 ms on that cluster. With
+cert-manager's Secret watch held 100 ms at each delete, `kubectl replace --force` kept the
+key in 19 of 20 tries, and a foreground cascade in 39 of 40 runs.
 
 ## Code path
 
@@ -177,8 +183,31 @@ before the create kept the key in fewer runs:
 The 50 runs without a pause are the first row's 30 and 20 that took turns with the pauses.
 
 `kubectl replace --force` (kubectl v1.37.0) deletes the Certificate, sees it gone, and
-creates it 35 to 55 ms after the delete. With the first row's Certificate, it kept the key
+creates it 35 to 58 ms after the delete. With the first row's Certificate, it kept the key
 in none of 20 tries.
+
+cert-manager's Secret informer sets the window, not the client. In the batches below,
+cert-manager ran out of cluster behind a proxy. At each `DELETED` event on one of
+cert-manager's Secret watches, the proxy held that watch for a set time, and later events
+queued behind it. The reproducer and kubectl went to the API server directly. The
+reproducer ran with `-algorithm RSA -propagation Foreground`, and kubectl replaced the first
+row's Certificate. Each cell counts the runs that kept the key:
+
+| cert-manager's Secret watch | `-policy Always` | `-policy Never` | `kubectl replace --force` |
+| --- | --- | --- | --- |
+| not held | 0 of 20 | 0 of 20 | 0 of 20 |
+| held 50 ms at each delete | 8 of 10 | 10 of 10 | not run |
+| held 100 ms at each delete | 19 of 20 | 20 of 20 | 19 of 20 |
+
+- Every kept key came by write-back.
+- With the watch not held, the new Certificate reached cert-manager 15 to 41 ms after the
+  Secret's delete under the foreground cascade, and 22 to 38 ms after it under
+  `kubectl replace --force`. Under the reproducer's default background cascade, it arrived
+  between 12 ms before and 3 ms after the delete, and 3 of 10 runs kept the key.
+- In 10 runs where the proxy delayed every Secret event by 100 ms instead, cert-manager
+  issued each first Certificate more than once before any delete. Under `Never`, the first
+  Certificate did not settle within a minute, twice. So those batches do not measure this
+  window.
 
 ## How botbox found it
 
@@ -285,8 +314,8 @@ No run tested either change.
 
 - cert-manager may mean to adopt a Secret whose owner was deleted.
 - Every run used an idle cluster. A garbage collector that lags would widen the re-point
-  window. A Secret informer in cert-manager that lags, as with many Secrets, would widen the
-  write-back window. No run measured either.
+  window, and no run measured that. No run measured how far cert-manager's Secret informer
+  lags on a busy cluster, such as one with many Secrets.
 - No run used the released image, or a Kubernetes version that v1.21.2 tests on (1.33 to
   1.36).
 - Only the tests of `pkg/controller/certificates/issuing/...` ran against the patch, and

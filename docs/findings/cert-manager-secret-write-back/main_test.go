@@ -138,6 +138,7 @@ func TestMainExitsWithWhatStoppedIt(t *testing.T) {
 		exit       int
 	}{
 		{"-kubeconfig " + forbidden + " -runs 0", "map[]", 0},
+		{"-h", "-collect", 0},
 		{"-kubeconfig " + filepath.Join(t.TempDir(), "missing") + " -runs 0", "no such file", 1},
 		{"-kubeconfig " + forbidden + " -runs 1", "namespaces is forbidden", 1},
 	} {
@@ -172,22 +173,26 @@ func TestMechanismTellsHowTheOldKeySurvived(t *testing.T) {
 	}
 }
 
-func TestFindingPrintsBothSecretsHashes(t *testing.T) {
-	f := finding{mechanism: "write-back", old: secret{Key: "oldkey", Cert: "oldcert"}, now: secret{Key: "newkey", Cert: "newcert"}}
-	for _, hash := range []string{"oldkey", "newkey", "oldcert", "newcert"} {
-		if !strings.Contains(f.String(), hash) {
-			t.Errorf("%q lacks %s", f, hash)
-		}
+func TestFindingPrintsWhatTheRunSaw(t *testing.T) {
+	f := finding{"write-back", "oldcert1-uid", "newcert2-uid", "True Ready",
+		secret{"oldsecrt-uid", "oldcert1-uid", "oldkeyhash12-rest", "oldcrthash12-rest"},
+		secret{"newsecrt-uid", "owner123-uid", "newkeyhash12-rest", "newcrthash12-rest"}}
+	want := "write-back. Certificate oldcert1, then newcert2, Ready True Ready. Secret oldsecrt, then newsecrt owned by owner123. " +
+		"tls.key sha256 oldkeyhash12, then newkeyhash12. tls.crt sha256 oldcrthash12, then newcrthash12."
+	if got := f.String(); got != want {
+		t.Errorf("finding prints\n%s\nwant\n%s", got, want)
 	}
 }
 
 func TestCollectGarbageDeletesWhatTheOldCertificateControls(t *testing.T) {
 	orphan := controlled("CertificateRequest", "example-3", "old")
 	orphan.SetOwnerReferences(nil)
+	adopted := controlled("CertificateRequest", "example-4", "new")
+	adopted.SetOwnerReferences(append([]metav1.OwnerReference{{APIVersion: "cert-manager.io/v1", Kind: "Certificate", Name: "example", UID: "old"}}, adopted.GetOwnerReferences()...))
 	client := fakeDynamic(controlled("Secret", "example-tls", "old"),
 		controlled("CertificateRequest", "example-1", "old"),
 		controlled("CertificateRequest", "example-2", "new"),
-		orphan)
+		orphan, adopted)
 	var deleted []string
 	client.PrependReactor("delete", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
 		del := action.(k8stesting.DeleteAction)
@@ -280,6 +285,27 @@ func TestRecreateLooksForTheOldCertificateAtOnce(t *testing.T) {
 	defer cancel()
 	if _, err := r.recreate(ctx, "old"); err != nil {
 		t.Errorf("recreate returned %v, want the new Certificate before a poll interval passed", err)
+	}
+}
+
+func TestRecreateReadsAgainAfterAReadFails(t *testing.T) {
+	old := certificate("Always", "", "")
+	old.SetNamespace("ns")
+	client := fakeDynamic(old)
+	reads, readsBeforeCreate := 0, 0
+	client.PrependReactor("get", "certificates", func(k8stesting.Action) (bool, runtime.Object, error) {
+		if reads++; reads == 1 {
+			return true, nil, apierrors.NewInternalError(errors.New("etcd timed out"))
+		}
+		return false, nil, nil
+	})
+	client.PrependReactor("create", "certificates", func(k8stesting.Action) (bool, runtime.Object, error) {
+		readsBeforeCreate = reads
+		return false, nil, nil
+	})
+	r := repro{dyn: client, ns: "ns", poll: time.Millisecond}
+	if _, err := r.recreate(context.Background(), "old"); err != nil || readsBeforeCreate != 2 {
+		t.Errorf("recreate returned %v and created after %d reads, want the new Certificate after the second read found the old one gone", err, readsBeforeCreate)
 	}
 }
 
@@ -693,7 +719,9 @@ func TestSecretOnceThereWaitsForTheSecret(t *testing.T) {
 	if got, err := (repro{core: client, ns: "ns", timeout: time.Minute}).secretOnceThere(context.Background()); err != nil || got.UID != "secret-uid" {
 		t.Errorf("secretOnceThere() = %+v, %v; want the Secret once it exists", got, err)
 	}
-	if got, err := (repro{core: kubefake.NewClientset(), ns: "ns", timeout: 300 * time.Millisecond}).secretOnceThere(context.Background()); err != nil || got != (secret{}) {
-		t.Errorf("secretOnceThere() without a Secret = %+v, %v; want none and no error", got, err)
+	ctx, cancel := context.WithTimeout(context.Background(), 900*time.Millisecond)
+	defer cancel()
+	if got, err := (repro{core: kubefake.NewClientset(), ns: "ns", timeout: 100 * time.Millisecond}).secretOnceThere(ctx); err != nil || got != (secret{}) || ctx.Err() != nil {
+		t.Errorf("secretOnceThere() without a Secret = %+v, %v, and its context ended: %v; want none and no error after -wait", got, err, ctx.Err())
 	}
 }

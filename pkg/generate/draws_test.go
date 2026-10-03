@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"encoding/json"
 	"flag"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
@@ -406,11 +407,11 @@ func crWrites(t *testing.T, patterns ...string) []crWrite {
 
 // The Runner stops at an op whose CR the API server refuses, and the API
 // server drops an unknown metadata field and a field the CRD does not declare.
-// Only the example tier runs an example's sequences, and nothing runs a
-// finding's.
+// No unit test runs these sequences against an API server: the example tiers
+// and make hunt-<example> run an example's, and nothing runs a finding's.
 func TestSequencesOnDiskWriteCRsTheirCRDAccepts(t *testing.T) {
 	rules := map[*target.Target]*crdRules{}
-	for _, write := range crWrites(t, "../../examples/*/sequences/*.json", "../../examples/*/sequences/hunt/*.json", "../../docs/findings/*/sequence.json") {
+	for _, write := range crWrites(t, sequencesOnDisk(t)...) {
 		if rules[write.target] == nil {
 			schema, err := openAPISchema(write.target)
 			if err != nil {
@@ -431,6 +432,33 @@ func TestSequencesOnDiskWriteCRsTheirCRDAccepts(t *testing.T) {
 			t.Errorf("%s op %d writes %v, which the API server drops.", write.file, write.op.Index, dropped)
 		}
 	}
+}
+
+// sequencesOnDisk are each example's sequences, in any directory under its
+// sequences, and each finding's.
+func sequencesOnDisk(t *testing.T) []string {
+	t.Helper()
+	findings, err := filepath.Glob("../../docs/findings/*/sequence.json")
+	if err != nil || len(findings) == 0 {
+		t.Fatalf("found finding sequences %v: %v; delete this glob with the last findings draft", findings, err)
+	}
+	examples, err := filepath.Glob("../../examples/*/sequences")
+	if err != nil || len(examples) == 0 {
+		t.Fatalf("found example sequences %v: %v", examples, err)
+	}
+	var files []string
+	for _, dir := range examples {
+		err := filepath.WalkDir(dir, func(file string, _ fs.DirEntry, err error) error {
+			if err == nil && strings.HasSuffix(file, ".json") {
+				files = append(files, file)
+			}
+			return err
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	return append(files, findings...)
 }
 
 // droppedFields are the unknown metadata fields of cr and the fields its CRD

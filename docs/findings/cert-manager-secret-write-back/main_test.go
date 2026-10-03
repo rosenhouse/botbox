@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -334,9 +335,9 @@ func TestRunReadsEachSecretOnceItsCertificateSettles(t *testing.T) {
 			if got.mechanism != kept || got.oldCertificate != "certificate-1" || got.newCertificate != "certificate-2" || got.ready != "True Ready" || got.old.UID != "secret-1" || got.now.UID != wantNow {
 				t.Errorf("run() = %v, want %s from certificate-1 to certificate-2, Ready True Ready, Secret secret-1 then %s", got, kept, wantNow)
 			}
-			for i, want := range []map[string]any{{"rotationPolicy": "Always"}, {"rotationPolicy": "Always", "algorithm": "ECDSA"}} {
-				if got, _, _ := unstructured.NestedMap(cluster.created[i].Object, "spec", "privateKey"); !maps.Equal(got, want) {
-					t.Errorf("run created Certificate %d with privateKey %v, want %v", i+1, got, want)
+			for i, want := range []*unstructured.Unstructured{certificate("Always", "", "example.test"), certificate("Always", "ECDSA", "other.test")} {
+				if got := cluster.created[i].Object["spec"]; !reflect.DeepEqual(got, want.Object["spec"]) {
+					t.Errorf("run created Certificate %d with spec %v, want %v", i+1, got, want.Object["spec"])
 				}
 			}
 			for _, a := range slices.Concat(cluster.core.Actions(), cluster.dyn.Actions()) {
@@ -348,6 +349,44 @@ func TestRunReadsEachSecretOnceItsCertificateSettles(t *testing.T) {
 				t.Errorf("after run, getting its namespace returned %v, want NotFound", err)
 			}
 		})
+	}
+}
+
+func TestRunCollectsWhatTheFirstCertificateControlsOnceItIsDeleted(t *testing.T) {
+	cluster := newFakeCertManager("write-back", 50*time.Millisecond)
+	for _, o := range []*unstructured.Unstructured{
+		controlled("Secret", "example-tls", "certificate-1"),
+		controlled("CertificateRequest", "example-1", "certificate-1"),
+		controlled("CertificateRequest", "other-1", "other"),
+	} {
+		o.SetNamespace("write-back-1")
+		if err := cluster.dyn.Tracker().Add(o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r := cluster.repro(5 * time.Second)
+	r.collect = true
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if _, err := r.run(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var collected []string
+	certificateDeleted := false
+	for _, a := range cluster.dyn.Actions() {
+		switch del, ok := a.(k8stesting.DeleteAction); {
+		case !ok:
+		case del.GetResource() == certificates:
+			certificateDeleted = true
+		case !certificateDeleted:
+			t.Errorf("run deleted %s %s before the Certificate", del.GetResource().Resource, del.GetName())
+		default:
+			collected = append(collected, del.GetName())
+		}
+	}
+	if want := []string{"example-tls", "example-1"}; !slices.Equal(collected, want) {
+		t.Errorf("run collected %v, want %v", collected, want)
 	}
 }
 

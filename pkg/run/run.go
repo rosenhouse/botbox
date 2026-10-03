@@ -42,6 +42,7 @@ const (
 	targetLogFile  = "target.log"
 	requestsFile   = "requests.jsonl"
 	objectsFile    = "objects.jsonl"
+	collectorFile  = "collector.jsonl"
 	sequenceFile   = "sequence.json"
 )
 
@@ -106,6 +107,8 @@ type Harness struct {
 	target *target.Target
 	dir    string
 	down   teardown
+	// collector is nil where the cluster runs its own garbage collector.
+	collector *cluster.Collector
 	// unresolved is what the collector could not resolve, once it stops.
 	unresolved []cluster.Unresolved
 
@@ -204,7 +207,7 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 	excludePresent(h.Observer.Store, h.target.WatchedKinds())
 
 	if !opts.ControllerManager {
-		collector, err := cluster.StartCollector(h.Config, cluster.CollectorOptions{
+		h.collector, err = cluster.StartCollector(h.Config, cluster.CollectorOptions{
 			Namespace: h.Namespace,
 			Kinds:     h.target.WatchedKinds(),
 			Mapper:    h.mapper,
@@ -213,7 +216,7 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 			return err
 		}
 		h.down.push("stopping the collector", func(context.Context) error {
-			h.unresolved = collector.Stop()
+			h.unresolved = h.collector.Stop()
 			return nil
 		})
 	}
@@ -237,7 +240,7 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 }
 
 // Stop takes the run down in the reverse of the order Start brought it up, and
-// writes the run's recordings. Emptying the namespace is the Runner's own
+// then writes the run's recordings. Emptying the namespace is the Runner's own
 // step.
 func (h *Harness) Stop(ctx context.Context) error {
 	return errors.Join(h.down.run(ctx), h.writeRecordings())
@@ -319,10 +322,14 @@ func (h *Harness) applyFixtures(ctx context.Context) error {
 }
 
 func (h *Harness) writeRecordings() error {
-	return errors.Join(
+	err := errors.Join(
 		writeFile(filepath.Join(h.dir, requestsFile), h.Proxy.WriteLog),
 		writeFile(filepath.Join(h.dir, objectsFile), h.Observer.WriteHistory),
 	)
+	if h.collector != nil {
+		err = errors.Join(err, writeFile(filepath.Join(h.dir, collectorFile), h.collector.WriteLog))
+	}
+	return err
 }
 
 // namespaceDefaults are what kube-controller-manager adds to every namespace.

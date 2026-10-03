@@ -27,7 +27,7 @@ func (d document) markdown() []byte {
 		fmt.Fprintf(&md, "\n%s\n", d.Check.Evidence)
 	}
 	fmt.Fprintf(&md, "\n```sh\n%s\n```\n", d.Replay)
-	fmt.Fprintf(&md, "\n%s The run directory holds `requests.jsonl`, `objects.jsonl` and `target.log`.\n", d.provenance())
+	fmt.Fprintf(&md, "\n%s %s\n", d.provenance(), d.recordings())
 	if len(d.Notes) > 0 {
 		md.WriteString("\n## Notes\n\n")
 		for _, note := range d.Notes {
@@ -218,6 +218,15 @@ func (d document) provenance() string {
 		ran += fmt.Sprintf(" and applied %d of the sequence's %d ops", d.Applied, d.Ops)
 	}
 	return ran + "."
+}
+
+// recordings names the files beside the report.
+func (d document) recordings() string {
+	if !d.Collector {
+		return "The run directory holds `requests.jsonl`, `objects.jsonl` and `target.log`."
+	}
+	return "The run directory holds `requests.jsonl`, `objects.jsonl`, `collector.jsonl` and `target.log`. " +
+		"`collector.jsonl` holds each delete that botbox's garbage collector tried."
 }
 
 // describe names the target and the version it declares.

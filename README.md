@@ -282,6 +282,9 @@ data:
 jq -c 'select(.name == "widget-0") | .object.data' objects.jsonl
 ```
 
+`requests.jsonl` holds only your controller's requests. On envtest, `collector.jsonl` holds each
+delete that botbox's garbage collector tried, so you can tell its deletes from your controller's.
+
 [docs/failures.md](docs/failures.md) says what each file and message means.
 
 ### When botbox exits 2

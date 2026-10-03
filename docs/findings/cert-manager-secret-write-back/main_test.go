@@ -330,8 +330,9 @@ func TestRecreateCreatesNothingWhileTheOldCertificateRemains(t *testing.T) {
 }
 
 // Under -collect, the collector starts once the old Certificate's delete
-// returns, and races the create, as kube-controller-manager's would. So the
-// collector's list can wait for the create to be sent, and the create for the
+// returns, as kube-controller-manager's would. So it runs while recreate polls
+// for the old Certificate to go, waits out -pause and creates the new one. The
+// collector's list can wait for the create to be sent, and the poll for the
 // list to begin.
 func TestRecreateCollectsWhatTheOldCertificateControlsAlongsideTheCreate(t *testing.T) {
 	old := certificate("Always", "", "")
@@ -348,12 +349,13 @@ func TestRecreateCollectsWhatTheOldCertificateControlsAlongsideTheCreate(t *test
 				return errors.New("the collector listed Secrets before the old Certificate's delete")
 			case <-time.After(100 * time.Millisecond):
 			}
+		case verb == "get" && resource == certificates:
+			return closed(ctx, listing)
 		case verb == "list" && resource == secrets:
 			listed()
 			return closed(ctx, creating)
 		case verb == "create" && resource == certificates:
-			defer created()
-			return closed(ctx, listing)
+			created()
 		}
 		return nil
 	}}
@@ -361,7 +363,7 @@ func TestRecreateCollectsWhatTheOldCertificateControlsAlongsideTheCreate(t *test
 	defer cancel()
 	r := repro{dyn: interleaved, ns: "ns", poll: time.Millisecond, setupWait: time.Minute, collect: true}
 	if _, err := r.recreate(ctx, "old"); err != nil {
-		t.Fatalf("recreate returned %v, want the collector to list Secrets after the delete, while the create is sent", err)
+		t.Fatalf("recreate returned %v, want the collector to list Secrets after the delete, while the poll and the create are sent", err)
 	}
 	if _, err := client.Tracker().Get(secrets, "ns", "example-tls"); !apierrors.IsNotFound(err) {
 		t.Errorf("after recreate under -collect, getting the old Certificate's Secret returned %v, want NotFound", err)
@@ -377,7 +379,7 @@ func closed(ctx context.Context, c <-chan struct{}) error {
 	}
 }
 
-// hooked calls before ahead of each list, create and delete it sends. A
+// hooked calls before ahead of each get, list, create and delete it sends. A
 // reactor of the fake cannot block, since the fake holds its lock while it
 // reacts.
 type hooked struct {
@@ -402,6 +404,13 @@ type hookedResource struct {
 func (h hookedResource) Namespace(ns string) dynamic.ResourceInterface {
 	h.ResourceInterface = h.all.Namespace(ns)
 	return h
+}
+
+func (h hookedResource) Get(ctx context.Context, name string, opts metav1.GetOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	if err := h.before(ctx, "get", h.resource); err != nil {
+		return nil, err
+	}
+	return h.ResourceInterface.Get(ctx, name, opts, subresources...)
 }
 
 func (h hookedResource) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {

@@ -228,7 +228,7 @@ func (r repro) collectGarbage(ctx context.Context, owner types.UID) error {
 func (r repro) ready(ctx context.Context, timeout time.Duration) string {
 	seen := "unset"
 	var since time.Time
-	_ = wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, timeout, true, func(context.Context) (bool, error) {
+	_ = wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, timeout, true, func(ctx context.Context) (bool, error) {
 		crt, err := r.dyn.Resource(certificates).Namespace(r.ns).Get(ctx, "example", metav1.GetOptions{})
 		if err != nil {
 			seen = err.Error()
@@ -264,7 +264,7 @@ func (r repro) ready(ctx context.Context, timeout time.Duration) string {
 // Ready while cert-manager still applies its Secret.
 func (r repro) secretOnceThere(ctx context.Context) (secret, error) {
 	var s secret
-	err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, r.wait, true, func(context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, r.wait, true, func(ctx context.Context) (bool, error) {
 		var err error
 		s, err = r.secret(ctx)
 		return s.UID != "", err

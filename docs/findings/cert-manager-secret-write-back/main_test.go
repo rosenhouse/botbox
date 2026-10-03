@@ -796,3 +796,30 @@ func TestSecretOnceThereWaitsForTheSecret(t *testing.T) {
 		t.Errorf("secretOnceThere() without a Secret = %+v, %v, and its context ended: %v; want none and no error after -wait", got, err, ctx.Err())
 	}
 }
+
+// The server gives up after 5 s, so that a read the wait does not end fails
+// the test rather than hangs it.
+func TestEachWaitEndsAReadThatHangs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(5 * time.Second):
+		}
+	}))
+	defer server.Close()
+	r, err := newRepro(writeKubeconfig(t, server.URL))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.ns, r.wait = "ns", 100*time.Millisecond
+	for name, wait := range map[string]func(context.Context) error{
+		"ready":           func(ctx context.Context) error { r.ready(ctx, r.wait); return nil },
+		"secretOnceThere": func(ctx context.Context) error { _, err := r.secretOnceThere(ctx); return err },
+	} {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if err := wait(ctx); err != nil || ctx.Err() != nil {
+			t.Errorf("%s returned %v, and its context ended: %v; want it to end a read that hangs after -wait", name, err, ctx.Err())
+		}
+		cancel()
+	}
+}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -10,9 +11,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	goruntime "runtime"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -328,22 +331,29 @@ func TestRecreateCreatesNothingWhileTheOldCertificateRemains(t *testing.T) {
 	}
 }
 
-// Under -collect, the collector races the create, as kube-controller-manager's
-// would. So the collector's list can wait for the create, and the create for
-// the list.
+// Under -collect, the collector starts once the old Certificate is gone and
+// races the create, as kube-controller-manager's would. So the collector's
+// list can wait for the create, and the create for the list.
 func TestRecreateCollectsWhatTheOldCertificateControlsAlongsideTheCreate(t *testing.T) {
 	old := certificate("Always", "", "")
 	old.SetNamespace("ns")
 	client := fakeDynamic(old, controlled("Secret", "example-tls", "old"))
 	listing, creating := make(chan struct{}), make(chan struct{})
+	listed, created := sync.OnceFunc(func() { close(listing) }), sync.OnceFunc(func() { close(creating) })
 	interleaved := hooked{client, func(ctx context.Context, verb string, resource schema.GroupVersionResource) error {
 		switch {
 		case verb == "list" && resource == secrets:
-			close(listing)
+			if _, err := client.Tracker().Get(certificates, "ns", "example"); !apierrors.IsNotFound(err) {
+				return fmt.Errorf("the collector listed Secrets while getting the old Certificate returned %v", err)
+			}
+			listed()
 			return closed(ctx, creating)
 		case verb == "create" && resource == certificates:
-			defer close(creating)
+			defer created()
 			return closed(ctx, listing)
+		case verb == "delete" && resource == certificates:
+			// A collector started before the delete lists first.
+			goruntime.Gosched()
 		}
 		return nil
 	}}
@@ -375,33 +385,40 @@ type hooked struct {
 }
 
 func (h hooked) Resource(resource schema.GroupVersionResource) dynamic.NamespaceableResourceInterface {
-	return hookedResource{h.Interface.Resource(resource), h, resource}
+	all := h.Interface.Resource(resource)
+	return hookedResource{all, all, h.before, resource}
 }
 
+// hookedResource sends its calls through ResourceInterface, which Namespace
+// narrows to one namespace.
 type hookedResource struct {
-	dynamic.NamespaceableResourceInterface
-	client   hooked
+	dynamic.ResourceInterface
+	all      dynamic.NamespaceableResourceInterface
+	before   func(context.Context, string, schema.GroupVersionResource) error
 	resource schema.GroupVersionResource
 }
 
 func (h hookedResource) Namespace(ns string) dynamic.ResourceInterface {
-	return hookedCalls{h.NamespaceableResourceInterface.Namespace(ns), h}
+	h.ResourceInterface = h.all.Namespace(ns)
+	return h
 }
 
-type hookedCalls struct {
-	dynamic.ResourceInterface
-	of hookedResource
-}
-
-func (h hookedCalls) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
-	if err := h.of.client.before(ctx, "list", h.of.resource); err != nil {
+func (h hookedResource) List(ctx context.Context, opts metav1.ListOptions) (*unstructured.UnstructuredList, error) {
+	if err := h.before(ctx, "list", h.resource); err != nil {
 		return nil, err
 	}
 	return h.ResourceInterface.List(ctx, opts)
 }
 
-func (h hookedCalls) Create(ctx context.Context, obj *unstructured.Unstructured, opts metav1.CreateOptions, subresources ...string) (*unstructured.Unstructured, error) {
-	if err := h.of.client.before(ctx, "create", h.of.resource); err != nil {
+func (h hookedResource) Delete(ctx context.Context, name string, opts metav1.DeleteOptions, subresources ...string) error {
+	if err := h.before(ctx, "delete", h.resource); err != nil {
+		return err
+	}
+	return h.ResourceInterface.Delete(ctx, name, opts, subresources...)
+}
+
+func (h hookedResource) Create(ctx context.Context, obj *unstructured.Unstructured, opts metav1.CreateOptions, subresources ...string) (*unstructured.Unstructured, error) {
+	if err := h.before(ctx, "create", h.resource); err != nil {
 		return nil, err
 	}
 	return h.ResourceInterface.Create(ctx, obj, opts, subresources...)

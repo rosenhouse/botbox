@@ -493,3 +493,12 @@ something botbox requires rather than something one controller forces.
 
 M7 outcome: `make test-example-external-secrets` runs on every pull request, and one
 nightly workflow draws seeds for both examples.
+
+### D93 — the nightly's report step never executed
+
+The nightly workflow's "Report the find" steps had `if: steps.<id>.conclusion == 'failure'`
+without `failure()`, so GitHub Actions skipped them after a failed step. `make` also
+always exits 2 on a recipe failure, losing botbox's exit code. The fix adds `failure()`,
+a `must-pass` Makefile macro that preserves the exit code, exit 2 in quickstarts for
+their own failures, and jq-based verdict logic that reads `summary.json` to file under
+`nightly-find-` or `nightly-error-`.

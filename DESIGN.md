@@ -1367,7 +1367,10 @@ the proxy; the `Image` launcher. Separate design addendum.
   through `--kubeconfig` against a kind cluster it creates and deletes, on demand. It
   passes `b0.json` and fixed seeds, and fails B3 on G3 and B8 on G7 as its negative
   controls. It installs the pinned kind into `bin/` and needs Docker. The nightly workflow
-  runs the same runs with `make test-kind-runs`. `make hunt-cert-manager` and
+  runs the same runs with `make test-kind-runs`. The `must-pass` Makefile macro runs a
+  command and exits make with the command's own exit code, so the nightly workflow can
+  read `summary.json` to tell a find (exit 1) from a harness error (exit 2). Each
+  quickstart exits 2 on its own failures (D93). `make hunt-cert-manager` and
   `make hunt-external-secrets` hunt for bugs in the adopted examples, on demand and on no
   pull request. Each runs every family in `examples/<example>/sequences/hunt/`, then up to
   `HUNT_RUNS` seeds drawn from `HUNT_SEED` on, each in an invocation of its own, until
@@ -2578,3 +2581,8 @@ built from source and run as a black-box binary.
   response. A bound on how long after a write its version may come was rejected as another
   guess. The settle wait still ends only after `T_stable` in which nothing changed, so a
   checkpoint follows the cluster's changes.
+- **D93 The nightly reads summary.json to tell a find from an error.** `make` always
+  exits 2 on any recipe failure, so the nightly workflow could not read botbox's exit
+  code from make. The `must-pass` macro captures it, each quickstart exits 2 on its
+  own failures, and the report step reads `summary.json` to file under `nightly-find-`
+  or `nightly-error-`. The step's `if:` needed `failure()` to run after a failed step.

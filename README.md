@@ -372,10 +372,12 @@ and turn setup-go's cache on.
 
 A pull request runs fixed seeds, so its runs repeat from one commit to the next. The nightly run
 draws fresh seeds. GitHub tells only whoever last edited the schedule when a nightly run fails.
-botbox's own [nightly.yml](.github/workflows/nightly.yml) also files an issue. A seed names a
-sequence only for one build of botbox and one `target.yaml`, so upgrading botbox, or editing
-your CRD or `target.yaml`, can draw other sequences. To tell whether a failure comes from the
-change under review, replay its `sequence.json` against the base branch's controller.
+botbox's own [nightly.yml](.github/workflows/nightly.yml) reads `summary.json` to tell a find
+(a check failed, exit 1) from an error (exit 2 or no output) and files an issue under the
+matching label. A seed names a sequence only for one build of botbox and one `target.yaml`, so
+upgrading botbox, or editing your CRD or `target.yaml`, can draw other sequences. To tell
+whether a failure comes from the change under review, replay its `sequence.json` against the
+base branch's controller.
 
 Add a step that runs your pinned sequences, such as
 `exec botbox run --target target.yaml --deadline 10m --out botbox-out sequences/*.json`.

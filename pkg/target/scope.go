@@ -79,6 +79,65 @@ var builtinScopes = map[schema.GroupKind]bool{
 	{Group: "storagemigration.k8s.io", Kind: "StorageVersionMigration"}:               false,
 }
 
+// BuiltinPlural returns the resource plural of a built-in Kubernetes kind, or
+// empty if the kind is not in the table.
+func BuiltinPlural(gk schema.GroupKind) string {
+	return builtinPlurals[gk]
+}
+
+// builtinPlurals maps each kind in builtinScopes to its resource plural.
+var builtinPlurals = map[schema.GroupKind]string{
+	{Kind: "Binding"}:               "bindings",
+	{Kind: "ConfigMap"}:             "configmaps",
+	{Kind: "Endpoints"}:             "endpoints",
+	{Kind: "Event"}:                 "events",
+	{Kind: "LimitRange"}:            "limitranges",
+	{Kind: "PersistentVolumeClaim"}: "persistentvolumeclaims",
+	{Kind: "Pod"}:                   "pods",
+	{Kind: "PodTemplate"}:           "podtemplates",
+	{Kind: "ReplicationController"}: "replicationcontrollers",
+	{Kind: "ResourceQuota"}:         "resourcequotas",
+	{Kind: "Secret"}:                "secrets",
+	{Kind: "Service"}:               "services",
+	{Kind: "ServiceAccount"}:        "serviceaccounts",
+
+	{Kind: "ComponentStatus"}:  "componentstatuses",
+	{Kind: "Namespace"}:        "namespaces",
+	{Kind: "Node"}:             "nodes",
+	{Kind: "PersistentVolume"}: "persistentvolumes",
+
+	{Group: "apps", Kind: "ControllerRevision"}: "controllerrevisions",
+	{Group: "apps", Kind: "DaemonSet"}:          "daemonsets",
+	{Group: "apps", Kind: "Deployment"}:         "deployments",
+	{Group: "apps", Kind: "ReplicaSet"}:         "replicasets",
+	{Group: "apps", Kind: "StatefulSet"}:        "statefulsets",
+
+	{Group: "autoscaling", Kind: "HorizontalPodAutoscaler"}: "horizontalpodautoscalers",
+	{Group: "batch", Kind: "CronJob"}:                       "cronjobs",
+	{Group: "batch", Kind: "Job"}:                           "jobs",
+	{Group: "coordination.k8s.io", Kind: "Lease"}:           "leases",
+	{Group: "discovery.k8s.io", Kind: "EndpointSlice"}:      "endpointslices",
+	{Group: "events.k8s.io", Kind: "Event"}:                 "events",
+	{Group: "networking.k8s.io", Kind: "Ingress"}:           "ingresses",
+	{Group: "networking.k8s.io", Kind: "NetworkPolicy"}:     "networkpolicies",
+	{Group: "policy", Kind: "PodDisruptionBudget"}:          "poddisruptionbudgets",
+
+	{Group: "rbac.authorization.k8s.io", Kind: "Role"}:               "roles",
+	{Group: "rbac.authorization.k8s.io", Kind: "RoleBinding"}:        "rolebindings",
+	{Group: "rbac.authorization.k8s.io", Kind: "ClusterRole"}:        "clusterroles",
+	{Group: "rbac.authorization.k8s.io", Kind: "ClusterRoleBinding"}: "clusterrolebindings",
+
+	{Group: "certificates.k8s.io", Kind: "CertificateSigningRequest"}: "certificatesigningrequests",
+
+	{Group: "resource.k8s.io", Kind: "ResourceClaim"}:         "resourceclaims",
+	{Group: "resource.k8s.io", Kind: "ResourceClaimTemplate"}: "resourceclaimtemplates",
+	{Group: "storage.k8s.io", Kind: "CSIStorageCapacity"}:     "csistoragecapacities",
+	{Group: "storage.k8s.io", Kind: "CSIDriver"}:              "csidrivers",
+	{Group: "storage.k8s.io", Kind: "CSINode"}:                "csinodes",
+	{Group: "storage.k8s.io", Kind: "StorageClass"}:           "storageclasses",
+	{Group: "storage.k8s.io", Kind: "VolumeAttachment"}:       "volumeattachments",
+}
+
 // scopeFunc reports whether a kind is namespaced, and whether it knows the kind.
 type scopeFunc func(schema.GroupVersionKind) (namespaced, known bool)
 

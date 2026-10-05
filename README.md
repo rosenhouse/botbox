@@ -29,11 +29,6 @@ such as a Service, it runs only the [sequences you write](docs/targets.md#sequen
   child in another namespace, and it cannot supply an object your controller reads from
   another namespace
   ([#38](https://github.com/rosenhouse/botbox/issues/38)).
-- botbox does not test your controller's RBAC. Its proxy sends your controller's requests with
-  botbox's own credentials, which are admin on envtest, so a rule your Role lacks goes
-  unnoticed ([#45](https://github.com/rosenhouse/botbox/issues/45)).
-- The sequences botbox generates inject no faults. Only a sequence you write carries one
-  ([#47](https://github.com/rosenhouse/botbox/issues/47)).
 
 ## Install
 
@@ -207,10 +202,11 @@ botbox run --target target.yaml --runs 5
 ```
 
 Each run draws a sequence of ops from `create`, `update`, `delete`, `recreate`, `settle`,
-`restart` and `deleteManaged`, and from the [fixture ops](docs/targets.md#fixtures) where
-`generate.fixtures` names a fixture. A drawn `create` adds a second or a third CR beside your
-sample. Without `--seed`, botbox draws a seed and prints it. `--seed` draws the same sequences
-again.
+`restart`, `deleteManaged` and `fault`, and from the [fixture ops](docs/targets.md#fixtures)
+where `generate.fixtures` names a fixture. A drawn `create` adds a second or a third CR beside
+your sample. A drawn `fault` injects an API error or delay on the primary or a managed kind's
+requests for a span of the sequence. Without `--seed`, botbox draws a seed and prints it.
+`--seed` draws the same sequences again.
 
 ### Pin sequences
 

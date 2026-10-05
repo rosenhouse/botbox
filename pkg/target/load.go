@@ -59,6 +59,7 @@ type generateDeclaration struct {
 	Overlay  map[string]map[string]any     `json:"overlay"`
 	MaxCRs   *int                          `json:"maxCRs"`
 	Distinct []string                      `json:"distinct"`
+	Faults   *bool                         `json:"faults"`
 	Fixtures map[string]fixtureDeclaration `json:"fixtures"`
 }
 
@@ -120,6 +121,9 @@ func load(path string) (*Target, error) {
 			return nil, fmt.Errorf("generate.maxCRs %d: a sequence creates at least 1 CR", *maxCRs)
 		}
 		loaded.Generate.MaxCRs = *maxCRs
+	}
+	if declared.Generate.Faults != nil && !*declared.Generate.Faults {
+		loaded.Generate.NoFaults = true
 	}
 	for _, crd := range declared.CRDs {
 		crdPath := resolve(dir, crd)

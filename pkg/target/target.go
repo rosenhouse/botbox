@@ -63,6 +63,9 @@ type GenerateSpec struct {
 	// Distinct lists dotted paths at which no two CRs of a sequence hold one
 	// value.
 	Distinct []string
+	// NoFaults disables generated fault injection. A hand-written sequence
+	// still carries the faults it declares.
+	NoFaults bool
 	// Fixtures are the fixtures generation may delete, in the order the
 	// target lists them.
 	Fixtures []MutableFixture

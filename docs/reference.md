@@ -97,6 +97,7 @@ thresholds:
 | `generate.overlay` | none | It maps a dotted path to schema keywords. For generation, they win over the CRD's keywords there, and the CRD keeps those they do not name. botbox reads `additionalProperties`, `enum`, `exclusiveMaximum`, `exclusiveMinimum`, `format`, `items`, `maxItems`, `maxLength`, `maxProperties`, `maximum`, `minItems`, `minLength`, `minProperties`, `minimum`, `pattern`, `properties`, `required`, `type`, `x-kubernetes-int-or-string` and `x-kubernetes-list-type`, and refuses any other. |
 | `generate.maxCRs` | `3` | It bounds the CRs a sequence creates, the sample included. `1` keeps every sequence to the sample. |
 | `generate.distinct` | none | It lists dotted paths at which the sample holds a string, such as a field that names a child. Each CR after the first appends its `-2` or `-3` there, so no two CRs share a value. |
+| `generate.faults` | `true` | It says whether generation draws fault injection. `false` keeps every seed's sequence as it was before faults were added. |
 | `generate.fixtures` | none | It maps a file, written as `fixtures` lists it, to what generation may do to its objects. Generation may delete the objects of any file it names. |
 | `generate.fixtures[*].mutate` | none | It lists paths to strings that generation may set to a short word of letters and digits, written as `equalIgnore` writes a path. Every object in the file holds a string there. |
 | `launch.binary` | required | It names your controller's executable, relative to the directory botbox runs in, or a name on `PATH`. |

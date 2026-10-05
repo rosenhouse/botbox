@@ -206,8 +206,7 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
 - Control ops: `Restart` (launcher), `Settle` (wait for convergence before continuing;
   used to make properties checkable mid-sequence), and `DeleteManaged{kind, index}`
   (delete one managed object behind the target's back, §7). The Runner issues
-  `DeleteManaged` directly to the API server, as it does the CR ops. The generator draws
-  no `Fault`; only a sequence written by hand carries one.
+  `DeleteManaged` directly to the API server, as it does the CR ops.
 - Fixture ops: `UpdateFixture` (set one string of a fixture) and `DeleteFixture` (delete a
   fixture until a later op, §7), only on the fixtures `generate.fixtures` names (§8.1).
   Built-in kinds carry no schema botbox reads, so a drawn value is a word of 4, 8 or 12
@@ -215,6 +214,13 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   restores a deleted fixture before the next op that settles, because a target may rightly
   not be ready while a fixture is gone, and every settle wait judges G4. A target that
   names no fixture draws no fixture op.
+- **Fault injection.** After the drawn ops are checkpointed, the generator inserts at most
+  one `Fault` op per sequence, drawn with probability 0.5. The fault matches one resource
+  (the primary's plural or a managed kind's, looked up from the CRD or the built-in table)
+  and optionally one verb. Its action is an error code (500, 503 or 429) or a delay scaled
+  to the target's `timeouts.stable`. The fault starts before an eligible op (one preceded
+  by a settle) and ends at a settle the generator inserts after the span it covers.
+  `generate.faults: false` disables fault generation for a target.
 - **Schema-driven mutation** from the CRD's OpenAPI v3 schema: numeric ranges, enums,
   string patterns, optional-field presence, list length, map size. Generic and works on
   any CRD. botbox draws no sequence for a built-in primary kind, whose schema it does not
@@ -2586,3 +2592,10 @@ built from source and run as a black-box binary.
   code from make. The `must-pass` macro captures it, each quickstart exits 2 on its
   own failures, and the report step reads `summary.json` to file under `nightly-find-`
   or `nightly-error-`. The step's `if:` needed `failure()` to run after a failed step.
+
+- **D94 Generated faults inject at most one fault per sequence.** A sequence covers one
+  span. The fault matches one resource plural (from the primary's CRD or a managed kind's
+  built-in table) and optionally one verb, and acts as an error or a delay. The generator
+  inserts the fault after `checkpointed` has placed settles, so the fault's span starts at
+  an eligible op (preceded by a settle) and ends at a settle it inserts. A target may set
+  `generate.faults: false` to keep its seeds stable while it does not handle faults.

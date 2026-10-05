@@ -991,3 +991,21 @@ generate:
 			loaded.Generate.MaxCRs, loaded.Generate.Distinct)
 	}
 }
+
+func TestLoadFaultsOff(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"generate:\n  faults: false\n", map[string]string{"widget.yaml": sampleWidget})
+	loaded, err := target.Load(path)
+	if err != nil {
+		t.Fatalf("Load rejected generate.faults: false: %v", err)
+	}
+	if !loaded.Generate.NoFaults {
+		t.Error("Load left NoFaults false for a target with generate.faults: false.")
+	}
+}
+
+func TestLoadFaultsDefaultsToOn(t *testing.T) {
+	toy := loadToy(t)
+	if toy.Generate.NoFaults {
+		t.Error("Load set NoFaults on the toy target, which declares no generate.faults.")
+	}
+}

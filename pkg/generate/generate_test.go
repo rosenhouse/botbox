@@ -391,9 +391,10 @@ func TestSequencesAreLegalToReplay(t *testing.T) {
 				if sequence.Target != loaded.Name {
 					rt.Fatalf("The sequence names the target %q, want %q.", sequence.Target, loaded.Name)
 				}
-				// checkpointed adds at most two settles per drawn op.
-				if len(sequence.Ops) > 3*maxOps {
-					rt.Fatalf("The sequence holds %d ops, over the %d drawn and the settles each may need.",
+				// checkpointed adds at most two settles per drawn op; a
+				// fault adds a fault op and a settle.
+				if len(sequence.Ops) > 3*maxOps+2 {
+					rt.Fatalf("The sequence holds %d ops, over the %d drawn, their settles, and one fault.",
 						len(sequence.Ops), maxOps)
 				}
 				if sequence.Ops[0].Type != run.OpCreate {
@@ -409,7 +410,11 @@ func TestSequencesAreLegalToReplay(t *testing.T) {
 							rt.Fatalf("Op %d deletes the managed object %d, which generation cannot know exists.",
 								op.Index, *op.Nth)
 						}
-						if previous := sequence.Ops[i]; !previous.Settles() {
+						previous := sequence.Ops[i]
+						if previous.Type == run.OpFault {
+							previous = sequence.Ops[i-1]
+						}
+						if !previous.Settles() {
 							rt.Fatalf("Op %d deletes a managed object after op %d, which waits for nothing.",
 								op.Index, previous.Index)
 						}

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	gvkschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"pgregory.net/rapid"
 
 	"github.com/rosenhouse/botbox/pkg/target"
@@ -81,6 +82,25 @@ func overlaid(root map[string]any, overlays map[string]map[string]any) (*schema,
 		mergeInto(node, overlay)
 	}
 	return asSchema(root)
+}
+
+// crdPlural returns the plural resource name from the target's CRDs for a GVK,
+// or empty if no CRD defines it.
+func crdPlural(t *target.Target, gvk gvkschema.GroupVersionKind) (string, error) {
+	documents, err := target.ReadCRDs(t.CRDs)
+	if err != nil {
+		return "", err
+	}
+	for _, document := range documents {
+		spec, _ := document["spec"].(map[string]any)
+		names, _ := spec["names"].(map[string]any)
+		if spec["group"] != gvk.Group || names["kind"] != gvk.Kind {
+			continue
+		}
+		plural, _ := names["plural"].(string)
+		return plural, nil
+	}
+	return "", nil
 }
 
 // openAPISchema finds the primary CR's openAPIV3Schema among the target's CRDs.

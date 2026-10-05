@@ -36,3 +36,11 @@ func TestTheReferenceGivesTheDefaultMaxCRs(t *testing.T) {
 		t.Errorf("The reference gives generate.maxCRs the default %s, want %s.", documented, want)
 	}
 }
+
+func TestTheReferenceGivesTheDefaultFaults(t *testing.T) {
+	documented := reference.Row(t, "## target.yaml", "generate.faults")[0]
+
+	if want := "`true`"; documented != want {
+		t.Errorf("The reference gives generate.faults the default %s, want %s.", documented, want)
+	}
+}

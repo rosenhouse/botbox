@@ -233,7 +233,7 @@ func (r *run) fault(from, to time.Duration) *run {
 	return r
 }
 
-// activeFault is a fault the proxy still applies.
+// activeFault is a fault that has not stopped by the end of the observation.
 func (r *run) activeFault(from time.Duration) *run {
 	r.in.Faults = append(r.in.Faults, invariant.FaultWindow{Start: at(from)})
 	return r

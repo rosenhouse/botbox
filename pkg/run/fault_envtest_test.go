@@ -152,8 +152,10 @@ func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
 }
 
 // The reference's example holds every op and fault field. A correct
-// controller passes it, each of its faults applies to a request, and no fault
-// lasts long enough to leave a check unjudged.
+// controller passes it, and each of its faults applies to a request. The
+// faults leave no check unjudged but P1, which skips the checkpoints where a
+// fault excuses the target, the one after op 7 among them: a fault drops the
+// deletes op 7 asks for until op 8.
 func TestTheReferenceSequencePassesTheToy(t *testing.T) {
 	t.Parallel()
 	toy := loadTarget(t, buildToy(t))
@@ -171,8 +173,13 @@ func TestTheReferenceSequencePassesTheToy(t *testing.T) {
 	if result.Violation != nil {
 		t.Errorf("The run reported %s: %s", result.Violation.ID, result.Violation.Statement)
 	}
-	if len(result.Notes) > 0 {
-		t.Errorf("The run left checks unjudged: %q", result.Notes)
+	for _, note := range result.Notes {
+		if !strings.HasPrefix(note, "P1 is not evaluated at the checkpoint after op ") || !strings.Contains(note, faultExcused) {
+			t.Errorf("The run left a check unjudged where no fault excused P1: %q", note)
+		}
+	}
+	if want := "P1 is not evaluated at the checkpoint after op 7 (update): " + faultExcused; !slices.ContainsFunc(result.Notes, startsWith(want)) {
+		t.Errorf("The run noted %q, want one beginning %q.", result.Notes, want)
 	}
 	if got := len(result.Timeline.Faults); got != 3 {
 		t.Errorf("The run injected %d faults, want 3.", got)
@@ -182,6 +189,62 @@ func TestTheReferenceSequencePassesTheToy(t *testing.T) {
 			t.Errorf("The proxy applied fault %d to no request.", i)
 		}
 	}
+}
+
+// faultExcused is why a property skips a checkpoint where a fault excuses the
+// target.
+const faultExcused = "a fault was active there, or the target was still owed time to recover from one"
+
+func startsWith(prefix string) func(string) bool {
+	return func(note string) bool { return strings.HasPrefix(note, prefix) }
+}
+
+// lostChild refuses the toy's ConfigMap creates while botbox deletes a child,
+// so status.ready counts the child until the update after the fault.
+const lostChild = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"error": 500}, "until": {"op": 3}}},
+    {"i": 2, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 3, "t": "update", "patch": {"spec": {"count": 3}}}
+  ]
+}`
+
+// The correct toy passes where a fault keeps it from repairing what P1 reads,
+// and the run notes where P1 was not evaluated.
+func TestTheCorrectToyPassesAFaultThatKeepsWhatP1Reads(t *testing.T) {
+	t.Parallel()
+	binary := buildToy(t)
+	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
+	runToy := func(t *testing.T, sequence string, noted ...string) run.Result {
+		t.Helper()
+		result, err := run.Run(t.Context(), loadTarget(t, binary), readSequence(t, sequence),
+			run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+		}
+		for _, want := range noted {
+			if !slices.ContainsFunc(result.Notes, startsWith(want)) {
+				t.Errorf("The run noted %q, want one beginning %q.", result.Notes, want)
+			}
+		}
+		return result
+	}
+
+	t.Run("a wait that converged under the fault", func(t *testing.T) {
+		t.Parallel()
+
+		result := runToy(t, lostChild, "P1 is not evaluated at the checkpoint after op 2 (deleteManaged): "+faultExcused)
+
+		if wait := result.Timeline.Ops[2].Settled; wait == nil || !wait.Converged {
+			t.Errorf("The deleteManaged's wait was %+v, want one that converged.", wait)
+		}
+	})
 }
 
 // leaseFault fails most of the toy's lease updates until the teardown.

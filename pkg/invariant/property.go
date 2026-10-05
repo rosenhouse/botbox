@@ -56,7 +56,8 @@ func Property(declared target.Property) Check {
 // evaluationPoints are the instants a property is evaluated at, in order, and
 // why it is not evaluated at the other checkpoints. `checkpoint` and `end`
 // keep the teardown's checkpoint. `always` skips the events the teardown
-// caused, which are botbox's own doing.
+// caused, which are botbox's own doing, and keeps those under a fault, whose
+// transient states it exists to catch.
 func (in Input) evaluationPoints(declared target.Property) (points []time.Time, unjudged []string) {
 	checkpoints := in.Checkpoints
 	switch declared.When {
@@ -84,18 +85,21 @@ func (in Input) evaluationPoints(declared target.Property) (points []time.Time, 
 
 // unjudgeable says why the property is not evaluated at the checkpoint, or is
 // empty where it is: what the property reads may be about to change, or the
-// target may not yet have acted on it. A wait that converged saw the target
-// back for timeouts.stable.
+// target may not yet have acted on it or repaired it. A wait that converged
+// saw the target back for timeouts.stable, but a fault can keep a target from
+// seeing what changed.
 func (in Input) unjudgeable(checkpoint Checkpoint, property string) string {
 	if checkpoint.Held {
 		return fmt.Sprintf("the proxy held a request of the target's there, or released one in the last %s (timeouts.stable), which may still change what %s reads",
 			in.timeouts().Stable, property)
 	}
-	if checkpoint.Settle == Converged {
-		return ""
+	if checkpoint.Settle != Converged {
+		if starting := in.starting(checkpoint.Time); starting != "" {
+			return fmt.Sprintf("%s, so it may not yet have acted on what %s reads", starting, property)
+		}
 	}
-	if starting := in.starting(checkpoint.Time); starting != "" {
-		return fmt.Sprintf("%s, so it may not yet have acted on what %s reads", starting, property)
+	if in.Recovering(checkpoint.Time) {
+		return fmt.Sprintf("a fault was active there, or the target was still owed time to recover from one, so it may not yet have repaired what %s reads", property)
 	}
 	return ""
 }

@@ -281,8 +281,9 @@ type harness interface {
 	namespace() string
 	now() time.Time
 	// settle waits for the target to converge, past timeouts.settle while
-	// owed returns a later instant.
-	settle(ctx context.Context, owed func() time.Time) (bool, error)
+	// owed returns a later instant. It converges no sooner than floor, and
+	// gives up no sooner than timeouts.stable past it.
+	settle(ctx context.Context, owed func() time.Time, floor time.Time) (bool, error)
 	sleep(ctx context.Context, d time.Duration) error
 	restart(ctx context.Context) error
 	// addFault has the proxy apply the fault after those it holds.
@@ -646,8 +647,15 @@ func (r *runner) applyDeleteManaged(ctx context.Context, op Op) (string, error) 
 }
 
 // settle waits for the target's reaction and checkpoints where the wait ends.
+// Nothing shows what a deleteManaged changed, so the wait after one that
+// deleted an object converges no sooner than the target must have recreated
+// it.
 func (r *runner) settle(ctx context.Context, op Op) error {
-	wait, err := r.wait(ctx)
+	var floor time.Time
+	if applied := r.timeline.Ops[len(r.timeline.Ops)-1]; applied.Deleted != "" {
+		floor = r.asOf(r.now()).RecreateOwed(applied.At)
+	}
+	wait, err := r.wait(ctx, floor)
 	if err != nil {
 		return err
 	}
@@ -657,9 +665,10 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 
 // wait waits up to timeouts.settle for the target to converge, or longer
 // while it is owed time to recover from the faults or to finish a deletion.
-func (r *runner) wait(ctx context.Context) (Wait, error) {
+// It converges no sooner than floor.
+func (r *runner) wait(ctx context.Context, floor time.Time) (Wait, error) {
 	wait := Wait{Window: Window{Start: r.now()}}
-	converged, err := r.h.settle(ctx, r.owed)
+	converged, err := r.h.settle(ctx, r.owed, floor)
 	wait.Window.End, wait.Converged = r.now(), converged
 	if converged {
 		if r.converged.IsZero() {
@@ -941,7 +950,7 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 	if now := r.now(); r.violation != nil || r.failed || !r.asOf(now).Recovering(now) {
 		return nil
 	}
-	wait, err := r.wait(ctx)
+	wait, err := r.wait(ctx, time.Time{})
 	if err == nil {
 		r.timeline.Recovery = &wait
 		// The faults are cleared, and the wait ran until the time they left

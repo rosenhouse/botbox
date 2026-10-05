@@ -60,15 +60,19 @@ func (w *waitingHarness) waited() time.Duration {
 }
 
 // settle waits T_settle, or until what the run owes, which can move during the
-// wait. A target that exits in the wait exits a moment into it.
-func (w *waitingHarness) settle(ctx context.Context, owed func() time.Time) (bool, error) {
+// wait, or T_stable past its floor. A target that exits in the wait exits a
+// moment into it.
+func (w *waitingHarness) settle(ctx context.Context, owed func() time.Time, floor time.Time) (bool, error) {
 	began := w.at
 	w.at = w.at.Add(time.Millisecond)
-	converged, err := w.fakeHarness.settle(ctx, owed)
+	converged, err := w.fakeHarness.settle(ctx, owed, floor)
 	for {
 		deadline := began.Add(w.timeouts.Settle)
 		if owes := owed(); owes.After(deadline) {
 			deadline = owes
+		}
+		if floored := floor.Add(w.timeouts.Stable); floored.After(deadline) {
+			deadline = floored
 		}
 		if w.delay > 0 && w.added > 0 {
 			deadline = deadline.Add(w.delay + w.timeouts.Settle)
@@ -215,7 +219,8 @@ var (
 	settleOp = Op{Type: OpSettle}
 	faultOp  = Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}}
 	// countedOp's fault stops once it has faulted three requests.
-	countedOp = Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 3}}}
+	countedOp       = Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 3}}}
+	deleteManagedOp = Op{Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)}
 )
 
 func faultUntil(op int) Op {
@@ -263,7 +268,12 @@ func TestBoundCoversTheRunnersWaits(t *testing.T) {
 		{name: "a restart", timeouts: long, ops: []Op{createOp, {Type: OpRestart}, settleOp}},
 		{name: "a restart the target returns from late", timeouts: long,
 			ops: []Op{createOp, {Type: OpRestart}, settleOp}, returnsLate: true},
-		{name: "a deleteManaged", timeouts: long, ops: []Op{createOp, {Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)}}},
+		{name: "a deleteManaged", timeouts: long, ops: []Op{createOp, deleteManagedOp}},
+		{name: "a deleteManaged after a fault stopped", timeouts: long,
+			ops: []Op{createOp, faultUntil(3), updateOp, deleteManagedOp}, waits: 2*time.Hour + 21*time.Minute + 11*time.Second},
+		{name: "a deleteManaged after faults that stopped one after another", timeouts: long,
+			ops:     []Op{createOp, faultUntil(3), updateOp, faultUntil(5), updateOp, deleteManagedOp},
+			settles: []bool{true, false, false}, waits: 3*time.Hour + 41*time.Minute + 11*time.Second},
 		{name: "a fault the teardown stops", timeouts: long,
 			ops: []Op{createOp, faultOp, updateOp, updateOp, updateOp}, settles: []bool{true, false, false, false},
 			waits: 3*time.Hour + 31*time.Minute + 11*time.Second},

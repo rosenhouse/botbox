@@ -103,6 +103,8 @@ type fakeHarness struct {
 	// applyingInWait replaces applying once a wait begins.
 	owed           []time.Time
 	applyingInWait []proxy.FaultWindow
+	// floors is the floor each settle wait was given.
+	floors []time.Time
 	// retiresInWait has the proxy retire the first fault this long into a
 	// wait, which then runs in real time until the target owes nothing.
 	retiresInWait time.Duration
@@ -160,7 +162,8 @@ func (f *fakeHarness) now() time.Time {
 	return f.clock()
 }
 
-func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time) (bool, error) {
+func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time, floor time.Time) (bool, error) {
+	f.floors = append(f.floors, floor)
 	if f.applyingInWait != nil {
 		f.applying = f.applyingInWait
 	}
@@ -1297,6 +1300,47 @@ func TestRunTellsTheSettleWaitWhatRecoveryTheFaultsAreOwed(t *testing.T) {
 	want := retired.Add(retired.Sub(applied) + testTimeouts.Settle)
 	if len(h.owed) == 0 || !h.owed[0].Equal(want) {
 		t.Errorf("The settle wait was told the target owed %v, want %v.", h.owed, want)
+	}
+}
+
+// Nothing shows what a deleteManaged changed, and a target can converge while
+// an informer of its still backs off from a fault. So the wait after the op
+// does not converge before each fault that stopped has had as long as it
+// lasted, and T_settle more.
+func TestRunHoldsTheWaitAfterADeleteManagedForEachFaultThatStopped(t *testing.T) {
+	applied, retired := time.Now().Add(-6*time.Second), time.Now().Add(-2*time.Second)
+	owed := retired.Add(retired.Sub(applied) + testTimeouts.Settle)
+	fault := Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 1}}}
+	create := Op{Type: OpCreate, Obj: widget("widget")}
+	for _, test := range []struct {
+		name     string
+		ops      []Op
+		applying []proxy.FaultWindow
+		// floors are the floors of the waits in turn.
+		floors []time.Time
+	}{
+		{name: "after a fault the run converged since",
+			ops:      []Op{create, fault, {Type: OpSettle}, {Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)}},
+			applying: []proxy.FaultWindow{{First: applied, Retired: retired}}, floors: []time.Time{{}, {}, owed}},
+		{name: "with no fault",
+			ops: []Op{create, {Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)}}, floors: []time.Time{{}, {}}},
+		{name: "that deleted nothing",
+			ops:      []Op{create, fault, {Type: OpSettle}, {Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(7)}},
+			applying: []proxy.FaultWindow{{First: applied, Retired: retired}}, floors: []time.Time{{}, {}, {}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newFakeHarness()
+			h.applying = test.applying
+
+			_, err := runFake(t, h, nil, sequenceOf(test.ops...))
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if !slices.EqualFunc(h.floors, test.floors, time.Time.Equal) {
+				t.Errorf("The settle waits had the floors %v, want %v.", h.floors, test.floors)
+			}
+		})
 	}
 }
 

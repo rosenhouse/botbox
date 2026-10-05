@@ -22,6 +22,12 @@ const settlePoll = 50 * time.Millisecond
 // by then extends the wait to timeouts.settle past its release. A nil owed
 // owes nothing. The caller judges a wait that expires.
 func (h *Harness) Settle(ctx context.Context, owed func() time.Time) (bool, error) {
+	return h.settleFrom(ctx, owed, time.Time{})
+}
+
+// settleFrom is Settle, converging no sooner than floor and giving up no
+// sooner than timeouts.stable past it.
+func (h *Harness) settleFrom(ctx context.Context, owed func() time.Time, floor time.Time) (bool, error) {
 	return settle{
 		timeouts: h.target.Timeouts,
 		poll:     settlePoll,
@@ -31,6 +37,7 @@ func (h *Harness) Settle(ctx context.Context, owed func() time.Time) (bool, erro
 		held:     h.Proxy.Held,
 		stopped:  h.Launcher.Exited(),
 		owed:     owed,
+		floor:    floor,
 	}.wait(ctx)
 }
 
@@ -52,6 +59,9 @@ type settle struct {
 	// owed is when the wait may give up, which can move while the wait runs.
 	// Nil owes nothing.
 	owed func() time.Time
+	// floor is when the wait may first converge. The wait gives up no sooner
+	// than timeouts.stable past it.
+	floor time.Time
 }
 
 func (s settle) wait(ctx context.Context) (bool, error) {
@@ -72,10 +82,13 @@ func (s settle) wait(ctx context.Context) (bool, error) {
 		} else if released.After(changed) {
 			changed = released
 		}
-		if ready && !now.Before(changed.Add(s.timeouts.Stable)) {
+		if ready && !now.Before(changed.Add(s.timeouts.Stable)) && !now.Before(s.floor) {
 			return true, nil
 		}
 		deadline := start.Add(s.timeouts.Settle)
+		if floored := s.floor.Add(s.timeouts.Stable); floored.After(deadline) {
+			deadline = floored
+		}
 		if s.owed != nil {
 			if owed := s.owed(); owed.After(deadline) {
 				deadline = owed

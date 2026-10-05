@@ -68,19 +68,20 @@ func waitReading(ctx context.Context, c *clock, state func(since time.Time) (boo
 
 // waitHolding is a settle wait while the proxy holds requests as held says.
 func waitHolding(ctx context.Context, c *clock, state func(since time.Time) (bool, time.Time, error), held func(before time.Time) (bool, time.Time), owed func() time.Time, stopped <-chan struct{}) (bool, time.Duration, error) {
+	return waitOnClock(ctx, c, settle{state: state, held: held, stopped: stopped, owed: owed})
+}
+
+// waitOnClock runs the wait on the clock, under testTimeouts.
+func waitOnClock(ctx context.Context, c *clock, wait settle) (bool, time.Duration, error) {
 	start := c.now
-	wait := settle{
-		timeouts: testTimeouts,
-		poll:     testPoll,
-		now:      func() time.Time { return c.now },
-		sleep:    c.sleep,
-		state:    state,
-		held:     held,
-		stopped:  stopped,
-		owed:     owed,
-	}
+	wait.timeouts, wait.poll, wait.now, wait.sleep = testTimeouts, testPoll, func() time.Time { return c.now }, c.sleep
 	converged, err := wait.wait(ctx)
 	return converged, c.now.Sub(start), err
+}
+
+// waitFloored is a settle wait that may first converge floor into it.
+func waitFloored(ctx context.Context, c *clock, state func(since time.Time) (bool, time.Time, error), floor time.Duration) (bool, time.Duration, error) {
+	return waitOnClock(ctx, c, settle{state: state, held: holdsNothing, stopped: neverStops, floor: c.now.Add(floor)})
 }
 
 func holdsNothing(time.Time) (bool, time.Time) { return false, time.Time{} }
@@ -154,6 +155,47 @@ func TestSettleRunsAsLongAsRecoveryIsOwed(t *testing.T) {
 	}
 	if want := 9 * time.Second; elapsed != want {
 		t.Errorf("The wait took %v, want the %v the target was owed.", elapsed, want)
+	}
+}
+
+// The target may still be recovering from a fault, though ready held.
+func TestSettleConvergesNoSoonerThanItsFloor(t *testing.T) {
+	c := newClock()
+
+	converged, elapsed, err := waitFloored(t.Context(), c, readyAndQuiet, 7*time.Second)
+
+	if err != nil || !converged {
+		t.Fatalf("The wait returned (%t, %v), want convergence.", converged, err)
+	}
+	if want := 7 * time.Second; elapsed != want {
+		t.Errorf("The wait took %v, want the %v to its floor.", elapsed, want)
+	}
+}
+
+func TestSettleGivesUpTStablePastItsFloor(t *testing.T) {
+	c := newClock()
+	churning := func(time.Time) (bool, time.Time, error) { return true, c.now, nil }
+
+	converged, elapsed, err := waitFloored(t.Context(), c, churning, 9*time.Second)
+
+	if err != nil || converged {
+		t.Fatalf("The wait returned (%t, %v), want no convergence: the run never holds still.", converged, err)
+	}
+	if want := 9*time.Second + testTimeouts.Stable; elapsed != want {
+		t.Errorf("The wait took %v, want %v: T_stable past its floor.", elapsed, want)
+	}
+}
+
+func TestSettleIgnoresAFloorBehindIt(t *testing.T) {
+	c := newClock()
+
+	converged, elapsed, err := waitFloored(t.Context(), c, readyAndQuiet, -time.Second)
+
+	if err != nil || !converged {
+		t.Fatalf("The wait returned (%t, %v), want convergence.", converged, err)
+	}
+	if elapsed != testTimeouts.Stable {
+		t.Errorf("The wait took %v, want T_stable of %v.", elapsed, testTimeouts.Stable)
 	}
 }
 

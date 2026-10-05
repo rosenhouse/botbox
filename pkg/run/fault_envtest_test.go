@@ -485,6 +485,48 @@ func TestTheCorrectToyPassesWhereAWaitEndsWithARequestHeld(t *testing.T) {
 	}
 }
 
+// informerFault restarts the toy into a fault on ConfigMaps. Its ConfigMap
+// informer backs off past the fault, while the waits converge on the Widget.
+const informerFault = `{
+  "seed": 20260924,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "restart"},
+    {"i": 2, "t": "fault", "spec": {"match": {"resource": "configmaps"}, "action": {"error": 500}, "until": {"for": "4s"}}},
+    {"i": 3, "t": "settle"},
+    {"i": 4, "t": "settle"},
+    {"i": 5, "t": "settle"},
+    {"i": 6, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
+  ]
+}`
+
+// The wait after the deleteManaged lasts until the toy has had as long as the
+// fault lasted, and T_settle more, to see the deletion.
+func TestTheCorrectToyRecreatesAChildItsInformerMissedUnderAFault(t *testing.T) {
+	t.Parallel()
+	toy := loadTarget(t, buildToy(t))
+	testCluster := startCluster(t, toy.CRDs)
+
+	result, err := run.Run(t.Context(), toy, readSequence(t, informerFault),
+		run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+	}
+	fault := result.Timeline.Faults[0]
+	owed := fault.End.Add(fault.End.Sub(fault.Start) + toy.Timeouts.Settle)
+	if wait := result.Timeline.Ops[6].Settled; wait == nil || wait.Window.End.Before(owed) {
+		t.Errorf("The wait after the deleteManaged was %+v, want one that ended no sooner than %v.", wait, owed)
+	}
+	if slices.ContainsFunc(result.Notes, func(note string) bool { return strings.HasPrefix(note, "G7") }) {
+		t.Errorf("The run noted %q, want G7 judged.", result.Notes)
+	}
+}
+
 // requireQuietAfterHolds requires a wait that converged T_stable after the
 // proxy released each request it held for delay that arrived before the end.
 func requireQuietAfterHolds(t *testing.T, op int, wait run.Wait, log []proxy.Request, delay, stable time.Duration) {

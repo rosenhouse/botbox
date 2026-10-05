@@ -76,8 +76,8 @@ func (l *liveRun) namespace() string { return l.h.Namespace }
 
 func (l *liveRun) now() time.Time { return time.Now() }
 
-func (l *liveRun) settle(ctx context.Context, owed func() time.Time) (bool, error) {
-	return l.h.Settle(ctx, owed)
+func (l *liveRun) settle(ctx context.Context, owed func() time.Time, floor time.Time) (bool, error) {
+	return l.h.settleFrom(ctx, owed, floor)
 }
 
 func (l *liveRun) sleep(ctx context.Context, d time.Duration) error { return sleep(ctx, d) }

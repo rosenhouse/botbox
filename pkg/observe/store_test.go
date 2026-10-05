@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -492,5 +493,30 @@ func TestKindNameLeavesOutTheCoreGroup(t *testing.T) {
 		if got := observe.KindName(gvk); got != want {
 			t.Errorf("KindName(%#v) is %q, want %q, as target.yaml writes it.", gvk, got, want)
 		}
+	}
+}
+
+func TestResourceIsWhereTheMapperServesTheKind(t *testing.T) {
+	mapper := meta.NewDefaultRESTMapper(nil)
+	mapper.Add(widgetGVK, meta.RESTScopeNamespace)
+	s := observe.NewStore(observe.Options{Namespace: namespace, Mapper: mapper})
+
+	if got, want := s.Resource(widgetGVK), (schema.GroupResource{Group: "toy.botbox", Resource: "widgets"}); got != want {
+		t.Errorf("Resource(%v) is %v, want %v.", widgetGVK, got, want)
+	}
+}
+
+func TestResourceIsEmptyForAKindTheStoreCannotResolve(t *testing.T) {
+	for name, mapper := range map[string]meta.RESTMapper{
+		"no mapper":                 nil,
+		"a mapper without the kind": knowsNothing(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := observe.NewStore(observe.Options{Namespace: namespace, Mapper: mapper})
+
+			if got := s.Resource(widgetGVK); !got.Empty() {
+				t.Errorf("Resource(%v) is %v, want none.", widgetGVK, got)
+			}
+		})
 	}
 }

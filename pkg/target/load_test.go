@@ -490,7 +490,69 @@ spec:
   scope: Namespaced
 `
 
-func TestLoadRefusesEveryClusterScopedKindItsCRDsDefine(t *testing.T) {
+// namespacedPrimaryTarget declares a namespaced primary (Thing, defined by
+// clusterScopedCRDs) so that cluster-scoped fixture tests are not blocked by
+// the primary's scope.
+const namespacedPrimaryTarget = `name: min
+primary: toy.botbox/v1/Thing
+sample: thing.yaml
+crds: [crds/]
+launch: {binary: bin/min}
+`
+
+const sampleThing = `apiVersion: toy.botbox/v1
+kind: Thing
+metadata:
+  name: thing
+spec:
+  count: 1
+`
+
+func TestLoadAcceptsAClusterScopedFixture(t *testing.T) {
+	path := writeTarget(t, namespacedPrimaryTarget+`fixtures: [ingress-class.yaml]
+`, map[string]string{
+		"thing.yaml":         sampleThing,
+		"crds/toys.yaml":     clusterScopedCRDs,
+		"ingress-class.yaml": "apiVersion: networking.k8s.io/v1\nkind: IngressClass\nmetadata:\n  name: default\n",
+	})
+
+	loaded, err := target.Load(path)
+
+	if err != nil {
+		t.Fatalf("Load refused a cluster-scoped fixture: %v", err)
+	}
+	if len(loaded.Fixtures) != 1 || loaded.Fixtures[0].GetName() != "default" {
+		t.Errorf("Load read %d fixtures, want the IngressClass default.", len(loaded.Fixtures))
+	}
+	ingressClassGVK := schema.GroupVersionKind{Group: "networking.k8s.io", Version: "v1", Kind: "IngressClass"}
+	if !slices.Contains(loaded.ClusterFixtures, ingressClassGVK) {
+		t.Errorf("ClusterFixtures is %v, want it to contain IngressClass.", loaded.ClusterFixtures)
+	}
+}
+
+func TestLoadAcceptsAClusterScopedFixtureDefinedByCRD(t *testing.T) {
+	path := writeTarget(t, namespacedPrimaryTarget+`fixtures: [gadget.yaml]
+`, map[string]string{
+		"thing.yaml":     sampleThing,
+		"crds/toys.yaml": clusterScopedCRDs,
+		"gadget.yaml":    "apiVersion: toy.botbox/v1\nkind: Gadget\nmetadata:\n  name: shared\n",
+	})
+
+	loaded, err := target.Load(path)
+
+	if err != nil {
+		t.Fatalf("Load refused a cluster-scoped fixture whose CRD defines it: %v", err)
+	}
+	if len(loaded.Fixtures) != 1 || loaded.Fixtures[0].GetName() != "shared" {
+		t.Errorf("Load read %d fixtures, want the Gadget shared.", len(loaded.Fixtures))
+	}
+	gadgetGVK := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Gadget"}
+	if !slices.Contains(loaded.ClusterFixtures, gadgetGVK) {
+		t.Errorf("ClusterFixtures is %v, want it to contain Gadget.", loaded.ClusterFixtures)
+	}
+}
+
+func TestLoadRefusesEveryClusterScopedPrimaryAndManagedKindButNotFixtures(t *testing.T) {
 	path := writeTarget(t, minimalTarget+`crds: [crds/]
 manages: [toy.botbox/v1/Gadget, toy.botbox/v1/Thing, v1/ConfigMap]
 fixtures: [fixtures.yaml]
@@ -503,21 +565,21 @@ fixtures: [fixtures.yaml]
 	_, err := target.Load(path)
 
 	if err == nil {
-		t.Fatal("Load accepted cluster-scoped kinds.")
+		t.Fatal("Load accepted cluster-scoped primary and managed kinds.")
 	}
-	for _, want := range []string{"cluster-scoped", "primary toy.botbox/v1/Widget", "managed toy.botbox/v1/Gadget", "fixture toy.botbox/v1/Gadget shared-gadget"} {
+	for _, want := range []string{"cluster-scoped", "primary toy.botbox/v1/Widget", "managed toy.botbox/v1/Gadget"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Load returned %q, which does not name %q.", err, want)
 		}
 	}
-	for _, namespaced := range []string{"Thing", "a-thing", "ConfigMap"} {
-		if strings.Contains(err.Error(), namespaced) {
-			t.Errorf("Load returned %q, which names the namespaced %s.", err, namespaced)
+	for _, allowed := range []string{"fixture", "Thing", "a-thing", "ConfigMap", "shared-gadget"} {
+		if strings.Contains(err.Error(), allowed) {
+			t.Errorf("Load returned %q, which names %s.", err, allowed)
 		}
 	}
 }
 
-func TestLoadRefusesBuiltInClusterScopedKindsBesideThoseItsCRDsDefine(t *testing.T) {
+func TestLoadRefusesBuiltInClusterScopedPrimaryAndManagedButAcceptsFixtures(t *testing.T) {
 	path := writeTarget(t, minimalTarget+`crds: [crds/]
 manages: [v1/ConfigMap, rbac.authorization.k8s.io/v1/ClusterRole, example.com/v1/ClusterRole]
 fixtures: [webhook.yaml]
@@ -530,32 +592,58 @@ fixtures: [webhook.yaml]
 	_, err := target.Load(path)
 
 	if err == nil {
-		t.Fatal("Load accepted cluster-scoped kinds.")
+		t.Fatal("Load accepted cluster-scoped primary and managed kinds.")
 	}
-	for _, want := range []string{"primary toy.botbox/v1/Widget", "managed rbac.authorization.k8s.io/v1/ClusterRole",
-		"fixture admissionregistration.k8s.io/v1/ValidatingWebhookConfiguration widget-validator"} {
+	for _, want := range []string{"primary toy.botbox/v1/Widget", "managed rbac.authorization.k8s.io/v1/ClusterRole"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Load returned %q, which does not name %q.", err, want)
 		}
 	}
-	for _, namespaced := range []string{"ConfigMap", "example.com"} {
-		if strings.Contains(err.Error(), namespaced) {
-			t.Errorf("Load returned %q, which names %s.", err, namespaced)
+	for _, allowed := range []string{"ConfigMap", "example.com", "fixture", "ValidatingWebhookConfiguration", "widget-validator"} {
+		if strings.Contains(err.Error(), allowed) {
+			t.Errorf("Load returned %q, which names %s.", err, allowed)
 		}
 	}
 }
 
-func TestLoadRefusesAClusterScopedFixtureBeforeAnyFixtureNamespace(t *testing.T) {
-	path := writeTarget(t, minimalTarget+"fixtures: [secret.yaml, role.yaml]\n", map[string]string{
+func TestLoadRefusesAClusterScopedFixtureThatSetsANamespace(t *testing.T) {
+	path := writeTarget(t, minimalTarget+"fixtures: [role.yaml]\n", map[string]string{
 		"widget.yaml": sampleWidget,
-		"secret.yaml": "apiVersion: v1\nkind: Secret\nmetadata:\n  name: ca\n  namespace: default\n",
 		"role.yaml":   "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: reader\n  namespace: default\n",
 	})
 
 	_, err := target.Load(path)
 
-	if err == nil || !strings.Contains(err.Error(), "cluster-scoped kinds: the fixture rbac.authorization.k8s.io/v1/ClusterRole reader") {
-		t.Errorf("Load returned %v, want it to refuse the cluster-scoped ClusterRole.", err)
+	if err == nil {
+		t.Fatal("Load accepted a cluster-scoped fixture with a namespace.")
+	}
+	for _, want := range []string{"ClusterRole", "has no namespace", "drop it"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load returned %q, which does not say %q.", err, want)
+		}
+	}
+}
+
+func TestLoadRefusesGenerateFixturesNamingAClusterScopedObject(t *testing.T) {
+	path := writeTarget(t, minimalTarget+`fixtures: [role.yaml]
+generate:
+  fixtures:
+    role.yaml:
+      mutate: []
+`, map[string]string{
+		"widget.yaml": sampleWidget,
+		"role.yaml":   "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\nmetadata:\n  name: reader\n",
+	})
+
+	_, err := target.Load(path)
+
+	if err == nil {
+		t.Fatal("Load accepted generate.fixtures naming a cluster-scoped object.")
+	}
+	for _, want := range []string{"generate.fixtures", "role.yaml", "cluster-scoped"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load returned %q, which does not say %q.", err, want)
+		}
 	}
 }
 

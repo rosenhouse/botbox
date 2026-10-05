@@ -461,32 +461,52 @@ func TestApplyFixturesResolvesThroughTheHarnessMapper(t *testing.T) {
 	}
 }
 
-func TestApplyFixturesRefusesAClusterScopedFixtureAndThenOneThatSetsANamespace(t *testing.T) {
+func TestApplyFixturesSkipsClusterScopedFixtures(t *testing.T) {
 	clusterRoleKind := schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"}
 	mapper := meta.NewDefaultRESTMapper(nil)
 	mapper.Add(widgetKind, meta.RESTScopeNamespace)
-	mapper.Add(configMapKind, meta.RESTScopeNamespace)
 	mapper.Add(clusterRoleKind, meta.RESTScopeRoot)
-	for kind, want := range map[schema.GroupVersionKind]string{
-		configMapKind:   "the fixture ConfigMap shared sets metadata.namespace elsewhere",
-		clusterRoleKind: "the fixture ClusterRole shared is cluster-scoped",
-	} {
-		fixture := &unstructured.Unstructured{}
-		fixture.SetGroupVersionKind(kind)
-		fixture.SetName("shared")
-		fixture.SetNamespace("elsewhere")
-		h := &Harness{
-			Namespace: "botbox-run-1",
-			Config:    unreachable(),
-			mapper:    mapper,
-			target:    &target.Target{Primary: widgetKind, Fixtures: []*unstructured.Unstructured{fixture}},
-		}
+	fixture := &unstructured.Unstructured{}
+	fixture.SetGroupVersionKind(clusterRoleKind)
+	fixture.SetName("shared")
+	h := &Harness{
+		Namespace: "botbox-run-1",
+		Config:    unreachable(),
+		mapper:    mapper,
+		target: &target.Target{
+			Primary:         widgetKind,
+			Fixtures:        []*unstructured.Unstructured{fixture},
+			ClusterFixtures: []schema.GroupVersionKind{clusterRoleKind},
+		},
+	}
 
-		err := h.applyFixtures(t.Context())
+	err := h.applyFixtures(t.Context())
 
-		if err == nil || !strings.Contains(err.Error(), want) {
-			t.Errorf("applyFixtures returned %v, want it to say %q.", err, want)
-		}
+	if err != nil {
+		t.Errorf("applyFixtures refused a cluster-scoped fixture: %v", err)
+	}
+}
+
+func TestApplyFixturesRefusesAFixtureThatSetsANamespace(t *testing.T) {
+	mapper := meta.NewDefaultRESTMapper(nil)
+	mapper.Add(widgetKind, meta.RESTScopeNamespace)
+	mapper.Add(configMapKind, meta.RESTScopeNamespace)
+	fixture := &unstructured.Unstructured{}
+	fixture.SetGroupVersionKind(configMapKind)
+	fixture.SetName("shared")
+	fixture.SetNamespace("elsewhere")
+	h := &Harness{
+		Namespace: "botbox-run-1",
+		Config:    unreachable(),
+		mapper:    mapper,
+		target:    &target.Target{Primary: widgetKind, Fixtures: []*unstructured.Unstructured{fixture}},
+	}
+
+	err := h.applyFixtures(t.Context())
+
+	want := "the fixture ConfigMap shared sets metadata.namespace elsewhere"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("applyFixtures returned %v, want it to say %q.", err, want)
 	}
 }
 

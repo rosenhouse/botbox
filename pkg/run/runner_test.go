@@ -677,6 +677,39 @@ func TestRunRefusesAnOpOnAFixtureTheTargetDoesNotDeclare(t *testing.T) {
 	}
 }
 
+func TestRunRefusesAnOpOnAClusterScopedFixture(t *testing.T) {
+	clusterRoleKind := schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"}
+	withClusterRole := *toyTarget
+	fixture := &unstructured.Unstructured{}
+	fixture.SetGroupVersionKind(clusterRoleKind)
+	fixture.SetName("shared")
+	withClusterRole.Fixtures = []*unstructured.Unstructured{fixture}
+	withClusterRole.ClusterFixtures = []schema.GroupVersionKind{clusterRoleKind}
+	for _, opType := range []OpType{OpUpdateFixture, OpDeleteFixture} {
+		t.Run(string(opType), func(t *testing.T) {
+			op := Op{Type: opType, Kind: "rbac.authorization.k8s.io/v1/ClusterRole", Name: "shared"}
+			if opType == OpUpdateFixture {
+				op.Patch = map[string]any{"rules": []any{}}
+			}
+			if opType == OpDeleteFixture {
+				op.Until = &Until{Op: 2}
+			}
+			sequence := sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				op,
+				Op{Type: OpSettle},
+			)
+
+			_, err := runSequence(t.Context(), &withClusterRole, sequence, Options{Check: &fakeChecker{}}, newFakeHarness())
+
+			want := "cluster-scoped"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("The run returned %v, want an error saying %q.", err, want)
+			}
+		})
+	}
+}
+
 func TestRunNamesTheCREachCROpWrote(t *testing.T) {
 	sequence := sequenceOf(
 		Op{Type: OpCreate, Obj: widget("a")},

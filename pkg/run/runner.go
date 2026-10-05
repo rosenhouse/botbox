@@ -532,6 +532,9 @@ func (r *runner) applyToFixture(ctx context.Context, op Op) error {
 		return fmt.Errorf("the target declares no fixture %s %s", op.Kind, op.Name)
 	}
 	gvk := fixture.GroupVersionKind()
+	if slices.Contains(r.target.ClusterFixtures, gvk) {
+		return fmt.Errorf("the fixture %s %s is cluster-scoped, and a sequence cannot mutate what every run shares", observe.KindName(gvk), op.Name)
+	}
 	if op.Type == OpDeleteFixture {
 		r.deleted = append(r.deleted, op)
 		return r.h.deleteFixture(ctx, gvk, op.Name)

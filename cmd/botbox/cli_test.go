@@ -84,6 +84,8 @@ type fakeSession struct {
 
 func (s *fakeSession) vet(*target.Target) error { return s.refused }
 
+func (s *fakeSession) prepare(context.Context, *target.Target) error { return nil }
+
 func (s *fakeSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
 	s.sequences = append(s.sequences, sequence)
 	deadline, _ := ctx.Deadline()

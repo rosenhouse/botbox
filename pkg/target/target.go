@@ -122,7 +122,11 @@ type Target struct {
 	Primary       schema.GroupVersionKind
 	Sample        *unstructured.Unstructured
 	Fixtures      []*unstructured.Unstructured
-	Manages       []schema.GroupVersionKind
+	// ClusterFixtures are the GVKs of fixtures that are cluster-scoped. A run
+	// skips them (the invocation applies them once), and a sequence that
+	// mutates or deletes one is a configuration error.
+	ClusterFixtures []schema.GroupVersionKind
+	Manages         []schema.GroupVersionKind
 	// NotRecreated are the managed kinds the target leaves deleted, which G7
 	// does not require back.
 	NotRecreated []schema.GroupVersionKind
@@ -154,8 +158,9 @@ func (t *Target) CheckScopes(mapper meta.RESTMapper) error {
 	})
 }
 
-// checkScopes names every cluster-scoped kind the target declares. Only then
-// does it refuse a fixture of a namespaced kind that sets a namespace.
+// checkScopes refuses cluster-scoped primary and managed kinds, but allows
+// cluster-scoped fixtures. It then refuses a namespaced fixture that sets a
+// namespace, and a cluster-scoped fixture that sets one.
 func (t *Target) checkScopes(scope scopeFunc) error {
 	clusterScoped := func(gvk schema.GroupVersionKind) bool {
 		namespaced, known := scope(gvk)
@@ -170,17 +175,20 @@ func (t *Target) checkScopes(scope scopeFunc) error {
 			found = append(found, "the managed "+observe.KindName(gvk))
 		}
 	}
-	for _, fixture := range t.Fixtures {
-		if gvk := fixture.GroupVersionKind(); clusterScoped(gvk) {
-			found = append(found, fmt.Sprintf("the fixture %s %s", observe.KindName(gvk), fixture.GetName()))
-		}
-	}
 	if len(found) > 0 {
 		return fmt.Errorf("a run owns one namespace, so botbox cannot test these cluster-scoped kinds: %s", strings.Join(found, ", "))
 	}
 	for _, fixture := range t.Fixtures {
-		if namespaced, _ := scope(fixture.GroupVersionKind()); namespaced && fixture.GetNamespace() != "" {
-			return &misplacedFixture{fixture}
+		gvk := fixture.GroupVersionKind()
+		switch {
+		case clusterScoped(gvk) && fixture.GetNamespace() != "":
+			return &clusterFixtureNamespace{fixture}
+		case clusterScoped(gvk):
+			// Cluster-scoped fixtures are allowed.
+		default:
+			if namespaced, _ := scope(gvk); namespaced && fixture.GetNamespace() != "" {
+				return &misplacedFixture{fixture}
+			}
 		}
 	}
 	return nil
@@ -193,6 +201,14 @@ func (m *misplacedFixture) Error() string {
 	namespace := m.fixture.GetNamespace()
 	return fmt.Sprintf("the fixture %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace, and the target may look for this one in %s",
 		observe.KindName(m.fixture.GroupVersionKind()), m.fixture.GetName(), namespace, namespace)
+}
+
+// clusterFixtureNamespace is a cluster-scoped fixture that sets a namespace.
+type clusterFixtureNamespace struct{ fixture *unstructured.Unstructured }
+
+func (c *clusterFixtureNamespace) Error() string {
+	return fmt.Sprintf("the fixture %s %s sets metadata.namespace %s; an %s has no namespace; drop it",
+		observe.KindName(c.fixture.GroupVersionKind()), c.fixture.GetName(), c.fixture.GetNamespace(), c.fixture.GetKind())
 }
 
 // WatchedKinds are the kinds botbox watches: the primary CR and every managed

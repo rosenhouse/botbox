@@ -277,6 +277,9 @@ The Runner executes one sequence:
    stops applying it and has released every request it held (D36), and while the target
    is still owed time to recover from it (§6). A `recreate` whose old CR stays where no
    check reports it cannot go on, so the run ends as a harness error.
+   The wait after a `deleteManaged` that deleted an object does not converge before the
+   target has had its time after each fault that stopped (§6), and gives up no sooner than
+   `T_stable` after that.
    A request the proxy holds counts as a change until the proxy releases it (§5.2), since
    it is about to change what the checks read. A request that reached the proxy before a
    wait's time ran out holds the wait open until `T_settle` past its release. It holds a
@@ -525,7 +528,11 @@ released the last request it held where that is later. A settle wait does not gi
 before that time has passed, and one that expired is excused only while a fault is
 active or that time is still owed. A spec change made within that time is
 judged at the later of the two deadlines. A settle wait that converged sooner ends that
-time early. A target that exits while a fault excuses it, as controller-runtime with
+time early, except after a `deleteManaged`: nothing shows what that op changed, and a
+target can converge while an informer of its still backs off. So the wait after one that
+deleted an object does not converge before as long past each fault that stopped by the
+op as the fault lasted, and `T_settle` more, whatever converged since (D90).
+A target that exits while a fault excuses it, as controller-runtime with
 leader election on does when it loses its lease, then waits out the restart's backoff
 (§5.1), which botbox chose. G4 gives it `T_settle` past its return from that restart too,
 as after a `Restart` (§5.5), and does not judge a window the exit falls in, as it does not
@@ -700,14 +707,17 @@ equal. An item that `[*]` names stays even when left empty, so the items still c
 where the settle wait after it ends, which is always before the teardown boundary. Its
 window is that wait: up to `T_settle` or later after a fault or a deletion, closing once
 `Ready` holds with `T_stable` of quiet behind it (§5.5). Where `Ready` holds without the
-object, the target therefore has `T_stable` to recreate it. An object of the deleted one's
+object, the target therefore has `T_stable` to recreate it, or longer after a fault that
+stopped. An object of the deleted one's
 kind and name satisfies G7, whatever its UID and content, since a recreated object carries
 a new UID. Where none exists, G7 does not judge an op where nothing asks for the object
 back when the wait ends: no CR the object named, or no CR at all where it named none, is
 live and not being deleted. It notes an op where botbox changed a CR, a managed object or a
 fixture after the last settle wait that converged, since the target may then have meant to
 delete the object itself. It notes one where a fault was active during the op or its wait,
-or where the wait ended while the target was still owed time to recover from a fault. It
+or where the wait ended while the target was still owed time to recover from a fault. That
+time counts each fault that stopped before the op, whatever converged since, and the
+Runner's wait does not end before it (D90). It
 also notes an op that follows a restart, by a `Restart` op or by `Supervise` after an exit,
 where the target had not shown it runs (§5.5) between the last restart and the op. A
 settle wait that converged after the restart rules this out.
@@ -2014,9 +2024,8 @@ built from source and run as a black-box binary.
   while the target was still owed time to recover from a fault. The Runner stops a fault
   that runs until an op just before it applies the op, and the toy's informer retried its
   list 4 s after such a fault stopped, when G7 had already failed it. A settle wait that
-  converges ends that time (§6), though an informer may still be backing off. So the toy,
-  restarted into a 4 s fault on ConfigMaps, can still fail G7 on a `deleteManaged` after
-  settle waits that converged. G7 does not judge an op while no CR is live. An object that
+  converged since does not end that time for G7 (D90). G7 does not judge an op while no
+  CR is live. An object that
   is back satisfies G7 before any of these, whatever the fault or the change did. A
   `Restart` gives botbox no sign that the target is back, so a settle wait after one could
   converge while the target was still starting, or waiting out the lease its killed
@@ -2501,6 +2510,19 @@ built from source and run as a black-box binary.
   draft's sequence against the example it names, and judges its CRs by the example's
   CRD, as it does each example's sequences. It fails once either refuses the sequence. With
   no draft left, both checks fail and say what to change.
+- **D90 The wait after a `deleteManaged` lasts until the target has had its time after
+  each fault that stopped before the op.** The toy, restarted into a 4 s fault on
+  ConfigMaps, failed its list three times and retried 4.4 s after the fault stopped.
+  Settle waits converged in between, because the Widget stayed ready. So D44 owed nothing
+  at a later `deleteManaged`, and G7 failed the correct toy in 4 of 6 runs (#74). Deferring
+  only G7's verdict was not enough. With G7 silenced, P1 failed at the same checkpoint, and
+  with P1 gone, G1 counted the toy's late create in the teardown's quiet window. So that
+  wait does not converge before as long past each fault that stopped by the op as the
+  fault lasted, and `T_settle` more, whatever converged since. It gives up no sooner than
+  `T_stable` after that, and G7 judges there, so B8 still fails G7 after a fault. `Ready`
+  shows what a CR op changed, and nothing shows what a `deleteManaged` changed. Owing that
+  time to every wait was rejected, because it lengthens every wait after a fault. A fixture
+  op and a fixture's restore keep D44's rule, though `Ready` does not show them either.
 - **D92 G2 counts only the changes the target's writes explain.** On kind, just after the
   owner's CRD was installed, the garbage collector deleted an owned Deployment 2.3 s after
   its owner. The delete landed in the quiet window, and G2 failed 5 of 10 runs (#72). G2

@@ -212,7 +212,7 @@ request it makes can. End the fault before the `recreate` with `until.op`.
 | `settle` | none | none | yes | It waits for your controller to converge. |
 | `restart` | none | none | no | It kills your controller and starts it again. |
 | `fault` | `spec` | none | no | It adds a fault the proxy applies to your controller's requests. |
-| `deleteManaged` | `kind`, `index` | none | yes | It deletes a managed object behind your controller's back. G7 requires an object of its kind and name once the wait ends, unless `notRecreated` lists the kind. |
+| `deleteManaged` | `kind`, `index` | none | yes | It deletes a managed object behind your controller's back. G7 requires an object of its kind and name once the wait ends, unless `notRecreated` lists the kind. After a fault, the wait runs at least as long past the fault's end as the fault lasted, plus `settle`. |
 | `updateFixture` | `kind`, `name`, `patch` | none | yes | It applies `patch` to a fixture as a JSON merge patch. |
 | `deleteFixture` | `kind`, `name`, `until.op` | none | no | It deletes a fixture, waits up to `timeouts.delete` for it to go, and creates it again before op `until.op` acts. |
 

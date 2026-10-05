@@ -128,7 +128,9 @@ webhook or a status rule might, botbox exits 2 and names the `sequence.json` tha
 A `deleteManaged` deletes one managed object behind your controller's back. G7 then requires
 your controller to recreate an object of that kind and name before the run settles. Where your
 `ready` still holds without the object, the run settles once nothing has changed for `stable`.
-Your controller then has `stable` to recreate it, however wide `settle` is.
+Your controller then has `stable` to recreate it, however wide `settle` is. After a fault, the
+run settles no sooner than as long past the fault's end as the fault lasted, plus `settle`,
+because an informer may still be backing off.
 
 If your controller leaves a kind deleted by design, or recreates it under a new name, list the
 kind under `notRecreated`. cert-manager lists CertificateRequest, because a Ready Certificate

@@ -219,6 +219,40 @@ func TestPendingRestartIsARestartAFaultExcused(t *testing.T) {
 	}
 }
 
+// A target can converge while an informer of its still backs off, so an object
+// deleted after a fault is owed time past each fault that stopped, as long as
+// the fault lasted and T_settle more.
+func TestRecreateOwedGivesEachFaultThatStoppedItsOwnTime(t *testing.T) {
+	convergedAt := func(r *run) *run { return r.checkpoint(10500*time.Millisecond, invariant.Converged) }
+	for _, test := range []struct {
+		name string
+		run  *run
+		// want is zero where the target owes nothing.
+		want time.Duration
+	}{
+		{name: "a fault the run converged after", run: convergedAt(newRun().op(invariant.OpCreate, 0).fault(4*time.Second, 8*time.Second)),
+			want: 17 * time.Second},
+		{name: "faults the run converged after",
+			run:  convergedAt(newRun().op(invariant.OpCreate, 0).fault(4*time.Second, 8*time.Second).fault(9*time.Second, 9500*time.Millisecond)),
+			want: 17 * time.Second},
+		{name: "faults the run did not converge after", run: newRun().fault(time.Second, 2*time.Second).fault(9*time.Second, 10*time.Second),
+			want: 24 * time.Second},
+		{name: "a fault still active", run: convergedAt(newRun().op(invariant.OpCreate, 0).activeFault(4 * time.Second))},
+		{name: "a fault that stopped after the instant asked about", run: newRun().fault(4*time.Second, 12*time.Second)},
+		{name: "no fault", run: convergedAt(newRun().op(invariant.OpCreate, 0))},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			got := test.run.through(30 * time.Second).RecreateOwed(at(11 * time.Second))
+			if test.want == 0 && !got.IsZero() {
+				t.Errorf("The target owes a recreate until %v, want nothing.", got.Sub(epoch))
+			}
+			if test.want != 0 && !got.Equal(at(test.want)) {
+				t.Errorf("The target owes a recreate until %v, want %v.", got.Sub(epoch), test.want)
+			}
+		})
+	}
+}
+
 // owes fails the test unless the target owes recovery until want, where a
 // zero want owes nothing.
 func owes(t *testing.T, in invariant.Input, asked, want time.Duration) {

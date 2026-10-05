@@ -412,6 +412,31 @@ func TestG7JudgesOnceTheTargetHadRecoveredFromAFault(t *testing.T) {
 	})
 }
 
+// A target can converge while an informer of its still backs off. The fault
+// from 4s to 8s leaves the target owed until 17s, though the run converged
+// since.
+func TestG7WaitsOutAFaultTheRunConvergedSince(t *testing.T) {
+	waitEndingAt := func(end time.Duration) invariant.Input {
+		return converged().
+			fault(4*time.Second, 8*time.Second).
+			op(invariant.OpSettle, 8500*time.Millisecond).
+			checkpoint(10500*time.Millisecond, invariant.Converged).
+			deletedManaged(11*time.Second, "w-0").
+			remove(11100*time.Millisecond, child("w-0", "15")).
+			checkpoint(end, invariant.Converged).
+			through(end)
+	}
+	t.Run("where the wait ended T_stable after the op", func(t *testing.T) {
+		noted(t, invariant.SelfHealing, waitEndingAt(13100*time.Millisecond), "the target was still owed time to recover")
+	})
+	t.Run("just before 17s", func(t *testing.T) {
+		noted(t, invariant.SelfHealing, waitEndingAt(16999*time.Millisecond), "the target was still owed time to recover")
+	})
+	t.Run("at 17s", func(t *testing.T) {
+		fired(t, invariant.SelfHealing, waitEndingAt(17*time.Second))
+	})
+}
+
 // A deleted CR holds the settle wait open, until 10.3s here, but owes the
 // target no time to recover.
 func TestG7FiresSoonAfterARecreate(t *testing.T) {

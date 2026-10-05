@@ -233,6 +233,12 @@ func (r *run) fault(from, to time.Duration) *run {
 	return r
 }
 
+// activeFault is a fault the proxy still applies.
+func (r *run) activeFault(from time.Duration) *run {
+	r.in.Faults = append(r.in.Faults, invariant.FaultWindow{Start: at(from)})
+	return r
+}
+
 // exit is the target stopping on its own at when, and botbox starting it again
 // at restart.
 func (r *run) exit(when, restart time.Duration) *run {

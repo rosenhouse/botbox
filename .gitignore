@@ -5,11 +5,12 @@ botbox-out/
 # Go test artifacts.
 *.test
 *.out
-# Worktrees that subagents create for isolated work.
+# Worktrees and locks that subagents create for isolated work.
 .claude/worktrees/
+.claude/envtest.lock
 # Build output of the spike modules.
 docs/spikes/cert-manager-envtest/cert-manager-envtest
 docs/spikes/external-secrets-envtest/external-secrets-envtest
 
 # rapid writes a reproduction file beside a failing property test.
-testdata/rapid/
+**/testdata/rapid/

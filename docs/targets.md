@@ -241,7 +241,9 @@ The checks do not judge a window the proxy applied a fault in, so a fault tests 
 controller behaves once the fault stops. A controller backs off while its requests fail, so
 once the faults stop botbox gives it as long as they lasted, plus `settle`, to converge. That
 includes a fault still active when the sequence ends, like the one above. botbox clears it and
-waits for your controller before it tears the run down.
+waits for your controller before it tears the run down. botbox does not check a `checkpoint` or
+`end` property where a fault is active or your controller is still owed that time, and the run
+notes it. A property evaluated `always` still reads every change, a fault's included.
 
 A delay's window lasts until it stops and the proxy releases the last request it held. A settle
 wait counts a held request as a change until the proxy releases it. A watch counts only until

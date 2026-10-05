@@ -197,11 +197,12 @@ not check your properties where a wait ends with a request held, or released wit
 `timeouts.stable`, and the run notes it. Nor does it where your controller waits to restart,
 or has not been back for `timeouts.stable` since it last started. Your controller is back
 once it requests a resource outside leader election. botbox takes a controller that reads a
-Lease with a get to elect a leader, and counts it back only once it wins its lease. A
-property evaluated `always` is still checked at every change. botbox exits 2 where a
-`recreate`'s old CR outlasts the wait and no check fails, because the op cannot go on. A
-fault active during the `recreate` can do that to a correct controller, as a delay on each
-request it makes can. End the fault before the `recreate` with `until.op`.
+Lease with a get to elect a leader, and counts it back only once it wins its lease. Nor does
+it where a fault is active, or your controller is still owed time to recover from one. A
+property evaluated `always` is still checked at every change. A `recreate` whose old CR a
+fault keeps past the wait cannot create its CR, so it stops the run, and the run notes it.
+botbox then clears the fault and judges your controller as it tears the run down. End the
+fault before the `recreate` with `until.op` to test the ops after it.
 
 | Op | Needs | May carry | Settles | What it does |
 |---|---|---|---|---|

@@ -275,8 +275,9 @@ The Runner executes one sequence:
    that. The Runner and the engine raise it with one function, so they agree. A fault
    excuses it while active, which is once the proxy has applied it and until the proxy
    stops applying it and has released every request it held (D36), and while the target
-   is still owed time to recover from it (§6). A `recreate` whose old CR stays where no
-   check reports it cannot go on, so the run ends as a harness error.
+   is still owed time to recover from it (§6). A `recreate` whose old CR stays cannot create
+   its CR. Where a fault excuses the target there, the op stops the run with a note, and the
+   teardown follows (step 4). G3 or G4 reports any other such CR there.
    The wait after a `deleteManaged` that deleted an object does not converge before the
    target has had its time after each fault that stopped (§6), and gives up no sooner than
    `T_stable` after that.
@@ -326,14 +327,16 @@ The Runner executes one sequence:
 3. Evaluate invariants and properties at each checkpoint (§4). Properties are not
    evaluated where the proxy held a request of the target's, or released one within
    `T_stable`, which may still change what they read, nor where the target was still
-   starting (§6). The run notes each such checkpoint. A run ends at its first violation.
+   starting, nor where a fault excuses the target (§6). The run notes each such checkpoint.
+   A run ends at its first violation.
    More than `N_objects` (default 500) managed objects in the namespace ends the run as a
    harness limit, reported as such rather than as a finding.
 4. Tear down. Clear every active fault. If the target is still owed time to recover from
    a fault, which is so for a fault the teardown just cleared, wait for convergence as
    step 2 does and checkpoint where the wait ends. This recovery wait is judged as an op's
-   wait is. A run that ended at a violation or a harness error gets none. Then wait
-   `T_stable`, which is the last quiet window (§6). Delete every primary CR the run
+   wait is. A run that ended at a violation or a harness error gets none. A run a
+   `recreate` stopped gets it, and the checks below, as a run whose ops all ran does. Then
+   wait `T_stable`, which is the last quiet window (§6). Delete every primary CR the run
    created and wait for the G3 window. A target that stopped for good, before supervision
    or because a restart failed, cleaned nothing up, so the run ends as that harness error
    rather than at a verdict on the deletion. G3 judges a target that is waiting to
@@ -545,6 +548,12 @@ an exit owes it that time too (§5.5). That time ends within `2 × T_settle` of 
 it bounds the op's wait. Once no fault is active, every exit a fault excused is owed its
 time. Only a fault excuses an exit, so a crash loop that a fault set off still fails G4,
 at the latest in the wait the teardown gives the target once it has cleared the faults.
+A target a fault excuses may not yet have repaired what the fault kept it from seeing or
+doing, so no property is evaluated, under `checkpoint` or `end`, at a checkpoint where a
+fault is active or the target is still owed time to recover from one, and the run notes
+each. That includes a wait that converged under an active fault, since a target that
+cannot read a kind sees no change to it. A property evaluated `always` reads every event,
+a fault's included, because a fault's transient states are what it exists to catch (§5.6).
 
 **A target still starting.** A wait converges only once the target is back since it last
 started and has run for `T_stable` after that (§5.5). A wait a fault excuses can end
@@ -555,8 +564,8 @@ started (§5.5), or first did within `T_stable`. G4's statement names the same s
 teardown's checkpoint can find the target so too. A target still starting may not yet
 have acted on what changed while it was down, so no property is evaluated at that
 checkpoint, under `checkpoint` or `end`, and the run notes each one.
-A wait that converged saw the target back for `T_stable`, so its checkpoint is judged,
-even where a `Restart` op replaced a target waiting out its backoff. A property evaluated
+A wait that converged saw the target back for `T_stable`, so this rule does not skip its
+checkpoint, even where a `Restart` op replaced a target waiting out its backoff. A property evaluated
 `always` reads every event rather than a checkpoint. No invariant needs the rule. A target
 that does not come back fails G4 where a wait expires with no fault active, at the latest
 in the teardown's recovery wait. G7 asks more after a restart: the target must be back
@@ -2059,8 +2068,8 @@ built from source and run as a black-box binary.
   with a `--cleanup-delay` past `T_settle` it passes a `create` and a `delete`, and B13
   fails G3 alone. A `recreate` waits as long for its old CR, and a CR still there where
   that wait ends is judged there. A harness error there hid B13 from G3 on generated runs.
-  The op cannot create its CR while the old one stays, so one that no check reports stays a
-  harness error.
+  The op cannot create its CR while the old one stays. Where a fault excuses the target,
+  the run stops there (D91), and one that no check reports otherwise is a harness error.
 - **D63 An interrupt abandons the run under way, and botbox dies of the signal once it
   has stopped what it started.** Only botbox takes back what it started: etcd,
   kube-apiserver, the target, the run namespace and envtest's directories in `TMPDIR`.
@@ -2523,6 +2532,38 @@ built from source and run as a black-box binary.
   shows what a CR op changed, and nothing shows what a `deleteManaged` changed. Owing that
   time to every wait was rejected, because it lengthens every wait after a fault. A fixture
   op and a fixture's restore keep D44's rule, though `Ready` does not show them either.
+- **D91 A fault excuses a `checkpoint` or `end` property as it excuses G4, and a `recreate`
+  whose old CR a fault keeps stops the run.** A 500 on the toy's Widget patches, active
+  through a `recreate`, failed the patch that clears its finalizer. With `spec.count` 0,
+  the old CR outlasted the recreate's wait, no check reported it, and the run ended as a
+  harness error. With `spec.count` 1, P1 failed the correct toy where that wait ended: the
+  toy had deleted its child and could not write `status.ready`. A `delete` in place of the
+  `recreate` failed P1 at the same point. Under 500s on its ConfigMap creates, the toy
+  could not replace a child a `deleteManaged` deleted, and P1 failed at a wait that
+  converged under the fault. The checks excuse a target while a fault is active or it is
+  still owed time to recover from one (D44), and properties did not. D85 rejected skipping
+  properties at every wait a fault excuses. The maintainer chose it in #75, and the run
+  notes each checkpoint skipped. A wait that converged under an active fault is skipped
+  too, because a target that cannot act on a change, or cannot see it, converges on a
+  stale state. A property evaluated `always` keeps every event, because a fault's
+  transient states are what it exists to catch (§5.6). The rule for a held request (D84)
+  now skips nothing this one does not: a held request keeps its fault's window open, and
+  a release within `T_stable` leaves time owed. It stays for its more specific note. The
+  harness error also skipped the teardown's recovery wait and checks. Under 500s on the
+  toy's ConfigMap creates across an update and a `recreate`, it hid B13, whose finalizer
+  never clears, and botbox exited 2. Such a `recreate` now stops the run with a note. The
+  teardown clears the fault, gives the target its time to recover and judges it. B13 then
+  fails G4 in the wait after the last fault stopped, naming the finalizer, in RUNS_B13
+  runs, and the correct toy passes RUNS_OK. The first sequence passes RUNS_R0 with the
+  note, and the second RUNS_R1. A CR that stays where nothing excuses the target fails G3
+  or G4 there. One that no check reports stays a harness error, which only checks that
+  disagree reach. Creating the CR before a later op, as a deleted fixture is restored,
+  was rejected: the create lands in that op's window, and a fault lasting to that op keeps
+  the old CR again. Skipping the create and going on was rejected, because a later op on
+  the CR then finds the old one or none, and errs. A wait that converged after the faults
+  stopped is still judged, as D44 has it. After 500s on a restarted toy's ConfigMap lists
+  and watches, its informer backed off past the next wait, which converged on the stale
+  Widget, and P1 failed the correct toy in 5 of 6 runs. #74 meets the same limit in G7.
 - **D92 G2 counts only the changes the target's writes explain.** On kind, just after the
   owner's CRD was installed, the garbage collector deleted an owned Deployment 2.3 s after
   its owner. The delete landed in the quiet window, and G2 failed 5 of 10 runs (#72). G2

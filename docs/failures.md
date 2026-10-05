@@ -82,8 +82,9 @@ that checkpoint. Guard it with `has()`, or begin it with `!has(metadata.name) ||
 there.
 
 A `checkpoint` or `end` property skips a checkpoint where the proxy
-[held a request](targets.md#faults) or your controller was
-[still starting](#restarts-and-crash-loops), and the run notes it.
+[held a request](targets.md#faults), where your controller was
+[still starting](#restarts-and-crash-loops), or where a [fault](targets.md#faults) was active
+or your controller was still owed time to recover from one. The run notes each.
 
 The report quotes the property's description, the versions of the CR it failed on, and the
 managed objects' metadata. Read the values the property judged from `objects.jsonl`.
@@ -130,7 +131,9 @@ the finalizers still on it.
 Where a fault reached into the deletion, G3 cannot judge it. The settle wait's G4 then says
 `the CR … was still being deleted, held by the finalizers …`. Where the CR's deletion deadline
 held the wait open past `settle`, the line gives `timeouts.delete is …` in place of
-`timeouts.settle is …`.
+`timeouts.settle is …`. A `recreate` whose old CR a fault keeps past the wait stops the run, and
+the run notes it. botbox then clears the fault, and the settle wait after the last fault stopped
+says that line where the CR still does not go.
 
 ## When G1, G2, G6 or G7 fails
 
@@ -224,9 +227,5 @@ usual causes and what to change.
   `botbox replay`.
 - A controller that binds a fixed port, such as a health probe on `:8081`, collides with a
   second invocation of itself. Give it a free port in `launch.args`, or with `--launch-arg`.
-- A `recreate` cannot create its CR while the old one is there, so botbox exits 2 where the old
-  CR outlasts the wait and no check fails. A fault active during the `recreate` can do that to a
-  correct controller, as a delay on each request it makes can. End the fault before the
-  `recreate` with `until.op`.
 - botbox exits 2, rather than reporting a find, when the deadline ends a run or stops botbox
   before its last run.

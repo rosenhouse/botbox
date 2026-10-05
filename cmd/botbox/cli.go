@@ -938,11 +938,8 @@ func (s *clusterSession) prepare(ctx context.Context, t *target.Target) error {
 	if err != nil {
 		return err
 	}
-	if err := inv.Prepare(ctx, t, s.mapper); err != nil {
-		return err
-	}
-	s.invocation = inv
-	return nil
+	s.invocation = inv // set before Prepare so close() cleans up partial creates
+	return inv.Prepare(ctx, t, s.mapper)
 }
 
 func (s *clusterSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {

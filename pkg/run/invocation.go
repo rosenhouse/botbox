@@ -2,6 +2,7 @@ package run
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -69,8 +70,5 @@ func (inv *Invocation) Close(ctx context.Context) error {
 			errs = append(errs, fmt.Errorf("deleting the cluster fixture %s: %w", cf.name, err))
 		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("cleaning up cluster fixtures: %w", errs[0])
-	}
-	return nil
+	return errors.Join(errs...)
 }

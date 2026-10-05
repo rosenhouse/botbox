@@ -2,16 +2,17 @@ package invariant
 
 import (
 	"fmt"
+	"slices"
 
 	"github.com/rosenhouse/botbox/pkg/observe"
 	"github.com/rosenhouse/botbox/pkg/proxy"
 )
 
-// NoChurn is G2: once converged under a stable spec, the primary CR, the set
-// of managed objects and their resourceVersions do not change for
-// timeouts.stable. A status write whose content is unchanged moves no
-// resourceVersion, so the proxy log supplies that half, which
-// thresholds.quiet bounds.
+// NoChurn is G2: once converged under a stable spec, the target changes
+// neither the primary CR nor the set of managed objects and their
+// resourceVersions for timeouts.stable. A status write whose content is
+// unchanged moves no resourceVersion, so the proxy log supplies that half,
+// which thresholds.quiet bounds.
 func NoChurn(in Input) (Result, error) {
 	out := Result{ID: "G2"}
 	allowed := in.quietAllowance()
@@ -35,18 +36,31 @@ func NoChurn(in Input) (Result, error) {
 }
 
 // changesIn returns the versions of the primary CR and of managed objects the
-// Observer recorded inside the window.
+// Observer recorded inside the window that a write of the target's explains.
 func (in Input) changesIn(window quiet) []observe.Version {
+	written := in.requestsIn(window, func(r proxy.Request) bool { return writes(r.Verb) })
 	var moved []observe.Version
 	for _, v := range in.versions() {
 		if v.Time.Before(window.start) || v.Time.After(window.end) {
 			continue
 		}
-		if in.attributes(v) {
+		if in.attributes(v) && in.explains(written, v) {
 			moved = append(moved, v)
 		}
 	}
 	return moved
+}
+
+// explains reports whether one of the writes could have made the version: a
+// write to its object, or to its collection, which names no object, that
+// reached the proxy no later than the version reached the Observer. A write
+// counts whatever its answer, which the Observer can see first.
+func (in Input) explains(written []proxy.Request, v observe.Version) bool {
+	resource := in.History.Resource(v.GVK)
+	return slices.ContainsFunc(written, func(r proxy.Request) bool {
+		return !r.Start.After(v.Time) && r.Group == resource.Group && r.Resource == resource.Resource &&
+			r.Namespace == v.Namespace && (r.Name == "" || r.Name == v.Name)
+	})
 }
 
 // attributes reports whether the version is the target's work: the primary CR

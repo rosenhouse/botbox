@@ -104,9 +104,9 @@ func b1() invariant.Input {
 		running(50*time.Millisecond).
 		record(100*time.Millisecond, widget("11", spec(2), status(2, 1), finalizers(cleanup))).
 		settled(2200*time.Millisecond, invariant.Converged).
-		request(3100*time.Millisecond, createChild("w-0")).
+		request(3100*time.Millisecond, createChild()).
 		record(3150*time.Millisecond, child("w-0", "12")).
-		request(3200*time.Millisecond, createChild("w-1")).
+		request(3200*time.Millisecond, createChild()).
 		record(3250*time.Millisecond, child("w-1", "13")).
 		through(14 * time.Second)
 }
@@ -121,7 +121,7 @@ func b2() invariant.Input {
 		created := time.Duration(i)*time.Second + 200*time.Millisecond
 		name := fmt.Sprintf("w-0-%d", i)
 		r.record(created, child(name, strconv.Itoa(20+i))).
-			request(created, createChild(name)).
+			request(created, createChild()).
 			record(created+100*time.Millisecond, widget(strconv.Itoa(40+i), spec(2), status(int64(i+1), 1), finalizers(cleanup))).
 			request(created+100*time.Millisecond, statusPatch())
 	}

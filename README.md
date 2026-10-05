@@ -484,7 +484,7 @@ Seven generic invariants apply to every target. [DESIGN.md](DESIGN.md#6-generic-
 | ID | Name | Checks |
 |---|---|---|
 | G1 | Bounded reconciliation | Under an unchanged spec, one quiet window holds no more requests than `thresholds.quiet` allows, zero by default. |
-| G2 | No churn | Once converged, the managed objects and their resourceVersions stop changing. |
+| G2 | No churn | Once converged, the target stops changing the CRs and the objects it manages. |
 | G3 | Clean deletion | Deleting a CR removes everything it manages and clears its finalizers. |
 | G4 | Convergence | `ready` holds on every CR within `timeouts.settle` of every spec change, `updateFixture` or return of a deleted fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
 | G5 | Restart-stable | Restarting the target does not change converged state. |

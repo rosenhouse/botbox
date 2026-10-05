@@ -287,9 +287,7 @@ kind delete cluster --kubeconfig kind.kubeconfig
 - The cluster may add more objects later. If they are of a kind your target manages, label
   your own objects and declare a `selector`, such as
   `selector: app.kubernetes.io/managed-by=my-controller`. botbox then counts only those.
-- botbox counts a change the cluster makes to an object your target manages as your
-  controller's. The garbage collector can delete a child seconds after its owner, especially
-  just after botbox installs the owner's CRD. If that delete comes after `stable` of quiet, G2
-  fails. A wider `stable` avoids that.
+- G2 counts a change only where one of your controller's own writes explains it, so a delete
+  by the cluster's garbage collector is not churn.
 
 `make test-kind` runs the toy controller this way.

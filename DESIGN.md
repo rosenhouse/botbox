@@ -493,7 +493,7 @@ real targets; the toy target sets much shorter ones (§9).
 | ID | Name | Statement | Signal |
 |---|---|---|---|
 | **G1** | Bounded reconciliation | Once the settle wait has ended, on convergence or at `T_settle` (default 30s) or later after a fault or a deletion (§5.5), the target makes no more than `N_quiet` (default 0) API requests in `T_stable` (default 10s). Watches do not count, nor does any request to `coordination.k8s.io`, whose leases and lease candidates leader election reads as well as writes, nor any request that names no resource, such as a health probe or a discovery read. | Proxy log |
-| **G2** | No churn | Once converged under a stable spec, the primary CRs, the set of managed objects and their resourceVersions do not change for `T_stable`. A status write whose content is unchanged moves no resourceVersion, so G2 counts status subresource writes from the proxy log, and more than `N_quiet` of them is churn. `N_quiet` never excuses a resourceVersion that moves. | Observer + proxy log |
+| **G2** | No churn | Once converged under a stable spec, the target changes neither the primary CRs nor the set of managed objects and their resourceVersions for `T_stable`. A change is the target's only where one of its writes explains it (attribution, below). A status write whose content is unchanged moves no resourceVersion, so G2 counts status subresource writes from the proxy log, and more than `N_quiet` of them is churn. `N_quiet` never excuses a resourceVersion that moves. | Observer + proxy log |
 | **G3** | Clean deletion | After deleting a CR with no faults active, every object the target manages for it is deleted and the CR's finalizers are cleared within `T_delete` (default 60s). Nothing the target manages remains once no CR does. | Observer |
 | **G4** | Convergence | Within `T_settle` after any spec change, `UpdateFixture` or restore of a deleted fixture, and after faults stop within as long as they lasted plus `T_settle`, the target's `Ready` predicate holds on every primary CR with `T_stable` of quiet behind it (§5.5). A `Restart` gives the target `T_settle` past its return. A target waiting to restart, or not back since it last started, has not converged. This is ESR as a test. | Observer + target predicate |
 | **G5** | Restart-stable | Restarting the target does not change converged state. The snapshots taken before and after a `Restart` are equal under the target's equality predicate. | Observer |
@@ -575,10 +575,14 @@ botbox's. The cluster's are what the namespace holds before the fixtures and the
 once §5.8's wait is over. Both are excluded by name, so an object the cluster recreates
 stays excluded. The namespace is private to one run, since a kubeconfig cluster serves one
 invocation at a time (§5.8). Everything else in it came from the target, except what a
-cluster adds later: the optional selector leaves that out. A change a cluster makes to a
-managed object still counts as the target's. On a kubeconfig cluster G2 therefore fails
-where the garbage collector deletes a child after `T_stable` of quiet (§14, question 5).
-ownerReferences refine attribution to a particular CR; they are not required for it. An
+cluster adds later: the optional selector leaves that out. G2 counts a change to a primary
+CR or a managed object only where one of the target's writes explains it: a create,
+update, patch, delete or deletecollection of the object's resource in its namespace, which
+names the object or, as a create does, no object. The write reached the proxy inside the
+quiet window and no later than the Observer saw the change. Its subresource and its answer
+do not matter. So G2 does not count a change the cluster makes, such as the garbage
+collector's delete of a child (D92). The other checks judge what the namespace holds,
+whoever changed it. ownerReferences refine attribution to a particular CR; they are not required for it. An
 object belongs to the primary CRs its ownerReferences name, by UID, and one that names
 none may belong to any CR. G3, G5, G7 and the properties attribute by that rule, so that
 a run of several CRs holds each to its own objects (below). An object owned through
@@ -1502,18 +1506,14 @@ the proxy; the `Image` launcher. Separate design addendum.
 3. Should a later phase run the target's admission webhook in envtest, so that generation
    can widen beyond `generate.mutate`?
 4. Is `InProcess` worth reviving for speed once envtest run time is measured?
-5. Should G2 leave out a change to a managed object that no request of the target's
-   explains? On kind, just after the owner's CRD was installed, the garbage collector
-   deleted an owned Deployment 2.3 s after its owner. With a `T_stable` of 2 s, that delete
-   landed in the quiet window, and G2 counted it as the target's.
-6. G5 takes an op on one CR to change only that CR and what it owns (§6). Should it judge
+5. G5 takes an op on one CR to change only that CR and what it owns (§6). Should it judge
    less for a controller whose CRs refer to one another, such as one CR delegating to
    another of its kind?
-7. Should a target declare its RBAC and run under it (§5.2)? The proxy could send a token
+6. Should a target declare its RBAC and run under it (§5.2)? The proxy could send a token
    that botbox requests for a ServiceAccount of the run, bound to the target's Roles and
    ClusterRoles. On envtest 1.37, such a token was refused a verb and a resource its Role
    lacked, another namespace, and an impersonation of `system:masters`.
-8. What lets the README show a find in a real controller as a bug botbox found: upstream
+7. What lets the README show a find in a real controller as a bug botbox found: upstream
    acknowledging it, or a deterministic replay that a reading of upstream's code confirms?
 
 ## 15. Decision log
@@ -2209,7 +2209,7 @@ built from source and run as a black-box binary.
   that CR's deadline, since the garbage collector keeps an object until its last owner
   goes, and a grandchild names no CR at all. G5 judges what botbox's changes between its
   states could not have reached, which assumes one CR does not change another's objects
-  (§14, question 6). B15 names its children after the kind, which a run of one Widget
+  (§14, question 5). B15 names its children after the kind, which a run of one Widget
   named `widget` cannot tell from correct. Seeds 1 to 30 of cert-manager passed, 11 of
   them with two Certificates or more, and so did seeds 36, 66, 157 and 178, which draw
   three. Seeds 1 to 40 of external-secrets passed, 7 of them with two. cert-manager's
@@ -2501,3 +2501,17 @@ built from source and run as a black-box binary.
   draft's sequence against the example it names, and judges its CRs by the example's
   CRD, as it does each example's sequences. It fails once either refuses the sequence. With
   no draft left, both checks fail and say what to change.
+- **D92 G2 counts only the changes the target's writes explain.** On kind, just after the
+  owner's CRD was installed, the garbage collector deleted an owned Deployment 2.3 s after
+  its owner. The delete landed in the quiet window, and G2 failed 5 of 10 runs (#72). G2
+  now counts a version only where the target wrote to that object, or to its collection,
+  inside the window and no later than the Observer saw the version (§6). Every write of the
+  target's passes the proxy, so B1, B2 and B6 still fail G2. A managed object the cluster
+  changes because the target wrote another, such as a ReplicaSet of a Deployment the target
+  updated, no longer counts, and G1 still counts the write. Waiting out the garbage
+  collector on a kubeconfig cluster was rejected: it slows every run and still guesses the
+  latency. So was a wider `stable`, the workaround the docs gave. Matching a write to a
+  version by resourceVersion was rejected, because the proxy would have to decode every
+  response. A bound on how long after a write its version may come was rejected as another
+  guess. The settle wait still ends only after `T_stable` in which nothing changed, so a
+  checkpoint follows the cluster's changes.

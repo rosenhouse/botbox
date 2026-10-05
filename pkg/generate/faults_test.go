@@ -172,19 +172,18 @@ func TestFaultsLeaveEverySeedsOtherOpsAlone(t *testing.T) {
 
 // stripFault removes the fault op and its inserted settle from a sequence.
 func stripFault(ops []run.Op) []run.Op {
-	var faultAt, settleAt int
-	hasFault := false
+	faultAt := -1
+	settleAt := -1
 	for i, op := range ops {
 		if op.Type == run.OpFault {
 			faultAt = i
 			if op.Fault != nil && op.Fault.Until.Op != nil {
 				settleAt = *op.Fault.Until.Op
 			}
-			hasFault = true
 			break
 		}
 	}
-	if !hasFault {
+	if faultAt < 0 {
 		return ops
 	}
 	var stripped []run.Op

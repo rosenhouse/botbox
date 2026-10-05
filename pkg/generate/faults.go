@@ -69,7 +69,7 @@ func (g *Generator) faulted(t *rapid.T, ops []run.Op) []run.Op {
 	}
 	s := rapid.SampledFrom(starts).Draw(t, "faultStart")
 
-	fault := g.drawFault(t, s, ops)
+	fault := g.drawFault(t)
 
 	// Find the end of the span: the first op at or after s that settles.
 	end := s
@@ -127,7 +127,7 @@ func eligibleStarts(ops []run.Op) []int {
 }
 
 // drawFault draws a fault specification.
-func (g *Generator) drawFault(t *rapid.T, _ int, _ []run.Op) run.Fault {
+func (g *Generator) drawFault(t *rapid.T) run.Fault {
 	resource := rapid.SampledFrom(g.faultables).Draw(t, "faultResource")
 	verb := rapid.SampledFrom(faultVerbs).Draw(t, "faultVerb")
 

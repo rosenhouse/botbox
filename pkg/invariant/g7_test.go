@@ -426,7 +426,7 @@ func TestG7WaitsOutAFaultTheRunConvergedSince(t *testing.T) {
 			checkpoint(end, invariant.Converged).
 			through(end)
 	}
-	t.Run("where the wait ended T_stable after the op", func(t *testing.T) {
+	t.Run("at 13.1s", func(t *testing.T) {
 		noted(t, invariant.SelfHealing, waitEndingAt(13100*time.Millisecond), "the target was still owed time to recover")
 	})
 	t.Run("just before 17s", func(t *testing.T) {

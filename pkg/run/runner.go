@@ -353,6 +353,9 @@ type runner struct {
 	// botbox did to the run namespace itself.
 	skipped []string
 	failed  bool
+	// stopped is whether an op ended the run early with no finding, as a
+	// recreate does whose old CR a fault keeps.
+	stopped bool
 	// converged is where the last settle wait that converged ended. The first
 	// shows the target works, so botbox supervises it from there on.
 	converged time.Time
@@ -429,10 +432,11 @@ func refusal(op Op, err error) error {
 	return err
 }
 
-// applyOps applies the sequence in order and stops at the first violation.
+// applyOps applies the sequence in order and stops at the first violation,
+// or where an op stopped the run.
 func (r *runner) applyOps(ctx context.Context) error {
 	for _, op := range r.sequence.Ops {
-		if r.violation != nil {
+		if r.violation != nil || r.stopped {
 			return nil
 		}
 		if err := r.applyOp(ctx, op); err != nil {
@@ -571,7 +575,7 @@ func (r *runner) create(ctx context.Context, op Op) error {
 // recreate deletes the CR, waits for it to go and creates the op's object. The
 // wait lasts timeouts.delete, or longer while the run is owed time or the
 // proxy holds a request, as a settle wait does. A CR still there where the
-// wait ends is judged there.
+// wait ends is judged there, and the op creates nothing.
 func (r *runner) recreate(ctx context.Context, op Op, cr string) error {
 	due := r.now().Add(r.target.Timeouts.Delete)
 	if err := r.h.deleteCR(ctx, cr); err != nil {
@@ -606,15 +610,23 @@ func (s *crStayed) Error() string {
 	return fmt.Sprintf("the CR %s was still there %v after its delete", s.cr, s.wait.Window.End.Sub(s.wait.Window.Start).Round(time.Second))
 }
 
-// judgeStayed checkpoints where a recreate's wait for its CR ended. A CR that
-// no check reports there is a harness error, since the op cannot go on.
+// judgeStayed checkpoints where a recreate's wait for its CR ended. The op
+// cannot go on. Where a fault excuses the target, the run stops, and the
+// teardown judges the target once it has cleared the fault. A CR that no
+// check reports there otherwise is a harness error.
 func (r *runner) judgeStayed(ctx context.Context, op Op, stayed *crStayed) error {
 	checkpoint := stayed.wait.checkpoint(op.Index)
 	checkpoint.Stayed = true
 	if err := r.judge(ctx, checkpoint, invariant.Input.Excused); err != nil || r.violation != nil {
 		return err
 	}
-	return stayed
+	if !r.asOf(checkpoint.At).Recovering(checkpoint.At) {
+		return stayed
+	}
+	r.stopped = true
+	r.skipped = append(r.skipped, fmt.Sprintf("op %d (%s) stopped the run: %v, and a fault excused the target, so the op could not create its CR",
+		op.Index, op.Type, stayed))
+	return nil
 }
 
 // applyDeleteManaged resolves the op's index against the managed objects and

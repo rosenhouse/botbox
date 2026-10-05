@@ -1510,19 +1510,15 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		// fault is the fault op's window, placed from the deletion.
-		fault   func(deleted time.Time) proxy.FaultWindow
-		found   []Violation
-		want    string
-		says    string
-		wantErr string
+		fault func(deleted time.Time) proxy.FaultWindow
+		found []Violation
+		want  string
+		says  string
 	}{
 		{name: "a check reports it", found: []Violation{{ID: "G3"}}, want: "G3"},
 		{name: "a fault reached into its deletion", fault: func(deleted time.Time) proxy.FaultWindow {
 			return proxy.FaultWindow{First: deleted.Add(time.Second), Retired: deleted.Add(2 * time.Second)}
 		}, want: "G4", says: fmt.Sprintf("(timeouts.delete is %s)", testTimeouts.Delete)},
-		{name: "a fault is still active", fault: func(deleted time.Time) proxy.FaultWindow {
-			return proxy.FaultWindow{First: deleted.Add(time.Second)}
-		}, wantErr: "op 2 (recreate): the CR widget was still there"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newFakeHarness()
@@ -1543,13 +1539,10 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 			result, err := runFake(t, h, check, sequence)
 
 			ended := time.Now()
-			if test.wantErr == "" && err != nil {
+			if err != nil {
 				t.Fatalf("The run failed: %v", err)
 			}
-			if test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)) {
-				t.Fatalf("The run returned %v, want %q.", err, test.wantErr)
-			}
-			if got := result.Violation; test.want != "" && (got == nil || got.ID != test.want || !strings.Contains(got.Statement, test.says)) {
+			if got := result.Violation; got == nil || got.ID != test.want || !strings.Contains(got.Statement, test.says) {
 				t.Errorf("The run reported %v, want %s saying %q.", got, test.want, test.says)
 			}
 			if got, want := checkpointsAt(result.Timeline), []int{1, 2}; !slices.Equal(got, want) {
@@ -1570,6 +1563,58 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 				t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
 			}
 		})
+	}
+}
+
+// The op cannot create its CR while a fault keeps the old one, so the run
+// goes on to the teardown, which judges the target once the fault is cleared.
+func TestARecreateWhoseOldCRAFaultKeptStopsTheRun(t *testing.T) {
+	h := newFakeHarness()
+	h.crStays = true
+	h.faulting = true
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}},
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpRecreate, Obj: widget("widget")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil || result.Violation != nil {
+		t.Fatalf("The run returned %v and reported %v, want neither: a fault kept the CR.", err, result.Violation)
+	}
+	const stopped = "op 2 (recreate) stopped the run: the CR widget was still there"
+	if !slices.ContainsFunc(result.Notes, func(note string) bool { return strings.HasPrefix(note, stopped) }) {
+		t.Errorf("The run noted %q, want one beginning %q.", result.Notes, stopped)
+	}
+	want := []string{"addFault 0", "createCR widget", "settle", "supervise", "deleteCR widget", "awaitCRGone widget"}
+	if got := h.opCalls(); !slices.Equal(got, want) {
+		t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
+	}
+	if result.Timeline.Recovery == nil {
+		t.Error("The teardown gave the target no recovery from the fault that kept the CR.")
+	}
+	if got, want := checkpointsAt(result.Timeline), []int{1, 2, Recovery, Teardown}; !slices.Equal(got, want) {
+		t.Errorf("The run checkpointed at %v, want %v.", got, want)
+	}
+}
+
+// The checks excuse a CR past its G3 deadline only for G3 to report it, so
+// one that no check reports means they disagree.
+func TestARecreateWhoseCRStaysUnexcusedIsAHarnessError(t *testing.T) {
+	h := newFakeHarness()
+	h.crStays = true
+	h.recordDeletingCR("widget", "11", time.Now().Add(-testTimeouts.Delete-time.Second))
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpRecreate, Obj: widget("widget")},
+	)
+
+	_, err := runFake(t, h, nil, sequence)
+
+	if want := "op 1 (recreate): the CR widget was still there"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("The run returned %v, want %q.", err, want)
 	}
 }
 

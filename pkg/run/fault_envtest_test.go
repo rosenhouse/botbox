@@ -199,6 +199,20 @@ func startsWith(prefix string) func(string) bool {
 	return func(note string) bool { return strings.HasPrefix(note, prefix) }
 }
 
+// keptCR fails the toy's patches of its Widget until after a recreate. The toy
+// deletes the Widget's child, and the patch that clears its finalizer fails,
+// so the Widget stays with status.ready 1.
+const keptCR = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "patch", "resource": "widgets"}, "action": {"error": 500}, "until": {"op": 3}}},
+    {"i": 2, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 3, "t": "settle"}
+  ]
+}`
+
 // lostChild refuses the toy's ConfigMap creates while botbox deletes a child,
 // so status.ready counts the child until the update after the fault.
 const lostChild = `{
@@ -236,6 +250,18 @@ func TestTheCorrectToyPassesAFaultThatKeepsWhatP1Reads(t *testing.T) {
 		return result
 	}
 
+	t.Run("a recreate whose old CR the fault keeps", func(t *testing.T) {
+		t.Parallel()
+
+		result := runToy(t, keptCR,
+			"op 2 (recreate) stopped the run: the CR widget was still there",
+			"P1 is not evaluated at the checkpoint after op 2 (recreate): "+faultExcused)
+
+		if recovery := result.Timeline.Recovery; recovery == nil || !recovery.Converged {
+			t.Errorf("The teardown recorded the recovery %+v, want a wait that converged.", recovery)
+		}
+	})
+
 	t.Run("a wait that converged under the fault", func(t *testing.T) {
 		t.Parallel()
 
@@ -243,6 +269,59 @@ func TestTheCorrectToyPassesAFaultThatKeepsWhatP1Reads(t *testing.T) {
 
 		if wait := result.Timeline.Ops[2].Settled; wait == nil || !wait.Converged {
 			t.Errorf("The deleteManaged's wait was %+v, want one that converged.", wait)
+		}
+	})
+}
+
+// refusedAcrossARecreate refuses the toy's ConfigMap creates from before a
+// scale-up until after a recreate.
+const refusedAcrossARecreate = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"error": 500}, "until": {"op": 4}}},
+    {"i": 2, "t": "update", "patch": {"spec": {"count": 2}}},
+    {"i": 3, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 4, "t": "settle"}
+  ]
+}`
+
+// A fault active during a recreate excuses a finalizer that never clears, and
+// stops the run. The teardown clears the fault, and its recovery wait blames
+// the finalizer.
+func TestAFinalizerThatNeverClearsFailsG4OnceAFaultThatStoppedARecreateIsCleared(t *testing.T) {
+	t.Parallel()
+	binary := buildToy(t)
+	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
+	runUnder := func(t *testing.T, launchArgs ...string) run.Result {
+		t.Helper()
+		toy := loadTarget(t, binary)
+		toy.Launch.Args = append(toy.Launch.Args, launchArgs...)
+		result, err := run.Run(t.Context(), toy, readSequence(t, refusedAcrossARecreate),
+			run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		return result
+	}
+
+	t.Run("B13", func(t *testing.T) {
+		t.Parallel()
+
+		result := runUnder(t, "--bug=13")
+
+		if v := result.Violation; v == nil || v.ID != "G4" || !strings.Contains(v.Statement, "after the last fault stopped") ||
+			!strings.Contains(v.Statement, "held by the finalizers widget.botbox/cleanup") {
+			t.Errorf("The run reported %v, want the G4 of the wait after the last fault stopped, naming the finalizer.", v)
+		}
+	})
+
+	t.Run("the correct toy", func(t *testing.T) {
+		t.Parallel()
+
+		if result := runUnder(t); result.Violation != nil {
+			t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
 		}
 	})
 }

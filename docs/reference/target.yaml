@@ -14,6 +14,8 @@ manages:
   - v1/Secret
 notRecreated:
   - v1/Secret
+rbac:
+  - ../../targets/toy-widget/rbac/role.yaml
 selector: app.kubernetes.io/managed-by=widget-controller
 ready: >-
   has(status.observedGeneration) && status.observedGeneration == metadata.generation

@@ -127,6 +127,8 @@ primary: toy.botbox/v1/Widget      # botbox creates, changes and deletes CRs of 
 sample: widget.yaml                # Each drawn sequence creates a variant of this CR first.
 manages:                           # The controller creates objects of these kinds.
   - v1/ConfigMap
+rbac:
+  - rbac/role.yaml
 launch:
   binary: bin/toy-widget
   args:

@@ -197,6 +197,14 @@ func (r *Reconciler) b1Hold() time.Duration {
 // Widget created at count 0 would never gain status.ready at all.
 func (r *Reconciler) patchStatus(ctx context.Context, widget *toyv1.Widget, status toyv1.WidgetStatus) error {
 	widget.Status = status
+	// B16: Update instead of Patch requires "update" on widgets/status, which
+	// the correct RBAC grants only as "patch".
+	if r.Bug == B16 {
+		if err := r.Status().Update(ctx, widget); err != nil {
+			return fmt.Errorf("writing the status: %w", err)
+		}
+		return nil
+	}
 	patch, err := json.Marshal(map[string]any{"status": status})
 	if err != nil {
 		return fmt.Errorf("encoding the status: %w", err)

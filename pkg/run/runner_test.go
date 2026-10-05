@@ -2628,6 +2628,45 @@ func TestRunNotesEachOwnerTheCollectorCouldNotResolve(t *testing.T) {
 	}
 }
 
+func TestRunNotesWhatTheAPIServerForbadeTheTarget(t *testing.T) {
+	h := newFakeHarness()
+	h.logged = []proxy.Request{
+		{Verb: "patch", Resource: "widgets", Subresource: "status", Status: 403},
+		{Verb: "update", Resource: "widgets", Subresource: "status", Status: 403},
+		{Verb: "patch", Resource: "widgets", Subresource: "status", Status: 403}, // duplicate
+		{Verb: "get", Resource: "configmaps", Status: 200},                       // not forbidden
+		{Verb: "list", Resource: "widgets", Status: 403, Fault: "error(403)"},     // injected fault
+	}
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	want := "the API server forbade the target: patch widgets/status, update widgets/status"
+	if !slices.Contains(result.Notes, want) {
+		t.Errorf("The run noted %q, want %q.", result.Notes, want)
+	}
+}
+
+func TestRunDoesNotNoteForbiddenWhenNoneOccurred(t *testing.T) {
+	h := newFakeHarness()
+	h.logged = []proxy.Request{
+		{Verb: "get", Resource: "configmaps", Status: 200},
+	}
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	for _, note := range result.Notes {
+		if strings.Contains(note, "forbade") {
+			t.Errorf("The run noted %q, want no forbidden note.", note)
+		}
+	}
+}
+
 // A check that cannot be evaluated is a configuration error, so the run ends
 // as a harness error rather than as a finding (DESIGN.md §11).
 func TestRunEndsWhenACheckCannotBeEvaluated(t *testing.T) {

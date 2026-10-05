@@ -406,7 +406,7 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 	teardown := r.teardown(ctx)
 	r.readExits()
 	// The run's own notes come before the last checkpoint's.
-	notes := slices.Concat(r.exitNotes(), r.skipped, r.notes)
+	notes := slices.Concat(r.exitNotes(), r.forbiddenNotes(), r.skipped, r.notes)
 	result := Result{Timeline: r.timeline, Violation: r.violation, Notes: notes, Recorded: r.input()}
 	return result, errors.Join(failure, teardown)
 }
@@ -1050,6 +1050,36 @@ func (r *runner) exitNotes() []string {
 		notes[i] = fmt.Sprintf("the target exited during %s with %v", r.during(exit.At), exit)
 	}
 	return notes
+}
+
+// forbiddenNotes returns a note naming each distinct verb+resource the API
+// server forbade the target, excluding faults the proxy injected.
+func (r *runner) forbiddenNotes() []string {
+	type pair struct{ verb, resource string }
+	seen := map[pair]bool{}
+	var pairs []pair
+	for _, req := range r.h.requests() {
+		if !req.Forbidden() {
+			continue
+		}
+		resource := req.Resource
+		if req.Subresource != "" {
+			resource += "/" + req.Subresource
+		}
+		p := pair{req.Verb, resource}
+		if !seen[p] {
+			seen[p] = true
+			pairs = append(pairs, p)
+		}
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	parts := make([]string, len(pairs))
+	for i, p := range pairs {
+		parts[i] = p.verb + " " + p.resource
+	}
+	return []string{"the API server forbade the target: " + strings.Join(parts, ", ")}
 }
 
 // during names what the run was doing at t: the op it had applied last, or the

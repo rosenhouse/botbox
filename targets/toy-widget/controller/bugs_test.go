@@ -455,6 +455,44 @@ func TestB15NamesTheChildrenAfterTheKindSoTwoWidgetsFightOverThem(t *testing.T) 
 	}
 }
 
+// B16 uses Status().Update() instead of Status().Patch(). The fake client
+// exercises both paths; a real run under RBAC sees the difference as a 403 on
+// widgets/status because the role grants patch, not update.
+func TestB16UsesStatusUpdateInsteadOfPatch(t *testing.T) {
+	var patched, updated bool
+	funcs := interceptor.Funcs{
+		SubResourcePatch: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, patch client.Patch, opts ...client.SubResourcePatchOption) error {
+			patched = true
+			return c.SubResource(subResourceName).Patch(ctx, obj, patch, opts...)
+		},
+		SubResourceUpdate: func(ctx context.Context, c client.Client, subResourceName string, obj client.Object, opts ...client.SubResourceUpdateOption) error {
+			updated = true
+			return c.SubResource(subResourceName).Update(ctx, obj, opts...)
+		},
+	}
+	widget := newWidget(1)
+	r := fixture(t, B16, funcs, widget)
+	mustReconcile(t, r, widget)
+
+	if patched {
+		t.Error("B16 patched the status, want it to use Update.")
+	}
+	if !updated {
+		t.Error("B16 did not update the status.")
+	}
+
+	// The correct controller patches.
+	patched, updated = false, false
+	correct := fixture(t, 0, funcs, newWidget(1))
+	mustReconcile(t, correct, newWidget(1))
+	if !patched {
+		t.Error("The correct controller did not patch the status.")
+	}
+	if updated {
+		t.Error("The correct controller updated the status, want Patch.")
+	}
+}
+
 // refuseTheFirstChildCreate is the fault the sequence b11-fault.json injects,
 // as the fake API server: one refused ConfigMap create and no more.
 func refuseTheFirstChildCreate() interceptor.Funcs {

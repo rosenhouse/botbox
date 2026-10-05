@@ -35,6 +35,7 @@ type declaration struct {
 	Fixtures     []string              `json:"fixtures"`
 	Manages      []string              `json:"manages"`
 	NotRecreated []string              `json:"notRecreated"`
+	RBAC         []string              `json:"rbac"`
 	Selector     string                `json:"selector"`
 	Ready        string                `json:"ready"`
 	Equal        string                `json:"equal"`
@@ -126,6 +127,10 @@ func load(path string) (*Target, error) {
 			return nil, fmt.Errorf("crds: %w", err)
 		}
 		loaded.CRDs = append(loaded.CRDs, crdPath)
+	}
+
+	if err := loadRBAC(dir, declared.RBAC, loaded); err != nil {
+		return nil, err
 	}
 
 	if declared.Primary == "" {

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/labels"
@@ -127,6 +128,8 @@ type Target struct {
 	// mutates or deletes one is a configuration error.
 	ClusterFixtures []schema.GroupVersionKind
 	Manages         []schema.GroupVersionKind
+	Roles           []rbacv1.Role
+	ClusterRoles    []rbacv1.ClusterRole
 	// NotRecreated are the managed kinds the target leaves deleted, which G7
 	// does not require back.
 	NotRecreated []schema.GroupVersionKind

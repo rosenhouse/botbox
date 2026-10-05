@@ -31,6 +31,8 @@ manages:
   - v1/Secret
 notRecreated:
   - v1/Secret
+rbac:
+  - ../../targets/toy-widget/rbac/role.yaml
 selector: app.kubernetes.io/managed-by=widget-controller
 ready: >-
   has(status.observedGeneration) && status.observedGeneration == metadata.generation
@@ -81,6 +83,7 @@ thresholds:
 | `fixtures` | none | It lists files of objects that botbox creates in each run's namespace before op 0, such as a Secret your controller reads. A fixture sets no `metadata.namespace`. botbox never counts a fixture as your controller's. |
 | `manages` | none | It lists the kinds your controller creates, as `group/version/Kind`, or `v1/Kind` for the core group. botbox watches them and judges your controller by them. |
 | `notRecreated` | none | It lists the managed kinds your controller leaves deleted, or recreates under another name. G7 does not require them back. Each is also under `manages`. |
+| `rbac` | none | It lists files of Role and ClusterRole YAML. botbox creates a ServiceAccount with these permissions for each run instead of running the target as admin. |
 | `selector` | every object | Only the managed objects this label selector matches count as your controller's. |
 | `ready` | `has(status.observedGeneration) && status.observedGeneration == metadata.generation` | It is CEL that says whether a CR is ready, or `go:<name>`. G4 requires it of every CR. |
 | `equal` | none | It names a `go:<name>` hook that replaces G5's comparison of the states on either side of a restart. It takes no `equalIgnore`. |

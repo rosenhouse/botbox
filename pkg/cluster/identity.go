@@ -160,6 +160,8 @@ func (id *Identity) Delete(ctx context.Context) error {
 	if id.client == nil {
 		return nil
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancel()
 	var errs []error
 	for _, name := range id.clusterRoleBindings {
 		err := id.client.RbacV1().ClusterRoleBindings().Delete(ctx, name, metav1.DeleteOptions{})

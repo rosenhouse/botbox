@@ -2635,7 +2635,7 @@ func TestRunNotesWhatTheAPIServerForbadeTheTarget(t *testing.T) {
 		{Verb: "update", Resource: "widgets", Subresource: "status", Status: 403},
 		{Verb: "patch", Resource: "widgets", Subresource: "status", Status: 403}, // duplicate
 		{Verb: "get", Resource: "configmaps", Status: 200},                       // not forbidden
-		{Verb: "list", Resource: "widgets", Status: 403, Fault: "error(403)"},     // injected fault
+		{Verb: "list", Resource: "widgets", Status: 403, Fault: "error(403)"},    // injected fault
 	}
 
 	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))

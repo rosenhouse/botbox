@@ -1,4 +1,4 @@
-apiVersion: rules.botbox/v1
+apiVersion: rules.reconciler-fuzzer/v1
 kind: Gadget
 metadata:
   name: gadget

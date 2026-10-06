@@ -21,20 +21,20 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
 )
 
 var (
-	thingKind     = schema.GroupVersionKind{Group: "test.botbox", Version: "v1", Kind: "Thing"}
-	thingResource = schema.GroupVersionResource{Group: "test.botbox", Version: "v1", Resource: "things"}
+	thingKind     = schema.GroupVersionKind{Group: "test.reconciler-fuzzer", Version: "v1", Kind: "Thing"}
+	thingResource = schema.GroupVersionResource{Group: "test.reconciler-fuzzer", Version: "v1", Resource: "things"}
 )
 
 const thingCRD = `apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: things.test.botbox
+  name: things.test.reconciler-fuzzer
 spec:
-  group: test.botbox
+  group: test.reconciler-fuzzer
   names:
     kind: Thing
     plural: things
@@ -218,9 +218,9 @@ func TestConnectInstallsCRDsAndLeavesThem(t *testing.T) {
 const convertedCRD = `apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: converted.test.botbox
+  name: converted.test.reconciler-fuzzer
 spec:
-  group: test.botbox
+  group: test.reconciler-fuzzer
   conversion:
     strategy: Webhook
     webhook:
@@ -279,7 +279,7 @@ func conversionStrategy(t *testing.T, config *rest.Config) string {
 	t.Helper()
 	crds := dynamic.NewForConfigOrDie(config).Resource(schema.GroupVersionResource{
 		Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"})
-	crd, err := crds.Get(t.Context(), "converted.test.botbox", metav1.GetOptions{})
+	crd, err := crds.Get(t.Context(), "converted.test.reconciler-fuzzer", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Reading the CRD failed: %v", err)
 	}

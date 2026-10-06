@@ -15,7 +15,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 
-	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
 func TestMatchesSelectsOnVerbResourceAndName(t *testing.T) {
@@ -98,7 +98,7 @@ func TestInjectedErrorReplacesTheUpstreamResponse(t *testing.T) {
 		Status:   metav1.StatusFailure,
 		Code:     http.StatusInternalServerError,
 		Reason:   metav1.StatusReasonInternalError,
-		Message:  "botbox fault: create /api/v1/namespaces/ns1/configmaps",
+		Message:  "reconciler-fuzzer fault: create /api/v1/namespaces/ns1/configmaps",
 		Details:  &metav1.StatusDetails{Kind: "configmaps"},
 	}
 	if status.TypeMeta != want.TypeMeta || status.Status != want.Status || status.Code != want.Code ||

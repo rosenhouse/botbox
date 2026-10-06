@@ -13,8 +13,8 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"pgregory.net/rapid"
 
-	"github.com/rosenhouse/botbox/internal/run"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 func newGenerator(t *testing.T, loaded *target.Target, opts Options) *Generator {
@@ -146,8 +146,8 @@ func TestADeletedFixtureComesBackBeforeTheNextOpThatSettles(t *testing.T) {
 	})
 }
 
-// G7 notes a deleteManaged that follows a change of botbox's before the run
-// converged, so generation waits for the target's reaction first.
+// G7 notes a deleteManaged that follows a change of reconciler-fuzzer's before
+// the run converged, so generation waits for the target's reaction first.
 func TestADeletedFixtureIsBackForTheNextDrawOnceAnOpSettles(t *testing.T) {
 	loaded := loadTarget(t, fixturesTarget)
 	g := newGenerator(t, loaded, Options{})
@@ -347,7 +347,7 @@ func TestAnUpdateTheCRDAlwaysRefusesBecomesASettle(t *testing.T) {
 	}
 }
 
-func TestTheStateFollowsTheCRBotboxLastWrote(t *testing.T) {
+func TestTheStateFollowsTheCRReconcilerFuzzerLastWrote(t *testing.T) {
 	spec := func(count int64) map[string]any {
 		return map[string]any{"spec": map[string]any{"count": count, "mode": "fast"}}
 	}

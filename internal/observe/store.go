@@ -77,8 +77,8 @@ func (s *Store) RecordDeletion(gvk schema.GroupVersionKind, obj *unstructured.Un
 	s.record(newVersion(gvk, obj, at, true))
 }
 
-// Exclude records that the named object is not the target's: botbox created
-// it, or the cluster did. It is never managed, and neither is an object
+// Exclude records that the named object is not the target's: reconciler-fuzzer
+// created it, or the cluster did. It is never managed, and neither is an object
 // recreated under its name.
 func (s *Store) Exclude(gvk schema.GroupVersionKind, name string) {
 	s.mu.Lock()

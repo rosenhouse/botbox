@@ -1,6 +1,6 @@
 ---
 name: add-invariant
-description: Add a new generic invariant (G-series) to botbox: design row, pure-function implementation, fixture tests, toy-target bug that trips it, and bug-matrix update. Use when asked to add, split, or redefine an invariant.
+description: Add a new generic invariant (G-series) to reconciler-fuzzer: design row, pure-function implementation, fixture tests, toy-target bug that trips it, and bug-matrix update. Use when asked to add, split, or redefine an invariant.
 ---
 
 # Add a generic invariant

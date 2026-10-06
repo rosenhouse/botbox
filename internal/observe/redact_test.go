@@ -13,7 +13,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 var (
@@ -156,7 +156,7 @@ func TestEqualValuesShareAMarkerAcrossRunsOfOneProcess(t *testing.T) {
 func TestEachProcessKeysItsMarkersAfresh(t *testing.T) {
 	markerOfAProcess := func() string {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestPrintAMarker$")
-		cmd.Env = append(os.Environ(), "BOTBOX_PRINT_A_MARKER=1")
+		cmd.Env = append(os.Environ(), "RECONCILER_FUZZER_PRINT_A_MARKER=1")
 		out, err := cmd.Output()
 		if err != nil {
 			t.Fatalf("The helper process failed: %v\n%s", err, out)
@@ -172,7 +172,7 @@ func TestEachProcessKeysItsMarkersAfresh(t *testing.T) {
 }
 
 func TestPrintAMarker(t *testing.T) {
-	if os.Getenv("BOTBOX_PRINT_A_MARKER") == "" {
+	if os.Getenv("RECONCILER_FUZZER_PRINT_A_MARKER") == "" {
 		t.Skip("This is TestEachProcessKeysItsMarkersAfresh's helper process.")
 	}
 	fmt.Println(field(t, observe.Redacted(secretGVK, secret("creds", "10", map[string]string{"token": "s3cr3t"}).Object), "data")["token"])

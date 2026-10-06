@@ -12,8 +12,8 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // Invocation manages cluster-scoped fixtures that are shared across runs.
@@ -36,7 +36,7 @@ func NewInvocation(config *rest.Config, t *target.Target) (*Invocation, error) {
 	}
 	client, err := dynamic.NewForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("building botbox's dynamic client for cluster fixtures: %w", err)
+		return nil, fmt.Errorf("building reconciler-fuzzer's dynamic client for cluster fixtures: %w", err)
 	}
 	return &Invocation{client: client}, nil
 }

@@ -1,6 +1,7 @@
-// Package cluster provides the test cluster a botbox run executes against: an
-// envtest control plane it starts, or an existing cluster a kubeconfig names.
-// envtest reads KUBEBUILDER_ASSETS itself; `make setup` installs the binaries.
+// Package cluster provides the test cluster a reconciler-fuzzer run executes
+// against: an envtest control plane it starts, or an existing cluster a
+// kubeconfig names. envtest reads KUBEBUILDER_ASSETS itself; `make setup`
+// installs the binaries.
 //
 // This is the one harness package allowed to import controller-runtime.
 package cluster
@@ -95,7 +96,7 @@ func cannotRun(name, path string) string {
 
 // Cluster is a running test cluster.
 type Cluster struct {
-	// env is nil for a cluster botbox did not start.
+	// env is nil for a cluster reconciler-fuzzer did not start.
 	env    *envtest.Environment
 	config *rest.Config
 }

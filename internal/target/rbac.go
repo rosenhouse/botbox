@@ -70,7 +70,7 @@ func loadRBACDocument(file string, data []byte, t *Target, roleNames, clusterRol
 			return fmt.Errorf("%s: a Role has no metadata.name", file)
 		}
 		if role.Namespace != "" {
-			return fmt.Errorf("%s: the Role %s sets metadata.namespace; drop it, because botbox binds roles in each run's own namespace", file, role.Name)
+			return fmt.Errorf("%s: the Role %s sets metadata.namespace; drop it, because reconciler-fuzzer binds roles in each run's own namespace", file, role.Name)
 		}
 		if roleNames[role.Name] {
 			return fmt.Errorf("%s: duplicate Role %s", file, role.Name)
@@ -87,7 +87,7 @@ func loadRBACDocument(file string, data []byte, t *Target, roleNames, clusterRol
 			return fmt.Errorf("%s: a ClusterRole has no metadata.name", file)
 		}
 		if cr.AggregationRule != nil {
-			return fmt.Errorf("%s: the ClusterRole %s sets aggregationRule; botbox copies the rules, not an aggregation", file, cr.Name)
+			return fmt.Errorf("%s: the ClusterRole %s sets aggregationRule; reconciler-fuzzer copies the rules, not an aggregation", file, cr.Name)
 		}
 		if clusterRoleNames[cr.Name] {
 			return fmt.Errorf("%s: duplicate ClusterRole %s", file, cr.Name)

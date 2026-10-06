@@ -8,8 +8,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // ignoredByDefault are the paths the default equality ignores. It compares
@@ -80,8 +80,8 @@ func (out *Result) noteOnce(note string) {
 // whatever version a reference names, then by UID.
 type ownerSet struct {
 	uids map[ownerKey]types.UID
-	// watched are the kinds botbox observes. An owner of any other kind is
-	// unresolvable, so it counts as live.
+	// watched are the kinds reconciler-fuzzer observes. An owner of any other kind
+	// is unresolvable, so it counts as live.
 	watched map[schema.GroupKind]bool
 }
 
@@ -123,7 +123,7 @@ func (o ownerSet) exists(ref map[string]any) bool {
 	gvk := schema.FromAPIVersionAndKind(text(ref["apiVersion"]), text(ref["kind"]))
 	key := ownerKey{kind: gvk.GroupKind(), name: text(ref["name"])}
 	if !o.watched[key.kind] {
-		return true // botbox does not watch the kind, so it cannot say the owner is gone.
+		return true // reconciler-fuzzer does not watch the kind, so it cannot say the owner is gone.
 	}
 	uid, found := o.uids[key]
 	return found && uid == types.UID(text(ref["uid"]))

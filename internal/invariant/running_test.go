@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
 )
 
 func TestBackIsTheFirstRequestThatShowsTheTargetRunning(t *testing.T) {
@@ -62,8 +62,8 @@ func TestBackIsTheFirstRequestThatShowsTheTargetRunning(t *testing.T) {
 	}
 }
 
-// botbox chose to restart the target, so a wait gives it T_settle past its
-// return, where it returned within T_settle.
+// reconciler-fuzzer chose to restart the target, so a wait gives it T_settle
+// past its return, where it returned within T_settle.
 func TestWaitOwedRunsPastTheReturnFromARestartOp(t *testing.T) {
 	restarted := func() *run { return newRun().running(time.Second).op(invariant.OpRestart, 3*time.Second) }
 	for _, test := range []struct {

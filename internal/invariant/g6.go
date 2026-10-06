@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
 // NoErrorLoop is G6: the target does not make the same failing request, same

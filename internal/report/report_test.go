@@ -16,13 +16,13 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/report"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/report"
 )
 
-const replayCommand = "botbox replay --target targets/toy-widget/target.yaml botbox-out/20260921T055744Z-23/run-1/sequence.json"
+const replayCommand = "reconciler-fuzzer replay --target targets/toy-widget/target.yaml reconciler-fuzzer-out/20260921T055744Z-23/run-1/sequence.json"
 
 // sequence is one canonical sequence as run.Sequence.Marshal writes it.
 var sequence = json.RawMessage(`{
@@ -44,11 +44,11 @@ func failingRun() report.Report {
 			Statement: "the v1/ConfigMap widget-0 was still there 10s after the CR was deleted",
 			Evidence:  "at 2026-09-21T05:59:08.980624165Z; 1 version, the first v1/ConfigMap widget-0",
 		},
-		Target:   report.Target{Name: "toy-widget", Version: "v0.1.0"},
-		Botbox:   "v1.2.3",
-		Seed:     23,
-		Replay:   replayCommand,
-		Sequence: sequence,
+		Target:           report.Target{Name: "toy-widget", Version: "v0.1.0"},
+		ReconcilerFuzzer: "v1.2.3",
+		Seed:             23,
+		Replay:           replayCommand,
+		Sequence:         sequence,
 	}
 }
 
@@ -68,7 +68,7 @@ func TestReportLeadsWithTheFailureAndHowToReproduceIt(t *testing.T) {
 			t.Errorf("The report's first ten lines do not name %q:\n%s", want, opening)
 		}
 	}
-	if want := "botbox v1.2.3 exercised toy-widget v0.1.0 on seed 23."; !strings.Contains(md, want) {
+	if want := "reconciler-fuzzer v1.2.3 exercised toy-widget v0.1.0 on seed 23."; !strings.Contains(md, want) {
 		t.Errorf("The report does not say %q:\n%s", want, md)
 	}
 }
@@ -90,11 +90,11 @@ func TestReportJSONCarriesWhatFailedAndWhatItRanAgainst(t *testing.T) {
 	_, encoded := write(t, failure)
 
 	var got struct {
-		Check  report.Check  `json:"check"`
-		Target report.Target `json:"target"`
-		Botbox string        `json:"botbox"`
-		Seed   int64         `json:"seed"`
-		Replay string        `json:"replay"`
+		Check            report.Check  `json:"check"`
+		Target           report.Target `json:"target"`
+		ReconcilerFuzzer string        `json:"reconcilerFuzzer"`
+		Seed             int64         `json:"seed"`
+		Replay           string        `json:"replay"`
 	}
 	if err := json.Unmarshal([]byte(encoded), &got); err != nil {
 		t.Fatalf("report.json does not parse: %v\n%s", err, encoded)
@@ -105,8 +105,8 @@ func TestReportJSONCarriesWhatFailedAndWhatItRanAgainst(t *testing.T) {
 	if got.Target != failure.Target {
 		t.Errorf("report.json names the target %+v, want %+v.", got.Target, failure.Target)
 	}
-	if got.Botbox != failure.Botbox {
-		t.Errorf("report.json names botbox %q, want %q.", got.Botbox, failure.Botbox)
+	if got.ReconcilerFuzzer != failure.ReconcilerFuzzer {
+		t.Errorf("report.json names reconciler-fuzzer %q, want %q.", got.ReconcilerFuzzer, failure.ReconcilerFuzzer)
 	}
 	if got.Seed != failure.Seed {
 		t.Errorf("report.json names seed %d, want %d.", got.Seed, failure.Seed)
@@ -138,7 +138,7 @@ func TestReportQuotesTheRequestsAndVersionsTheViolationNamed(t *testing.T) {
 	failure := failingRun()
 	failure.Requests = []proxy.Request{{
 		Start: time.Date(2026, 9, 21, 5, 59, 8, 980624165, time.UTC),
-		Verb:  "create", Path: "/api/v1/namespaces/botbox-run-x/configmaps", Status: 500, Fault: "error(500)",
+		Verb:  "create", Path: "/api/v1/namespaces/reconciler-fuzzer-run-x/configmaps", Status: 500, Fault: "error(500)",
 	}}
 	failure.Versions = []observe.Version{{
 		Key:             observe.Key{GVK: schema.GroupVersionKind{Group: "cert-manager.io", Version: "v1", Kind: "CertificateRequest"}, Name: "widget-0"},
@@ -147,7 +147,7 @@ func TestReportQuotesTheRequestsAndVersionsTheViolationNamed(t *testing.T) {
 		// A check reading a Ready predicate reads these, so a report quotes them.
 		Generation:         4,
 		ObservedGeneration: ptr(int64(3)),
-		Finalizers:         []string{"widget.botbox/cleanup"},
+		Finalizers:         []string{"widget.reconciler-fuzzer/cleanup"},
 		DeletionTimestamp:  &metav1.Time{Time: time.Date(2026, 9, 21, 5, 59, 8, 0, time.UTC)},
 		Deleted:            true,
 	}, {
@@ -164,10 +164,10 @@ func TestReportQuotesTheRequestsAndVersionsTheViolationNamed(t *testing.T) {
 	}{
 		{"Requests", []string{"The violation quotes 1 request.", "requests.jsonl",
 			"| start | verb | path | status | fault |\n| --- | --- | --- | --- | --- |\n",
-			"| 2026-09-21T05:59:08.980624165Z | create | /api/v1/namespaces/botbox-run-x/configmaps | 500 | error(500) |"}},
+			"| 2026-09-21T05:59:08.980624165Z | create | /api/v1/namespaces/reconciler-fuzzer-run-x/configmaps | 500 | error(500) |"}},
 		{"Object versions", []string{"The violation quotes 2 versions.", "objects.jsonl",
 			"| time | kind | name | resourceVersion | generation | observed | finalizers | deletionTimestamp | deleted |",
-			"| 2026-09-21T05:59:09Z | cert-manager.io/v1/CertificateRequest | widget-0 | 812 | 4 | 3 | widget.botbox/cleanup | 2026-09-21T05:59:08Z | yes |",
+			"| 2026-09-21T05:59:09Z | cert-manager.io/v1/CertificateRequest | widget-0 | 812 | 4 | 3 | widget.reconciler-fuzzer/cleanup | 2026-09-21T05:59:08Z | yes |",
 			"| 2026-09-21T05:59:10Z | v1/ConfigMap | widget-0-0 | 813 | 0 |  |  |  |  |"}},
 	} {
 		body := section(md, excerpt.heading)
@@ -183,13 +183,13 @@ func TestReportQuotesTheRequestsAndVersionsTheViolationNamed(t *testing.T) {
 	if got := field(t, encoded, "requests"); !strings.Contains(got, "error(500)") {
 		t.Errorf("report.json quotes the requests as %s", got)
 	}
-	if got := field(t, encoded, "versions"); !strings.Contains(got, "widget.botbox/cleanup") {
+	if got := field(t, encoded, "versions"); !strings.Contains(got, "widget.reconciler-fuzzer/cleanup") {
 		t.Errorf("report.json quotes the versions as %s", got)
 	}
 }
 
-// botbox's garbage collector runs only on envtest, and its deletes never
-// reach requests.jsonl.
+// reconciler-fuzzer's garbage collector runs only on envtest, and its deletes
+// never reach requests.jsonl.
 func TestReportNamesTheCollectorsDeletesWhereItRan(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
@@ -200,7 +200,7 @@ func TestReportNamesTheCollectorsDeletesWhereItRan(t *testing.T) {
 			"The run directory holds `requests.jsonl`, `objects.jsonl` and `target.log`.\n"},
 		{"on envtest", true,
 			"The run directory holds `requests.jsonl`, `objects.jsonl`, `collector.jsonl` and `target.log`. " +
-				"`collector.jsonl` holds each delete that botbox's garbage collector tried.\n"},
+				"`collector.jsonl` holds each delete that reconciler-fuzzer's garbage collector tried.\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			failure := failingRun()
@@ -208,7 +208,7 @@ func TestReportNamesTheCollectorsDeletesWhereItRan(t *testing.T) {
 
 			md, _ := write(t, failure)
 
-			if !strings.Contains(md, "botbox v1.2.3 exercised toy-widget v0.1.0 on seed 23. "+tc.want) {
+			if !strings.Contains(md, "reconciler-fuzzer v1.2.3 exercised toy-widget v0.1.0 on seed 23. "+tc.want) {
 				t.Errorf("The report does not say %q:\n%s", tc.want, md)
 			}
 		})
@@ -230,7 +230,7 @@ func TestReportJSONIsTheSameWhetherTheCollectorRan(t *testing.T) {
 
 func TestReportNamesWhatRanWhereNoVersionIsDeclared(t *testing.T) {
 	failure := failingRun()
-	failure.Target.Version, failure.Botbox = "", ""
+	failure.Target.Version, failure.ReconcilerFuzzer = "", ""
 
 	md, encoded := write(t, failure)
 
@@ -240,7 +240,7 @@ func TestReportNamesWhatRanWhereNoVersionIsDeclared(t *testing.T) {
 	if want := "The run exercised toy-widget on seed 23."; !strings.Contains(md, want) {
 		t.Errorf("The report does not say %q:\n%s", want, md)
 	}
-	for _, absent := range []string{"botbox", "version"} {
+	for _, absent := range []string{"reconciler-fuzzer", "version"} {
 		if strings.Contains(encoded, `"`+absent+`"`) {
 			t.Errorf("report.json holds an empty %q:\n%s", absent, encoded)
 		}
@@ -318,7 +318,7 @@ func TestReportBoundsTheEvidenceAndSaysHowMuchThereWas(t *testing.T) {
 func TestReportQuotesTheTimelineAndTheStateApart(t *testing.T) {
 	failure := failingRun()
 	failure.Versions = []observe.Version{{
-		Key:             observe.Key{GVK: schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}, Name: "widget"},
+		Key:             observe.Key{GVK: schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Widget"}, Name: "widget"},
 		ResourceVersion: "219",
 	}}
 	failure.Managed = []observe.Version{{
@@ -326,14 +326,14 @@ func TestReportQuotesTheTimelineAndTheStateApart(t *testing.T) {
 		ResourceVersion: "221",
 	}}
 	failure.ManagedTotal = ptr(1)
-	failure.VersionsOf = "toy.botbox/v1/Widget widget"
+	failure.VersionsOf = "toy.reconciler-fuzzer/v1/Widget widget"
 
 	md, encoded := write(t, failure)
 
-	if want := "The violation quotes 1 version of `toy.botbox/v1/Widget widget`."; !strings.Contains(md, want) {
+	if want := "The violation quotes 1 version of `toy.reconciler-fuzzer/v1/Widget widget`."; !strings.Contains(md, want) {
 		t.Errorf("The report does not say %q:\n%s", want, md)
 	}
-	if got := field(t, encoded, "versionsOf"); got != `"toy.botbox/v1/Widget widget"` {
+	if got := field(t, encoded, "versionsOf"); got != `"toy.reconciler-fuzzer/v1/Widget widget"` {
 		t.Errorf("report.json says the timeline is of %s, want the CR it quotes.", got)
 	}
 	timeline, state := section(md, "Object versions"), section(md, "Managed objects at the verdict")
@@ -356,7 +356,7 @@ func TestReportQuotesTheVersionTimelineWithoutTheObjects(t *testing.T) {
 
 	_, encoded := write(t, failure)
 
-	if strings.Contains(encoded, "botbox-the-whole-object") {
+	if strings.Contains(encoded, "reconciler-fuzzer-the-whole-object") {
 		t.Errorf("report.json embeds the object bodies:\n%s", encoded)
 	}
 	if failure.Versions[0].Object == nil {
@@ -607,7 +607,7 @@ func object(name string) *unstructured.Unstructured {
 		"apiVersion": "v1",
 		"kind":       "ConfigMap",
 		"metadata":   map[string]any{"name": name},
-		"data":       map[string]any{"marker": "botbox-the-whole-object"},
+		"data":       map[string]any{"marker": "reconciler-fuzzer-the-whole-object"},
 	}}
 }
 
@@ -790,7 +790,7 @@ func TestReportBoundsTheStateItWasHanded(t *testing.T) {
 	if total := field(t, encoded, "managedTotal"); total != "25" {
 		t.Errorf("report.json says the target managed %s objects, want the 25 it was handed.", total)
 	}
-	if strings.Contains(encoded, "botbox-the-whole-object") {
+	if strings.Contains(encoded, "reconciler-fuzzer-the-whole-object") {
 		t.Errorf("report.json embeds the object bodies:\n%s", encoded)
 	}
 }
@@ -807,7 +807,7 @@ func TestReportSaysWhatTheChecksOwnBoundLeftOut(t *testing.T) {
 		})
 	}
 	failure.RequestsTotal, failure.VersionsTotal = 133, 41
-	failure.VersionsOf = "toy.botbox/v1/Widget widget"
+	failure.VersionsOf = "toy.reconciler-fuzzer/v1/Widget widget"
 
 	md, encoded := write(t, failure)
 
@@ -818,7 +818,7 @@ func TestReportSaysWhatTheChecksOwnBoundLeftOut(t *testing.T) {
 		body := section(md, excerpt.heading)
 		subject := ""
 		if excerpt.key == "versions" {
-			subject = " of `toy.botbox/v1/Widget widget`"
+			subject = " of `toy.reconciler-fuzzer/v1/Widget widget`"
 		}
 		if want := fmt.Sprintf("The violation quotes the last 20 of %d %s%s.", excerpt.chose, excerpt.key, subject); !strings.Contains(body, want) {
 			t.Errorf("The report does not say %q:\n%s", want, body)

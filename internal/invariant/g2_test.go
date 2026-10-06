@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
 func TestG2PassesWhenNothingMovesInTheQuietWindow(t *testing.T) {
@@ -163,7 +163,7 @@ func TestG2IgnoresChangesBeforeTheQuietWindow(t *testing.T) {
 	silent(t, invariant.NoChurn, in)
 }
 
-func TestG2IgnoresAnObjectBotboxCreated(t *testing.T) {
+func TestG2IgnoresAnObjectReconcilerFuzzerCreated(t *testing.T) {
 	fixture := child("shared", "10", orphaned)
 	in := newRun().
 		fixture(fixture).
@@ -211,7 +211,7 @@ func TestG2IgnoresAChangeTheTargetsWriteElsewhereCannotExplain(t *testing.T) {
 	otherGroup := write("patch", "w-0")
 	otherGroup.Group = "example.com"
 	otherNamespace := write("patch", "w-0")
-	otherNamespace.Namespace = "botbox-run-2"
+	otherNamespace.Namespace = "reconciler-fuzzer-run-2"
 	for name, elsewhere := range map[string]struct {
 		when time.Duration
 		req  proxy.Request

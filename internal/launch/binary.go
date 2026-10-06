@@ -1,5 +1,5 @@
-// Package launch starts, stops and restarts the target process. botbox does
-// not probe the target for health.
+// Package launch starts, stops and restarts the target process.
+// reconciler-fuzzer does not probe the target for health.
 package launch
 
 import (
@@ -45,11 +45,11 @@ type Status struct {
 	// Restarting is whether a supervised target has exited and waits to start
 	// again.
 	Restarting bool
-	// Started is when the process botbox holds started.
+	// Started is when the process reconciler-fuzzer holds started.
 	Started time.Time
 	// Exit is why a target that ran stopped: an *exec.ExitError naming its exit
 	// status or signal, or ErrExitedZero. It is nil while the target runs, and
-	// before Start and after Stop, when botbox is running no target.
+	// before Start and after Stop, when reconciler-fuzzer is running no target.
 	Exit error
 }
 
@@ -176,8 +176,8 @@ func (b *Binary) start(kubeconfig string) error {
 	return nil
 }
 
-// environment is botbox's own, with Env and then KUBECONFIG over it. os/exec
-// keeps the last value of a repeated name.
+// environment is reconciler-fuzzer's own, with Env and then KUBECONFIG over it.
+// os/exec keeps the last value of a repeated name.
 func (b *Binary) environment(placeholders *strings.Replacer, kubeconfig string) []string {
 	env := os.Environ()
 	for _, name := range slices.Sorted(maps.Keys(b.options.Env)) {

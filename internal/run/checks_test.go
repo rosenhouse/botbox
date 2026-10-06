@@ -12,10 +12,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // runStart is the instant every check test measures from.
@@ -48,7 +48,7 @@ func history() *observe.Store {
 		Namespace: fakeNamespace,
 		Manages:   []schema.GroupVersionKind{configMapKind},
 	})
-	store.Exclude(widgetKind, "widget") // botbox creates the CR, so it is never managed.
+	store.Exclude(widgetKind, "widget") // reconciler-fuzzer creates the CR, so it is never managed.
 	return store
 }
 
@@ -242,7 +242,7 @@ func deletedRun(clean bool) Input {
 // target's hands, so G3 credits the target with no cleanup it did not do
 // (DESIGN.md §5.4, D38). The Runner is the only one that knows which object
 // the op resolved to.
-func TestTheChecksDoNotCreditACleanupBotboxPerformed(t *testing.T) {
+func TestTheChecksDoNotCreditACleanupReconcilerFuzzerPerformed(t *testing.T) {
 	in := deletedRun(true)
 	in.Timeline.Ops = append(in.Timeline.Ops, AppliedOp{
 		Op: Op{Index: 1, Type: OpDeleteManaged, Kind: "v1/ConfigMap"}, At: at(11), Deleted: "widget-0",
@@ -254,7 +254,7 @@ func TestTheChecksDoNotCreditACleanupBotboxPerformed(t *testing.T) {
 		t.Errorf("G3 reported %v, and the target still had until its deadline.", g3.Violations)
 	}
 	if len(g3.Notes) != 1 || !strings.Contains(g3.Notes[0], "widget-0") {
-		t.Errorf("G3 noted %v, want one note naming the child botbox deleted.", g3.Notes)
+		t.Errorf("G3 noted %v, want one note naming the child reconciler-fuzzer deleted.", g3.Notes)
 	}
 }
 
@@ -275,7 +275,7 @@ func TestTheChecksCarryNoObjectForAnOpThatDeletedNothing(t *testing.T) {
 	}
 }
 
-func TestTheChecksKnowWhereBotboxRestoredAFixture(t *testing.T) {
+func TestTheChecksKnowWhereReconcilerFuzzerRestoredAFixture(t *testing.T) {
 	timeline := Timeline{Ops: []AppliedOp{
 		{Op: Op{Index: 0, Type: OpSettle}, At: at(1)},
 		{Op: Op{Index: 1, Type: OpSettle}, At: at(2), Restored: true},
@@ -436,8 +436,8 @@ func TestTheChecksJudgeTheTeardownDeletionWindow(t *testing.T) {
 	}
 }
 
-// No window reaches past the teardown, because what changes then is botbox's
-// own doing (DESIGN.md §6).
+// No window reaches past the teardown, because what changes then is
+// reconciler-fuzzer's own doing (DESIGN.md §6).
 func TestTheChecksStopEveryWindowAtTheTeardown(t *testing.T) {
 	in := convergedRun()
 	in.Timeline.Deletion = Window{Start: at(3), End: at(13)}
@@ -474,7 +474,7 @@ func TestTheChecksQuoteWhatTheRunDid(t *testing.T) {
 	if !strings.Contains(first.Statement, "widget") {
 		t.Errorf("G4 says %q, want it to name the CR.", first.Statement)
 	}
-	if !strings.Contains(first.Evidence, "toy.botbox/v1/Widget widget") {
+	if !strings.Contains(first.Evidence, "toy.reconciler-fuzzer/v1/Widget widget") {
 		t.Errorf("G4's evidence is %q, want the object version it read.", first.Evidence)
 	}
 	// The instant is a field of its own, which the report renders once (#24).
@@ -489,7 +489,7 @@ func TestTheChecksQuoteWhatTheRunDid(t *testing.T) {
 	if len(first.Versions) == 0 {
 		t.Errorf("G4 carried out no versions, and its evidence quotes one.")
 	}
-	if want := "toy.botbox/v1/Widget widget"; first.VersionsOf != want {
+	if want := "toy.reconciler-fuzzer/v1/Widget widget"; first.VersionsOf != want {
 		t.Errorf("G4 says its timeline is of %q, want %q.", first.VersionsOf, want)
 	}
 }

@@ -94,7 +94,7 @@ func (p *Proxy) Stop() error {
 // Kubeconfig writes a kubeconfig that points at the proxy, names namespace and
 // carries no credentials, for the launcher to hand the target.
 func (p *Proxy) Kubeconfig(path, namespace string) error {
-	const name = "botbox"
+	const name = "reconciler-fuzzer"
 	config := clientcmdapi.Config{
 		Clusters:       map[string]*clientcmdapi.Cluster{name: {Server: p.URL()}},
 		Contexts:       map[string]*clientcmdapi.Context{name: {Cluster: name, Namespace: namespace}},

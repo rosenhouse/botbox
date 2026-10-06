@@ -1,5 +1,5 @@
-# CI for botbox: lint, unit tests, and envtest tests on every PR and on push to
-# main. See DESIGN.md §10 (M0 acceptance) and §11 (test tiers, lint).
+# CI for reconciler-fuzzer: lint, unit tests, and envtest tests on every PR and
+# on push to main. See DESIGN.md §10 (M0 acceptance) and §11 (test tiers, lint).
 name: CI
 
 on:
@@ -101,7 +101,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: bug-matrix-run
-          path: ${{ runner.temp }}/bug-matrix/botbox-matrix-*/
+          path: ${{ runner.temp }}/bug-matrix/reconciler-fuzzer-matrix-*/
           if-no-files-found: ignore
 
   # The cert-manager adoption example of DESIGN.md §10 (M5): generated sequences
@@ -143,8 +143,8 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: botbox-out-cert-manager
-          path: botbox-out/
+          name: reconciler-fuzzer-out-cert-manager
+          path: reconciler-fuzzer-out/
           if-no-files-found: ignore
 
   # The external-secrets adoption example of DESIGN.md §10 (M7), on the same
@@ -183,6 +183,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: botbox-out-external-secrets
-          path: botbox-out/
+          name: reconciler-fuzzer-out-external-secrets
+          path: reconciler-fuzzer-out/
           if-no-files-found: ignore

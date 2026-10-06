@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
 )
 
 // G1 ignores a watch whether it hung or failed; G6 counts the one that failed.
@@ -43,7 +43,7 @@ func TestG1IgnoresRequestsThatNameNoResource(t *testing.T) {
 		settled(2*time.Second, invariant.Converged).
 		request(3*time.Second, nonResource("/livez/ping")).
 		request(3200*time.Millisecond, nonResource("/apis")).
-		request(3400*time.Millisecond, nonResource("/apis/toy.botbox/v1")).
+		request(3400*time.Millisecond, nonResource("/apis/toy.reconciler-fuzzer/v1")).
 		through(14 * time.Second)
 
 	silent(t, invariant.BoundedReconciliation, in)

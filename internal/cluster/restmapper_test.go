@@ -8,7 +8,7 @@ import (
 
 	"k8s.io/client-go/rest"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
 )
 
 func TestNewRESTMapperReportsADiscoveryThatFailed(t *testing.T) {

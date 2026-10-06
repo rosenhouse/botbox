@@ -3,7 +3,7 @@ package invariant
 import (
 	"fmt"
 
-	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
 // BoundedReconciliation is G1: once the settle wait has ended, the target

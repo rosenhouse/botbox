@@ -15,8 +15,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosenhouse/botbox/internal/run"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 	structuralschema "k8s.io/apiextensions-apiserver/pkg/apiserver/schema"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/objectmeta"
 	"k8s.io/apiextensions-apiserver/pkg/apiserver/schema/pruning"
@@ -94,8 +94,8 @@ func seedRange(first, last int64) []int64 {
 	return seeds
 }
 
-// A seed names a sequence only for one build of botbox, so a change to what a
-// seed draws has to be deliberate: rerun with -update and say why.
+// A seed names a sequence only for one build of reconciler-fuzzer, so a change
+// to what a seed draws has to be deliberate: rerun with -update and say why.
 func TestSeedsDrawTheGoldenSequences(t *testing.T) {
 	drawn := map[string]map[string]json.RawMessage{}
 	for _, declared := range goldenSeeds(t) {

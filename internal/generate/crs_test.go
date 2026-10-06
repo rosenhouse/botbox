@@ -9,10 +9,10 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"pgregory.net/rapid"
 
-	"github.com/rosenhouse/botbox/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
 )
 
-// written is a CR as botbox last wrote it.
+// written is a CR as reconciler-fuzzer last wrote it.
 type written struct {
 	object map[string]any
 	live   bool
@@ -132,7 +132,7 @@ func values(crs map[string]*written) []*written {
 }
 
 // No two CRs of a sequence hold one value at a distinct path, whichever CR
-// botbox wrote last and whether or not it is live.
+// reconciler-fuzzer wrote last and whether or not it is live.
 func TestNoTwoCRsShareADistinctValue(t *testing.T) {
 	for _, testCase := range []struct {
 		path     string

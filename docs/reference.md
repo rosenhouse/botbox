@@ -6,23 +6,23 @@ how to choose their values.
 
 ## target.yaml
 
-botbox reads `crds`, `sample` and `fixtures` relative to target.yaml, and `launch.binary`
+reconciler-fuzzer reads `crds`, `sample` and `fixtures` relative to target.yaml, and `launch.binary`
 relative to the directory it runs in. A key it does not take is an error. A duration is a Go
-duration, such as `30s` or `1m30s`. botbox refuses a cluster-scoped `primary`, kind under
-`manages` or fixture, because a run [owns one namespace](../README.md#what-botbox-cannot-test-yet).
+duration, such as `30s` or `1m30s`. reconciler-fuzzer refuses a cluster-scoped `primary`, kind under
+`manages` or fixture, because a run [owns one namespace](../README.md#what-reconciler-fuzzer-cannot-test-yet).
 
 This example sets every key but `equal`:
 
 <!-- embed: docs/reference/target.yaml -->
 ```yaml
-# This sets every key but equal, which botbox refuses beside equalIgnore. It
-# loads, because it names the toy controller's files. It would not run: the toy
-# has no spec.prefix, labels no child and manages no Secret.
+# This sets every key but equal, which reconciler-fuzzer refuses beside
+# equalIgnore. It loads, because it names the toy controller's files. It would
+# not run: the toy has no spec.prefix, labels no child and manages no Secret.
 name: widget-controller
 version: v1.2.3
 crds:
   - ../../targets/toy-widget/crds/
-primary: toy.botbox/v1/Widget
+primary: toy.reconciler-fuzzer/v1/Widget
 sample: ../../targets/toy-widget/widget.yaml
 fixtures:
   - ../../targets/toy-widget/config.yaml
@@ -78,13 +78,13 @@ thresholds:
 |---|---|---|
 | `name` | required | It names the target. A sequence file gives the same name in `target`. |
 | `version` | none | It is free text, such as your controller's release. Reports print it. |
-| `crds` | none | It lists files or directories of CRD YAML, which botbox installs. A directory contributes its `.yaml`, `.yml` and `.json` files. |
+| `crds` | none | It lists files or directories of CRD YAML, which reconciler-fuzzer installs. A directory contributes its `.yaml`, `.yml` and `.json` files. |
 | `primary` | required | It names your CR's kind as `group/version/Kind`. |
-| `sample` | required | It names a file that holds one CR of the primary kind, with a `metadata.name`. Every sequence botbox draws creates it first, and changes copies of it. |
-| `fixtures` | none | It lists files of objects that botbox creates in each run's namespace before op 0, such as a Secret your controller reads. A fixture sets no `metadata.namespace`. botbox never counts a fixture as your controller's. |
-| `manages` | none | It lists the kinds your controller creates, as `group/version/Kind`, or `v1/Kind` for the core group. botbox watches them and judges your controller by them. |
+| `sample` | required | It names a file that holds one CR of the primary kind, with a `metadata.name`. Every sequence reconciler-fuzzer draws creates it first, and changes copies of it. |
+| `fixtures` | none | It lists files of objects that reconciler-fuzzer creates in each run's namespace before op 0, such as a Secret your controller reads. A fixture sets no `metadata.namespace`. reconciler-fuzzer never counts a fixture as your controller's. |
+| `manages` | none | It lists the kinds your controller creates, as `group/version/Kind`, or `v1/Kind` for the core group. reconciler-fuzzer watches them and judges your controller by them. |
 | `notRecreated` | none | It lists the managed kinds your controller leaves deleted, or recreates under another name. G7 does not require them back. Each is also under `manages`. |
-| `rbac` | none | It lists files of Role and ClusterRole YAML. botbox creates a ServiceAccount with these permissions for each run instead of running the target as admin. |
+| `rbac` | none | It lists files of Role and ClusterRole YAML. reconciler-fuzzer creates a ServiceAccount with these permissions for each run instead of running the target as admin. |
 | `selector` | every object | Only the managed objects this label selector matches count as your controller's. |
 | `ready` | `has(status.observedGeneration) && status.observedGeneration == metadata.generation` | It is CEL that says whether a CR is ready, or `go:<name>`. G4 requires it of every CR. |
 | `equal` | none | It names a `go:<name>` hook that replaces G5's comparison of the states on either side of a restart. It takes no `equalIgnore`. |
@@ -93,17 +93,17 @@ thresholds:
 | `properties[*].id` | required | It names the property in output, such as `P1`. No two properties share one. |
 | `properties[*].description` | none | It says what the property means. Reports print it. |
 | `properties[*].cel` | required | It is CEL that says whether the property holds. |
-| `properties[*].when` | `checkpoint` | It says where botbox evaluates the property: `always` at every change botbox observes, `checkpoint` wherever the checks run, and `end` at the last checkpoint. The last two skip a checkpoint where a wait ends too early to judge ([Ops](#ops)). |
-| `generate.mutate` | each spec path generation can draw a value for | It lists the dotted spec paths generation may change. Generation changes no others. Without it, `botbox run` prints each spec path it leaves alone, and why. |
-| `generate.overlay` | none | It maps a dotted path to schema keywords. For generation, they win over the CRD's keywords there, and the CRD keeps those they do not name. botbox reads `additionalProperties`, `enum`, `exclusiveMaximum`, `exclusiveMinimum`, `format`, `items`, `maxItems`, `maxLength`, `maxProperties`, `maximum`, `minItems`, `minLength`, `minProperties`, `minimum`, `pattern`, `properties`, `required`, `type`, `x-kubernetes-int-or-string` and `x-kubernetes-list-type`, and refuses any other. |
+| `properties[*].when` | `checkpoint` | It says where reconciler-fuzzer evaluates the property: `always` at every change reconciler-fuzzer observes, `checkpoint` wherever the checks run, and `end` at the last checkpoint. The last two skip a checkpoint where a wait ends too early to judge ([Ops](#ops)). |
+| `generate.mutate` | each spec path generation can draw a value for | It lists the dotted spec paths generation may change. Generation changes no others. Without it, `reconciler-fuzzer run` prints each spec path it leaves alone, and why. |
+| `generate.overlay` | none | It maps a dotted path to schema keywords. For generation, they win over the CRD's keywords there, and the CRD keeps those they do not name. reconciler-fuzzer reads `additionalProperties`, `enum`, `exclusiveMaximum`, `exclusiveMinimum`, `format`, `items`, `maxItems`, `maxLength`, `maxProperties`, `maximum`, `minItems`, `minLength`, `minProperties`, `minimum`, `pattern`, `properties`, `required`, `type`, `x-kubernetes-int-or-string` and `x-kubernetes-list-type`, and refuses any other. |
 | `generate.maxCRs` | `3` | It bounds the CRs a sequence creates, the sample included. `1` keeps every sequence to the sample. |
 | `generate.distinct` | none | It lists dotted paths at which the sample holds a string, such as a field that names a child. Each CR after the first appends its `-2` or `-3` there, so no two CRs share a value. |
 | `generate.faults` | `true` | It says whether generation draws fault injection. `false` keeps every seed's sequence as it was before faults were added. |
 | `generate.fixtures` | none | It maps a file, written as `fixtures` lists it, to what generation may do to its objects. Generation may delete the objects of any file it names. |
 | `generate.fixtures[*].mutate` | none | It lists paths to strings that generation may set to a short word of letters and digits, written as `equalIgnore` writes a path. Every object in the file holds a string there. |
-| `launch.binary` | required | It names your controller's executable, relative to the directory botbox runs in, or a name on `PATH`. |
-| `launch.args` | none | It lists your controller's arguments. botbox replaces `$KUBECONFIG` with the path of the kubeconfig it writes, and `$NAMESPACE` with the run's namespace. `--launch-arg` appends more. |
-| `launch.env` | none | It maps variables that botbox sets over those your controller inherits, with the same replacements. botbox sets `KUBECONFIG` itself. Quote a name or value that YAML would change, such as `0022` or `yes`. |
+| `launch.binary` | required | It names your controller's executable, relative to the directory reconciler-fuzzer runs in, or a name on `PATH`. |
+| `launch.args` | none | It lists your controller's arguments. reconciler-fuzzer replaces `$KUBECONFIG` with the path of the kubeconfig it writes, and `$NAMESPACE` with the run's namespace. `--launch-arg` appends more. |
+| `launch.env` | none | It maps variables that reconciler-fuzzer sets over those your controller inherits, with the same replacements. reconciler-fuzzer sets `KUBECONFIG` itself. Quote a name or value that YAML would change, such as `0022` or `yes`. |
 | `timeouts.settle` | `30s` | It says how long a settle wait gives your controller to converge after a change. |
 | `timeouts.stable` | `10s` | It says how long nothing may change before a settle wait converges. G1 and G2 judge a window this long. It is shorter than `settle`. |
 | `timeouts.delete` | `60s` | It says how long a deleted CR has to go, with everything it manages. A `recreate` and a `deleteFixture` wait as long for their object to go. |
@@ -124,14 +124,14 @@ says that no CR existed. The string extensions are available. An expression that
 bool, and an error while evaluating a property, end the run as a configuration error.
 
 `go:<name>` names a function registered with `target.RegisterReady` or `target.RegisterEqual`.
-Only a botbox built with that function can load the target.
+Only a reconciler-fuzzer binary built with that function can load the target.
 
 ### equalIgnore paths
 
 A path joins keys with `.`, and `[*]` names every item of a list or value of a map. A key
 that holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
 as in `metadata.annotations["example.com/started-at"]`. Write the list in block style, and
-quote a path that starts with `[` or holds `: ` or ` #`. botbox refuses a list index such as
+quote a path that starts with `[` or holds `: ` or ` #`. reconciler-fuzzer refuses a list index such as
 `[0]`.
 
 G5 always skips `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`,
@@ -141,8 +141,8 @@ and each ownerReference whose owner is gone.
 ## Sequences
 
 A sequence file is JSON, such as the `sequence.json` of a failing run.
-`botbox run --target target.yaml <file>...` runs files as written, and `botbox replay` runs
-one. botbox refuses a field it does not know, and an op that lacks a field its type needs or
+`reconciler-fuzzer run --target target.yaml <file>...` runs files as written, and `reconciler-fuzzer replay` runs
+one. reconciler-fuzzer refuses a field it does not know, and an op that lacks a field its type needs or
 carries one it does not take.
 
 This example holds every op and every fault field. `make test-envtest` runs it against the
@@ -151,14 +151,14 @@ toy controller of `targets/toy-widget/target.yaml`, which passes it:
 <!-- embed: docs/reference/sequence.json -->
 ```json
 {"seed": 20260922, "target": "toy-widget", "ops": [
-  {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
+  {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget",
     "metadata": {"name": "widget"}, "spec": {"count": 1}}},
   {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps", "fraction": 0.5},
     "action": {"error": 500}, "until": {"count": 2}}},
   {"i": 2, "t": "update", "patch": {"spec": {"count": 3}}},
   {"i": 3, "t": "fault", "spec": {"match": {"verb": "patch", "resource": "widgets", "name": "widget-*"},
     "action": {"delay": "500ms"}, "until": {"for": "10s"}}},
-  {"i": 4, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
+  {"i": 4, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget",
     "metadata": {"name": "widget-2"}, "spec": {"count": 1}}},
   {"i": 5, "t": "update", "cr": "widget-2", "patch": {"spec": {"count": 2}}, "noSettle": true},
   {"i": 6, "t": "fault", "spec": {"match": {"verb": "delete", "resource": "configmaps"},
@@ -171,7 +171,7 @@ toy controller of `targets/toy-widget/target.yaml`, which passes it:
   {"i": 12, "t": "updateFixture", "kind": "v1/ConfigMap", "name": "widget-config",
     "patch": {"data": {"label": "blue"}}},
   {"i": 13, "t": "deleteFixture", "kind": "v1/ConfigMap", "name": "widget-config", "until": {"op": 14}},
-  {"i": 14, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
+  {"i": 14, "t": "recreate", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget",
     "metadata": {"name": "widget"}, "spec": {"count": 2}}},
   {"i": 15, "t": "delete", "cr": "widget-2"}]}
 ```
@@ -186,7 +186,7 @@ time to recover.
 | Field | Meaning |
 |---|---|
 | `seed` | It seeds the draws `match.fraction` makes. A replay repeats them where your controller repeats its requests in order. |
-| `target` | It gives the target's `name`. botbox refuses a sequence for another target. |
+| `target` | It gives the target's `name`. reconciler-fuzzer refuses a sequence for another target. |
 | `ops` | It lists the ops in order. The last one settles. |
 
 ### Ops
@@ -197,16 +197,16 @@ Every op carries `i` and `t`. A settle wait follows each op that settles. It end
 while the checks still give your controller time. A request the proxy holds under
 `action.delay` counts as a change until the proxy forwards it. One held as the wait's time
 runs out keeps the wait open until `timeouts.settle` past its release. It keeps a
-`recreate`'s wait for its old CR open the same way. The checks run where it ends. botbox does
+`recreate`'s wait for its old CR open the same way. The checks run where it ends. reconciler-fuzzer does
 not check your properties where a wait ends with a request held, or released within
 `timeouts.stable`, and the run notes it. Nor does it where your controller waits to restart,
 or has not been back for `timeouts.stable` since it last started. Your controller is back
-once it requests a resource outside leader election. botbox takes a controller that reads a
+once it requests a resource outside leader election. reconciler-fuzzer takes a controller that reads a
 Lease with a get to elect a leader, and counts it back only once it wins its lease. Nor does
 it where a fault is active, or your controller is still owed time to recover from one. A
 property evaluated `always` is still checked at every change. A `recreate` whose old CR a
 fault keeps past the wait cannot create its CR, so it stops the run, and the run notes it.
-botbox then clears the fault and judges your controller as it tears the run down. End the
+reconciler-fuzzer then clears the fault and judges your controller as it tears the run down. End the
 fault before the `recreate` with `until.op` to test the ops after it.
 
 | Op | Needs | May carry | Settles | What it does |
@@ -254,13 +254,13 @@ of the run where it sets none. The proxy tries faults in op order, and the first
 applies to a request wins. The checks do not judge a window a fault applied in or held a
 request in, and they give your controller as long as the faults lasted, plus
 `timeouts.settle`, to recover.
-botbox clears a fault still active at the end, and waits for your controller to recover. A
+reconciler-fuzzer clears a fault still active at the end, and waits for your controller to recover. A
 fault that applies to no request tests nothing, and the run notes it.
 
 | Field | Default | Meaning |
 |---|---|---|
 | `match.verb` | every verb | It is one of `get`, `list`, `watch`, `create`, `update`, `patch`, `delete` and `deletecollection`. |
-| `match.resource` | every resource | It names the plural the API server serves, such as `configmaps`, in any group. It matches subresource requests too, such as those to `widgets/status`. botbox refuses one that holds a slash or that the API server does not serve. |
+| `match.resource` | every resource | It names the plural the API server serves, such as `configmaps`, in any group. It matches subresource requests too, such as those to `widgets/status`. reconciler-fuzzer refuses one that holds a slash or that the API server does not serve. |
 | `match.name` | every name | It is a glob over the object name in the request path, as Go's `path.Match` reads it. A list, a watch, a `deletecollection` and a create of an object carry an empty name there, which `*` matches. |
 | `match.fraction` | every request | It gives the share of matching requests the fault applies to, above 0 and up to 1. The sequence's `seed` draws which. |
 | `action.error` | none | The proxy answers with this status, from 400 to 599, and forwards nothing. |

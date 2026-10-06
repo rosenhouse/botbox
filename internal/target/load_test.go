@@ -15,7 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 func toyTargetPath(t *testing.T) string {
@@ -46,7 +46,7 @@ func TestLoadToyWidget(t *testing.T) {
 	if want := []string{filepath.Join(dir, "crds")}; !reflect.DeepEqual(toy.CRDs, want) {
 		t.Errorf("Load resolved crds to %v, want %v.", toy.CRDs, want)
 	}
-	if want := (schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}); toy.Primary != want {
+	if want := (schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Widget"}); toy.Primary != want {
 		t.Errorf("Load read primary %v, want %v.", toy.Primary, want)
 	}
 	if want := []schema.GroupVersionKind{{Version: "v1", Kind: "ConfigMap"}}; !reflect.DeepEqual(toy.Manages, want) {
@@ -100,7 +100,7 @@ func TestLoadToyWidget(t *testing.T) {
 
 func widgetCR(generation, count int64, status map[string]any) *unstructured.Unstructured {
 	cr := &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "toy.botbox/v1",
+		"apiVersion": "toy.reconciler-fuzzer/v1",
 		"kind":       "Widget",
 		"metadata":   map[string]any{"name": "widget", "generation": generation},
 		"spec":       map[string]any{"count": count},
@@ -115,7 +115,7 @@ func widgetCR(generation, count int64, status map[string]any) *unstructured.Unst
 // spec and no status.
 func widgetBare() *unstructured.Unstructured {
 	return &unstructured.Unstructured{Object: map[string]any{
-		"apiVersion": "toy.botbox/v1",
+		"apiVersion": "toy.reconciler-fuzzer/v1",
 		"kind":       "Widget",
 	}}
 }
@@ -207,7 +207,7 @@ func writeTarget(t *testing.T, targetYAML string, extra map[string]string) strin
 	return filepath.Join(dir, "target.yaml")
 }
 
-const sampleWidget = `apiVersion: toy.botbox/v1
+const sampleWidget = `apiVersion: toy.reconciler-fuzzer/v1
 kind: Widget
 metadata:
   name: widget
@@ -217,14 +217,14 @@ spec:
 
 // minimalTarget is a valid declaration that each error case breaks in one way.
 const minimalTarget = `name: min
-primary: toy.botbox/v1/Widget
+primary: toy.reconciler-fuzzer/v1/Widget
 sample: widget.yaml
 launch: {binary: bin/min}
 `
 
 // minimalTargetWithEnv ends in an open launch.env block.
 const minimalTargetWithEnv = `name: min
-primary: toy.botbox/v1/Widget
+primary: toy.reconciler-fuzzer/v1/Widget
 sample: widget.yaml
 launch:
   binary: bin/min
@@ -256,17 +256,17 @@ func TestLoadRejects(t *testing.T) {
 		{"unknown equal hook", minimalTarget + "equal: 'go:nosuchhook'\n", "", []string{"nosuchhook"}},
 		{"unparsable timeout", minimalTarget + "timeouts:\n  settle: soon\n", "", []string{"settle", "soon"}},
 		{"unparsable selector", minimalTarget + "selector: 'app in'\n", "", []string{"selector"}},
-		{"missing sample", "name: min\nprimary: toy.botbox/v1/Widget\nsample: nosuch.yaml\nlaunch: {binary: bin/min}\n", "", []string{"nosuch.yaml"}},
+		{"missing sample", "name: min\nprimary: toy.reconciler-fuzzer/v1/Widget\nsample: nosuch.yaml\nlaunch: {binary: bin/min}\n", "", []string{"nosuch.yaml"}},
 		{"missing fixture", minimalTarget + "fixtures:\n  - nosuch.yaml\n", "", []string{"nosuch.yaml"}},
 		{"sample that is not an object", minimalTarget, "- 1\n- 2\n", []string{"widget.yaml"}},
-		{"no name", "primary: toy.botbox/v1/Widget\nsample: widget.yaml\nlaunch: {binary: bin/min}\n", "", []string{"name"}},
+		{"no name", "primary: toy.reconciler-fuzzer/v1/Widget\nsample: widget.yaml\nlaunch: {binary: bin/min}\n", "", []string{"name"}},
 		{"no primary", "name: min\nsample: widget.yaml\nlaunch: {binary: bin/min}\n", "", []string{"primary"}},
-		{"no sample", "name: min\nprimary: toy.botbox/v1/Widget\nlaunch: {binary: bin/min}\n", "", []string{"sample"}},
-		{"no launch binary", "name: min\nprimary: toy.botbox/v1/Widget\nsample: widget.yaml\n", "", []string{"launch.binary"}},
+		{"no sample", "name: min\nprimary: toy.reconciler-fuzzer/v1/Widget\nlaunch: {binary: bin/min}\n", "", []string{"sample"}},
+		{"no launch binary", "name: min\nprimary: toy.reconciler-fuzzer/v1/Widget\nsample: widget.yaml\n", "", []string{"launch.binary"}},
 		{"sample of another kind", minimalTarget, "apiVersion: v1\nkind: Secret\nmetadata:\n  name: s\n", []string{"widget.yaml", "Secret", "Widget"}},
 		{"sample holding two objects", minimalTarget, sampleWidget + "---\n" + sampleWidget, []string{"widget.yaml", "2 objects"}},
 		{"sample holding no object", minimalTarget, "# just a comment\n", []string{"widget.yaml", "no object"}},
-		{"sample with no name", minimalTarget, "apiVersion: toy.botbox/v1\nkind: Widget\nmetadata:\n  generateName: widget-\n",
+		{"sample with no name", minimalTarget, "apiVersion: toy.reconciler-fuzzer/v1\nkind: Widget\nmetadata:\n  generateName: widget-\n",
 			[]string{"widget.yaml", "no metadata.name"}},
 		{"sample that is not YAML", minimalTarget, "name: \"unterminated\n", []string{"widget.yaml"}},
 		{"missing crds path", minimalTarget + "crds: [nosuch/]\n", "", []string{"crds", "nosuch"}},
@@ -335,7 +335,7 @@ func TestLoadKeepsAnAbsolutePath(t *testing.T) {
 	if err := os.WriteFile(sample, []byte(sampleWidget), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	path := writeTarget(t, "name: min\nprimary: toy.botbox/v1/Widget\nlaunch: {binary: bin/min}\nsample: "+sample+"\n", nil)
+	path := writeTarget(t, "name: min\nprimary: toy.reconciler-fuzzer/v1/Widget\nlaunch: {binary: bin/min}\nsample: "+sample+"\n", nil)
 
 	loaded, err := target.Load(path)
 	if err != nil {
@@ -357,7 +357,7 @@ func TestLoadRejectsAMissingFile(t *testing.T) {
 // TestLoadReportsTheResolvedPath covers the mistake of writing a path relative
 // to the working directory where target.yaml's own directory is the base.
 func TestLoadReportsTheResolvedPath(t *testing.T) {
-	path := writeTarget(t, "name: min\nprimary: toy.botbox/v1/Widget\nsample: targets/toy-widget/widget.yaml\n", nil)
+	path := writeTarget(t, "name: min\nprimary: toy.reconciler-fuzzer/v1/Widget\nsample: targets/toy-widget/widget.yaml\n", nil)
 
 	_, err := target.Load(path)
 	if err == nil {
@@ -373,7 +373,7 @@ func TestLoadReportsTheResolvedPath(t *testing.T) {
 // to the working directory.
 func TestLoadResolvesPathsAgainstTheTargetDirectory(t *testing.T) {
 	path := writeTarget(t, `name: min
-primary: toy.botbox/v1/Widget
+primary: toy.reconciler-fuzzer/v1/Widget
 crds: [crds/]
 sample: widget.yaml
 fixtures: [fixture.yaml]
@@ -464,28 +464,28 @@ func TestLoadPointsAtAMisspelledKey(t *testing.T) {
 const clusterScopedCRDs = `apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 spec:
-  group: elsewhere.botbox
+  group: elsewhere.reconciler-fuzzer
   names: {kind: Thing, plural: things}
   scope: Cluster
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 spec:
-  group: toy.botbox
+  group: toy.reconciler-fuzzer
   names: {kind: Widget, plural: widgets}
   scope: Cluster
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 spec:
-  group: toy.botbox
+  group: toy.reconciler-fuzzer
   names: {kind: Gadget, plural: gadgets}
   scope: Cluster
 ---
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 spec:
-  group: toy.botbox
+  group: toy.reconciler-fuzzer
   names: {kind: Thing, plural: things}
   scope: Namespaced
 `
@@ -494,13 +494,13 @@ spec:
 // clusterScopedCRDs) so that cluster-scoped fixture tests are not blocked by
 // the primary's scope.
 const namespacedPrimaryTarget = `name: min
-primary: toy.botbox/v1/Thing
+primary: toy.reconciler-fuzzer/v1/Thing
 sample: thing.yaml
 crds: [crds/]
 launch: {binary: bin/min}
 `
 
-const sampleThing = `apiVersion: toy.botbox/v1
+const sampleThing = `apiVersion: toy.reconciler-fuzzer/v1
 kind: Thing
 metadata:
   name: thing
@@ -535,7 +535,7 @@ func TestLoadAcceptsAClusterScopedFixtureDefinedByCRD(t *testing.T) {
 `, map[string]string{
 		"thing.yaml":     sampleThing,
 		"crds/toys.yaml": clusterScopedCRDs,
-		"gadget.yaml":    "apiVersion: toy.botbox/v1\nkind: Gadget\nmetadata:\n  name: shared\n",
+		"gadget.yaml":    "apiVersion: toy.reconciler-fuzzer/v1\nkind: Gadget\nmetadata:\n  name: shared\n",
 	})
 
 	loaded, err := target.Load(path)
@@ -546,7 +546,7 @@ func TestLoadAcceptsAClusterScopedFixtureDefinedByCRD(t *testing.T) {
 	if len(loaded.Fixtures) != 1 || loaded.Fixtures[0].GetName() != "shared" {
 		t.Errorf("Load read %d fixtures, want the Gadget shared.", len(loaded.Fixtures))
 	}
-	gadgetGVK := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Gadget"}
+	gadgetGVK := schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Gadget"}
 	if !slices.Contains(loaded.ClusterFixtures, gadgetGVK) {
 		t.Errorf("ClusterFixtures is %v, want it to contain Gadget.", loaded.ClusterFixtures)
 	}
@@ -554,12 +554,12 @@ func TestLoadAcceptsAClusterScopedFixtureDefinedByCRD(t *testing.T) {
 
 func TestLoadRefusesEveryClusterScopedPrimaryAndManagedKindButNotFixtures(t *testing.T) {
 	path := writeTarget(t, minimalTarget+`crds: [crds/]
-manages: [toy.botbox/v1/Gadget, toy.botbox/v1/Thing, v1/ConfigMap]
+manages: [toy.reconciler-fuzzer/v1/Gadget, toy.reconciler-fuzzer/v1/Thing, v1/ConfigMap]
 fixtures: [fixtures.yaml]
 `, map[string]string{
 		"widget.yaml":    sampleWidget,
 		"crds/toys.yaml": clusterScopedCRDs,
-		"fixtures.yaml":  "apiVersion: toy.botbox/v1\nkind: Gadget\nmetadata:\n  name: shared-gadget\n---\napiVersion: toy.botbox/v1\nkind: Thing\nmetadata:\n  name: a-thing\n",
+		"fixtures.yaml":  "apiVersion: toy.reconciler-fuzzer/v1\nkind: Gadget\nmetadata:\n  name: shared-gadget\n---\napiVersion: toy.reconciler-fuzzer/v1\nkind: Thing\nmetadata:\n  name: a-thing\n",
 	})
 
 	_, err := target.Load(path)
@@ -567,7 +567,7 @@ fixtures: [fixtures.yaml]
 	if err == nil {
 		t.Fatal("Load accepted cluster-scoped primary and managed kinds.")
 	}
-	for _, want := range []string{"cluster-scoped", "primary toy.botbox/v1/Widget", "managed toy.botbox/v1/Gadget"} {
+	for _, want := range []string{"cluster-scoped", "primary toy.reconciler-fuzzer/v1/Widget", "managed toy.reconciler-fuzzer/v1/Gadget"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Load returned %q, which does not name %q.", err, want)
 		}
@@ -594,7 +594,7 @@ fixtures: [webhook.yaml]
 	if err == nil {
 		t.Fatal("Load accepted cluster-scoped primary and managed kinds.")
 	}
-	for _, want := range []string{"primary toy.botbox/v1/Widget", "managed rbac.authorization.k8s.io/v1/ClusterRole"} {
+	for _, want := range []string{"primary toy.reconciler-fuzzer/v1/Widget", "managed rbac.authorization.k8s.io/v1/ClusterRole"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("Load returned %q, which does not name %q.", err, want)
 		}
@@ -652,12 +652,12 @@ func TestLoadReadsEveryManifestExtensionOfACRDDirectory(t *testing.T) {
 		path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{
 			"widget.yaml": sampleWidget,
 			file: `{"apiVersion": "apiextensions.k8s.io/v1", "kind": "CustomResourceDefinition",
-				"spec": {"group": "toy.botbox", "names": {"kind": "Widget", "plural": "widgets"}, "scope": "Cluster"}}`,
+				"spec": {"group": "toy.reconciler-fuzzer", "names": {"kind": "Widget", "plural": "widgets"}, "scope": "Cluster"}}`,
 		})
 
 		_, err := target.Load(path)
 
-		if err == nil || !strings.Contains(err.Error(), "primary toy.botbox/v1/Widget") {
+		if err == nil || !strings.Contains(err.Error(), "primary toy.reconciler-fuzzer/v1/Widget") {
 			t.Errorf("Load returned %v, want it to refuse the cluster-scoped Widget %s defines.", err, file)
 		}
 	}
@@ -667,7 +667,7 @@ func TestLoadLeavesACRDWithoutAScopeToTheCluster(t *testing.T) {
 	path := writeTarget(t, minimalTarget+"crds: [crds/]\n", map[string]string{
 		"widget.yaml": sampleWidget,
 		"crds/widget.yaml": "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n" +
-			"spec:\n  group: toy.botbox\n  names: {kind: Widget, plural: widgets}\n",
+			"spec:\n  group: toy.reconciler-fuzzer\n  names: {kind: Widget, plural: widgets}\n",
 	})
 
 	if _, err := target.Load(path); err != nil {
@@ -689,11 +689,11 @@ func TestLoadRejectsACRDFileThatIsNotYAML(t *testing.T) {
 }
 
 func TestLoadRefusesAFixtureOfANamespacedKindThatNamesANamespace(t *testing.T) {
-	for _, kind := range []struct{ apiVersion, kind string }{{"v1", "Secret"}, {"toy.botbox/v1", "Thing"}} {
+	for _, kind := range []struct{ apiVersion, kind string }{{"v1", "Secret"}, {"toy.reconciler-fuzzer/v1", "Thing"}} {
 		path := writeTarget(t, minimalTarget+"crds: [crds/]\nfixtures: [config.yaml, issuer.yaml, more.yaml]\n", map[string]string{
 			"widget.yaml": sampleWidget,
 			"crds/thing.yaml": "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\n" +
-				"spec:\n  group: toy.botbox\n  names: {kind: Thing, plural: things}\n  scope: Namespaced\n",
+				"spec:\n  group: toy.reconciler-fuzzer\n  names: {kind: Thing, plural: things}\n  scope: Namespaced\n",
 			"config.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: settings\n",
 			"more.yaml":   "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: more\n",
 			"issuer.yaml": "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: other\n---\n" +
@@ -704,7 +704,7 @@ func TestLoadRefusesAFixtureOfANamespacedKindThatNamesANamespace(t *testing.T) {
 
 		want := "fixture " + filepath.Join(filepath.Dir(path), "issuer.yaml") + ": the fixture " + kind.apiVersion + "/" + kind.kind +
 			" ca sets metadata.namespace default; drop it," +
-			" because botbox creates fixtures in each run's own namespace, and the target may look for this one in default"
+			" because reconciler-fuzzer creates fixtures in each run's own namespace, and the target may look for this one in default"
 		if err == nil || !strings.HasSuffix(err.Error(), want) {
 			t.Errorf("Load returned %v, want it to end %q.", err, want)
 		}
@@ -714,7 +714,7 @@ func TestLoadRefusesAFixtureOfANamespacedKindThatNamesANamespace(t *testing.T) {
 func TestLoadLeavesAFixtureOfAKindItDoesNotKnowToTheCluster(t *testing.T) {
 	path := writeTarget(t, minimalTarget+"fixtures: [gadget.yaml]\n", map[string]string{
 		"widget.yaml": sampleWidget,
-		"gadget.yaml": "apiVersion: toy.botbox/v1\nkind: Gadget\nmetadata:\n  name: shared\n  namespace: default\n",
+		"gadget.yaml": "apiVersion: toy.reconciler-fuzzer/v1\nkind: Gadget\nmetadata:\n  name: shared\n  namespace: default\n",
 	})
 
 	if _, err := target.Load(path); err != nil {

@@ -8,8 +8,8 @@ import (
 
 	"k8s.io/client-go/discovery"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 func TestLoadKnowsTheScopeOfEveryKindABareAPIServerServes(t *testing.T) {

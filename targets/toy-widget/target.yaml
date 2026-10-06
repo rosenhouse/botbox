@@ -1,10 +1,11 @@
-# botbox reads crds, sample and fixtures relative to this file, and
+# reconciler-fuzzer reads crds, sample and fixtures relative to this file, and
 # launch.binary relative to the directory it runs in.
 name: toy-widget
 version: dev                       # Reports print it.
-crds:                              # botbox installs the CRDs in these files and directories.
+crds:                              # reconciler-fuzzer installs the CRDs in these files and directories.
   - crds/
-primary: toy.botbox/v1/Widget      # botbox creates, changes and deletes CRs of this kind.
+# reconciler-fuzzer creates, changes and deletes CRs of this kind.
+primary: toy.reconciler-fuzzer/v1/Widget
 sample: widget.yaml                # Each drawn sequence creates a variant of this CR first.
 manages:                           # The controller creates objects of these kinds.
   - v1/ConfigMap
@@ -13,11 +14,11 @@ rbac:
 launch:
   binary: bin/toy-widget
   args:
-    - --kubeconfig=$KUBECONFIG     # botbox writes a kubeconfig for its proxy.
+    - --kubeconfig=$KUBECONFIG     # reconciler-fuzzer writes a kubeconfig for its proxy.
     - --label-from=widget-config
     - --bug=0                      # A later --bug wins, so --launch-arg --bug=3 switches on B3.
   env:
-    WATCH_NAMESPACE: $NAMESPACE    # botbox replaces $NAMESPACE with each run's namespace.
+    WATCH_NAMESPACE: $NAMESPACE    # reconciler-fuzzer replaces $NAMESPACE with each run's namespace.
 fixtures:                          # The controller reads these objects and owns none.
   - config.yaml
 ready: >-                          # This CEL holds once the controller has converged.

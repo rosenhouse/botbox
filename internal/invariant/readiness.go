@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // ExpiredWait is the G4 of a settle wait that expired, with why it did. The

@@ -18,7 +18,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
 // startProxy puts a proxy in front of upstream and stops both when the test ends.
@@ -148,10 +148,10 @@ func TestRecordsTheParsedRequest(t *testing.T) {
 			Verb: "get", Group: "apps", Version: "v1", Resource: "deployments", Namespace: "ns1", Name: "d1"}},
 		{"PUT", "/apis/apps/v1/namespaces/ns1/deployments/d1/status", proxy.Request{
 			Verb: "update", Group: "apps", Version: "v1", Resource: "deployments", Namespace: "ns1", Name: "d1", Subresource: "status"}},
-		{"PATCH", "/apis/toy.botbox/v1/namespaces/ns1/widgets/w1/status", proxy.Request{
-			Verb: "patch", Group: "toy.botbox", Version: "v1", Resource: "widgets", Namespace: "ns1", Name: "w1", Subresource: "status"}},
-		{"GET", "/apis/toy.botbox/v1/widgets", proxy.Request{
-			Verb: "list", Group: "toy.botbox", Version: "v1", Resource: "widgets"}},
+		{"PATCH", "/apis/toy.reconciler-fuzzer/v1/namespaces/ns1/widgets/w1/status", proxy.Request{
+			Verb: "patch", Group: "toy.reconciler-fuzzer", Version: "v1", Resource: "widgets", Namespace: "ns1", Name: "w1", Subresource: "status"}},
+		{"GET", "/apis/toy.reconciler-fuzzer/v1/widgets", proxy.Request{
+			Verb: "list", Group: "toy.reconciler-fuzzer", Version: "v1", Resource: "widgets"}},
 		{"POST", "/apis/coordination.k8s.io/v1/namespaces/ns1/leases", proxy.Request{
 			Verb: "create", Group: "coordination.k8s.io", Version: "v1", Resource: "leases", Namespace: "ns1"}},
 		{"GET", "/api/v1", proxy.Request{Verb: "get", Version: "v1"}},
@@ -346,7 +346,7 @@ func TestRecordsAWatchAtItsStartAndItsDurationAtItsEnd(t *testing.T) {
 
 func TestWriteLogWritesOneJSONObjectPerRequest(t *testing.T) {
 	p := startProxy(t, okUpstream())
-	do(t, p, "POST", "/apis/toy.botbox/v1/namespaces/ns1/widgets", nil)
+	do(t, p, "POST", "/apis/toy.reconciler-fuzzer/v1/namespaces/ns1/widgets", nil)
 	do(t, p, "GET", "/api/v1/namespaces/ns1/configmaps?watch=true", nil)
 
 	// The client has its response before the proxy stamps the exchange's
@@ -367,8 +367,8 @@ func TestWriteLogWritesOneJSONObjectPerRequest(t *testing.T) {
 		t.Fatalf("The first line is not JSON: %v", err)
 	}
 	want := map[string]any{
-		"verb": "create", "group": "toy.botbox", "version": "v1", "resource": "widgets",
-		"namespace": "ns1", "path": "/apis/toy.botbox/v1/namespaces/ns1/widgets",
+		"verb": "create", "group": "toy.reconciler-fuzzer", "version": "v1", "resource": "widgets",
+		"namespace": "ns1", "path": "/apis/toy.reconciler-fuzzer/v1/namespaces/ns1/widgets",
 		"status": float64(200),
 	}
 	for k, v := range want {
@@ -470,7 +470,7 @@ func TestKubeconfigNamesTheNamespace(t *testing.T) {
 	p := startProxy(t, okUpstream())
 	path := filepath.Join(t.TempDir(), "kubeconfig")
 
-	if err := p.Kubeconfig(path, "botbox-run-x"); err != nil {
+	if err := p.Kubeconfig(path, "reconciler-fuzzer-run-x"); err != nil {
 		t.Fatalf("Kubeconfig returned an error: %v", err)
 	}
 
@@ -479,8 +479,8 @@ func TestKubeconfigNamesTheNamespace(t *testing.T) {
 		t.Fatal(err)
 	}
 	namespace, _, err := clientcmd.NewDefaultClientConfig(*loaded, nil).Namespace()
-	if err != nil || namespace != "botbox-run-x" {
-		t.Errorf("The kubeconfig names the namespace %q (%v), want botbox-run-x.", namespace, err)
+	if err != nil || namespace != "reconciler-fuzzer-run-x" {
+		t.Errorf("The kubeconfig names the namespace %q (%v), want reconciler-fuzzer-run-x.", namespace, err)
 	}
 }
 

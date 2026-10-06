@@ -1,7 +1,7 @@
 # Build output and tool binaries (see Makefile LOCALBIN).
 bin/
 # Run output (DESIGN.md §11).
-botbox-out/
+reconciler-fuzzer-out/
 # Go test artifacts.
 *.test
 *.out

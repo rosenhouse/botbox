@@ -16,12 +16,12 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/launch"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/launch"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // defaultMaxManaged bounds the managed objects in the run namespace. Beyond
@@ -187,8 +187,8 @@ type AppliedOp struct {
 	CR string
 	// Deleted is the object a deleteManaged op deleted.
 	Deleted string
-	// Restored says botbox created a fixture it had deleted again, after At
-	// and before the op's own change.
+	// Restored says reconciler-fuzzer created a fixture it had deleted again,
+	// after At and before the op's own change.
 	Restored bool
 	// Settled is the settle wait that followed the op, or nil if none did.
 	Settled *Wait
@@ -350,14 +350,14 @@ type runner struct {
 	violation *Violation
 	notes     []string
 	// skipped names what no check judged: what the run could not do, and what
-	// botbox did to the run namespace itself.
+	// reconciler-fuzzer did to the run namespace itself.
 	skipped []string
 	failed  bool
 	// stopped is whether an op ended the run early with no finding, as a
 	// recreate does whose old CR a fault keeps.
 	stopped bool
 	// converged is where the last settle wait that converged ended. The first
-	// shows the target works, so botbox supervises it from there on.
+	// shows the target works, so reconciler-fuzzer supervises it from there on.
 	converged time.Time
 
 	teardownStart time.Time
@@ -366,7 +366,8 @@ type runner struct {
 	faults []heldFault
 	// faultOps is the op index of each of Timeline.Faults.
 	faultOps []int
-	// fixtures are the fixtures as botbox last wrote them, by kind and name.
+	// fixtures are the fixtures as reconciler-fuzzer last wrote them, by kind and
+	// name.
 	fixtures map[string]*unstructured.Unstructured
 	// deleted are the deleteFixture ops whose fixture is still gone.
 	deleted []Op
@@ -524,8 +525,8 @@ func (r *runner) apply(ctx context.Context, op Op, cr string) (string, error) {
 	return "", fmt.Errorf("%q is not an op type", op.Type)
 }
 
-// applyToFixture changes or deletes a fixture. The fixture is botbox's, so a
-// deleted one is not the target's to recreate.
+// applyToFixture changes or deletes a fixture. The fixture is
+// reconciler-fuzzer's, so a deleted one is not the target's to recreate.
 func (r *runner) applyToFixture(ctx context.Context, op Op) error {
 	fixture, declared := r.fixtures[op.fixture()]
 	if !declared {
@@ -546,8 +547,8 @@ func (r *runner) applyToFixture(ctx context.Context, op Op) error {
 	return nil
 }
 
-// restoreFixtures creates again, as botbox last wrote them, the fixtures
-// deleted until this op, and reports whether it created any.
+// restoreFixtures creates again, as reconciler-fuzzer last wrote them, the
+// fixtures deleted until this op, and reports whether it created any.
 func (r *runner) restoreFixtures(ctx context.Context, op int) (bool, error) {
 	var gone []Op
 	restored := false
@@ -654,7 +655,7 @@ func (r *runner) applyDeleteManaged(ctx context.Context, op Op) (string, error) 
 	case err != nil:
 		return "", err
 	case !deleted:
-		r.skipped = append(r.skipped, fmt.Sprintf("op %d (deleteManaged) deleted nothing: index %d resolved to the %s %s, which was gone before botbox could delete it",
+		r.skipped = append(r.skipped, fmt.Sprintf("op %d (deleteManaged) deleted nothing: index %d resolved to the %s %s, which was gone before reconciler-fuzzer could delete it",
 			op.Index, *op.Nth, op.Kind, name))
 		return "", nil
 	}
@@ -757,7 +758,7 @@ func (r *runner) targetStopped(ctx context.Context, status launch.Status) error 
 	// A supervised target stops only where a restart failed, and a target that
 	// requested no resource never saw the CR.
 	case len(r.crs) > 0 && r.converged.IsZero() && slices.ContainsFunc(r.h.requests(), namesAResource):
-		err = fmt.Errorf("%w; botbox had created the CR, so the CR may have crashed the target, and %s replays the run",
+		err = fmt.Errorf("%w; reconciler-fuzzer had created the CR, so the CR may have crashed the target, and %s replays the run",
 			err, filepath.Join(r.dir, sequenceFile))
 	}
 	if ctx.Err() != nil {
@@ -822,8 +823,8 @@ func lastUsageHeader(lines []string) int {
 
 // tailLines are the whole lines of the file past from, at most maxTail bytes
 // of them, innermost last, and where the file ends. A line longer than
-// maxTail has no whole form to quote, and a file botbox cannot read has
-// nothing.
+// maxTail has no whole form to quote, and a file reconciler-fuzzer cannot read
+// has nothing.
 func tailLines(path string, from int64) ([]string, int64) {
 	file, err := os.Open(path)
 	if err != nil {
@@ -999,10 +1000,10 @@ func (r *runner) teardown(ctx context.Context) error {
 	r.timeline.Quiet.Start = r.now()
 	cut := r.h.sleep(ctx, r.target.Timeouts.Stable)
 
-	// Stamped before the delete, not after it: from here on botbox is the one
-	// changing the namespace, and no invariant window reaches past this
-	// instant. The sleep above is the last quiet window, and still the
-	// target's to answer for.
+	// Stamped before the delete, not after it: from here on reconciler-fuzzer is
+	// the one changing the namespace, and no invariant window reaches past this
+	// instant. The sleep above is the last quiet window, and still the target's to
+	// answer for.
 	r.timeline.Quiet.End = r.now()
 	r.timeline.Deletion.Start = r.timeline.Quiet.End
 	for _, cr := range r.crs {
@@ -1104,7 +1105,7 @@ func unresolvedNote(u cluster.Unresolved) string {
 	if u.Unserved {
 		why = "the API server does not serve " + observe.KindName(u.OwnerKind)
 	}
-	return fmt.Sprintf("botbox's garbage collector never deletes %s %s, because %s, the kind of its owner %s",
+	return fmt.Sprintf("reconciler-fuzzer's garbage collector never deletes %s %s, because %s, the kind of its owner %s",
 		observe.KindName(u.DependentKind), u.DependentName, why, u.OwnerName)
 }
 

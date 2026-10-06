@@ -14,14 +14,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
-const namespace = "botbox-run-1"
+const namespace = "reconciler-fuzzer-run-1"
 
 var (
 	configMapGVK = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
-	widgetGVK    = schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
+	widgetGVK    = schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Widget"}
 	epoch        = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 )
 
@@ -141,7 +141,7 @@ func TestRecordCapturesTheMetadataTheInvariantsRead(t *testing.T) {
 		"observedGeneration": int64(4),
 	})
 	obj.SetGeneration(5)
-	obj.SetFinalizers([]string{"widget.botbox/cleanup"})
+	obj.SetFinalizers([]string{"widget.reconciler-fuzzer/cleanup"})
 	obj.SetLabels(map[string]string{"app": "toy"})
 	obj.SetDeletionTimestamp(&deletionTimestamp)
 
@@ -158,7 +158,7 @@ func TestRecordCapturesTheMetadataTheInvariantsRead(t *testing.T) {
 	if v.ObservedGeneration == nil || *v.ObservedGeneration != 4 {
 		t.Errorf("The version carries observedGeneration %v, want 4.", v.ObservedGeneration)
 	}
-	if !slices.Equal(v.Finalizers, []string{"widget.botbox/cleanup"}) {
+	if !slices.Equal(v.Finalizers, []string{"widget.reconciler-fuzzer/cleanup"}) {
 		t.Errorf("The version carries finalizers %v.", v.Finalizers)
 	}
 	if len(v.OwnerReferences) != 1 || v.OwnerReferences[0].UID != types.UID("uid-widget") {
@@ -250,7 +250,7 @@ func TestSnapshotAtReturnsTheLatestVersionAtOrBeforeTheMoment(t *testing.T) {
 	}
 }
 
-// KindName orders the kinds, so toy.botbox/v1/Widget comes before
+// KindName orders the kinds, so toy.reconciler-fuzzer/v1/Widget comes before
 // v1/ConfigMap.
 func TestSnapshotsAndLiveObjectsAreOrderedByKindThenName(t *testing.T) {
 	s := observe.NewStore(managing(configMapGVK, widgetGVK))
@@ -399,7 +399,7 @@ func TestManagedByReturnsTheObjectsOneOwnerOwns(t *testing.T) {
 	}
 }
 
-func TestManagedByExcludesObjectsBotboxCreated(t *testing.T) {
+func TestManagedByExcludesObjectsReconcilerFuzzerCreated(t *testing.T) {
 	s := observe.NewStore(managing(configMapGVK))
 	s.Exclude(configMapGVK, "fixture")
 	s.Record(configMapGVK, withOwner(object(configMapGVK, "fixture", "10"), "uid-widget"), at(0))
@@ -488,7 +488,7 @@ func TestHistoryOfFillsInTheWatchedNamespace(t *testing.T) {
 func TestKindNameLeavesOutTheCoreGroup(t *testing.T) {
 	for gvk, want := range map[schema.GroupVersionKind]string{
 		configMapGVK: "v1/ConfigMap",
-		widgetGVK:    "toy.botbox/v1/Widget",
+		widgetGVK:    "toy.reconciler-fuzzer/v1/Widget",
 	} {
 		if got := observe.KindName(gvk); got != want {
 			t.Errorf("KindName(%#v) is %q, want %q, as target.yaml writes it.", gvk, got, want)
@@ -501,7 +501,7 @@ func TestResourceIsWhereTheMapperServesTheKind(t *testing.T) {
 	mapper.Add(widgetGVK, meta.RESTScopeNamespace)
 	s := observe.NewStore(observe.Options{Namespace: namespace, Mapper: mapper})
 
-	if got, want := s.Resource(widgetGVK), (schema.GroupResource{Group: "toy.botbox", Resource: "widgets"}); got != want {
+	if got, want := s.Resource(widgetGVK), (schema.GroupResource{Group: "toy.reconciler-fuzzer", Resource: "widgets"}); got != want {
 		t.Errorf("Resource(%v) is %v, want %v.", widgetGVK, got, want)
 	}
 }

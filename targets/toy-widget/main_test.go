@@ -15,8 +15,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/rosenhouse/botbox/internal/target"
-	"github.com/rosenhouse/botbox/targets/toy-widget/controller"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/targets/toy-widget/controller"
 )
 
 func writeKubeconfig(t *testing.T, server string) string {
@@ -66,12 +66,12 @@ func TestRestConfigFallsBackToTheEnvironment(t *testing.T) {
 }
 
 func TestManagerOptionsWatchOnlyWatchNamespace(t *testing.T) {
-	t.Setenv("WATCH_NAMESPACE", "botbox-run-x")
+	t.Setenv("WATCH_NAMESPACE", "reconciler-fuzzer-run-x")
 
 	watched := managerOptions(nil, "0", 0).Cache.DefaultNamespaces
 
-	if namespaces := slices.Collect(maps.Keys(watched)); !slices.Equal(namespaces, []string{"botbox-run-x"}) {
-		t.Errorf("The manager watches %v, want only botbox-run-x.", namespaces)
+	if namespaces := slices.Collect(maps.Keys(watched)); !slices.Equal(namespaces, []string{"reconciler-fuzzer-run-x"}) {
+		t.Errorf("The manager watches %v, want only reconciler-fuzzer-run-x.", namespaces)
 	}
 }
 
@@ -97,12 +97,12 @@ func TestManagerOptionsElectNoLeader(t *testing.T) {
 // A lease lets a fault on leases make the toy lose it and exit, as a replica
 // of a real controller does.
 func TestManagerOptionsElectALeaderInWatchNamespaceWithALease(t *testing.T) {
-	t.Setenv("WATCH_NAMESPACE", "botbox-run-x")
+	t.Setenv("WATCH_NAMESPACE", "reconciler-fuzzer-run-x")
 
 	options := managerOptions(nil, "0", 3*time.Second)
 
-	if !options.LeaderElection || options.LeaderElectionID == "" || options.LeaderElectionNamespace != "botbox-run-x" {
-		t.Errorf("The manager elects a leader %t, by the lease %q in %q; want a lease in botbox-run-x.",
+	if !options.LeaderElection || options.LeaderElectionID == "" || options.LeaderElectionNamespace != "reconciler-fuzzer-run-x" {
+		t.Errorf("The manager elects a leader %t, by the lease %q in %q; want a lease in reconciler-fuzzer-run-x.",
 			options.LeaderElection, options.LeaderElectionID, options.LeaderElectionNamespace)
 	}
 	for _, lease := range []struct {

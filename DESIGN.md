@@ -1,4 +1,4 @@
-# DESIGN.md — botbox
+# DESIGN.md — reconciler-fuzzer
 
 A black-box property-based and fault-injection harness for Kubernetes controllers.
 
@@ -15,7 +15,7 @@ reconcile correctly across partial progress, stale reads, missed events, API err
 and restarts. Formal verification (see Anvil / Welder) can prove liveness properties
 such as Eventually Stable Reconciliation (ESR), but requires rewriting the controller.
 
-`botbox` tests the same class of properties against **unmodified** controllers by:
+`reconciler-fuzzer` tests the same class of properties against **unmodified** controllers by:
 
 1. Generating random but valid sequences of operations on a custom resource.
 2. Observing the controller only through the Kubernetes API (no instrumentation).
@@ -24,20 +24,20 @@ such as Eventually Stable Reconciliation (ESR), but requires rewriting the contr
    configuration, plus optional per-controller **properties**.
 5. Shrinking any failing sequence to a minimal reproducer and emitting a report.
 
-The controller is a black box, which botbox drives through the API server. The README
-lists what botbox cannot test yet.
+The controller is a black box, which reconciler-fuzzer drives through the API server. The README
+lists what reconciler-fuzzer cannot test yet.
 
 ## 2. Non-goals
 
-- botbox is not a formal verifier. It offers no proofs and no model checker.
-- botbox is not a chaos platform for production clusters. It runs against test clusters
+- reconciler-fuzzer is not a formal verifier. It offers no proofs and no model checker.
+- reconciler-fuzzer is not a chaos platform for production clusters. It runs against test clusters
   only, envtest or kind.
-- botbox does not test the Kubernetes control plane itself.
-- botbox is not a mocking framework for reconciler unit tests. It observes only through
+- reconciler-fuzzer does not test the Kubernetes control plane itself.
+- reconciler-fuzzer is not a mocking framework for reconciler unit tests. It observes only through
   the API server.
-- botbox is not opinionated about controller framework. controller-runtime, kube-rs,
+- reconciler-fuzzer is not opinionated about controller framework. controller-runtime, kube-rs,
   client-go by hand and operator-sdk targets are all equally valid.
-- botbox does not replace the target's admission webhook. It generates from the CRD
+- reconciler-fuzzer does not replace the target's admission webhook. It generates from the CRD
   schema, so rules that only a webhook enforces are constrained per target (§8.3).
 
 ## 3. Provenance
@@ -57,10 +57,10 @@ external-secrets, upstream open-source projects, unmodified and pinned by versio
 | **Launcher** | How a target's process is started, stopped, and restarted. |
 | **Proxy** | An HTTP reverse proxy between the target and the API server. Observes every request; injects faults. |
 | **Observer** | Watches the cluster state directly (not via the proxy) and records object versions and events. |
-| **Test cluster** | The API server a run executes against: an envtest control plane that botbox starts (default), or an existing cluster given by kubeconfig (§5.8). |
+| **Test cluster** | The API server a run executes against: an envtest control plane that reconciler-fuzzer starts (default), or an existing cluster given by kubeconfig (§5.8). |
 | **Primary CR** | A custom resource of the kind the target declares primary. A sequence creates up to three, and each CR op acts on one by name (§7). |
-| **Fixture** | An object botbox applies to the run namespace before op 0, such as an Issuer. Only a fixture op changes it; not a managed object. |
-| **Managed object** | An object of a kind the target declares it manages, in the run namespace, that neither botbox nor the cluster created (§6). |
+| **Fixture** | An object reconciler-fuzzer applies to the run namespace before op 0, such as an Issuer. Only a fixture op changes it; not a managed object. |
+| **Managed object** | An object of a kind the target declares it manages, in the run namespace, that neither reconciler-fuzzer nor the cluster created (§6). |
 | **Op** | One step in a test sequence. The ops on a primary CR are `Create`, `Update`, `Delete` and `Recreate`; the fixture ops are `UpdateFixture` and `DeleteFixture`; the control ops are `Restart`, `Fault`, `Settle` and `DeleteManaged` (§5.4). A CR op may set `noSettle` to skip the Runner's implicit settle wait (§5.5). |
 | **Sequence** | An ordered list of ops plus a seed. The unit of generation, replay, and shrinking. |
 | **Invariant** | A generic check that applies to every target. IDs `G1..Gn`. |
@@ -88,7 +88,7 @@ external-secrets, upstream open-source projects, unmodified and pinned by versio
                           Invariant engine ──▶ Report
 ```
 
-In envtest mode the test cluster also includes botbox's garbage-collector emulation
+In envtest mode the test cluster also includes reconciler-fuzzer's garbage-collector emulation
 (§5.8). It writes to the API server directly, never through the proxy, and records its
 own deletes.
 
@@ -108,12 +108,12 @@ type Launcher interface {
 Implementations:
 
 - `Binary` — the primary launcher and the only one required through M6. Exec a local
-  binary. It runs on botbox's host, which routes to no Pod and resolves no Service name of
-  the test cluster. botbox writes a kubeconfig whose server is the proxy URL and whose
+  binary. It runs on reconciler-fuzzer's host, which routes to no Pod and resolves no Service name of
+  the test cluster. reconciler-fuzzer writes a kubeconfig whose server is the proxy URL and whose
   context names the run namespace, and exports it as `KUBECONFIG`. It substitutes
   `$KUBECONFIG` and `$NAMESPACE`, the run namespace, in `launch.args` and in the values of
   `launch.env`.
-  `launch.env` sets variables over the environment the target inherits from botbox, and
+  `launch.env` sets variables over the environment the target inherits from reconciler-fuzzer, and
   may not set `KUBECONFIG`. The target's stdout and stderr go to `target.log` in the run
   directory. `Restart` sends SIGKILL, waits for the process to be reaped, then execs
   again, so fixed ports and lock files are released. A killed process never releases a
@@ -123,7 +123,7 @@ Implementations:
   stopped and when it starts again. `Stop` and `Restart` are not exits, and `Stop` ends
   supervision. The end of the context `Supervise` was given ends it too. `Status` says
   whether a supervised target is waiting to restart, and when the process now running
-  started. botbox does not probe the target for health. A settle wait does not converge
+  started. reconciler-fuzzer does not probe the target for health. A settle wait does not converge
   until the process now running has shown it runs (§5.5).
 - `InProcess` — deferred. It may return if envtest run time becomes the bottleneck (§14).
 - `Image` — run a container image against a kind cluster, with the proxy in-cluster or
@@ -136,9 +136,9 @@ The proxy is an `httputil.ReverseProxy` in front of the test cluster. It listens
 HTTP/2 only over TLS. The proxy's upstream transport comes from the test cluster's
 `rest.Config` via `rest.TransportFor`, so it carries whatever that cluster uses: a client
 certificate on envtest, a token or exec credential on a kubeconfig cluster. The proxy
-strips any inbound `Authorization` header. The target's requests therefore carry botbox's
+strips any inbound `Authorization` header. The target's requests therefore carry reconciler-fuzzer's
 credentials, admin on envtest, and the target's RBAC is never exercised (§14). A target's
-own `Impersonate-*` headers pass through, and the API server honors them under botbox's
+own `Impersonate-*` headers pass through, and the API server honors them under reconciler-fuzzer's
 credentials.
 
 Responsibilities:
@@ -209,7 +209,7 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   `DeleteManaged` directly to the API server, as it does the CR ops.
 - Fixture ops: `UpdateFixture` (set one string of a fixture) and `DeleteFixture` (delete a
   fixture until a later op, §7), only on the fixtures `generate.fixtures` names (§8.1).
-  Built-in kinds carry no schema botbox reads, so a drawn value is a word of 4, 8 or 12
+  Built-in kinds carry no schema reconciler-fuzzer reads, so a drawn value is a word of 4, 8 or 12
   lowercase letters and digits, which a Secret's `data` also reads as base64. Generation
   restores a deleted fixture before the next op that settles, because a target may rightly
   not be ready while a fixture is gone, and every settle wait judges G4. A target that
@@ -223,10 +223,10 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   `generate.faults: false` disables fault generation for a target.
 - **Schema-driven mutation** from the CRD's OpenAPI v3 schema: numeric ranges, enums,
   string patterns, optional-field presence, list length, map size. Generic and works on
-  any CRD. botbox draws no sequence for a built-in primary kind, whose schema it does not
+  any CRD. reconciler-fuzzer draws no sequence for a built-in primary kind, whose schema it does not
   read, and runs only the sequences a user writes.
 - **Valid by the CRD's own rules.** Every create, recreate and update the generator draws
-  passes the CRD as the API server judges the CR botbox wrote: defaults, value
+  passes the CRD as the API server judges the CR reconciler-fuzzer wrote: defaults, value
   validations, list types and `x-kubernetes-validations` rules, transition rules included.
   The check does not see the status the controller writes, so a CRD rule that reads status
   can still refuse a draw. The generator runs the API server's own code for this (D55). A
@@ -240,7 +240,7 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   into the sample until the CRD accepts one. A `generate.mutate` path is a configuration
   error too when the generator cannot draw a value for it, such as a set whose items allow
   fewer values than its `minItems` or a pattern nothing matches, or when the CRD refuses
-  every value drawn. Without `generate.mutate`, botbox prints each spec path it leaves
+  every value drawn. Without `generate.mutate`, reconciler-fuzzer prints each spec path it leaves
   alone, and why: its schema says too little to draw from, such as an int-or-string, the
   generator cannot draw a value for it, or the CRD refuses every value drawn for it.
 - **Hand-written generators** per target are deferred (#59). No target needs one, since
@@ -248,7 +248,7 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   accepts (§8.3), and one would need a public Go API.
 
 Every sequence is serializable to JSON (§7) so it can be replayed without rapid. A seed
-names a sequence for one build of botbox and one target declaration. A golden test records
+names a sequence for one build of reconciler-fuzzer and one target declaration. A golden test records
 what the seeds the repository runs by number draw, so a change to a draw is deliberate
 (D54).
 
@@ -299,27 +299,27 @@ The Runner executes one sequence:
    panic opens with, or else the last line above the last usage text, which Go's flag
    package and cobra print below a flag error, or else the last line above any stack
    trace, since a logger's trace ends in a frame. The log holds every process a `restart`
-   started, and the last one is the one that stopped. Where botbox had created the CR and
+   started, and the last one is the one that stopped. Where reconciler-fuzzer had created the CR and
    the target had requested a resource, the error says the CR may have crashed the target
    and names the run's
    `sequence.json`, unless the target wrote that its port was taken. Once a wait has
    converged, the target has shown it runs, and the Launcher supervises it (§5.1). The run
    notes each exit and the line the target wrote as it stopped. A wait does not converge
    while the target waits to restart, nor until the process now running has shown it runs.
-   botbox takes a target that has read a Lease with a get to elect a leader, because
+   reconciler-fuzzer takes a target that has read a Lease with a get to elect a leader, because
    leader election reads its Lease that way to learn who holds it. A process of such a
    target shows it runs once the API server accepts a create, update or patch of a lease
    that follows the process's own get. A controller can start informers before it leads,
-   and the leader that botbox replaces renews its lease without a get while its renewals
+   and the leader that reconciler-fuzzer replaces renews its lease without a get while its renewals
    succeed. A process of any other target shows it runs by requesting a resource outside
-   leader election, because a controller lists what it watches as it starts. botbox has no
+   leader election, because a controller lists what it watches as it starts. reconciler-fuzzer has no
    other sign that a target is back. A start and that sign count as changes, so a
    restarted target runs for `T_stable` past its return before a wait converges. A target
    that exits again within `T_stable` of each return therefore never converges, even where
    it wrote its converged state first, and its wait expires as a G4 that counts the exits
    since the target last converged and quotes the last. A target that runs longer between
    exits can converge in between, until a backoff outlasts a wait. A target that converges
-   after an exit passes. botbox chose when to restart the target after a `Restart` op and
+   after an exit passes. reconciler-fuzzer chose when to restart the target after a `Restart` op and
    after an exit a fault excuses (§6), so a wait gives it `T_settle` past its return from
    either, where it returns within `T_settle` of the restart, and `T_settle` past the
    restart where it does not. While a fault is active, only the first exit a fault excused
@@ -367,7 +367,7 @@ restart.
 Cleanup between runs never restarts the API server, because a shrink pass replays a
 sequence many times and starting a control plane costs seconds.
 
-**Shrinking** is sequence-level, and botbox's own pass does all of it. It removes one op at
+**Shrinking** is sequence-level, and reconciler-fuzzer's own pass does all of it. It removes one op at
 a time and replays what is left from clean state. Where an op stays and carries a fault,
 it halves `until.count`, `until.for` and `action.delay` one at a time, while the replay
 still fails, but never a count below 1 or a duration below 10 ms. A candidate replaces
@@ -396,7 +396,7 @@ how many of its ops the run reached, the violated invariant or property with the
 evidence (request log excerpt, object version timeline), the target and versions, the
 seed, and a one-line replay command. That command repeats the target, the kubeconfig and
 every launch argument the run had, quoted so that `sh` and `zsh` read each word as
-written. It does not record what the target inherits from botbox's environment, so a
+written. It does not record what the target inherits from reconciler-fuzzer's environment, so a
 target declares what it needs in `launch.env` (§8.1). The run directory also holds
 recordings of the run (§11), so a report can be re-examined without re-running. A
 readiness verdict and a
@@ -429,24 +429,24 @@ is, therefore carries no latency in the report and its own in `requests.jsonl`.
 
 ### 5.8 Test cluster
 
-botbox owns the API server a run executes against.
+reconciler-fuzzer owns the API server a run executes against.
 
-- **envtest** (default). botbox starts `kube-apiserver` and `etcd` from
+- **envtest** (default). reconciler-fuzzer starts `kube-apiserver` and `etcd` from
   `KUBEBUILDER_ASSETS` (installed by `setup-envtest`) using
   `sigs.k8s.io/controller-runtime/pkg/envtest` inside `internal/cluster`. This is the one
   harness package allowed to import controller-runtime (§11). It starts its own control
-  plane even where `USE_EXISTING_CLUSTER` is set. Before it starts them, botbox looks for
+  plane even where `USE_EXISTING_CLUSTER` is set. Before it starts them, reconciler-fuzzer looks for
   both binaries where envtest does: `TEST_ASSET_ETCD` and `TEST_ASSET_KUBE_APISERVER`,
-  then `KUBEBUILDER_ASSETS`, then `/usr/local/kubebuilder/bin`. botbox looks up a bare
+  then `KUBEBUILDER_ASSETS`, then `/usr/local/kubebuilder/bin`. reconciler-fuzzer looks up a bare
   name on `PATH`, as envtest does. A `KUBEBUILDER_ASSETS` of `""` or `.` leaves bare names,
-  such as `etcd`. botbox names the variable and the path when a binary is missing.
+  such as `etcd`. reconciler-fuzzer names the variable and the path when a binary is missing.
 - **kubeconfig**. An existing cluster, normally kind. Used by `make test-kind` and, in
-  phase 2, by `Image` targets. botbox installs the target's CRDs there, creating or
+  phase 2, by `Image` targets. reconciler-fuzzer installs the target's CRDs there, creating or
   replacing each one, and leaves them installed. The cluster runs
   `kube-controller-manager`, whose garbage collector replaces the emulation below. It also
   adds the `default` ServiceAccount and the `kube-root-ca.crt` ConfigMap to every
   namespace. A run waits up to 30 s for those of a kind it watches, and a missing one is a
-  harness error. The cluster serves one botbox invocation at a time: a target that watches
+  harness error. The cluster serves one reconciler-fuzzer invocation at a time: a target that watches
   every namespace acts in another invocation's run namespace too, and each invocation
   would count that work as its own target's.
 
@@ -455,13 +455,13 @@ kubelet, so nothing garbage-collects owned objects, namespaces never finish term
 default service accounts appear, no pods run, and no workload's status changes.
 Consequences:
 
-- **Garbage-collector emulation.** In envtest mode botbox runs a minimal collector over
+- **Garbage-collector emulation.** In envtest mode reconciler-fuzzer runs a minimal collector over
   the run namespace: it deletes a managed object that has at least one ownerReference
   once every owner in its `ownerReferences` is gone; an object with none is never touched.
   Like kube's garbage collector, it maps a reference's apiVersion and kind through
   discovery, so any version the API server serves resolves. It then finds the owner by
   (group, kind, name) in the run namespace and compares the UID; a name match with a
-  different UID counts as gone. An owner of a kind botbox does not watch, or named at a
+  different UID counts as gone. An owner of a kind reconciler-fuzzer does not watch, or named at a
   version the API server does not serve, is treated as live, so the emulator never deletes
   an object whose owners it cannot resolve. The run notes each unresolved reference once
   per object that carries it (§6). The emulator is watch-driven and deletes within 1 s of
@@ -482,8 +482,8 @@ Consequences:
   only its kubelet confirms the delete, so G3 fails on one the target manages. When
   `manages` names one of these kinds, an envtest invocation says so once, before the
   control plane starts, and names `--kubeconfig` and kind. A G4 report repeats it among
-  its notes. botbox does not emulate these controllers (D57).
-- **No finalizers that only `kube-controller-manager` removes.** botbox starts the API
+  its notes. reconciler-fuzzer does not emulate these controllers (D57).
+- **No finalizers that only `kube-controller-manager` removes.** reconciler-fuzzer starts the API
   server with its garbage collector off, and with the `StorageObjectInUseProtection`
   admission plugin disabled beside envtest's own `ServiceAccount`. A delete of anything
   but a Namespace therefore adds no `orphan` or `foregroundDeletion` finalizer, whatever
@@ -491,9 +491,9 @@ Consequences:
   and no PersistentVolume carries `kubernetes.io/pv-protection`. On a kubeconfig cluster a
   Job or ReplicationController deleted without a policy orphans its Pods, and a claim
   keeps its finalizer until no Pod uses it.
-- **No admission or conversion webhooks.** botbox installs no admission webhook (§8.3).
+- **No admission or conversion webhooks.** reconciler-fuzzer installs no admission webhook (§8.3).
   envtest removes a CRD's conversion webhook, so the API server converts a CR between
-  versions by `apiVersion` alone. A kubeconfig cluster keeps the webhook. botbox deploys
+  versions by `apiVersion` alone. A kubeconfig cluster keeps the webhook. reconciler-fuzzer deploys
   no webhook Service, so a request that needs conversion fails unless the cluster serves
   one.
 
@@ -543,7 +543,7 @@ deleted an object does not converge before as long past each fault that stopped 
 op as the fault lasted, and `T_settle` more, whatever converged since (D90).
 A target that exits while a fault excuses it, as controller-runtime with
 leader election on does when it loses its lease, then waits out the restart's backoff
-(§5.1), which botbox chose. G4 gives it `T_settle` past its return from that restart too,
+(§5.1), which reconciler-fuzzer chose. G4 gives it `T_settle` past its return from that restart too,
 as after a `Restart` (§5.5), and does not judge a window the exit falls in, as it does not
 judge one a fault reaches into. While a fault is active, only the target's first such exit
 during each op is owed that time, because owing each later exit would hold a crash loop's
@@ -580,7 +580,7 @@ after such a wait where a fault is active at its end. G3 judges deadlines, G5 co
 states and G6 failing requests.
 
 **The teardown boundary.** No invariant window reaches past the instant the Runner
-begins the teardown (§5.5 step 4), because from there on botbox is the one changing the
+begins the teardown (§5.5 step 4), because from there on reconciler-fuzzer is the one changing the
 namespace and the attribution below no longer holds. A window that would close after it
 is not judged, rather than judged early: judging early would hold the target to a shorter
 window than §6 gives it, and where the boundary falls would depend on harness timing. G3
@@ -592,8 +592,8 @@ where G3 can judge it, and G4 leaves that wait to G3. Where a fault reached into
 deletion, G3 only notes it, and G4 judges the wait.
 
 **Attribution.** A managed object is any object of a declared managed kind in the run
-namespace that neither botbox nor the cluster created. Fixtures and the primary CRs are
-botbox's. The cluster's are what the namespace holds before the fixtures and the target,
+namespace that neither reconciler-fuzzer nor the cluster created. Fixtures and the primary CRs are
+reconciler-fuzzer's. The cluster's are what the namespace holds before the fixtures and the target,
 once §5.8's wait is over. Both are excluded by name, so an object the cluster recreates
 stays excluded. The namespace is private to one run, since a kubeconfig cluster serves one
 invocation at a time (§5.8). Everything else in it came from the target, except what a
@@ -610,9 +610,9 @@ none may belong to any CR. G3, G5, G7 and the properties attribute by that rule,
 a run of several CRs holds each to its own objects (below). An object owned through
 another, such as a ReplicaSet of a Deployment a CR owns, names no CR.
 
-**Fixtures.** A fixture stays botbox's, whatever its kind, and so does the object botbox
+**Fixtures.** A fixture stays reconciler-fuzzer's, whatever its kind, and so does the object reconciler-fuzzer
 creates again under its name, so G3 never counts one as left behind and G7 never asks for
-one back. A fixture op, and the restore of a deleted fixture, is a change of botbox's: G5
+one back. A fixture op, and the restore of a deleted fixture, is a change of reconciler-fuzzer's: G5
 does not judge a restart it falls between, and G7 notes a `DeleteManaged` it precedes
 before the run converged. G4 measures `T_settle` from an update or a restore of a fixture as
 from a spec change, and G6 counts failing requests afresh after any fixture op or restore.
@@ -645,7 +645,7 @@ within `T_settle`, so a slow failing loop can pass both.
 
 **What the proxy cannot see.** G1 and G6 observe only requests that leave the target
 process. Reads served from a client-side cache are invisible, so a reconcile loop that
-makes no API calls is outside what botbox can detect.
+makes no API calls is outside what reconciler-fuzzer can detect.
 
 **What G6 does not count.** A 409 Conflict on an `update` or a `patch` is the API
 server's optimistic-concurrency contract: the target is meant to re-read and write again,
@@ -664,13 +664,13 @@ fixed interval longer than `T_settle / N_errloop` escapes G6, and a readiness ve
 G1 often names it instead (§5.7).
 
 **Notes.** A check that could not judge something records a note naming it: G3 for a
-deletion whose deadline the run did not reach, that a fault reached into, or that botbox
-took an object inside, G5 for a `Restart` missing a snapshot or with a change of botbox's
+deletion whose deadline the run did not reach, that a fault reached into, or that reconciler-fuzzer
+took an object inside, G5 for a `Restart` missing a snapshot or with a change of reconciler-fuzzer's
 or a fault between its snapshots, and G7 for an object a `DeleteManaged` deleted that did
 not come back, where the op followed such a change before the run converged or followed a
 `Restart` the target had not yet answered, or where a fault reached into the op or its
 wait or the target was still owed time to recover from one where the wait ended. The
-Runner carries the last checkpoint's notes out and `botbox` prints them at the end of the
+Runner carries the last checkpoint's notes out and `reconciler-fuzzer` prints them at the end of the
 run, because a check that was skipped otherwise reads like one that passed. A run may
 delete one CR more than once, so a G3 note names the first `delete` or `recreate` that
 found the CR, or else the teardown. The Observer can record a deletion after the next op
@@ -682,7 +682,7 @@ since the object that carries it stays, and G3 would report it without saying wh
 notes each fault op whose fault the proxy applied to no request, since that fault tested
 nothing (D36). It notes each exit of the target it restarted (§5.5), since a run that
 passes shows no other sign of it. A G4 report on envtest also notes the managed kinds
-whose status envtest never changes (§5.8), since G4 may fail for that alone. botbox prints
+whose status envtest never changes (§5.8), since G4 may fail for that alone. reconciler-fuzzer prints
 that note once, when the invocation starts, rather than with a run's notes.
 
 **Readiness.** G3 and G6 require nothing from the target except which resource kinds it
@@ -696,11 +696,11 @@ that differs across it, judged at the snapshot after it. The Runner snapshots wh
 settle wait converges, implicit or explicit. A `Restart` is compared against the last
 converged snapshot before it and the first converged snapshot after it. If either is
 missing, G5 is not evaluated for that `Restart` and the report says so. The same holds
-where a fault's window reaches between them. An op botbox applied between the two
+where a fault's window reaches between them. An op reconciler-fuzzer applied between the two
 snapshots that changed a CR, a managed object or a fixture leaves unjudged what it may have
 changed: a `Create`, `Update`, `Delete` or `Recreate` reaches its CR, and a `DeleteManaged`
 that deleted something reaches its object and the CRs that object named, or every CR where
-it named none. A fixture op, or an op before which botbox restored a fixture, reaches every
+it named none. A fixture op, or an op before which reconciler-fuzzer restored a fixture, reaches every
 object, since any CR may read the fixture. What a reached CR owns, and every object that
 names no CR, is reached too (§6, attribution). A difference there could be the op's. G5
 compares the rest and notes what it left out, and where nothing is left it is not evaluated
@@ -727,7 +727,7 @@ stopped. An object of the deleted one's
 kind and name satisfies G7, whatever its UID and content, since a recreated object carries
 a new UID. Where none exists, G7 does not judge an op where nothing asks for the object
 back when the wait ends: no CR the object named, or no CR at all where it named none, is
-live and not being deleted. It notes an op where botbox changed a CR, a managed object or a
+live and not being deleted. It notes an op where reconciler-fuzzer changed a CR, a managed object or a
 fixture after the last settle wait that converged, since the target may then have meant to
 delete the object itself. It notes one where a fault was active during the op or its wait,
 or where the wait ended while the target was still owed time to recover from a fault. That
@@ -791,7 +791,7 @@ Details the example does not show:
 - A fault's `match.name` is a glob as Go's `path.Match` reads it. `match.fraction` is a
   share above 0 and up to 1, and a fault without one applies to every request it
   matches. `action.error` is a status from 400 to 599. `action.delay` is not negative, and
-  0 leaves it unset. `until.count` and `until.for` are above 0, because botbox would read 0
+  0 leaves it unset. `until.count` and `until.for` are above 0, because reconciler-fuzzer would read 0
   as no trigger. `until.op` is above the fault's own index, and an index past the last op
   lets the fault outlast the sequence. Any other value is a configuration error.
 - Each `fault` op adds a fault of its own, even where its spec equals another's. The proxy
@@ -802,11 +802,11 @@ Details the example does not show:
   and settles: `{"i": 1, "t": "updateFixture", "kind": "v1/Secret", "name": "token",
   "patch": {"data": {"token": "abcd"}}}`.
 - `deleteFixture` deletes the fixture of `kind` and `name` and waits up to `T_delete` for it
-  to go, and botbox creates it again, as it last wrote it, before the op `until` names acts:
+  to go, and reconciler-fuzzer creates it again, as it last wrote it, before the op `until` names acts:
   `{"i": 2, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 3}}`.
   A fixture still there where the wait ends, held by a finalizer, ends the run as a harness
   error that names the finalizers. So does another object that takes the fixture's name
-  before botbox restores it. `until.op` names a later op, up to the last, and no op
+  before reconciler-fuzzer restores it. `until.op` names a later op, up to the last, and no op
   before it acts on that fixture. A `deleteFixture` does not settle.
   A fixture op names a fixture the target declares, or the run ends as a configuration
   error.
@@ -817,16 +817,16 @@ Details the example does not show:
   then name. The index is resolved at execution time against what the Observer has seen.
   An index that resolves to nothing is skipped and reported as a note, since a target that
   manages fewer objects than the sequence expected is behaving, not failing. So is an
-  object already gone when botbox deletes it, which the Observer had not yet seen go: the
+  object already gone when reconciler-fuzzer deletes it, which the Observer had not yet seen go: the
   op deleted nothing, and the note names the object. A kind the target does not declare in
   `manages` is a configuration error. G7 judges a `deleteManaged` only once the run has
-  converged since botbox last changed something (§6), so put a `settle` op between a
+  converged since reconciler-fuzzer last changed something (§6), so put a `settle` op between a
   `noSettle` op and a `deleteManaged`.
 
-botbox refuses an op that lacks a field its type needs, or carries one it does not take.
+reconciler-fuzzer refuses an op that lacks a field its type needs, or carries one it does not take.
 The error names the fields the type needs.
 
-`botbox replay --target target.yaml sequence.json` re-executes exactly this. Reports
+`reconciler-fuzzer replay --target target.yaml sequence.json` re-executes exactly this. Reports
 embed the minimized sequence in this format. `docs/reference.md` lists every field, op and
 fault field, and its example sequence sets each one (§11).
 
@@ -917,15 +917,15 @@ The sample must set `metadata.name`, since each further CR extends it and ops na
 they act on.
 
 `crds`, `sample` and `fixtures` are relative to the directory holding target.yaml.
-`launch.binary` is relative to the directory botbox runs in, or a name on `PATH`, because
-`launch.args` and any relative path the target opens itself resolve from there too. botbox
+`launch.binary` is relative to the directory reconciler-fuzzer runs in, or a name on `PATH`, because
+`launch.args` and any relative path the target opens itself resolve from there too. reconciler-fuzzer
 checks that it can execute `launch.binary` before it starts a control plane.
 
-`launch.env` sets environment variables for the target, over those it inherits from botbox.
+`launch.env` sets environment variables for the target, over those it inherits from reconciler-fuzzer.
 Its values and `launch.args` take two placeholders: `$KUBECONFIG`, the path of the
-kubeconfig botbox writes, and `$NAMESPACE`, the run namespace, which that kubeconfig also
-names (§5.1). botbox replaces each occurrence of either text and expands no other spelling,
-such as `$(NAMESPACE)`. botbox sets no namespace variable of its own, because frameworks
+kubeconfig reconciler-fuzzer writes, and `$NAMESPACE`, the run namespace, which that kubeconfig also
+names (§5.1). reconciler-fuzzer replaces each occurrence of either text and expands no other spelling,
+such as `$(NAMESPACE)`. reconciler-fuzzer sets no namespace variable of its own, because frameworks
 name it differently. An operator-sdk operator declares:
 
 ```yaml
@@ -967,18 +967,18 @@ cert-manager lists CertificateRequest: a request records one issuance, and a Rea
 Certificate whose request is deleted issues no new one.
 
 The primary, every managed kind and every fixture must be namespaced, because a run owns
-one namespace (§5.5, D13). botbox judges scopes in two checks, and each refuses every
-cluster-scoped kind it knows in one error. The first runs when botbox loads the target.
+one namespace (§5.5, D13). reconciler-fuzzer judges scopes in two checks, and each refuses every
+cluster-scoped kind it knows in one error. The first runs when reconciler-fuzzer loads the target.
 It knows the kinds a Kubernetes 1.37 API server serves by default and the kinds the
 `crds` define. The second runs through discovery once the control plane is up, before
 the first run. It knows the rest, such as a kind whose CRD the cluster holds but `crds`
 does not list. On `--kubeconfig`, a target with kinds of both sorts therefore hears of
-them in two errors. botbox observes only the run namespace, so it does not see a child
+them in two errors. reconciler-fuzzer observes only the run namespace, so it does not see a child
 the target creates in another.
-botbox creates the CR and each fixture in the run namespace. A fixture sets no
+reconciler-fuzzer creates the CR and each fixture in the run namespace. A fixture sets no
 `metadata.namespace`, because the target may look for it in the namespace it names. A
 check refuses such a fixture only if it found no cluster-scoped kind and knows the
-fixture's kind is namespaced. The run refuses the rest. The CR may set one, which botbox
+fixture's kind is namespaced. The run refuses the rest. The CR may set one, which reconciler-fuzzer
 replaces, because the target finds a CR by watching.
 
 `equalIgnore` lists further paths G5 ignores (§6). A path joins keys with `.`. A key that
@@ -1010,13 +1010,13 @@ unjudged.
 cert-manager v1.21.2 binds its healthz server to `0.0.0.0:9403`. The one flag that moves
 it, `--internal-healthz-listen-address`, is hidden, and upstream says the prefix and the
 hiding are there to discourage overriding it and that the flag may be renamed or removed.
-botbox does not build on it, so runs against this target are sequential. Its metrics
+reconciler-fuzzer does not build on it, so runs against this target are sequential. Its metrics
 server does take a supported flag, and the ephemeral port above keeps it out of the way.
 
 ### 8.2 Go form
 
 `internal/target` loads the YAML into a `Target`, and everything downstream consumes it.
-`go doc github.com/rosenhouse/botbox/internal/target Target` lists its fields, so this document
+`go doc github.com/rosenhouse/reconciler-fuzzer/internal/target Target` lists its fields, so this document
 gives only the intent. `Ready` returns an error beside its verdict, and an error means not
 ready (§8.4). A property's error is a configuration error. A nil `Equal` means the §6
 default with the `equalIgnore` paths. An `equal` hook replaces the default and takes no
@@ -1025,8 +1025,8 @@ recreated object compares against its predecessor.
 
 ### 8.3 Generation constraints and admission webhooks
 
-botbox generates from the CRD's OpenAPI v3 schema and keeps the rules the CRD states,
-`x-kubernetes-validations` included, on the CR botbox writes. It cannot keep a rule that
+reconciler-fuzzer generates from the CRD's OpenAPI v3 schema and keeps the rules the CRD states,
+`x-kubernetes-validations` included, on the CR reconciler-fuzzer writes. It cannot keep a rule that
 reads the status the controller writes (§5.4). Phase 1 does not install the target's
 admission webhooks. Rules that only a webhook enforces are therefore invisible to the
 generator. For cert-manager these include: a Certificate needs at least one of
@@ -1071,7 +1071,7 @@ configuration error.
 
 A Go hook is a function registered under a name in `internal/target` and referenced as
 `ready: go:<name>` or `equal: go:<name>`. Hooks exist for in-repo targets only. No Go
-function runs botbox end to end, and its packages make no compatibility promise (D81).
+function runs reconciler-fuzzer end to end, and its packages make no compatibility promise (D81).
 
 ## 9. Toy target: `Widget`
 
@@ -1083,7 +1083,7 @@ deliberately boring. It builds as the binary `bin/toy-widget` and is declared in
   ConfigMaps named `<widget>-<i>` exist, owned by the Widget, each containing `index: i`.
 - `Widget.status.ready` (int) holds the number of ConfigMaps present. The controller also
   sets `status.observedGeneration`.
-- The Widget carries the finalizer `widget.botbox/cleanup`. On deletion the controller
+- The Widget carries the finalizer `widget.reconciler-fuzzer/cleanup`. On deletion the controller
   lists the children by ownerReference, deletes any that remain, and removes the finalizer
   when none remain. Children also carry ownerReferences, so the collector and the
   finalizer are two independent cleanup paths.
@@ -1166,7 +1166,7 @@ span several PRs.
 
 **M0 — Scaffold.** Deliverables:
 
-- Go module `github.com/rosenhouse/botbox` on Go 1.26.
+- Go module `github.com/rosenhouse/reconciler-fuzzer` on Go 1.26.
 - `LICENSE` (Apache-2.0).
 - `Makefile` with `setup`, `test`, `test-envtest`, `fmt`, `vet`.
 - `setup-envtest` pinned through `ENVTEST_K8S_VERSION` and `ENVTEST_INDEX_URL`.
@@ -1197,7 +1197,7 @@ Observer shows the ConfigMaps.
 **M3 — Generic invariants and Runner.** G1–G6 and declared properties implemented as pure
 functions with tests on recorded fixtures. Runner executes hand-written JSON sequences
 with `Create`, `Update`, `Delete`, `Recreate`, `Settle`, `Restart` and `DeleteManaged`
-(the `Restart` op is a launcher call, so it lands here; faults do not). `botbox replay`.
+(the `Restart` op is a launcher call, so it lands here; faults do not). `reconciler-fuzzer replay`.
 Acceptance: every seeded bug of §9.1 with a fault-free sequence is caught by the
 invariant or property that section names, and no check fires on that sequence against the
 toy with no bug; `docs/bug-matrix.md` is generated by CI.
@@ -1217,7 +1217,7 @@ adopter has to supply.
 
 **M5 — Generation and shrinking.** rapid-driven sequences; schema-driven mutation from
 CRD OpenAPI with `generate.mutate` and `generate.overlay`; sequence-level shrinker;
-`botbox run --runs --seed`. Acceptance: with `--bug=B2`, the harness finds and shrinks a
+`reconciler-fuzzer run --runs --seed`. Acceptance: with `--bug=B2`, the harness finds and shrinks a
 failure to ≤ 3 ops without a hand-written sequence; the cert-manager example switches to
 generated runs, with fixed seeds on PRs and random seeds nightly.
 
@@ -1262,48 +1262,48 @@ the proxy; the `Image` launcher. Separate design addendum.
   repeats go.mod's module and Go version, and the runner and action releases of
   `.github/workflows/`. The README's Install section and the tools module section of
   `docs/ci.md` quote go.mod's Go version and the k8s.io/api and controller-runtime versions
-  that requiring botbox forces on a module (D80).
+  that requiring reconciler-fuzzer forces on a module (D80).
   `make test` holds each copy to its source. Each `--deadline` in the
   recipe gives a run at least the time that the Makefile's example tiers give one. Bumps
   are their own PRs, never mixed with features.
 - **controller-runtime boundary.** Only `targets/toy-widget/` and `internal/cluster` may
   import it. The rule covers the root module; the spike modules under `docs/spikes/` are
   separate and exempt. Everything else uses client-go and apimachinery.
-- **Layout.** `cmd/botbox/`, `internal/cluster`, `internal/proxy`, `internal/observe`,
+- **Layout.** `cmd/reconciler-fuzzer/`, `internal/cluster`, `internal/proxy`, `internal/observe`,
   `internal/invariant`, `internal/generate`, `internal/run`, `internal/report`, `internal/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`,
   `examples/ci/`, `docs/`, `internal/reference` for the tests that read
   `docs/reference.md`, and `bin/` for git-ignored build output.
-- **CLI.** botbox has these commands. A test holds this block to the flags each command
+- **CLI.** reconciler-fuzzer has these commands. A test holds this block to the flags each command
   parses.
 
   ```
-  botbox run --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--out dir] [--runs n] [--seed n] [sequence.json...]
-  botbox replay --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--out dir] sequence.json
-  botbox version
-  botbox matrix --target file --sequences dir [--deadline duration] [--kubeconfig file] [--launch-arg arg]... [--out file]
+  reconciler-fuzzer run --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--out dir] [--runs n] [--seed n] [sequence.json...]
+  reconciler-fuzzer replay --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--out dir] sequence.json
+  reconciler-fuzzer version
+  reconciler-fuzzer matrix --target file --sequences dir [--deadline duration] [--kubeconfig file] [--launch-arg arg]... [--out file]
   ```
 
-  `botbox matrix` generates the toy's bug matrix for `make bug-matrix`, so the top-level
-  help leaves it out. `botbox help` and `botbox --help` print what botbox does, its
+  `reconciler-fuzzer matrix` generates the toy's bug matrix for `make bug-matrix`, so the top-level
+  help leaves it out. `reconciler-fuzzer help` and `reconciler-fuzzer --help` print what reconciler-fuzzer does, its
   commands, the exit codes, `KUBEBUILDER_ASSETS`, the README's URL and the pages that list
   every key and explain a failure, because `go install` ships no documentation.
-  `botbox <command> --help` and `botbox help <command>` print the command's synopsis and
+  `reconciler-fuzzer <command> --help` and `reconciler-fuzzer help <command>` print the command's synopsis and
   each flag with its meaning and default. `-h`, `--h`, `-help` or `--help` after a sequence
-  file asks for help too. Help goes to stdout and exits 0. A bare `botbox` prints botbox's
+  file asks for help too. Help goes to stdout and exits 0. A bare `reconciler-fuzzer` prints reconciler-fuzzer's
   help to stderr and exits 2. A usage error, such as an unknown flag, a missing required
   flag, another flag or `--` after a sequence file or a wrong count of sequence files,
   exits 2 and prints the error and the command's synopsis to stderr. It spells a flag with
   two dashes, as the help does, but quotes a flag after a sequence file as given. No
-  message botbox prints cites this document or uses its symbols, such as `T_settle`. A
+  message reconciler-fuzzer prints cites this document or uses its symbols, such as `T_settle`. A
   message names the target.yaml key and its value instead, as in `2s (timeouts.stable)`. A
   test scans the code's string literals for them.
-  `botbox run` draws its sequences or runs the ones named, never both, since `--runs`
+  `reconciler-fuzzer run` draws its sequences or runs the ones named, never both, since `--runs`
   says how many to draw. The deadline abandons the run under way (§5.5), and the
   shrinker stops there and reports the smallest failing sequence it found. Without
-  `--deadline`, botbox prints and uses the longest the planned runs' waits can take at the
-  target's timeouts, plus 4m to minimize a failure where botbox drew the sequences
-  (D64). A shrink pass can take minutes, so botbox prints the failed check's ID before it
+  `--deadline`, reconciler-fuzzer prints and uses the longest the planned runs' waits can take at the
+  target's timeouts, plus 4m to minimize a failure where reconciler-fuzzer drew the sequences
+  (D64). A shrink pass can take minutes, so reconciler-fuzzer prints the failed check's ID before it
   minimizes a drawn sequence of more than one op. `--launch-arg` appends to `launch.args`
   (repeatable; a later flag wins), which is how the bug matrix selects `--bug=N`.
   `--kubeconfig` selects an existing cluster instead of envtest and installs the target's
@@ -1312,13 +1312,13 @@ the proxy; the `Image` launcher. Separate design addendum.
   harness error, or a deadline that ended a run or stopped the invocation before its last
   run. A deadline that ends minimization leaves the violation, and exit 1, standing.
   SIGINT, SIGTERM and SIGHUP interrupt the invocation. No further run starts, and the run
-  under way is abandoned (§5.5). `botbox run` and `botbox replay` name its directory, and
-  `botbox matrix` names its row. A run that failed before the interrupt reports its own
-  error. botbox ignores SIGPIPE from then on, stops what it started, and then dies of the
-  signal, so a shell reports 128 plus the signal's number. A second signal kills botbox at
-  once. A SIGHUP or SIGINT that botbox was started ignoring, as under `nohup`, stays
+  under way is abandoned (§5.5). `reconciler-fuzzer run` and `reconciler-fuzzer replay` name its directory, and
+  `reconciler-fuzzer matrix` names its row. A run that failed before the interrupt reports its own
+  error. reconciler-fuzzer ignores SIGPIPE from then on, stops what it started, and then dies of the
+  signal, so a shell reports 128 plus the signal's number. A second signal kills reconciler-fuzzer at
+  once. A SIGHUP or SIGINT that reconciler-fuzzer was started ignoring, as under `nohup`, stays
   ignored.
-- **Output.** `--out` defaults to `botbox-out/`. Each invocation writes
+- **Output.** `--out` defaults to `reconciler-fuzzer-out/`. Each invocation writes
   `<out>/<timestamp>-<seed>/`, taking the next free name where a second invocation of one
   seed opens a directory in the same second. Each failing run writes `run-<n>/` under it
   with `report.json`, `report.md`, `sequence.json`, `requests.jsonl`, `objects.jsonl`,
@@ -1332,7 +1332,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   invocation ends, before it stops the cluster. Until then, the invocation and the run
   under way are `unfinished`, and the summary gives no exit code, so a SIGKILL or a crash
   leaves the runs that finished. An interrupt that arrives while the cluster stops
-  rewrites them, since botbox then dies of it. They give botbox's version, the target, the
+  rewrites them, since reconciler-fuzzer then dies of it. They give reconciler-fuzzer's version, the target, the
   seed, the `--launch-arg` values, the cluster, the deadline, the outcome (`passed`,
   `violation`, `error`, `interrupted` or `unfinished`), the exit code, and what stopped
   the invocation where no run did. Each planned run has its seed, its sequence file if it
@@ -1341,19 +1341,19 @@ the proxy; the `Image` launcher. Separate design addendum.
   faulted, its checkpoints, the target's exits, its notes and its sequence (§7). These
   describe the run of the planned sequence. A failing run also has its `run-<n>/`,
   relative to the summary, and its error, or the violation and notes its report carries.
-  Until botbox writes the report, those are the run's own, and `run-<n>/` holds no report.
-  botbox empties `run-<n>/` before it runs the minimized sequence there, and meanwhile
+  Until reconciler-fuzzer writes the report, those are the run's own, and `run-<n>/` holds no report.
+  reconciler-fuzzer empties `run-<n>/` before it runs the minimized sequence there, and meanwhile
   `summary.md` and the JUnit file say `run-<n>/` holds a partial run of it (D72).
   `summary.md` leaves out the ops by type, the checkpoints, what each exit said and the
-  sequences. `summary.json` carries `schema: 1`, which changes when a field changes
+  sequences. `summary.json` carries `schema: 2`, which changes when a field changes
   meaning or goes away. `--junit FILE` writes the runs as JUnit XML with the summary,
   creating the file's directory: one testsuite, a testcase per planned run, a `failure`
   typed with the check's ID for a violation, an `error` for a run that did not finish,
-  `skipped` for a run that never started, and an `error` testcase named `botbox` for what
+  `skipped` for a run that never started, and an `error` testcase named `reconciler-fuzzer` for what
   stopped the invocation where no run did, or for an invocation that has not finished. The
   testsuite of an invocation that has not finished gives no time. An invocation that stops
   before it has a directory writes that testcase alone.
-  botbox replaces each file whole, and warns of one it cannot write.
+  reconciler-fuzzer replaces each file whole, and warns of one it cannot write.
   `objects.jsonl` writes each value of a Secret's `data` and annotations as a marker such
   as `[redacted 6 bytes hmac-sha256:8c7ef51307f40278]`. The HMAC key is drawn per
   invocation and never written, so equal values share a marker within one invocation and a
@@ -1361,7 +1361,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   compares them exactly, and its report quotes the markers. Nothing else is redacted: a
   Secret's labels, every other object, `target.log`, `sequence.json`, the summary's
   sequences, and a report's sequence and replay command hold what the target, the sample
-  and the command line gave them (D49). `botbox matrix` writes each run to a directory
+  and the command line gave them (D49). `reconciler-fuzzer matrix` writes each run to a directory
   under the system's temporary directory and deletes it once the checks have read it. A
   run that errs keeps its directory, and the error names it and the command that replays
   the run. CI uploads that directory.
@@ -1369,7 +1369,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   10 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
   adopted examples under envtest, each under 10 minutes on CI including obtaining the
   binary (cached). All four run on every PR. The `-nightly` target beside each example
-  runs it on seeds botbox draws, with the negative control. `make test-kind` = the toy
+  runs it on seeds reconciler-fuzzer draws, with the negative control. `make test-kind` = the toy
   through `--kubeconfig` against a kind cluster it creates and deletes, on demand. It
   passes `b0.json` and fixed seeds, and fails B3 on G3 and B8 on G7 as its negative
   controls. It installs the pinned kind into `bin/` and needs Docker. The nightly workflow
@@ -1380,15 +1380,15 @@ the proxy; the `Image` launcher. Separate design addendum.
   `make hunt-external-secrets` hunt for bugs in the adopted examples, on demand and on no
   pull request. Each runs every family in `examples/<example>/sequences/hunt/`, then up to
   `HUNT_RUNS` seeds drawn from `HUNT_SEED` on, each in an invocation of its own, until
-  `HUNT_MINUTES` runs out. Each invocation writes under `botbox-out/hunt-<example>/`. A
+  `HUNT_MINUTES` runs out. Each invocation writes under `reconciler-fuzzer-out/hunt-<example>/`. A
   family is checked in only once it passes the pinned controller.
 - **Triage.** A hunt run that fails is a candidate, not a bug. Triage replays it three
-  times, reproduces it by hand against envtest unless only botbox's proxy can inject its
+  times, reproduces it by hand against envtest unless only reconciler-fuzzer's proxy can inject its
   faults, and reads upstream's code path. It searches upstream's tracker where the
-  maintainer allows that. A candidate that no replay reproduces, or that breaks a botbox
-  rule and no upstream contract, becomes a botbox issue. A candidate that breaks an
+  maintainer allows that. A candidate that no replay reproduces, or that breaks a reconciler-fuzzer
+  rule and no upstream contract, becomes a reconciler-fuzzer issue. A candidate that breaks an
   upstream contract becomes a draft under `docs/findings/`, with how many replays failed,
-  for botbox's maintainer to file upstream. The draft's directory holds its
+  for reconciler-fuzzer's maintainer to file upstream. The draft's directory holds its
   `sequence.json`, which `make test` checks against the example it names and its CRD,
   and the by-hand reproducer where there is one. One that upstream's tracker already
   holds needs no draft. A draft says whether triage searched the tracker. Where it did
@@ -1404,24 +1404,24 @@ the proxy; the `Image` launcher. Separate design addendum.
   cites no section or decision and uses none of this document's symbols. It names the
   target.yaml key instead, as a message does. A test scans every such comment, the
   spikes' included. Tests may cite this document, since they hold the code to it (D82).
-- **README.** Usage-first and short; internals live here and in `docs/`. Order: what botbox
+- **README.** Usage-first and short; internals live here and in `docs/`. Order: what reconciler-fuzzer
   is, in a few sentences, which say that it runs the controller against a real
   kube-apiserver and etcd; what it cannot test yet; install; a quick start, which draws runs
   on the toy and replays a bug planted in it, and runs as written in an envtest test, with
-  the botbox and the control plane that install leaves; writing `target.yaml` for your own
+  the reconciler-fuzzer binary and the control plane that install leaves; writing `target.yaml` for your own
   controller, around the toy's `target.yaml` embedded as the worked example, with how to
   run it, a `ready` for a CR that reports a Ready condition, which `make test` evaluates,
   and a sequence to pin per managed kind and per property, which the envtest tier runs;
   reading a failure, with one table that gives each check and its usual cause, and a link
-  to what to change when botbox exits 2; running in CI, in brief; a closing "Development
+  to what to change when reconciler-fuzzer exits 2; running in CI, in brief; a closing "Development
   and internals" section that links to this document, its §6, and `docs/bug-matrix.md`.
   Detail lives in pages the README links (D83, D95): `docs/reference.md` lists every key
   and field, `docs/targets.md` says how to write a target, `docs/failures.md` says what
   each file and message of a failure means, `docs/examples.md` runs the adopted examples
   and their negative controls, and `docs/ci.md` holds the CI recipe, embedded from
-  `examples/ci/github-actions.yml`, a tools module that keeps botbox out of an operator's
+  `examples/ci/github-actions.yml`, a tools module that keeps reconciler-fuzzer out of an operator's
   go.mod, embedded from `examples/tools-module.sh`, which the envtest tier runs (D80), and
-  a test that runs botbox from `go test`, embedded from `targets/toy-widget/botbox_test.go`,
+  a test that runs reconciler-fuzzer from `go test`, embedded from `targets/toy-widget/reconciler_fuzzer_test.go`,
   which the envtest tier runs (D81). Only the README's closing section links here, or
   cites a section, a decision or a symbol of this document. The guide pages cite none.
   None of them names a milestone. Every sequence they show loads, every link among them
@@ -1438,7 +1438,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   byte-identical to that file including its trailing newline; `<path>` is relative to the
   repository root; `make test` enforces it. It also runs the cert-manager quickstart
   command of `docs/examples.md` against a fake session and requires the block after it to
-  hold what botbox prints.
+  hold what reconciler-fuzzer prints.
 - **PRs.** Every PR description, issue, review and comment a Claude session posts begins
   with the line `🤖 Created by Claude 🤖` (CLAUDE.md). The description then names the
   milestone and the invariant/property IDs it touches, and carries a "Design change"
@@ -1450,7 +1450,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   unjudged.
 - **No flaky-test retries in CI.** A flaky harness test is a P0 bug in the harness.
 - **Seeds are always printed.** Every failure is reproducible from its sequence, and from
-  its seed with the same botbox build and target declaration (§5.4).
+  its seed with the same reconciler-fuzzer build and target declaration (§5.4).
 
 ## 12. How agents work in this repo
 
@@ -1513,7 +1513,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   generation approach and the oracle ideas.
 - Sieve (UIUC, OSDI'22) injects controller faults by instrumenting the controller, and
   names the intermediate-state, stale-state and unobserved-state classes used in §9.1.
-  `botbox` injects at the API boundary instead.
+  `reconciler-fuzzer` injects at the API boundary instead.
 - rapid gives Go property-based testing with shrinking.
 - envtest, kind and kwok provide test control planes.
 
@@ -1526,7 +1526,7 @@ the proxy; the `Image` launcher. Separate design addendum.
    target-side setting. The question stands for a controller that offers no such
    setting.
 2. How is a cluster-scoped primary CR (ClusterIssuer-like), managed kind or fixture
-   isolated per run? Should botbox observe a child the target creates in another
+   isolated per run? Should reconciler-fuzzer observe a child the target creates in another
    namespace?
 3. Should a later phase run the target's admission webhook in envtest, so that generation
    can widen beyond `generate.mutate`?
@@ -1535,10 +1535,10 @@ the proxy; the `Image` launcher. Separate design addendum.
    less for a controller whose CRs refer to one another, such as one CR delegating to
    another of its kind?
 6. Should a target declare its RBAC and run under it (§5.2)? The proxy could send a token
-   that botbox requests for a ServiceAccount of the run, bound to the target's Roles and
+   that reconciler-fuzzer requests for a ServiceAccount of the run, bound to the target's Roles and
    ClusterRoles. On envtest 1.37, such a token was refused a verb and a resource its Role
    lacked, another namespace, and an impersonation of `system:masters`.
-7. What lets the README show a find in a real controller as a bug botbox found: upstream
+7. What lets the README show a find in a real controller as a bug reconciler-fuzzer found: upstream
    acknowledging it, or a deterministic replay that a reading of upstream's code confirms?
 
 ## 15. Decision log
@@ -1555,12 +1555,12 @@ built from source and run as a black-box binary.
 - **D3 CEL for `ready` and for properties.** cert-manager's Certificate carries
   `observedGeneration` only inside conditions, so readiness needs a cross-field comparison
   JSONPath cannot express.
-- **D4 envtest is the default test cluster and botbox owns it.** `internal/cluster` may
+- **D4 envtest is the default test cluster and reconciler-fuzzer owns it.** `internal/cluster` may
   import `controller-runtime/pkg/envtest`; re-implementing envtest would be waste.
 - **D5 Garbage-collector emulation and self-cleanup on envtest.** Spike: 10 s after a
   Certificate was deleted, its Secret and CertificateRequest were still present despite
   ownerReferences, and the namespace stayed `Terminating`.
-- **D6 Attribution by namespace.** Everything in the run namespace that botbox or a
+- **D6 Attribution by namespace.** Everything in the run namespace that reconciler-fuzzer or a
   fixture did not create is the target's. Amended by D56 for a cluster with a controller
   manager.
 - **D7 G2 covers the set of managed objects; G5 is measured within one run.** G2 as
@@ -1593,7 +1593,7 @@ built from source and run as a black-box binary.
   spent: subagents with fresh context and cheaper models where the task allows.
 - **D17 The cert-manager example ships a negative control.** With
   `--enable-certificate-owner-ref=false` the Secret is retained by design (cert-manager
-  documents this), and botbox must report it as G3 because the target declares Secrets as
+  documents this), and reconciler-fuzzer must report it as G3 because the target declares Secrets as
   managed.
 - **D18 `ENVTEST_INDEX_URL` pins the setup-envtest release index to a tagged
   controller-tools ref.** The default index tracks `HEAD`, so a pinned
@@ -1640,7 +1640,7 @@ built from source and run as a black-box binary.
 - **D28 cert-manager's healthz port moves only under a hidden flag, so runs stay
   sequential.** `--internal-healthz-listen-address` exists, and upstream hides it to
   discourage overriding it and records that it may be renamed or removed. The spike tried
-  `--healthz-listen-address`, got "unknown flag", and read that as no flag at all. botbox
+  `--healthz-listen-address`, got "unknown flag", and read that as no flag at all. reconciler-fuzzer
   does not build on a flag upstream discourages.
 - **D29 G6 ignores a 409 only on an `update` or a `patch`.** D27 excluded every write.
   A create that collides returns AlreadyExists, which is not a lost race: the object is
@@ -1660,7 +1660,7 @@ built from source and run as a black-box binary.
   example's `issue.json` was observed to 31.3 s against a 71.3 s deadline, and only the
   negative control ever reached a verdict. Emptiness decides the deletion at the instant
   it is seen. G3 and G5 now record what they could not judge, the Runner carries the last
-  checkpoint's notes out, and `botbox` prints them, because a skipped check reads like a
+  checkpoint's notes out, and `reconciler-fuzzer` prints them, because a skipped check reads like a
   passing one from outside.
 - **D32 The teardown's `T_stable` is a quiet window of its own, and G1's statement
   follows the settle wait.** §5.5 step 4 already called that wait the last quiet window
@@ -1673,7 +1673,7 @@ built from source and run as a black-box binary.
   give §6's "within `T_settle` after faults stop" somewhere to be measured, waits for M6.
   G1's row promised `T_settle` to fall quiet while the code judged the `T_stable` after
   the settle wait, which is shorter whenever the target converges early. The statement
-  now says what the code does and what G2 already said: the settle wait is where botbox
+  now says what the code does and what G2 already said: the settle wait is where reconciler-fuzzer
   judges the target converged, and B1 keeps the G1 row D26 gave it, because it reports
   itself converged and only then creates its children.
 - **D33 A sequence ends with an op that settles, and generation adds the settle waits
@@ -1731,21 +1731,21 @@ built from source and run as a black-box binary.
   and counted in the same way (D50). The report also carries what no check could judge,
   for D31's reason: a report that omits "G3 could not be judged" reads like one where G3
   passed, and it is the artefact a human actually reads.
-- **D38 G3 credits no cleanup botbox performed.** A `DeleteManaged` op deletes a managed
+- **D38 G3 credits no cleanup reconciler-fuzzer performed.** A `DeleteManaged` op deletes a managed
   object behind the target's back (§5.4). Inside a CR deletion's window that deletes the
   evidence: G3 asked whether the object was gone by the deadline and never asked who
   removed it, so `b3.json` with one `deleteManaged` op added turned a reported orphan into
   "every run passed". The Runner resolves the op to an object and hands it to the engine.
-  G3 notes an object botbox took inside the window rather than counting it as cleaned. It
+  G3 notes an object reconciler-fuzzer took inside the window rather than counting it as cleaned. It
   is a note and not a violation, because the target still had until the deadline; an
-  object botbox took after the deadline was still there at the deadline, which G3 already
+  object reconciler-fuzzer took after the deadline was still there at the deadline, which G3 already
   reports. The object is matched by UID, since one the run recreated carries the same name
   and belongs to the CR that came after.
 - **D37 A forced finalizer is a note, not a reason to withhold G3.** §5.5 step 4 said each
   forced removal invalidates G3 for the run, and nothing implemented it. Implementing it
   literally would have thrown away true findings. The teardown stamps the end of the
   deletion window and takes G3's checkpoint before it forces anything, and no check reads a
-  version recorded after that instant, so nothing botbox forced was ever credited to the
+  version recorded after that instant, so nothing reconciler-fuzzer forced was ever credited to the
   target. What was missing is visibility: an object no check judges — a fixture, or a child
   born after the deletion — can hold a finalizer while G3 passes, and nothing said so. The
   run notes what it forced.
@@ -1769,7 +1769,7 @@ built from source and run as a black-box binary.
   writes and convergence with them, because the controller then skips a spec change
   unless it renames the target Secret, so readiness never reaches the new generation.
   `OnChange` syncs when the generation, the labels or the annotations change and writes
-  nothing in between. It costs coverage: nothing botbox does reaches the periodic refresh
+  nothing in between. It costs coverage: nothing reconciler-fuzzer does reaches the periodic refresh
   path. This is the first real target to raise §14 question 1, and the answer taken here
   is a target-side setting rather than a per-target G2 exemption list.
 - **D41 external-secrets' negative control is a sequence, not a launch flag.**
@@ -1780,13 +1780,13 @@ built from source and run as a black-box binary.
   nothing to resolve, and G3 names the Secret. `deletionPolicy` is not a second control:
   its default `Retain` leaves a Secret that still carries an ownerReference, which the
   collector removes.
-- **D42 G5 judges a restart only where botbox changed nothing between its snapshots.**
+- **D42 G5 judges a restart only where reconciler-fuzzer changed nothing between its snapshots.**
   A `restart` does not settle, so in `b10.json` the first converged state after the
   restart follows the update to `count` 1. G5 blamed the restart for that update and
   failed the toy with no bug. G5 notes such a restart instead. A `restart` that settles
   was rejected: it would reverse D33, which lets a hand-written sequence restart and
   change the spec at once, and it would change what replaying a sequence does. G5 loses
-  every restart that an op of botbox's confounds, since it cannot judge those soundly. It
+  every restart that an op of reconciler-fuzzer's confounds, since it cannot judge those soundly. It
   also loses one next to an update that changes nothing. A fault's window between the
   snapshots confounds a restart too, so G5 leaves that restart unjudged, as every other
   check ignores a fault's window. The shrink pass matches a candidate on the check alone,
@@ -1851,13 +1851,13 @@ built from source and run as a black-box binary.
   quotes the CEL error, and a non-bool ends the run at its first evaluation. The same
   verdicts name a failing request the target repeated, which #46 found behind G4 and G1
   under controller-runtime's default backoff.
-- **D49 A Secret's values are written as keyed markers.** CI uploads `botbox-out/` when a
+- **D49 A Secret's values are written as keyed markers.** CI uploads `reconciler-fuzzer-out/` when a
   tier fails, and `objects.jsonl` held the external-secrets control's token and the
   cert-manager control's private keys. A marker still shows a reader which value changed.
   An unkeyed hash would let anyone confirm a guessed value. external-secrets annotates its
   Secret with exactly such a hash, and kubectl with a copy of the data, so every annotation
   value is marked too. Labels are not, because a reader checks a `selector`'s attribution
-  against them. Only core Secrets are redacted, because botbox cannot tell a credential
+  against them. Only core Secrets are redacted, because reconciler-fuzzer cannot tell a credential
   anywhere else from other data. No flag writes the raw values. Each example tier fails if
   its control's evidence holds its Secret's value.
 - **D50 A G5 violation names each field that differs.** A G5 report named the object and
@@ -1873,17 +1873,17 @@ built from source and run as a black-box binary.
   crowd out the others. G5 is stamped at the state after the restart, where it judged. A
   target with its own equality hook gets one row per object, because G5 cannot see what the
   hook compared. A row of a whole object names no path, because `equalIgnore` cannot ignore
-  an object. The line botbox prints quotes the first row with a path, since that is what an
+  an object. The line reconciler-fuzzer prints quotes the first row with a path, since that is what an
   adopter pastes, and names its object where the statement names another.
-- **D51 A target learns the run namespace from botbox.** Each run takes a fresh
+- **D51 A target learns the run namespace from reconciler-fuzzer.** Each run takes a fresh
   namespace (§5.5), and an operator-sdk operator watches only the namespace
-  `WATCH_NAMESPACE` names. botbox substituted only `$KUBECONFIG`, and its kubeconfig named
+  `WATCH_NAMESPACE` names. reconciler-fuzzer substituted only `$KUBECONFIG`, and its kubeconfig named
   no namespace, so such an operator watched the wrong one and every run failed G4 with 0
   managed objects. The placeholder `$NAMESPACE` and the key `launch.env` now carry the run
   namespace. The kubeconfig's context names it too, and kube-rs, clientcmd and kubectl read
-  it there with no configuration. botbox exports no `WATCH_NAMESPACE` of its own, because
+  it there with no configuration. reconciler-fuzzer exports no `WATCH_NAMESPACE` of its own, because
   the name differs by framework and operator-sdk reads an empty one as every namespace. The
-  target still inherits botbox's environment, since it may need `PATH`, `HOME` or proxy
+  target still inherits reconciler-fuzzer's environment, since it may need `PATH`, `HOME` or proxy
   settings, but the replay command does not record it. `launch.env` is in the target file,
   which the replay reads. The toy reads `WATCH_NAMESPACE`, so every toy run depends on the
   substitution. Only the bare spellings expand. Refusing `${...}` would break a `sh -c`
@@ -1897,7 +1897,7 @@ built from source and run as a black-box binary.
   no line. A missing `launch.binary` and a cluster-scoped kind failed only once the control
   plane was up, and the cluster-scoped kinds one at a time. A stopped target's quote was the
   last frame of its stack trace. A fault on `configmap` matched nothing and said nothing.
-  botbox now looks for the control plane where envtest does, checks `launch.binary` first,
+  reconciler-fuzzer now looks for the control plane where envtest does, checks `launch.binary` first,
   names a bad key's line and nearest key, and quotes the line above a stack trace. It
   refuses every cluster-scoped primary, managed kind and fixture in one error per check:
   from the CRD files at load time, and through discovery before the first run for built-in
@@ -1907,10 +1907,10 @@ built from source and run as a black-box binary.
   working directory as its base, because `launch.args` and the target's own relative paths
   resolve from there. The Runner checks a fault's resource when it applies the fault op,
   not when the run starts, because a target may install its CRDs itself. Amended by D78.
-- **D53 botbox restarts a target that exits once it has converged, and a crash loop is a
+- **D53 reconciler-fuzzer restarts a target that exits once it has converged, and a crash loop is a
   G4.** Controllers are deployed to be restarted, and controller-runtime with leader
   election on exits on purpose when it loses its lease, which a fault can cause. A new
-  invariant, "the target keeps running", would report such a controller, so botbox
+  invariant, "the target keeps running", would report such a controller, so reconciler-fuzzer
   restarts the target as a kubelet does, with a kubelet's backoff. A target waiting out
   the backoff has not converged, and a restart counts as a change, so a target that exits
   again soon after each restart fails G4, even where it writes the converged state first.
@@ -1932,7 +1932,7 @@ built from source and run as a black-box binary.
   `-update`. The quickstarts of `docs/examples.md` must run the Makefile's example seed,
   and the drawn runs that page shows must start at that seed. Another test runs its
   cert-manager quickstart command as `quickstart.sh` passes it on, and fails unless the
-  page shows what botbox prints. The README tells CI to pin botbox to a commit and to
+  page shows what reconciler-fuzzer prints. The README tells CI to pin reconciler-fuzzer to a commit and to
   replay a failing `sequence.json` against the base branch.
 - **D55 Generation keeps the CRD's own rules, judged by the API server's code.** The
   generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
@@ -1952,7 +1952,7 @@ built from source and run as a black-box binary.
   controller, so the two cannot drift apart unseen on a CR without status. With a
   controller, the API server judges an update with the stored status copied in, which the
   generator never sees. A CRD rule that reads status can therefore still refuse a draw. A
-  refusal still exits 2, since a rule botbox cannot keep belongs in the target declaration
+  refusal still exits 2, since a rule reconciler-fuzzer cannot keep belongs in the target declaration
   (§8.3). The message names the run and its `sequence.json`, and names a status rule as a
   possible cause. Undoing a refused field biases draws away from a rule's boundary: a
   sample that sets one of two exclusive fields never switches to the other. When the CRD
@@ -1965,45 +1965,45 @@ built from source and run as a black-box binary.
   namespace.** On kind, `--kubeconfig` installed no CRDs, so the first run failed to
   resolve the primary kind. With the CRD applied by hand, the toy with no bug failed G3 on
   `kube-root-ca.crt`: `deleteManaged` took that ConfigMap as the oldest, and
-  kube-controller-manager recreated it. D6 assumed that only botbox and the target write
+  kube-controller-manager recreated it. D6 assumed that only reconciler-fuzzer and the target write
   to the namespace. Kubernetes' e2e framework waits for the `default` ServiceAccount and
   `kube-root-ca.crt` in each test namespace, so a run waits for those of a kind it
   watches. It then excludes, by name, everything the namespace holds, before fixtures and
   the target. Without the wait, a root CA published late counts as the target's. Objects
   a cluster adds later stay attributed to the target, and `selector` leaves them out.
-  botbox installs the CRDs with envtest's `InstallCRDs`, which creates or replaces each
+  reconciler-fuzzer installs the CRDs with envtest's `InstallCRDs`, which creates or replaces each
   one and waits until it is served. It leaves them, because deleting a CRD deletes every
   object of that kind in the cluster. A kubeconfig cluster serves one invocation at a time:
   two invocations on one kind cluster failed the correct toy on G1 and G6, because each toy
   reconciled the other's Widget.
-  envtest also read `USE_EXISTING_CLUSTER`, which pointed botbox's default mode, collector
+  envtest also read `USE_EXISTING_CLUSTER`, which pointed reconciler-fuzzer's default mode, collector
   emulation and all, at whatever `KUBECONFIG` named. `cluster.Start` now turns that off.
   `make test-kind` runs on kind v0.33.0 and its default node image, Kubernetes 1.37.0.
-- **D57 botbox names the kinds envtest never moves, and envtest adds no finalizer that
+- **D57 reconciler-fuzzer names the kinds envtest never moves, and envtest adds no finalizer that
   only the controller manager removes.** An operator whose `ready` waited on its
-  Deployment's `availableReplicas` failed G4 on every envtest run, and botbox said nothing
+  Deployment's `availableReplicas` failed G4 on every envtest run, and reconciler-fuzzer said nothing
   about why. envtest runs no `kube-controller-manager` and no kubelet, so the Deployment's
   status stayed empty and no ReplicaSet or Pod appeared. Under the default
   `observedGeneration` predicate the same operator passed, but it requeued every 5 s while
   it waited, and so recreated a child it never watched. A seeded missed-watch bug passed.
-  botbox therefore names these kinds and points to kind, rather than suggest a weaker
+  reconciler-fuzzer therefore names these kinds and points to kind, rather than suggest a weaker
   `ready`. The list is explicit and short: the kinds that run Pods, and
   PersistentVolumeClaim. It matches by group and kind, at any version. Running
   `kube-controller-manager` beside envtest was rejected: setup-envtest ships no such
   binary, and no Pod would run without a kubelet anyway. A claim also carried
   `kubernetes.io/pvc-protection`, which nothing on envtest removes, so a correctly owned
   claim failed G3. Removing that finalizer in the collector was rejected, because it adds
-  code and timing, and on envtest no Pod ever uses a claim. botbox disables the admission
+  code and timing, and on envtest no Pod ever uses a claim. reconciler-fuzzer disables the admission
   plugin instead. A Job or a ReplicationController, which a delete orphans by default, and
   any foreground delete likewise carried a finalizer that only the garbage collector
-  removes, so a correctly owned Job failed G3 too. botbox therefore also turns off the API
+  removes, so a correctly owned Job failed G3 too. reconciler-fuzzer therefore also turns off the API
   server's garbage collector, which adds those finalizers.
 - **D58 A target declares how many requests a quiet window may hold.** G1 failed a
   controller that resyncs on a timer, because one request in the `T_stable` after
   convergence was a violation, and a target could not declare the timer.
   `thresholds.quiet`, `N_quiet`, default 0, bounds G1's count of requests in one quiet
   window and G2's count of status writes in it. It mirrors `errloop`: one number keeps G1 a
-  bound on the request rate. A declared resync interval would need botbox to find each
+  bound on the request rate. A declared resync interval would need reconciler-fuzzer to find each
   tick's burst, and an opt-out would drop G1 and G2 whole. One number covers both checks,
   because a tick that rewrites an unchanged status is both a request and a status write.
   It never excuses a resourceVersion that moves, so a heartbeat that changes a field is
@@ -2032,7 +2032,7 @@ built from source and run as a black-box binary.
   strings. cert-manager lists CertificateRequest: after `create` and `deleteManaged` of
   its request, the settle wait converged on 10 s of quiet with the request still gone. Its
   Secret came back, also after a re-issue, and so did external-secrets' Secret, also after
-  a rename, so neither lists Secret. G7 notes an op that follows a change of botbox's
+  a rename, so neither lists Secret. G7 notes an op that follows a change of reconciler-fuzzer's
   before the run converged, because the target may have meant to delete that object
   itself, as the toy does on a scale-down. It notes one where a fault was active during
   the op or its wait, as every check ignores a fault's window, and one whose wait ended
@@ -2042,7 +2042,7 @@ built from source and run as a black-box binary.
   converged since does not end that time for G7 (D90). G7 does not judge an op while no
   CR is live. An object that
   is back satisfies G7 before any of these, whatever the fault or the change did. A
-  `Restart` gives botbox no sign that the target is back, so a settle wait after one could
+  `Restart` gives reconciler-fuzzer no sign that the target is back, so a settle wait after one could
   converge while the target was still starting, or waiting out the lease its killed
   predecessor held. G7 then failed the correct toy behind a wrapper that delayed each
   restart by 3 s. A restart by `Supervise` after an exit is no different: G7 failed the
@@ -2076,25 +2076,25 @@ built from source and run as a black-box binary.
   that wait ends is judged there. A harness error there hid B13 from G3 on generated runs.
   The op cannot create its CR while the old one stays. Where a fault excuses the target,
   the run stops there (D91), and one that no check reports otherwise is a harness error.
-- **D63 An interrupt abandons the run under way, and botbox dies of the signal once it
-  has stopped what it started.** Only botbox takes back what it started: etcd,
+- **D63 An interrupt abandons the run under way, and reconciler-fuzzer dies of the signal once it
+  has stopped what it started.** Only reconciler-fuzzer takes back what it started: etcd,
   kube-apiserver, the target, the run namespace and envtest's directories in `TMPDIR`.
   envtest starts etcd and kube-apiserver in process groups of their own, so a terminal's
   Ctrl-C never reaches them. SIGINT, SIGTERM and SIGHUP end the invocation's context.
   GitHub Actions cancels a step by sending its shell SIGINT and, 7.5 s later, SIGTERM.
-  The shell passes neither on, so the step must `exec` botbox. The teardown's waits alone
+  The shell passes neither on, so the step must `exec` reconciler-fuzzer. The teardown's waits alone
   take `T_stable + T_delete`, so an abandoned run waits for nothing. A context whose
   deadline has passed cannot report a later interrupt, so the deadline ends the
   teardown's waits too, and a run it cuts there exits 2 (§11). A Ctrl-C also reaches the
-  target, so supervision ends with the context. botbox blames the interrupt only for a
+  target, so supervision ends with the context. reconciler-fuzzer blames the interrupt only for a
   wait it ended and a target the Runner found stopped after it. A run that failed on its
   own says why, even when the interrupt comes during its teardown.
-  botbox dies of the signal rather than exit 2, so that a shell loop, make and `timeout`
-  see an interrupt. A Ctrl-C also kills a `tee` that reads botbox's output, so botbox
-  ignores SIGPIPE once interrupted. `signal.Notify` would undo `nohup`, so botbox leaves
+  reconciler-fuzzer dies of the signal rather than exit 2, so that a shell loop, make and `timeout`
+  see an interrupt. A Ctrl-C also kills a `tee` that reads reconciler-fuzzer's output, so reconciler-fuzzer
+  ignores SIGPIPE once interrupted. `signal.Notify` would undo `nohup`, so reconciler-fuzzer leaves
   alone a SIGHUP or SIGINT it was started ignoring. Go keeps no other inherited SIG_IGN.
-  A SIGKILLed botbox still leaves the control plane and the target running.
-- **D64 Without `--deadline`, botbox derives the deadline from the target's timeouts.** A
+  A SIGKILLed reconciler-fuzzer still leaves the control plane and the target running.
+- **D64 Without `--deadline`, reconciler-fuzzer derives the deadline from the target's timeouts.** A
   fixed 4m stopped ten runs of a correct controller at §6's timeouts after six, each of
   which took 32 to 42 s, and a larger fixed default fails again when `--runs` grows or the
   timeouts widen. The derived deadline is the longest the planned runs' waits (§5.5) can
@@ -2116,7 +2116,7 @@ built from source and run as a black-box binary.
   Minimizing gets what the runs left plus 4m, so it may still stop early. At §6's
   timeouts, a create and an update get 3m50s, and ten drawn runs tens of minutes. A fault
   that stops before the update raises the 3m50s to 47 min. Four such faults, each before
-  an update of its own, give 26 h, past GitHub Actions' 6 h job limit. botbox
+  an update of its own, give 26 h, past GitHub Actions' 6 h job limit. reconciler-fuzzer
   prints the deadline, and a sequence with faults should set `--deadline`. An explicit
   `--deadline` must be positive and is used as given. The derived deadline ends no run the
   Runner would end on its own, unless a request hangs.
@@ -2133,15 +2133,15 @@ built from source and run as a black-box binary.
   passed.`, so nothing recorded what a nightly exercised. A seed is no such record, because
   it names a sequence for one build and one target declaration only (D54). The summary
   keeps each run's sequence, which a replay needs, and still drops a passing run's
-  recordings. botbox opens the invocation's directory before it starts the cluster, so a
+  recordings. reconciler-fuzzer opens the invocation's directory before it starts the cluster, so a
   cluster that does not start or refuses the target leaves a summary too. It writes the
-  summary then and as each run starts, because a second signal kills botbox at once, and
+  summary then and as each run starts, because a second signal kills reconciler-fuzzer at once, and
   GitHub Actions sends one 7.5 s after the first, which an abandoned run's teardown can
   outlast. It writes it again once a run finds a violation, because the shrink pass can
   take minutes and an OOM kill needs no second signal. An `unfinished` summary gives no
   exit code, which a reader would take for 0. Its JUnit testsuite gives no time, because
   the time to the last write would read as the invocation's. The final summary comes
-  before the cluster stops, and an interrupt during the stop rewrites it, because botbox
+  before the cluster stops, and an interrupt during the stop rewrites it, because reconciler-fuzzer
   then dies of the signal. A failing run's counts are of the run of its planned sequence,
   and its violation and notes are its report's, which may be of the minimized sequence.
   `run-<n>/` is named relative to the summary, so that it still resolves after an
@@ -2150,8 +2150,8 @@ built from source and run as a black-box binary.
   invocation where no run did is an `error` testcase of its own, so that a CI server never
   shows a stopped invocation as green. An invocation that stops before it has a directory
   writes that testcase alone, since a CI server would otherwise read an earlier
-  invocation's file as this one's. botbox detects no CI vendor. `$GITHUB_STEP_SUMMARY`
-  takes `summary.md` as it is, and GitLab and Jenkins read JUnit XML. A file botbox cannot
+  invocation's file as this one's. reconciler-fuzzer detects no CI vendor. `$GITHUB_STEP_SUMMARY`
+  takes `summary.md` as it is, and GitLab and Jenkins read JUnit XML. A file reconciler-fuzzer cannot
   write leaves the exit code alone, since the code already says what the runs found.
 - **D67 A matrix run that errs keeps its files.** The matrix deleted its temporary
   directory on every exit, so a harness error named a `target.log` that was gone. A run
@@ -2166,11 +2166,11 @@ built from source and run as a black-box binary.
   a Rust operator's repository lacks. It said to cache the control plane as ci.yml does, but
   its setup-envtest wrote to the OS data directory. It uploaded nothing. The recipe is now
   `examples/ci/github-actions.yml`, which the README embeds and a test parses. It caches
-  botbox and setup-envtest with the control plane, because botbox took 104 s to build cold on
-  four CPUs and the 175 MB control plane took 3 s to fetch. It saves the cache before botbox
+  reconciler-fuzzer and setup-envtest with the control plane, because reconciler-fuzzer took 104 s to build cold on
+  four CPUs and the 175 MB control plane took 3 s to fetch. It saves the cache before reconciler-fuzzer
   runs. `actions/cache` saves only when the job passes, so a nightly that kept finding
   something would never fill the cache that pull requests read. It uploads its `--out` however
-  botbox ends, which keeps the summary too (D66). Its download command restores the paths that
+  reconciler-fuzzer ends, which keeps the summary too (D66). Its download command restores the paths that
   the replay command in `report.md` names. The nightly's issues give the same command.
 - **D69 A settle wait converges only once the target has shown it runs since it last
   started.** Nothing changes while a restarted target starts up, so a settle wait after a
@@ -2182,7 +2182,7 @@ built from source and run as a black-box binary.
   and that request counts as a change, so the target's startup falls inside the wait. A
   controller lists what it watches as it starts, so a correct one makes such a request.
   The rule covers the first process too, since a `ready` that holds without the target
-  could otherwise end op 0's wait before the target started. botbox chose to restart the
+  could otherwise end op 0's wait before the target started. reconciler-fuzzer chose to restart the
   target, so a `Restart` owes it `T_settle` past its return, as an exit a fault excuses
   does. Counting the startup against the wait's `T_settle`, as op 0 does, failed G4 on
   the toy behind a 3.5 s delay under its 5 s `T_settle`. A target must return within
@@ -2191,20 +2191,20 @@ built from source and run as a black-box binary.
   startup and `T_stable` outlast the wait. Such a wait converged before, while the target
   was not back. Leaving G1 and G2 unjudged in the window after an op G7 notes was rejected,
   because it judges less.
-- **D70 A sequence changes and deletes fixtures.** No op touched a fixture, so botbox
+- **D70 A sequence changes and deletes fixtures.** No op touched a fixture, so reconciler-fuzzer
   never tried a referenced Secret that changes or an Issuer that disappears, and a
   controller that reads such an object without watching it passed. `updateFixture`
   merge-patches a fixture, and `deleteFixture` deletes one until the op its `until` names.
   It waits for the fixture to go, since a target may hold it with a finalizer, as
-  external-secrets does its SecretStore, and botbox cannot create it again until it has
+  external-secrets does its SecretStore, and reconciler-fuzzer cannot create it again until it has
   gone. A target names in `generate.fixtures` the fixtures generation may delete and the
-  strings it may set, since built-in kinds carry no schema botbox reads. A drawn value is
+  strings it may set, since built-in kinds carry no schema reconciler-fuzzer reads. A drawn value is
   a short word a Secret's `data` also reads as base64, so a target names only strings that
   take any such word. Generation restores a deleted fixture before the next op that
   settles, because a target may rightly not be ready while a dependency is gone. Excusing
   every check while a fixture is gone, as for a fault, was rejected: it judges less and
-  touches every check. A fixture stays botbox's, so G3 and G7 never ask anything of it. A
-  fixture op is botbox's change for G5 and G7, and G4 and G6 treat an update or a restore
+  touches every check. A fixture stays reconciler-fuzzer's, so G3 and G7 never ask anything of it. A
+  fixture op is reconciler-fuzzer's change for G5 and G7, and G4 and G6 treat an update or a restore
   of a fixture as a spec change. The Runner stamps the op a restore precedes before it
   restores, so the target's reply falls in that op's window. The toy's B14 copies a label
   from a ConfigMap fixture it does not watch, and G5 finds it once a restart reconciles
@@ -2212,7 +2212,7 @@ built from source and run as a black-box binary.
   to 60 that draws a fixture op. A target without `generate.fixtures` draws what it drew
   before, which the golden draws pin.
 - **D71 A sequence creates up to three CRs, and G3, G5 and G7 attribute objects to them
-  by ownerReference.** A run acted on one CR, so botbox never tried two CRs side by side.
+  by ownerReference.** A run acted on one CR, so reconciler-fuzzer never tried two CRs side by side.
   `update`, `delete` and `recreate` take an optional `cr`, the sample's name by default,
   so a sequence whose one CR takes the sample's name means what it did. One that creates
   its CR under another name must name it in `cr`. A CR with no `metadata.name`, and a
@@ -2231,7 +2231,7 @@ built from source and run as a black-box binary.
   and another outlived its deadline. An object now belongs to the CRs its ownerReferences
   name, and one that names none to any. G3 holds it to the last of those CRs to go, at
   that CR's deadline, since the garbage collector keeps an object until its last owner
-  goes, and a grandchild names no CR at all. G5 judges what botbox's changes between its
+  goes, and a grandchild names no CR at all. G5 judges what reconciler-fuzzer's changes between its
   states could not have reached, which assumes one CR does not change another's objects
   (§14, question 5). B15 names its children after the kind, which a run of one Widget
   named `widget` cannot tell from correct. Seeds 1 to 30 of cert-manager passed, 11 of
@@ -2239,7 +2239,7 @@ built from source and run as a black-box binary.
   three. Seeds 1 to 40 of external-secrets passed, 7 of them with two. cert-manager's
   seeds 23 to 27 no longer draw a delete or a `deleteManaged`, and its pinned sequences
   hold both.
-- **D72 botbox empties a run's directory before it runs the minimized sequence there.** A
+- **D72 reconciler-fuzzer empties a run's directory before it runs the minimized sequence there.** A
   run writes `requests.jsonl` and `objects.jsonl` as it ends. A SIGKILL during that run left
   the drawn run's recordings and the shrink pass's replays beside the new run's
   `sequence.json`, `kubeconfig` and `target.log`, under a summary that said the directory
@@ -2248,33 +2248,33 @@ built from source and run as a black-box binary.
 - **D73 One page lists every key, op and fault field, and tests keep it whole.** Some
   keys and fault fields appeared only in the Go source. `docs/reference.md` gives each a
   row, and tests hold the rows to the code (§11). A fault field value that tests something
-  else is refused, such as a `fraction` of 0, which botbox read as every request, an
-  `until.count` or `until.for` of 0, which botbox read as no trigger, or an `until.op` at
+  else is refused, such as a `fraction` of 0, which reconciler-fuzzer read as every request, an
+  `until.count` or `until.for` of 0, which reconciler-fuzzer read as no trigger, or an `until.op` at
   or before the fault's own op. Keeping the reference in DESIGN.md was rejected, because
   DESIGN.md mixes the contract with internals, milestones and decisions.
-- **D74 botbox's help and messages need no design document.** `go install` ships no
+- **D74 reconciler-fuzzer's help and messages need no design document.** `go install` ships no
   DESIGN.md. Each command's help is generated from its flags and gives each flag's
-  default, and botbox's help gives the exit codes and `KUBEBUILDER_ASSETS`. A usage error
+  default, and reconciler-fuzzer's help gives the exit codes and `KUBEBUILDER_ASSETS`. A usage error
   prints the command's synopsis. A message names the target.yaml key and its value rather
   than a symbol of this document. G4 gives how long an expired wait ran beside the key
   that bounds it, since a wait can run longer: `timeouts.delete` for a wait that a
   deleted CR's deadline held open while the CR stayed, and `timeouts.settle` for the
-  rest. A G3 note names what deleted the CR where botbox can tell, because a run may
+  rest. A G3 note names what deleted the CR where reconciler-fuzzer can tell, because a run may
   delete one CR twice. It names the first op that found the CR, because a lagging
   Observer shows the CR to the op after the one that deleted it.
   Splitting this document was rejected, because the hourly Routine reads it whole.
 - **D75 This document gives intent where a listing would drift.** §8.2 names `go doc`
   rather than listing `Target`'s fields, and a test holds §11's synopsis to each
-  command's flags. botbox shrinks with its own pass, because rapid shrinks only inside
+  command's flags. reconciler-fuzzer shrinks with its own pass, because rapid shrinks only inside
   `rapid.Check` and shrinks the choices a sequence is drawn from rather than its ops.
   Hand-written generators wait for a target that needs one.
-- **D76 The README says what botbox cannot test yet.** An adopter found each limit only
+- **D76 The README says what reconciler-fuzzer cannot test yet.** An adopter found each limit only
   by trying, after the control plane had started. A section right after the intro states
   them. Each limit an open issue tracks is a bullet that links it. The opening states those
   no issue tracks: a target on the host, webhooks, and generation for a built-in primary
   kind. A test lists each limit with words the README and this document say of it, so a
   change that lifts one edits all three (§12). A fixed port is not listed, because the
-  message botbox exits 2 with names the fix in `launch.args`.
+  message reconciler-fuzzer exits 2 with names the fix in `launch.args`.
 - **D77 While a fault is active, each op owes only its first exit and the exits it lands
   soon after, and no op lands while the target waits to restart.** B12, under a fault that
   never stopped, crashed six times and ran until a 3m deadline. Each exit the fault excused
@@ -2300,11 +2300,11 @@ built from source and run as a black-box binary.
   `T_settle` per op after it, so it ends no run the Runner would end on its own. The toy's
   `--lease` elects a leader, so a fault on leases makes the correct toy exit as
   controller-runtime does.
-- **D78 botbox knows the scope of every built-in kind.** Under D52, a built-in
+- **D78 reconciler-fuzzer knows the scope of every built-in kind.** Under D52, a built-in
   cluster-scoped kind was refused only after envtest had started, or after the CRDs were
   installed on a `--kubeconfig` cluster. A target with a cluster-scoped CRD and a
   ClusterRole under `manages` heard only of the CRD. A cluster-scoped fixture that set a
-  namespace was told to drop the namespace. botbox now lists the scope of each kind a
+  namespace was told to drop the namespace. reconciler-fuzzer now lists the scope of each kind a
   Kubernetes 1.37 API server serves by default. An envtest test compares that list with
   discovery on the pinned API server, so bumping that version means updating the list.
   Loading the target judges those kinds and the kinds of `crds`. Discovery, before the
@@ -2313,7 +2313,7 @@ built from source and run as a black-box binary.
   error. Only then does it refuse a fixture of a kind it knows to be namespaced that sets
   a namespace. The run refuses such a fixture of any other kind rather than move it. A
   target with kinds of both sorts hears of them in two errors. Merging them into one was
-  rejected, because the first check refuses before botbox installs CRDs on a
+  rejected, because the first check refuses before reconciler-fuzzer installs CRDs on a
   `--kubeconfig` cluster.
 - **D79 The README's first find is a seeded bug, and a hunt looks for real ones.** Every
   find the README shows is planted, and a find in a real controller needs a build of
@@ -2325,7 +2325,7 @@ built from source and run as a black-box binary.
   then drawn seeds until a time box runs out. Each family and seed runs in an invocation
   of its own, because an invocation stops at its first failing run and a hunt keeps every
   failure. A run the time box cut is no failure, but a find reported after the box's end
-  is one. The hunt runs a copy of `bin/botbox`, so a rebuild during a hunt changes
+  is one. The hunt runs a copy of `bin/reconciler-fuzzer`, so a rebuild during a hunt changes
   nothing. A family is checked in only once it passes the pinned controller. A run that
   fails is a candidate until triage keeps it (§11). No agent files a candidate upstream,
   because an issue there speaks for the maintainer. No pull request runs a hunt, because
@@ -2333,34 +2333,34 @@ built from source and run as a black-box binary.
   that settles, is a configuration error (§7), because a finalizer may still hold the old
   CR. Letting that create wait for the old CR was rejected, because a `recreate` already
   does.
-- **D80 The README keeps botbox out of an operator's go.mod.** Minimal version selection
-  works on the whole module graph, so requiring botbox, or importing any of its packages,
-  raises a module to botbox's Go, Kubernetes and controller-runtime versions (D11). The
-  README installs botbox with `go install`, or with `examples/tools-module.sh`, which
-  pins it in a module of its own under `tools/botbox/`. A new directory leaves a `tools/`
+- **D80 The README keeps reconciler-fuzzer out of an operator's go.mod.** Minimal version selection
+  works on the whole module graph, so requiring reconciler-fuzzer, or importing any of its packages,
+  raises a module to reconciler-fuzzer's Go, Kubernetes and controller-runtime versions (D11). The
+  README installs reconciler-fuzzer with `go install`, or with `examples/tools-module.sh`, which
+  pins it in a module of its own under `tools/reconciler-fuzzer/`. A new directory leaves a `tools/`
   package of the operator's own, a common place for one, in the operator's module. The
   script sets the tools module's go line before `go get -tool`, so that a `go` before
   1.24, which lacks the flag, switches first. Its `go get` and its build run with
   `GOWORK=off`, because an operator's go.work would hold back that switch, take the
   raised go line, and leave the tools module out of the build. Exporting `GOWORK` was
   rejected, because a reader who pastes the script into a shell would keep it. It builds
-  `bin/botbox`, because `go -C tools/botbox tool botbox` runs botbox in `tools/botbox/`,
+  `bin/reconciler-fuzzer`, because `go -C tools/reconciler-fuzzer tool reconciler-fuzzer` runs reconciler-fuzzer in `tools/reconciler-fuzzer/`,
   where `launch.binary` does not resolve. The envtest tier runs the script in a fresh
   operator module with a `tools/` package and a go.work, as the oldest `go` the README
-  names, with botbox replaced by the checkout. It also checks that the `go` before that
+  names, with reconciler-fuzzer replaced by the checkout. It also checks that the `go` before that
   one fails. The unit tier runs the script with `go` stubbed, and checks that it leaves
   its shell's variables as they were. Each line of the script runs every time, so that
   check sees each change to a variable the script names.
-- **D81 A Go test runs botbox as a binary.** No Go function runs botbox end to end, so
-  the README's `go test` recipe runs `bin/botbox`, which the tools module of D80 builds,
+- **D81 A Go test runs reconciler-fuzzer as a binary.** No Go function runs reconciler-fuzzer end to end, so
+  the README's `go test` recipe runs `bin/reconciler-fuzzer`, which the tools module of D80 builds,
   and fails the test on a non-zero exit. A build tag keeps it out of a plain
   `go test ./...`. The README runs it with `-count=1`, because go test caches a pass and
   cannot see a change to the controller or `target.yaml`. The recipe sets `--deadline`
   half a minute before go test's timeout, in whole seconds, and fails the test when that
-  leaves botbox no time. A test that the timeout ends leaves botbox to die of SIGPIPE at
+  leaves reconciler-fuzzer no time. A test that the timeout ends leaves reconciler-fuzzer to die of SIGPIPE at
   its next write, with its control plane still running. The envtest tier runs the recipe
   from a copy of the repository's layout: on the toy with no bug, under B4, with a
-  timeout too short for its runs, with one that leaves botbox no time, and with no
+  timeout too short for its runs, with one that leaves reconciler-fuzzer no time, and with no
   controller to launch.
   Hooks stay in-repo (D2).
 - **D82 Go comments need no design document.** Comments outside tests cited this
@@ -2370,16 +2370,16 @@ built from source and run as a black-box binary.
   of a message. A test scans every comment outside tests for what it scans string
   literals for. Six packages each defined the same helper, which writes a kind as
   target.yaml does. `observe.KindName` replaces them, because `observe` imports no other
-  botbox package.
+  reconciler-fuzzer package.
 - **D83 The README walks a newcomer from install to CI, and `docs/` holds the detail.**
-  Two newcomers walked the README cold. One built botbox and fetched the control plane
+  Two newcomers walked the README cold. One built reconciler-fuzzer and fetched the control plane
   twice, because the first find did not use what Install had set up. Both left the README
   for `docs/reference.md` to learn that a property runs where no CR exists, and which
   fields a `deleteManaged` takes. Neither drew a `deleteManaged` in a dozen runs, so a
   controller with no watch on its children passed. A third walker's 13 drawn runs passed a
   controller that never rewrote a child after a spec change, since none updated a CR that
-  had settled. The README now follows the order a newcomer needs: what botbox is, what it
-  cannot test, install, a first run and a first find with Install's botbox, the toy's
+  had settled. The README now follows the order a newcomer needs: what reconciler-fuzzer is, what it
+  cannot test, install, a first run and a first find with Install's binary, the toy's
   `target.yaml` as the worked example, reading a failure, and CI. It tells a reader to pin
   a sequence per managed kind that deletes one of its objects, and one per property that
   updates what the property reads. An envtest test runs the README's example against the
@@ -2395,9 +2395,9 @@ built from source and run as a black-box binary.
   flag has the line above its usage text quoted, since Go's flag package prints the error
   first. A walker also waited eight silent minutes for a find, twice the 4m the derived
   deadline's line seemed to promise. That line now says minimizing gets the rest of the
-  deadline, and botbox prints the failed check before it minimizes. The README says the
-  derived deadline is a worst case, and how to size a shorter one. `botbox --help` says
-  botbox runs a real kube-apiserver and etcd, and no longer that it injects faults, which
+  deadline, and reconciler-fuzzer prints the failed check before it minimizes. The README says the
+  derived deadline is a worst case, and how to size a shorter one. `reconciler-fuzzer --help` says
+  reconciler-fuzzer runs a real kube-apiserver and etcd, and no longer that it injects faults, which
   drawn sequences never do.
 - **D84 A settle wait outlasts the requests the proxy holds.** A delay fault held the
   toy's create of a child it had lost for 3 s, longer than its 2 s `T_stable`. Nothing
@@ -2440,11 +2440,11 @@ built from source and run as a black-box binary.
   target, so no check gives such a wait an end, and a target that renews a lease under a
   delay would hold it open until the derived deadline.
 - **D85 No property is judged where the target is still starting.** Under a fault that
-  failed most lease updates, the toy with `--lease=3s` lost its lease, and botbox
+  failed most lease updates, the toy with `--lease=3s` lost its lease, and reconciler-fuzzer
   restarted it. The restarted toy requested only leader election until it won the lease
   back, in one run 5.5 s after the restart, past its 5 s `T_settle`. The wait after a
   `deleteManaged` gave it `T_settle` past the restart and ended there. P1 read the
-  `status.ready` the toy wrote before botbox deleted a child, and failed the correct toy
+  `status.ready` the toy wrote before reconciler-fuzzer deleted a child, and failed the correct toy
   in 3 of 3 runs. A property now skips, with a note, a checkpoint where the target was
   still starting by the measure a wait converges on (§6). That covers a target waiting out
   a backoff, where a wait can end after a later exit during the op. It covers the first
@@ -2455,7 +2455,7 @@ built from source and run as a black-box binary.
   the teardown clears the fault, and no bound would then cover the wait. A wait that
   converged is judged whatever the exits read, because a `Restart` op can replace a target
   waiting out its backoff, and the restart the exit scheduled never comes. Skipping
-  properties at every wait a fault excuses was rejected, because properties are how botbox
+  properties at every wait a fault excuses was rejected, because properties are how reconciler-fuzzer
   sees a fault's transient states (§5.6). A target that elects a leader is back only once
   the API server accepts its create, update or patch of a lease. Some leader-election
   libraries win a Lease with a patch. controller-runtime starts the informers a field
@@ -2465,7 +2465,7 @@ built from source and run as a black-box binary.
   target that elects, because leader election reads its Lease that way to learn who holds
   it, and an informer lists and watches instead. A restarted process reads its lease only
   once its caches sync, which a fault can delay, so its predecessor's get marks it first.
-  A win counts only after the process's own get, because botbox stamps a `Restart` op
+  A win counts only after the process's own get, because reconciler-fuzzer stamps a `Restart` op
   before it kills the leader, which renews without a get while its renewals succeed. A
   target that reads a Lease with a get and elects no leader therefore shows it runs only
   once it writes a lease, and fails G4 where it never does. G4 and the property read only
@@ -2503,7 +2503,7 @@ built from source and run as a black-box binary.
   `SecretMismatch` was rejected, because it would pass a Certificate whose key never
   matches its spec. Changing the collector was rejected, because an update reaches that
   state with nothing for the collector to delete.
-- **D88 A run records each delete of botbox's garbage collector.** Hunt seed 1043 failed
+- **D88 A run records each delete of reconciler-fuzzer's garbage collector.** Hunt seed 1043 failed
   where cert-manager re-pointed a Secret's ownerReference just before the collector's
   delete, which then failed its precondition. The collector's writes bypass the proxy,
   and it dropped a 404 or a 409 silently, so the evidence showed the Secret go but not
@@ -2513,12 +2513,12 @@ built from source and run as a black-box binary.
   `objects.jsonl` holds versions, and a delete that lost its race changes none. Owner
   reads are not recorded, because a sweep reads every owner on each event and the
   delete's line says what the read found. An empty file says the collector tried no
-  delete. A kubeconfig cluster runs its own garbage collector, so botbox writes no file
+  delete. A kubeconfig cluster runs its own garbage collector, so reconciler-fuzzer writes no file
   there. The lines are kept in memory and written as the run ends, as the other
   recordings are.
-- **D89 A findings draft carries its reproducers.** Upstream readers do not run botbox.
-  So a draft's directory holds, beside the botbox sequence, a program that reproduces
-  the find on any cluster, unless only botbox's proxy can inject its faults. The first
+- **D89 A findings draft carries its reproducers.** Upstream readers do not run reconciler-fuzzer.
+  So a draft's directory holds, beside the reconciler-fuzzer sequence, a program that reproduces
+  the find on any cluster, unless only reconciler-fuzzer's proxy can inject its faults. The first
   such program needs only client-go, so it lives in the root module, where `go build`,
   `go vet` and `make test` reach it. A module of its own, as each spike has, was
   rejected: it would pin the same libraries a second time. `make test` loads each
@@ -2557,7 +2557,7 @@ built from source and run as a black-box binary.
   a release within `T_stable` leaves time owed. It stays for its more specific note. The
   harness error also skipped the teardown's recovery wait and checks. Under 500s on the
   toy's ConfigMap creates across an update and a `recreate`, it hid B13, whose finalizer
-  never clears, and botbox exited 2. Such a `recreate` now stops the run with a note. The
+  never clears, and reconciler-fuzzer exited 2. Such a `recreate` now stops the run with a note. The
   teardown clears the fault, gives the target its time to recover and judges it. B13 then
   fails G4 in the wait after the last fault stopped, naming the finalizer, in RUNS_B13
   runs, and the correct toy passes RUNS_OK. The first sequence passes RUNS_R0 with the
@@ -2585,7 +2585,7 @@ built from source and run as a black-box binary.
   guess. The settle wait still ends only after `T_stable` in which nothing changed, so a
   checkpoint follows the cluster's changes.
 - **D93 The nightly reads summary.json to tell a find from an error.** `make` always
-  exits 2 on any recipe failure, so the nightly workflow could not read botbox's exit
+  exits 2 on any recipe failure, so the nightly workflow could not read reconciler-fuzzer's exit
   code from make. The `must-pass` macro captures it, each quickstart exits 2 on its
   own failures, and the report step reads `summary.json` to file under `nightly-find-`
   or `nightly-error-`. The step's `if:` needed `failure()` to run after a failed step.
@@ -2601,7 +2601,7 @@ built from source and run as a black-box binary.
   runs to half that. What D54, D68, D80 and D81 say the README holds, the replay against
   the base branch, the CI recipe, the tools module and the `go test` recipe, `docs/ci.md`
   holds instead, with the tests that hold them. One table gives each check and its usual
-  cause, and a test holds its rows to §6. The quick start shows botbox's output from its
+  cause, and a test holds its rows to §6. The quick start shows reconciler-fuzzer's output from its
   first run on, without the deadline line, and says the toy's bugs are ones you switch on,
   in place of D79's statement that every find shown is planted. The limits' opening also
   states that envtest runs no Pod, beside D76's three. Minimizing and the `jq` recipe move

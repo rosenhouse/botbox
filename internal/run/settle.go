@@ -5,9 +5,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // settlePoll is how often a settle wait reads the Observer.

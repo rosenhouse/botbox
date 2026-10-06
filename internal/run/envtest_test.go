@@ -30,12 +30,12 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
-	"github.com/rosenhouse/botbox/internal/launch"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/run"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/launch"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 const (
@@ -48,7 +48,7 @@ const (
 )
 
 var (
-	widgetResource = schema.GroupVersionResource{Group: "toy.botbox", Version: "v1", Resource: "widgets"}
+	widgetResource = schema.GroupVersionResource{Group: "toy.reconciler-fuzzer", Version: "v1", Resource: "widgets"}
 	configMapKind  = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
 )
 
@@ -63,8 +63,8 @@ func TestHarness(t *testing.T) {
 	// The M2 acceptance criterion of DESIGN.md §10.
 	t.Run("runs the toy target and records what it did", func(t *testing.T) {
 		toy := loadTarget(t, binary)
-		// The harness creates a fixture and marks it botbox's, which keeps it
-		// out of the managed objects (DESIGN.md §6).
+		// The harness creates a fixture and marks it reconciler-fuzzer's, which keeps
+		// it out of the managed objects (DESIGN.md §6).
 		toy.Fixtures = append(toy.Fixtures, fixtureConfigMap())
 		dir := t.TempDir()
 		h := startHarness(t, ctx, toy, testCluster.Config(), dir)
@@ -98,8 +98,8 @@ func TestHarness(t *testing.T) {
 
 		widget := createWidget(t, ctx, h, toy)
 		requireSettled(t, ctx, h, toy)
-		// A ConfigMap botbox owns to the Widget without controlling it. The
-		// target only ever touches what it controls, so this one leaves the
+		// A ConfigMap reconciler-fuzzer owns to the Widget without controlling it.
+		// The target only ever touches what it controls, so this one leaves the
 		// namespace by the collector alone (DESIGN.md §5.8).
 		collected := createCollectedConfigMap(t, ctx, h, widget)
 		before := convergedState(t, h, toy)
@@ -244,7 +244,7 @@ func requireNoRunNamespaceLive(t *testing.T, ctx context.Context, config *rest.C
 	}
 	for _, namespace := range namespaces.Items {
 		// The prefix run.newNamespaceName gives a run namespace.
-		if strings.HasPrefix(namespace.Name, "botbox-run-") && namespace.DeletionTimestamp == nil {
+		if strings.HasPrefix(namespace.Name, "reconciler-fuzzer-run-") && namespace.DeletionTimestamp == nil {
 			t.Errorf("The namespace %s is still live: the run did not take it back.", namespace.Name)
 		}
 	}
@@ -317,13 +317,13 @@ func requireSettled(t *testing.T, ctx context.Context, h *run.Harness, toy *targ
 	}
 }
 
-// botbox writes directly to the API server, never through the proxy
+// reconciler-fuzzer writes directly to the API server, never through the proxy
 // (DESIGN.md §5.3).
 func widgets(t *testing.T, h *run.Harness) dynamic.ResourceInterface {
 	t.Helper()
 	client, err := dynamic.NewForConfig(h.Config)
 	if err != nil {
-		t.Fatalf("Building botbox's dynamic client failed: %v", err)
+		t.Fatalf("Building reconciler-fuzzer's dynamic client failed: %v", err)
 	}
 	return client.Resource(widgetResource).Namespace(h.Namespace)
 }
@@ -332,7 +332,7 @@ func configMaps(t *testing.T, h *run.Harness) corev1client.ConfigMapInterface {
 	t.Helper()
 	client, err := kubernetes.NewForConfig(h.Config)
 	if err != nil {
-		t.Fatalf("Building botbox's client failed: %v", err)
+		t.Fatalf("Building reconciler-fuzzer's client failed: %v", err)
 	}
 	return client.CoreV1().ConfigMaps(h.Namespace)
 }
@@ -421,7 +421,7 @@ func requireCollected(t *testing.T, dir string, collected *corev1.ConfigMap, wid
 		"kind": "v1/ConfigMap", "namespace": collected.Namespace, "name": collectedName,
 		"uid": string(collected.UID), "resourceVersion": collected.ResourceVersion,
 		"owners": []any{map[string]any{
-			"apiVersion": "toy.botbox/v1", "kind": "Widget", "name": widget.GetName(), "uid": string(widget.GetUID()), "gone": "not found",
+			"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "name": widget.GetName(), "uid": string(widget.GetUID()), "gone": "not found",
 		}},
 		"result": "deleted",
 	}
@@ -492,7 +492,7 @@ func requireWidgetReady(t *testing.T, h *run.Harness, toy *target.Target) {
 	t.Helper()
 	observed := h.Observer.Current(toy.Primary)
 	if len(observed) != 1 {
-		t.Fatalf("The Observer holds %d Widgets, want the one botbox created.", len(observed))
+		t.Fatalf("The Observer holds %d Widgets, want the one reconciler-fuzzer created.", len(observed))
 	}
 	widget := observed[0].Object
 	if ready, want := status(t, widget), count(t, toy.Sample); ready != want {

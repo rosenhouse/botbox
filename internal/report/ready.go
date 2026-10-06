@@ -8,7 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
 )
 
 // A CR's status holds whatever its controller wrote there, so a report quotes

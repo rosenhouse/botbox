@@ -14,7 +14,7 @@ import (
 var secretGVK = schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
 
 // markerKey is drawn once per process and never written, so a marker cannot
-// be looked up or brute-forced from what botbox writes.
+// be looked up or brute-forced from what reconciler-fuzzer writes.
 var markerKey = []byte(rand.Text())
 
 // Redacted returns a copy of a Secret whose data and annotation values are

@@ -20,7 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 // ReadyFunc is the target's readiness predicate, which G4 judges. An error
@@ -89,7 +89,7 @@ type LaunchSpec struct {
 	Env  map[string]string `json:"env"`
 }
 
-// Check reports a binary that botbox could not exec.
+// Check reports a binary that reconciler-fuzzer could not exec.
 func (l LaunchSpec) Check() error {
 	_, err := exec.LookPath(l.Binary)
 	switch {
@@ -182,7 +182,7 @@ func (t *Target) checkScopes(scope scopeFunc) error {
 		}
 	}
 	if len(found) > 0 {
-		return fmt.Errorf("a run owns one namespace, so botbox cannot test these cluster-scoped kinds: %s", strings.Join(found, ", "))
+		return fmt.Errorf("a run owns one namespace, so reconciler-fuzzer cannot test these cluster-scoped kinds: %s", strings.Join(found, ", "))
 	}
 	for _, fixture := range t.Fixtures {
 		gvk := fixture.GroupVersionKind()
@@ -205,7 +205,7 @@ type misplacedFixture struct{ fixture *unstructured.Unstructured }
 
 func (m *misplacedFixture) Error() string {
 	namespace := m.fixture.GetNamespace()
-	return fmt.Sprintf("the fixture %s %s sets metadata.namespace %s; drop it, because botbox creates fixtures in each run's own namespace, and the target may look for this one in %s",
+	return fmt.Sprintf("the fixture %s %s sets metadata.namespace %s; drop it, because reconciler-fuzzer creates fixtures in each run's own namespace, and the target may look for this one in %s",
 		observe.KindName(m.fixture.GroupVersionKind()), m.fixture.GetName(), namespace, namespace)
 }
 
@@ -217,9 +217,9 @@ func (c *clusterFixtureNamespace) Error() string {
 		observe.KindName(c.fixture.GroupVersionKind()), c.fixture.GetName(), c.fixture.GetNamespace(), c.fixture.GetKind())
 }
 
-// WatchedKinds are the kinds botbox watches: the primary CR and every managed
-// kind. The collector resolves an owner only among them, and managed objects
-// are commonly owned by the CR.
+// WatchedKinds are the kinds reconciler-fuzzer watches: the primary CR and
+// every managed kind. The collector resolves an owner only among them, and
+// managed objects are commonly owned by the CR.
 func (t *Target) WatchedKinds() []schema.GroupVersionKind {
 	kinds := []schema.GroupVersionKind{t.Primary}
 	for _, gvk := range t.Manages {

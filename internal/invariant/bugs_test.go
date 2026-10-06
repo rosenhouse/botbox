@@ -10,7 +10,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
 )
 
 // Each input below is the run the toy target produces under one seeded bug of
@@ -90,7 +90,7 @@ func noBug() invariant.Input {
 		through(22 * time.Second)
 }
 
-// deletedWidget is the CR botbox deleted at 10s.
+// deletedWidget is the CR reconciler-fuzzer deleted at 10s.
 func deletedWidget(resourceVersion string, opts ...option) *unstructured.Unstructured {
 	return widget(resourceVersion, append([]option{spec(2), status(2, 1), deleting(10 * time.Second)}, opts...)...)
 }

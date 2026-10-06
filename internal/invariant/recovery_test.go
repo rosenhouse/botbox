@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
 )
 
 func TestOwedIsAsLongAfterTheFaultsAsTheyLastedAndTSettleMore(t *testing.T) {

@@ -4,8 +4,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/launch"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/launch"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // stopBudget is what stopping a run takes: stopping the target and deleting

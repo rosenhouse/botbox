@@ -15,9 +15,9 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
-	"github.com/rosenhouse/botbox/internal/run"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // The API server itself judges what generation draws, with no controller

@@ -1,4 +1,4 @@
-apiVersion: toy.botbox/v1
+apiVersion: toy.reconciler-fuzzer/v1
 kind: Widget
 metadata:
   name: widget

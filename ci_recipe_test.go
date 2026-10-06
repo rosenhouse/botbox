@@ -1,4 +1,4 @@
-package botbox_test
+package reconcilerfuzzer_test
 
 import (
 	"fmt"
@@ -258,29 +258,29 @@ func TestTheCIRecipeCachesWhatItInstalls(t *testing.T) {
 		switch {
 		case strings.Contains(s.Run, "go install") && s.If != missed:
 			t.Errorf("step %d builds with go install on a cache hit too: %q", i, s.Run)
-		case strings.Contains(s.Run, "botbox run") && i < saved:
-			t.Errorf("step %d runs botbox before the cache is saved, so a find would leave it unsaved: %q", i, s.Run)
+		case strings.Contains(s.Run, "reconciler-fuzzer run") && i < saved:
+			t.Errorf("step %d runs reconciler-fuzzer before the cache is saved, so a find would leave it unsaved: %q", i, s.Run)
 		}
 	}
 }
 
 // The walk takes every step to pass, and so runs no step if: failure().
 func TestTheCIRecipeGivesEachStepWhatItNeedsOnACacheHitAndAMiss(t *testing.T) {
-	cached := []string{"botbox", "setup-envtest", "the control plane"}
+	cached := []string{"reconciler-fuzzer", "setup-envtest", "the control plane"}
 	effects := []struct {
 		usesOrRuns   *regexp.Regexp
 		needs, gives []string
 	}{
 		{regexp.MustCompile(`^actions/setup-go@`), nil, []string{"go"}},
 		{regexp.MustCompile(`(?m)^\s*go `), []string{"go"}, nil},
-		{regexp.MustCompile(`/botbox@`), nil, []string{"botbox"}},
+		{regexp.MustCompile(`/reconciler-fuzzer@`), nil, []string{"reconciler-fuzzer"}},
 		{regexp.MustCompile(`/setup-envtest@`), nil, []string{"setup-envtest"}},
 		{regexp.MustCompile(`setup-envtest use`), []string{"setup-envtest"}, []string{"the control plane"}},
 		{regexp.MustCompile(`setup-envtest use.*\s(-i|--installed-only)\b`), []string{"the control plane"}, nil},
 		{regexp.MustCompile(`KUBEBUILDER_ASSETS=`), nil, []string{"KUBEBUILDER_ASSETS"}},
 		{regexp.MustCompile(`^actions/cache/save@`), cached, nil},
 		{regexp.MustCompile(`go build -o`), nil, []string{"the controller"}},
-		{regexp.MustCompile(`botbox run`), []string{"botbox", "KUBEBUILDER_ASSETS", "the controller"}, []string{"a botbox run"}},
+		{regexp.MustCompile(`reconciler-fuzzer run`), []string{"reconciler-fuzzer", "KUBEBUILDER_ASSETS", "the controller"}, []string{"a reconciler-fuzzer run"}},
 	}
 	recipe := recipeJob(t)
 	restore := stepUsing(t, recipe.Steps, "actions/cache/restore")
@@ -334,8 +334,8 @@ func TestTheCIRecipeGivesEachStepWhatItNeedsOnACacheHitAndAMiss(t *testing.T) {
 						has[g] = true
 					}
 				}
-				if !has["a botbox run"] {
-					t.Error("no step runs botbox")
+				if !has["a reconciler-fuzzer run"] {
+					t.Error("no step runs reconciler-fuzzer")
 				}
 			})
 		}
@@ -348,12 +348,12 @@ func TestTheCIRecipeInstallsEachToolItRunsAtAPin(t *testing.T) {
 	if module == nil || setupEnvtest == nil {
 		t.Fatal("go.mod names no module, or the Makefile does not go install setup-envtest")
 	}
-	botbox := readWorkflow(t, ciRecipe).Env["BOTBOX_VERSION"]
-	if !regexp.MustCompile(`^([0-9a-f]{7,40}|<commit>)$`).MatchString(botbox) {
-		t.Errorf("BOTBOX_VERSION is %q, not a commit, so a cache hit restores whichever botbox the first miss built", botbox)
+	version := readWorkflow(t, ciRecipe).Env["RECONCILER_FUZZER_VERSION"]
+	if !regexp.MustCompile(`^([0-9a-f]{7,40}|<commit>)$`).MatchString(version) {
+		t.Errorf("RECONCILER_FUZZER_VERSION is %q, not a commit, so a cache hit restores whichever reconciler-fuzzer the first miss built", version)
 	}
 	want := []string{
-		"install " + module[1] + "/cmd/botbox@" + botbox,
+		"install " + module[1] + "/cmd/reconciler-fuzzer@" + version,
 		"install " + setupEnvtest[1] + "@" + makefilePins(t)["SETUP_ENVTEST_VERSION"],
 	}
 	var got []string
@@ -447,25 +447,25 @@ func runStep(t *testing.T, s step, workspace string, stubs map[string]string) ra
 	return ran
 }
 
-func TestTheCIRecipeFailsWhenBotboxFinds(t *testing.T) {
+func TestTheCIRecipeFailsWhenReconcilerFuzzerFinds(t *testing.T) {
 	recipe := recipeJob(t)
 	if recipe.ContinueOnError != nil || slices.ContainsFunc(recipe.Steps, func(s step) bool { return s.ContinueOnError != nil }) {
 		t.Error("the recipe sets continue-on-error, which can pass a find and skip the upload")
 	}
-	for _, s := range botboxRuns(t, recipe.Steps) {
-		if ran := runStep(t, s, t.TempDir(), map[string]string{"botbox": "exit 1"}); ran.err == nil {
-			t.Errorf("%q passes when botbox fails\n%s", s.Run, ran.output)
+	for _, s := range reconcilerFuzzerRuns(t, recipe.Steps) {
+		if ran := runStep(t, s, t.TempDir(), map[string]string{"reconciler-fuzzer": "exit 1"}); ran.err == nil {
+			t.Errorf("%q passes when reconciler-fuzzer fails\n%s", s.Run, ran.output)
 		}
 	}
 }
 
 // Actions cancels a job by signalling the step's shell, which passes no signal
 // on.
-func TestTheCIRecipeRunsBotboxInPlaceOfTheStepsShell(t *testing.T) {
-	for _, s := range botboxRuns(t, recipeSteps(t)) {
-		ran := runStep(t, s, t.TempDir(), map[string]string{"botbox": `echo "$PPID"`})
+func TestTheCIRecipeRunsReconcilerFuzzerInPlaceOfTheStepsShell(t *testing.T) {
+	for _, s := range reconcilerFuzzerRuns(t, recipeSteps(t)) {
+		ran := runStep(t, s, t.TempDir(), map[string]string{"reconciler-fuzzer": `echo "$PPID"`})
 		if parent := strings.TrimSpace(string(ran.output)); ran.err != nil || parent != strconv.Itoa(os.Getpid()) {
-			t.Errorf("%q runs botbox as a child of the step's shell, so a cancel never reaches it\n%s", s.Run, ran.output)
+			t.Errorf("%q runs reconciler-fuzzer as a child of the step's shell, so a cancel never reaches it\n%s", s.Run, ran.output)
 		}
 	}
 }
@@ -485,17 +485,17 @@ func TestTheCIRecipeRunsEachStepInBashFromTheWorkspaceRoot(t *testing.T) {
 	}
 }
 
-// botboxRuns are the steps that run botbox.
-func botboxRuns(t *testing.T, steps []step) []step {
+// reconcilerFuzzerRuns are the steps that run reconciler-fuzzer.
+func reconcilerFuzzerRuns(t *testing.T, steps []step) []step {
 	t.Helper()
 	var runs []step
 	for _, s := range steps {
-		if strings.Contains(s.Run, "botbox run") {
+		if strings.Contains(s.Run, "reconciler-fuzzer run") {
 			runs = append(runs, s)
 		}
 	}
 	if len(runs) == 0 {
-		t.Fatal("no step runs botbox")
+		t.Fatal("no step runs reconciler-fuzzer")
 	}
 	return runs
 }
@@ -505,23 +505,23 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 	steps := recipe.Steps
 	upload := stepUsing(t, steps, "actions/upload-artifact")
 	if upload.If != "always()" {
-		t.Errorf("the job uploads its output if %q, not however botbox ends, and only the summary keeps the sequences a passing nightly drew", upload.If)
+		t.Errorf("the job uploads its output if %q, not however reconciler-fuzzer ends, and only the summary keeps the sequences a passing nightly drew", upload.If)
 	}
 	if upload.With["if-no-files-found"] == "error" {
-		t.Error("the upload adds an error to a job that failed before botbox wrote anything")
+		t.Error("the upload adds an error to a job that failed before reconciler-fuzzer wrote anything")
 	}
 	uploaded := strings.TrimSuffix(upload.With["path"], "/")
 	if recipe.TimeoutMinutes != nil {
-		t.Errorf("the job's timeout-minutes %v also counts the steps before botbox, so it can stop botbox before its --deadline makes it write a report", recipe.TimeoutMinutes)
+		t.Errorf("the job's timeout-minutes %v also counts the steps before reconciler-fuzzer, so it can stop reconciler-fuzzer before its --deadline makes it write a report", recipe.TimeoutMinutes)
 	}
-	for _, s := range botboxRuns(t, steps) {
+	for _, s := range reconcilerFuzzerRuns(t, steps) {
 		if out := regexp.MustCompile(`--out (\S+)`).FindStringSubmatch(s.Run); out == nil || out[1] != uploaded {
 			t.Errorf("%q writes elsewhere than %s, which the job uploads", s.Run, uploaded)
 		}
 		if s.TimeoutMinutes == nil {
 			continue
 		}
-		_, deadline := botboxBudget(t, s)
+		_, deadline := reconcilerFuzzerBudget(t, s)
 		minutes, err := strconv.ParseFloat(fmt.Sprint(s.TimeoutMinutes), 64)
 		if err != nil || time.Duration(minutes*float64(time.Minute)) <= deadline {
 			t.Errorf("timeout-minutes %v can stop %q before its --deadline makes it write a report", s.TimeoutMinutes, s.Run)
@@ -529,14 +529,14 @@ func TestTheCIRecipeKeepsAFailingRunsEvidence(t *testing.T) {
 	}
 	last := 0
 	for i, s := range steps {
-		if strings.Contains(s.Run, "botbox run") {
+		if strings.Contains(s.Run, "reconciler-fuzzer run") {
 			last = i
 		}
 	}
 	for i, s := range steps {
 		reads := strings.Contains(s.Run, uploaded+"/") || strings.TrimSuffix(s.With["path"], "/") == uploaded
 		if reads && i < last {
-			t.Errorf("step %d reads %s before step %d runs botbox", i, uploaded, last)
+			t.Errorf("step %d reads %s before step %d runs reconciler-fuzzer", i, uploaded, last)
 		}
 	}
 
@@ -560,18 +560,18 @@ func TestTheCIRecipeShowsTheSummaryOnTheJobsPage(t *testing.T) {
 	}
 	shows := steps[i]
 	if shows.If != "always()" {
-		t.Errorf("the job shows the summary if %q, not however botbox ends", shows.If)
+		t.Errorf("the job shows the summary if %q, not however reconciler-fuzzer ends", shows.If)
 	}
 
 	workspace := t.TempDir()
 	invocation := filepath.Join(workspace, stepUsing(t, steps, "actions/upload-artifact").With["path"], "20260101T000000Z-1")
-	writeFile(t, filepath.Join(invocation, "summary.md"), "# botbox\n")
+	writeFile(t, filepath.Join(invocation, "summary.md"), "# reconciler-fuzzer\n")
 	writeFile(t, filepath.Join(invocation, "summary.json"), "{}\n")
-	if ran := runStep(t, shows, workspace, nil); ran.err != nil || ran.summary != "# botbox\n" {
+	if ran := runStep(t, shows, workspace, nil); ran.err != nil || ran.summary != "# reconciler-fuzzer\n" {
 		t.Errorf("the job's summary is %q, not summary.md: %v\n%s", ran.summary, ran.err, ran.output)
 	}
 	if ran := runStep(t, shows, t.TempDir(), nil); ran.err != nil {
-		t.Errorf("the step fails when botbox wrote no summary: %v\n%s", ran.err, ran.output)
+		t.Errorf("the step fails when reconciler-fuzzer wrote no summary: %v\n%s", ran.err, ran.output)
 	}
 }
 
@@ -600,7 +600,7 @@ func TestTheCIRecipeFixesSeedsOnPullRequestsAndDrawsThemNightly(t *testing.T) {
 		t.Errorf("the recipe's schedule is %v, not a list of five-field crons, and Actions rejects such a workflow", on["schedule"])
 	}
 	seeded := map[string]bool{}
-	for _, s := range botboxRuns(t, recipeSteps(t)) {
+	for _, s := range reconcilerFuzzerRuns(t, recipeSteps(t)) {
 		event := regexp.MustCompile(`^github\.event_name == '(\w+)'$`).FindStringSubmatch(s.If)
 		if event == nil {
 			t.Errorf("%q runs if %q, not on one event", s.Run, s.If)
@@ -609,11 +609,11 @@ func TestTheCIRecipeFixesSeedsOnPullRequestsAndDrawsThemNightly(t *testing.T) {
 		seeded[event[1]] = strings.Contains(s.Run, "--seed ")
 	}
 	if want := map[string]bool{"pull_request": true, "schedule": false}; !maps.Equal(seeded, want) {
-		t.Errorf("botbox run fixes a seed by event as %v, and should as %v", seeded, want)
+		t.Errorf("reconciler-fuzzer run fixes a seed by event as %v, and should as %v", seeded, want)
 	}
 }
 
-func TestTheCIRecipeSizesEachBotboxRun(t *testing.T) {
+func TestTheCIRecipeSizesEachReconcilerFuzzerRun(t *testing.T) {
 	pins := makefilePins(t)
 	perRun := func(tier string) time.Duration {
 		runs, _ := strconv.Atoi(pins[tier+"_RUNS"])
@@ -624,10 +624,10 @@ func TestTheCIRecipeSizesEachBotboxRun(t *testing.T) {
 		return deadline / time.Duration(runs)
 	}
 	floor := min(perRun("EXAMPLE"), perRun("NIGHTLY"))
-	for _, s := range botboxRuns(t, recipeSteps(t)) {
-		switch runs, deadline := botboxBudget(t, s); {
+	for _, s := range reconcilerFuzzerRuns(t, recipeSteps(t)) {
+		switch runs, deadline := reconcilerFuzzerBudget(t, s); {
 		case runs == 0 || deadline == 0:
-			t.Errorf("%q leaves --runs or --deadline to botbox's defaults, and an adopter sizes the two together", s.Run)
+			t.Errorf("%q leaves --runs or --deadline to reconciler-fuzzer's defaults, and an adopter sizes the two together", s.Run)
 		case runs < 2:
 			t.Errorf("%q runs %d sequences, and a tier should run several", s.Run, runs)
 		case deadline/time.Duration(runs) < floor:
@@ -636,8 +636,9 @@ func TestTheCIRecipeSizesEachBotboxRun(t *testing.T) {
 	}
 }
 
-// botboxBudget is the --runs and --deadline a botbox step passes, or zero.
-func botboxBudget(t *testing.T, s step) (runs int, deadline time.Duration) {
+// reconcilerFuzzerBudget is the --runs and --deadline a reconciler-fuzzer step
+// passes, or zero.
+func reconcilerFuzzerBudget(t *testing.T, s step) (runs int, deadline time.Duration) {
 	t.Helper()
 	if m := regexp.MustCompile(`--runs (\d+)`).FindStringSubmatch(s.Run); m != nil {
 		runs, _ = strconv.Atoi(m[1])
@@ -655,7 +656,8 @@ func botboxBudget(t *testing.T, s step) (runs int, deadline time.Duration) {
 func TestNightlyReportStepsRunOnlyAfterFailure(t *testing.T) {
 	nightly := readWorkflow(t, ".github/workflows/nightly.yml")
 	for name, job := range nightly.Jobs {
-		// The step that runs make or botbox, whose conclusion the report checks.
+		// The step that runs make or reconciler-fuzzer, whose conclusion the report
+		// checks.
 		var runID string
 		for _, s := range job.Steps {
 			if s.ID != "" && strings.Contains(s.Run, "make ") {
@@ -726,7 +728,7 @@ func TestNightlyReportStepFilesAFindForAViolationAndAnErrorOtherwise(t *testing.
 				t.Run(fmt.Sprintf("%s/%s", name, tc.name), func(t *testing.T) {
 					workspace := t.TempDir()
 					if tc.outcome != "" {
-						invocation := filepath.Join(workspace, "botbox-out", "20260101T000000Z-1")
+						invocation := filepath.Join(workspace, "reconciler-fuzzer-out", "20260101T000000Z-1")
 						writeFile(t, filepath.Join(invocation, "summary.json"),
 							fmt.Sprintf(`{"outcome":%q,"exitCode":1}`, tc.outcome))
 					}
@@ -756,18 +758,19 @@ func TestNightlyReportStepFilesAFindForAViolationAndAnErrorOtherwise(t *testing.
 	}
 }
 
-// T3: make test-kind-runs exits as botbox did.
-func TestMakeTestKindRunsExitsAsBotboxDid(t *testing.T) {
+// T3: make test-kind-runs exits as reconciler-fuzzer did.
+func TestMakeTestKindRunsExitsAsReconcilerFuzzerDid(t *testing.T) {
 	makefile := readFile(t, "Makefile")
-	// The test-kind-runs target should use must-pass for its botbox invocations.
+	// The test-kind-runs target should use must-pass for its reconciler-fuzzer
+	// invocations.
 	if !strings.Contains(makefile, "must-pass") {
 		t.Error("the Makefile does not define a must-pass macro")
 	}
 }
 
-// T4: botbox invocations inside tier recipes (apart from negative controls) use
-// must-pass so make exits with botbox's own exit code.
-func TestTierBotboxInvocationsUseMustPass(t *testing.T) {
+// T4: reconciler-fuzzer invocations inside tier recipes (apart from negative
+// controls) use must-pass so make exits with reconciler-fuzzer's own exit code.
+func TestTierReconcilerFuzzerInvocationsUseMustPass(t *testing.T) {
 	makefile := readFile(t, "Makefile")
 	// Extract recipe blocks for the tier targets.
 	tiers := []string{
@@ -793,8 +796,8 @@ func TestTierBotboxInvocationsUseMustPass(t *testing.T) {
 			}
 			trimmed := strings.TrimLeft(line, "\t @")
 			isQuickstart := strings.Contains(trimmed, "quickstart.sh")
-			isBotbox := strings.Contains(trimmed, "./bin/botbox run") || strings.Contains(trimmed, "$(KIND_BOTBOX)")
-			if !isQuickstart && !isBotbox {
+			isReconcilerFuzzer := strings.Contains(trimmed, "./bin/reconciler-fuzzer run") || strings.Contains(trimmed, "$(KIND_RECONCILER_FUZZER)")
+			if !isQuickstart && !isReconcilerFuzzer {
 				continue
 			}
 			// Negative controls use the negative-control macro.
@@ -803,7 +806,7 @@ func TestTierBotboxInvocationsUseMustPass(t *testing.T) {
 			}
 			// The invocation should be inside a must-pass call.
 			if !strings.Contains(line, "must-pass") {
-				t.Errorf("%s botbox invocation does not use must-pass: %s", tier, strings.TrimSpace(line))
+				t.Errorf("%s reconciler-fuzzer invocation does not use must-pass: %s", tier, strings.TrimSpace(line))
 			}
 		}
 	}
@@ -1032,7 +1035,8 @@ func runText(steps []step) string {
 	return strings.Join(commands, "\n")
 }
 
-// The README shows the recipe's botbox commands, without the exec a step needs.
+// The README shows the recipe's reconciler-fuzzer commands, without the exec a
+// step needs.
 func TestTheREADMEsCICommandsAreTheRecipes(t *testing.T) {
 	var recipe []string
 	for _, line := range strings.Split(runText(recipeSteps(t)), "\n") {
@@ -1041,7 +1045,7 @@ func TestTheREADMEsCICommandsAreTheRecipes(t *testing.T) {
 	shown := 0
 	for _, block := range fencedBlocks(section(t, readFile(t, "README.md"), "## Running in CI")) {
 		for _, line := range strings.Split(block, "\n") {
-			if !strings.HasPrefix(line, "botbox ") {
+			if !strings.HasPrefix(line, "reconciler-fuzzer ") {
 				continue
 			}
 			shown++
@@ -1051,7 +1055,7 @@ func TestTheREADMEsCICommandsAreTheRecipes(t *testing.T) {
 		}
 	}
 	if shown == 0 {
-		t.Fatal("README.md's Running in CI section runs no botbox command, so this test checks nothing.")
+		t.Fatal("README.md's Running in CI section runs no reconciler-fuzzer command, so this test checks nothing.")
 	}
 }
 
@@ -1068,6 +1072,6 @@ func TestTheCIRecipeNeedsNoGoMod(t *testing.T) {
 		t.Fatal("go.mod has no go directive")
 	}
 	if version := setupGo.With["go-version"]; version != directive[1] {
-		t.Errorf("setup-go installs Go %q, and botbox's go.mod asks for %s", version, directive[1])
+		t.Errorf("setup-go installs Go %q, and reconciler-fuzzer's go.mod asks for %s", version, directive[1])
 	}
 }

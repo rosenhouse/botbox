@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // Property returns the check of one declared property, evaluated where its
@@ -56,8 +56,8 @@ func Property(declared target.Property) Check {
 // evaluationPoints are the instants a property is evaluated at, in order, and
 // why it is not evaluated at the other checkpoints. `checkpoint` and `end`
 // keep the teardown's checkpoint. `always` skips the events the teardown
-// caused, which are botbox's own doing, and keeps those under a fault, whose
-// transient states it exists to catch.
+// caused, which are reconciler-fuzzer's own doing, and keeps those under a
+// fault, whose transient states it exists to catch.
 func (in Input) evaluationPoints(declared target.Property) (points []time.Time, unjudged []string) {
 	checkpoints := in.Checkpoints
 	switch declared.When {

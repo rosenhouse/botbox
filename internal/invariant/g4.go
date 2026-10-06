@@ -6,8 +6,8 @@ import (
 	"slices"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // Convergence is G4: within timeouts.settle after any spec change, and by what
@@ -123,7 +123,7 @@ func upTo(versions []observe.Version, t time.Time) []observe.Version {
 
 func describe(op Op) string {
 	if op.Restored {
-		return fmt.Sprintf("op %d (%s), where botbox restored a fixture", op.Index, op.Type)
+		return fmt.Sprintf("op %d (%s), where reconciler-fuzzer restored a fixture", op.Index, op.Type)
 	}
 	return fmt.Sprintf("op %d (%s)", op.Index, op.Type)
 }

@@ -3,10 +3,10 @@ kind: ClusterRole
 metadata:
   name: toy-widget
 rules:
-  - apiGroups: ["toy.botbox"]
+  - apiGroups: ["toy.reconciler-fuzzer"]
     resources: ["widgets"]
     verbs: ["get", "list", "watch", "update", "patch"]
-  - apiGroups: ["toy.botbox"]
+  - apiGroups: ["toy.reconciler-fuzzer"]
     resources: ["widgets/status"]
     verbs: ["get", "patch"]
 ---

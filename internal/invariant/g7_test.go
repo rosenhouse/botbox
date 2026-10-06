@@ -9,12 +9,12 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
-// childDeleted is the toy converged with two children, and botbox deleting
-// w-0 behind its back at 10s.
+// childDeleted is the toy converged with two children, and reconciler-fuzzer
+// deleting w-0 behind its back at 10s.
 func childDeleted() *run {
 	return converged().
 		deletedManaged(10*time.Second, "w-0").
@@ -61,7 +61,7 @@ func TestG7FiresOnAnObjectThatNeverCameBack(t *testing.T) {
 		t.Errorf("The timeline is of %q, want %q.", violation.VersionsOf, want)
 	}
 	if n := len(violation.Versions); n == 0 || !violation.Versions[n-1].Deleted {
-		t.Errorf("The timeline holds %v, want it to end where botbox deleted w-0.", quoted(violation))
+		t.Errorf("The timeline holds %v, want it to end where reconciler-fuzzer deleted w-0.", quoted(violation))
 	}
 }
 
@@ -165,8 +165,8 @@ func TestG7PassesAnObjectThatCameBack(t *testing.T) {
 	}
 }
 
-// botbox cannot tell when a restarted target is back. One still starting, or
-// waiting out its predecessor's lease, recreates nothing.
+// reconciler-fuzzer cannot tell when a restarted target is back. One still
+// starting, or waiting out its predecessor's lease, recreates nothing.
 func TestG7NotesAnObjectDeletedBeforeARestartedTargetWasBack(t *testing.T) {
 	const wantNote = "G7 is not evaluated for op 2 (deleteManaged): the target had requested no resource outside leader election between op 1 (restart) and it"
 	const wonNoLease = "G7 is not evaluated for op 2 (deleteManaged): the target had won no lease between op 1 (restart) and it"
@@ -342,8 +342,9 @@ func TestG7IgnoresAnOpWhoseWaitNeverEnded(t *testing.T) {
 	silent(t, invariant.SelfHealing, in)
 }
 
-// A fault that ends while botbox deletes the object can still hide the deletion
-// from the target, and so can one the target is still recovering from.
+// A fault that ends while reconciler-fuzzer deletes the object can still hide
+// the deletion from the target, and so can one the target is still recovering
+// from.
 func TestG7NotesAnObjectAFaultMayHaveKeptAway(t *testing.T) {
 	const wantNote = "G7 is not evaluated for op 1 (deleteManaged): a fault was active during it or the wait after it, " +
 		"or the target was still owed time to recover from one where the wait ended"
@@ -492,8 +493,8 @@ func TestG7NotesAnObjectDeletedBeforeTheRunConverged(t *testing.T) {
 	}
 }
 
-// botbox deleted the CR without waiting, and the Observer saw it go only after
-// the op had deleted the object.
+// reconciler-fuzzer deleted the CR without waiting, and the Observer saw it go
+// only after the op had deleted the object.
 func TestG7ReadsTheCRWhereTheWaitEnds(t *testing.T) {
 	in := converged().
 		record(300*time.Millisecond, child("kept", "13", orphaned)).
@@ -509,7 +510,7 @@ func TestG7ReadsTheCRWhereTheWaitEnds(t *testing.T) {
 	}
 }
 
-// A target owes nothing to a CR that botbox deleted.
+// A target owes nothing to a CR that reconciler-fuzzer deleted.
 func TestG7IgnoresAnObjectDeletedWhileTheCRWasGoing(t *testing.T) {
 	for _, c := range []struct {
 		name string
@@ -548,8 +549,8 @@ func twoConverged() *run {
 		checkpoint(2400*time.Millisecond, invariant.Converged)
 }
 
-// oneDeleting has botbox delete the Widget named at 5s, which its finalizer
-// then holds.
+// oneDeleting has reconciler-fuzzer delete the Widget named at 5s, which its
+// finalizer then holds.
 func oneDeleting(name string) func(*run) *run {
 	return func(r *run) *run {
 		deleting := deleting(5 * time.Second)

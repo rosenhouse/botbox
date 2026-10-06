@@ -1,12 +1,12 @@
 # cert-manager v1.21.2 can give a recreated Certificate the deleted Certificate's private key
 
-This draft is for botbox's maintainer to file at cert-manager. Triage did not search
+This draft is for reconciler-fuzzer's maintainer to file at cert-manager. Triage did not search
 cert-manager's tracker, so the maintainer searches it before filing. No agent may file it.
 The agents had no registry and only a Kubernetes 1.37.0 node image, while cert-manager
 v1.21.2 tests on 1.33 to 1.36. So the maintainer also reruns the documented command on
 1.36, against the released chart with `enableCertificateOwnerRef: true`. The issue body
 starts below the horizontal rule. Its links are relative to this file, so they need
-botbox's URL before filing.
+reconciler-fuzzer's URL before filing.
 
 ---
 
@@ -14,7 +14,7 @@ botbox's URL before filing.
 
 ## Summary
 
-botbox, a black-box test harness for Kubernetes controllers, found this in cert-manager
+reconciler-fuzzer, a black-box test harness for Kubernetes controllers, found this in cert-manager
 v1.21.2 with `--enable-certificate-owner-ref=true`.
 
 A client deletes a Certificate and creates one with the same name and `secretName`. The new
@@ -131,7 +131,7 @@ Then:
 A run keeps the key when the Secret still holds the old one. A new UID means a write-back,
 and the old UID owned by the new Certificate means a re-point. The UID does not tell which
 write-back path ran. cert-manager's log and Events do. Without `-collect`, the program
-never writes the Secret. From a botbox checkout:
+never writes the Secret. From a reconciler-fuzzer checkout:
 
 ```sh
 go run ./docs/findings/cert-manager-secret-write-back -kubeconfig "$KUBECONFIG" -runs 10 -algorithm RSA -policy Always
@@ -206,14 +206,14 @@ replaced the first row's Certificate. Each cell counts the runs that kept the ke
   Certificate did not settle within a minute, twice. So those batches do not measure this
   window.
 
-## How botbox found it
+## How reconciler-fuzzer found it
 
-botbox ran cert-manager against envtest, which has no garbage collector. botbox's own
+reconciler-fuzzer ran cert-manager against envtest, which has no garbage collector. reconciler-fuzzer's own
 collector deletes dependents with UID and resourceVersion preconditions, within 1 s of the
 owner's deletion. Hunt seed 1043 recreates a `Never` Certificate with ECDSA and other
 `dnsNames` and `duration`. It kept the key in 5 of 17 replays: 4 by write-back and 1 by
 re-point. [`sequence.json`](cert-manager-secret-write-back/sequence.json), the recreate in
-the table's ECDSA row, kept it in 3 of 8 botbox runs, all by write-back.
+the table's ECDSA row, kept it in 3 of 8 reconciler-fuzzer runs, all by write-back.
 
 On a cluster without a garbage collector, the program's `-collect` deletes what the old
 Certificate controls, much as kube-controller-manager would, but without its retry after a

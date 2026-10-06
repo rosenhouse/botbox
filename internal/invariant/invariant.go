@@ -9,9 +9,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // OpType is the kind of one op in a sequence.
@@ -59,8 +59,8 @@ type Op struct {
 	Deleted observe.Key
 	// CR is the primary CR a CR op wrote. Every other op carries the zero Key.
 	CR observe.Key
-	// Restored says botbox created a fixture it had deleted again, just after
-	// the op's Time and before the op's own change.
+	// Restored says reconciler-fuzzer created a fixture it had deleted again, just
+	// after the op's Time and before the op's own change.
 	Restored bool
 }
 
@@ -118,8 +118,8 @@ func (f FaultWindow) overlaps(from, to time.Time) bool {
 	return !f.Start.After(to) && (f.End.IsZero() || f.End.After(from))
 }
 
-// Exit is one time the target stopped on its own, and when botbox started it
-// again. Why is its error and what the target wrote as it stopped.
+// Exit is one time the target stopped on its own, and when reconciler-fuzzer
+// started it again. Why is its error and what the target wrote as it stopped.
 type Exit struct {
 	At, Restart time.Time
 	Why         string
@@ -136,16 +136,16 @@ type Input struct {
 	Checkpoints []Checkpoint
 	Faults      []FaultWindow
 	Exits       []Exit
-	// Teardown is when botbox began emptying the run namespace. What changes
-	// after it is botbox's own doing, so no window reaches past it. G3 judges
-	// the deletion it opens.
+	// Teardown is when reconciler-fuzzer began emptying the run namespace. What
+	// changes after it is reconciler-fuzzer's own doing, so no window reaches past
+	// it. G3 judges the deletion it opens.
 	Teardown time.Time
 	// Quiet is when the teardown began waiting timeouts.stable, the run's last
 	// quiet window. The window closes at Teardown.
 	Quiet time.Time
-	// Cleaned is when botbox saw the run namespace empty: every managed object
-	// gone and the CR with it. It satisfies G3's deletion for every deadline
-	// at or after it. Zero means the namespace never emptied.
+	// Cleaned is when reconciler-fuzzer saw the run namespace empty: every managed
+	// object gone and the CR with it. It satisfies G3's deletion for every
+	// deadline at or after it. Zero means the namespace never emptied.
 	Cleaned time.Time
 	// End is the instant the engine evaluates at, after which the run is
 	// unobserved. A zero End takes the last checkpoint's time.

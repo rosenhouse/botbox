@@ -5,14 +5,14 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/rosenhouse/botbox/internal/reference"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/reference"
 )
 
 func TestTheReferenceNamesEveryOverlayKeyword(t *testing.T) {
 	documented := reference.Spans(reference.Row(t, "## target.yaml", "generate.overlay")[1])
 
 	if !slices.Equal(slices.Sorted(slices.Values(documented)), keywords) {
-		t.Errorf("The row for generate.overlay names %v, want the keywords botbox reads, %v.", documented, keywords)
+		t.Errorf("The row for generate.overlay names %v, want the keywords reconciler-fuzzer reads, %v.", documented, keywords)
 	}
 }
 

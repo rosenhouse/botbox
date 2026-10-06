@@ -12,7 +12,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/rosenhouse/botbox/internal/reference"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/reference"
 )
 
 const (
@@ -79,7 +79,7 @@ func TestTheReferenceSaysWhichKeysAreRequired(t *testing.T) {
 	}
 	values := map[string]any{
 		"name":              "toy-widget",
-		"primary":           "toy.botbox/v1/Widget",
+		"primary":           "toy.reconciler-fuzzer/v1/Widget",
 		"sample":            sample,
 		"launch.binary":     "bin/toy-widget",
 		"properties[*].id":  "P1",

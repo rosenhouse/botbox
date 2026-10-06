@@ -16,7 +16,7 @@ const stamp = "20060102T150405Z"
 type Output struct{ dir string }
 
 // sameSecond is how many invocations of one seed can open a directory in the
-// same second before botbox gives up naming them apart.
+// same second before reconciler-fuzzer gives up naming them apart.
 const sameSecond = 100
 
 // OpenOutput creates the invocation's directory under root. A second

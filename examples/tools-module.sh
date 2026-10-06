@@ -1,8 +1,8 @@
-mkdir -p tools/botbox
-cd tools/botbox
-go mod init example.com/operator/tools/botbox
+mkdir -p tools/reconciler-fuzzer
+cd tools/reconciler-fuzzer
+go mod init example.com/operator/tools/reconciler-fuzzer
 go mod edit -go=1.26.0
-GOWORK=off go get -tool github.com/rosenhouse/botbox/cmd/botbox@latest
+GOWORK=off go get -tool github.com/rosenhouse/reconciler-fuzzer/cmd/reconciler-fuzzer@latest
 cd ../..
-GOWORK=off go -C tools/botbox build -o ../../bin/botbox github.com/rosenhouse/botbox/cmd/botbox
-bin/botbox version
+GOWORK=off go -C tools/reconciler-fuzzer build -o ../../bin/reconciler-fuzzer github.com/rosenhouse/reconciler-fuzzer/cmd/reconciler-fuzzer
+bin/reconciler-fuzzer version

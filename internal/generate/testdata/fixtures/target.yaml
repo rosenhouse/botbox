@@ -2,7 +2,7 @@
 name: fixtures
 crds:
   - ../../../../targets/toy-widget/crds/
-primary: toy.botbox/v1/Widget
+primary: toy.reconciler-fuzzer/v1/Widget
 sample: ../../../../targets/toy-widget/widget.yaml
 fixtures:
   - config.yaml

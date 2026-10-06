@@ -1,9 +1,9 @@
 apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
-  name: gadgets.rules.botbox
+  name: gadgets.rules.reconciler-fuzzer
 spec:
-  group: rules.botbox
+  group: rules.reconciler-fuzzer
   names:
     kind: Gadget
     listKind: GadgetList

@@ -1,4 +1,4 @@
-package botbox_test
+package reconcilerfuzzer_test
 
 import (
 	"fmt"
@@ -11,20 +11,20 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/rosenhouse/botbox/internal/run"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
-const limitsHeading = "## What botbox cannot test yet"
+const limitsHeading = "## What reconciler-fuzzer cannot test yet"
 
-// limits are what botbox cannot test yet: words the README says of each, the
-// issue that tracks it, or 0, and words DESIGN.md says of it. A change that
-// lifts a limit deletes its rows and both statements.
+// limits are what reconciler-fuzzer cannot test yet: words the README says of
+// each, the issue that tracks it, or 0, and words DESIGN.md says of it. A
+// change that lifts a limit deletes its rows and both statements.
 var limits = []limit{
-	{"cannot reach a Pod or a Service", 0, "It runs on botbox's host, which routes to no Pod"},
+	{"cannot reach a Pod or a Service", 0, "It runs on reconciler-fuzzer's host, which routes to no Pod"},
 	{"no admission or conversion webhook of yours runs", 0, "No admission or conversion webhooks."},
 	{"on the version your CRD stores", 0, "A kubeconfig cluster keeps the webhook."},
-	{"generates sequences only for a custom resource whose CRD your `target.yaml` lists", 0, "botbox draws no sequence for a built-in primary kind"},
+	{"generates sequences only for a custom resource whose CRD your `target.yaml` lists", 0, "reconciler-fuzzer draws no sequence for a built-in primary kind"},
 	{"envtest runs no Pod", 0, "no pods run, and no workload's status changes"},
 	{"tests namespaced kinds only", 38, "every managed kind and every fixture must be namespaced"},
 	{"misses a child your controller leaks into another namespace", 38, "it does not see a child the target creates in another"},
@@ -38,14 +38,14 @@ type limit struct {
 }
 
 // A team learns whether its controller fits before it installs anything.
-func TestTheReadmeSaysWhatBotboxCannotTestRightAfterWhatItDoes(t *testing.T) {
+func TestTheReadmeSaysWhatReconcilerFuzzerCannotTestRightAfterWhatItDoes(t *testing.T) {
 	design := oneLine(readFile(t, "DESIGN.md"))
 	intro, rest, found := strings.Cut(readFile(t, "README.md"), "\n"+limitsHeading+"\n")
 	if !found {
 		t.Fatalf("README.md has no %q heading", limitsHeading)
 	}
-	if strings.Contains(intro, "\n## ") || strings.TrimSpace(strings.TrimPrefix(intro, "# botbox\n")) == "" {
-		t.Errorf("README.md does not say what botbox cannot test right after what it does")
+	if strings.Contains(intro, "\n## ") || strings.TrimSpace(strings.TrimPrefix(intro, "# reconciler-fuzzer\n")) == "" {
+		t.Errorf("README.md does not say what reconciler-fuzzer cannot test right after what it does")
 	}
 	section, _, _ := strings.Cut(rest, "\n## ")
 	opening, bullets, err := limitParts(section)
@@ -144,12 +144,12 @@ func TestLimitPartsRefusesAnyOtherShape(t *testing.T) {
 }
 
 func TestABulletSaysALimitWithItsWordsAndItsLink(t *testing.T) {
-	l := limit{says: "botbox cannot", issue: 45}
-	link := "([#45](https://github.com/rosenhouse/botbox/issues/45))"
-	if !l.isIn("botbox cannot " + link) {
-		t.Errorf("isIn misses the limit in %q.", "botbox cannot "+link)
+	l := limit{says: "reconciler-fuzzer cannot", issue: 45}
+	link := "([#45](https://github.com/rosenhouse/reconciler-fuzzer/issues/45))"
+	if !l.isIn("reconciler-fuzzer cannot " + link) {
+		t.Errorf("isIn misses the limit in %q.", "reconciler-fuzzer cannot "+link)
 	}
-	for _, bullet := range []string{"botbox can " + link, "botbox cannot ([#46](https://github.com/rosenhouse/botbox/issues/46))"} {
+	for _, bullet := range []string{"reconciler-fuzzer can " + link, "reconciler-fuzzer cannot ([#46](https://github.com/rosenhouse/reconciler-fuzzer/issues/46))"} {
 		if l.isIn(bullet) {
 			t.Errorf("isIn finds %q in %q.", l.says, bullet)
 		}
@@ -157,7 +157,7 @@ func TestABulletSaysALimitWithItsWordsAndItsLink(t *testing.T) {
 }
 
 func (l limit) isIn(bullet string) bool {
-	link := fmt.Sprintf("](https://github.com/rosenhouse/botbox/issues/%d)", l.issue)
+	link := fmt.Sprintf("](https://github.com/rosenhouse/reconciler-fuzzer/issues/%d)", l.issue)
 	return strings.Contains(bullet, l.says) && strings.Contains(bullet, link)
 }
 
@@ -167,7 +167,7 @@ func oneLine(text string) string {
 
 // readmeOrder pairs each README section with the words DESIGN.md orders it by.
 var readmeOrder = []struct{ heading, design string }{
-	{"What botbox cannot test yet", "what it cannot test yet"},
+	{"What reconciler-fuzzer cannot test yet", "what it cannot test yet"},
 	{"Install", "install"},
 	{"Quick start", "a quick start"},
 	{"Your own controller", "writing `target.yaml` for your own controller"},
@@ -176,11 +176,11 @@ var readmeOrder = []struct{ heading, design string }{
 	{"Development and internals", `a closing "Development and internals" section`},
 }
 
-// A reader learns first that botbox tests against a real API server.
-func TestTheReadmeOpensWithTheAPIServerBotboxRuns(t *testing.T) {
+// A reader learns first that reconciler-fuzzer tests against a real API server.
+func TestTheReadmeOpensWithTheAPIServerReconcilerFuzzerRuns(t *testing.T) {
 	intro, _, _ := strings.Cut(readFile(t, "README.md"), "\n## ")
 	if says := "against a real kube-apiserver and etcd"; !strings.Contains(oneLine(intro), says) {
-		t.Errorf("README.md's intro does not say botbox runs your controller %q.", says)
+		t.Errorf("README.md's intro does not say reconciler-fuzzer runs your controller %q.", says)
 	}
 }
 
@@ -189,7 +189,7 @@ var userPages = []string{"README.md", "docs/targets.md", "docs/failures.md", "do
 
 const ciPage = "docs/ci.md"
 
-// A reader who copies a sequence from a page gets one botbox runs.
+// A reader who copies a sequence from a page gets one reconciler-fuzzer runs.
 func TestEverySequenceAPageShowsLoads(t *testing.T) {
 	shown := 0
 	for _, page := range userPages {
@@ -199,7 +199,7 @@ func TestEverySequenceAPageShowsLoads(t *testing.T) {
 			}
 			shown++
 			if _, err := run.UnmarshalSequence([]byte(block)); err != nil {
-				t.Errorf("%s shows a sequence botbox refuses: %v\n%s", page, err, block)
+				t.Errorf("%s shows a sequence reconciler-fuzzer refuses: %v\n%s", page, err, block)
 			}
 		}
 	}
@@ -302,10 +302,11 @@ func TestTheExamplesPageShowsRunsOfTheMakefilesExampleSeeds(t *testing.T) {
 	}
 }
 
-// Requiring botbox raises a module to these versions, as go prints them.
+// Requiring reconciler-fuzzer raises a module to these versions, as go prints
+// them.
 func TestTheREADMEAndTheCIPageQuoteGoModsVersions(t *testing.T) {
 	required := goModVersions(t)
-	install := section(t, readFile(t, "README.md"), "## Install") + section(t, readFile(t, ciPage), "## Keep botbox out of your go.mod")
+	install := section(t, readFile(t, "README.md"), "## Install") + section(t, readFile(t, ciPage), "## Keep reconciler-fuzzer out of your go.mod")
 	quoted := map[string]bool{}
 	check := func(text, module, version string) {
 		quoted[module] = true
@@ -327,9 +328,9 @@ func TestTheREADMEAndTheCIPageQuoteGoModsVersions(t *testing.T) {
 }
 
 // go test caches a pass, and cannot see the controller or target.yaml that
-// botbox reads.
+// reconciler-fuzzer reads.
 func TestTheCIPageRunsTheGoTestRecipeUncachedUnderItsBuildTag(t *testing.T) {
-	const recipe = "targets/toy-widget/botbox_test.go"
+	const recipe = "targets/toy-widget/reconciler_fuzzer_test.go"
 	tag := regexp.MustCompile(`^//go:build (\w+)\n`).FindStringSubmatch(readFile(t, recipe))
 	if tag == nil {
 		t.Fatalf("%s has no build tag of one word.", recipe)
@@ -404,7 +405,7 @@ func TestTheReadmesReadyConditionExampleHoldsOnlyOnACurrentReadyCondition(t *tes
 		t.Fatal(err)
 	}
 	declared := filepath.Join(t.TempDir(), "target.yaml")
-	writeFile(t, declared, fmt.Sprintf("name: ready-example\ncrds: [%s/crds]\nprimary: toy.botbox/v1/Widget\nsample: %s/widget.yaml\nlaunch:\n  binary: controller\n%s",
+	writeFile(t, declared, fmt.Sprintf("name: ready-example\ncrds: [%s/crds]\nprimary: toy.reconciler-fuzzer/v1/Widget\nsample: %s/widget.yaml\nlaunch:\n  binary: controller\n%s",
 		toy, toy, examples[0]))
 	loaded, err := target.Load(declared)
 	if err != nil {
@@ -441,8 +442,8 @@ func TestTheReadmesReadyConditionExampleHoldsOnlyOnACurrentReadyCondition(t *tes
 	}
 }
 
-// botbox --help sends a reader to docs/failures.md for what each failure means.
-// readmeChecks are the checks of the README's table, in order.
+// reconciler-fuzzer --help sends a reader to docs/failures.md for what each
+// failure means. readmeChecks are the checks of the README's table, in order.
 func readmeChecks(t *testing.T) []string {
 	t.Helper()
 	checks := firstGroups(`(?m)^\| (G[0-9]+) \|`, section(t, readFile(t, "README.md"), "## Reading a failure"))

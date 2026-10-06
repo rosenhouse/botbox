@@ -18,7 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	toyv1 "github.com/rosenhouse/botbox/targets/toy-widget/api/v1"
+	toyv1 "github.com/rosenhouse/reconciler-fuzzer/targets/toy-widget/api/v1"
 )
 
 // fixture wires a Reconciler running one seeded bug to a fake API server.
@@ -501,7 +501,7 @@ func refuseTheFirstChildCreate() interceptor.Funcs {
 		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
 			if _, isChild := obj.(*corev1.ConfigMap); isChild && !refused {
 				refused = true
-				return apierrors.NewInternalError(errors.New("botbox fault"))
+				return apierrors.NewInternalError(errors.New("reconciler-fuzzer fault"))
 			}
 			return c.Create(ctx, obj, opts...)
 		},

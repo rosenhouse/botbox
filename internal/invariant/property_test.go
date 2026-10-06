@@ -10,9 +10,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 func property(when target.PropertyWhen, eval target.PropertyFunc) target.Property {
@@ -152,8 +152,8 @@ func TestPropertyFiresWhereTheTargetRecoveredFromAFault(t *testing.T) {
 	}
 }
 
-// stale is a run whose CR counts a child botbox deleted, which a target still
-// starting has not yet seen go.
+// stale is a run whose CR counts a child reconciler-fuzzer deleted, which a
+// target still starting has not yet seen go.
 func stale(when target.PropertyWhen) *run {
 	r := newRun().
 		op(invariant.OpCreate, 0).

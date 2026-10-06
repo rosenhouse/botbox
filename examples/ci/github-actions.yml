@@ -1,4 +1,4 @@
-name: botbox
+name: reconciler-fuzzer
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
     - cron: '17 6 * * *'
 
 env:
-  BOTBOX_VERSION: <commit>   # Set this to a commit of main.
+  RECONCILER_FUZZER_VERSION: <commit>   # Set this to a commit of main.
   SETUP_ENVTEST_VERSION: v0.25.1
   ENVTEST_K8S_VERSION: 1.37.0
   ENVTEST_INDEX_URL: https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  botbox:
+  reconciler-fuzzer:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -29,15 +29,15 @@ jobs:
           path: |
             ~/go/bin
             bin/envtest
-          key: ${{ runner.os }}-${{ runner.arch }}-botbox-${{ env.BOTBOX_VERSION }}-${{ env.SETUP_ENVTEST_VERSION }}-${{ env.ENVTEST_K8S_VERSION }}
+          key: ${{ runner.os }}-${{ runner.arch }}-reconciler-fuzzer-${{ env.RECONCILER_FUZZER_VERSION }}-${{ env.SETUP_ENVTEST_VERSION }}-${{ env.ENVTEST_K8S_VERSION }}
       - if: steps.tools.outputs.cache-hit != 'true'
         run: |
-          go install "github.com/rosenhouse/botbox/cmd/botbox@$BOTBOX_VERSION"
+          go install "github.com/rosenhouse/reconciler-fuzzer/cmd/reconciler-fuzzer@$RECONCILER_FUZZER_VERSION"
           go install "sigs.k8s.io/controller-runtime/tools/setup-envtest@$SETUP_ENVTEST_VERSION"
       - run: |
           assets=$(setup-envtest use "$ENVTEST_K8S_VERSION" --index "$ENVTEST_INDEX_URL" --bin-dir bin/envtest -p path)
           echo "KUBEBUILDER_ASSETS=$assets" >>"$GITHUB_ENV"
-      # Saving before botbox runs fills the cache even when botbox fails.
+      # Saving before reconciler-fuzzer runs fills the cache even when it fails.
       - if: steps.tools.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
         with:
@@ -46,17 +46,17 @@ jobs:
             bin/envtest
           key: ${{ steps.tools.outputs.cache-primary-key }}
       - run: go build -o bin/controller ./cmd/controller   # Build what launch.binary names.
-      # exec hands a cancelled job's signal to botbox. bash would not pass it on.
+      # exec hands a cancelled job's signal to reconciler-fuzzer. bash would not pass it on.
       - if: github.event_name == 'pull_request'
-        run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-out
+        run: exec reconciler-fuzzer run --target target.yaml --seed 23 --runs 5 --deadline 10m --out reconciler-fuzzer-out
       - if: github.event_name == 'schedule'
-        run: exec botbox run --target target.yaml --runs 20 --deadline 30m --out botbox-out
+        run: exec reconciler-fuzzer run --target target.yaml --runs 20 --deadline 30m --out reconciler-fuzzer-out
       - if: always()
-        run: cat botbox-out/*/summary.md >>"$GITHUB_STEP_SUMMARY" || true
-      # gh run download <run-id> --name botbox-out --dir botbox-out restores
-      # the paths that the replay command in report.md names.
+        run: cat reconciler-fuzzer-out/*/summary.md >>"$GITHUB_STEP_SUMMARY" || true
+      # gh run download <run-id> --name reconciler-fuzzer-out --dir reconciler-fuzzer-out
+      # restores the paths that the replay command in report.md names.
       - if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: botbox-out
-          path: botbox-out/
+          name: reconciler-fuzzer-out
+          path: reconciler-fuzzer-out/

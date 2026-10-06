@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/reference"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/reference"
 )
 
 const (
@@ -59,7 +59,7 @@ func TestTheReferenceSaysAHeldRequestHoldsASettleWait(t *testing.T) {
 		"A request the proxy holds under `action.delay` counts as a change until the proxy forwards it.",
 		"One held as the wait's time runs out keeps the wait open until `timeouts.settle` past its release.",
 		"It keeps a `recreate`'s wait for its old CR open the same way.",
-		"botbox does not check your properties where a wait ends with a request held, or released within `timeouts.stable`, and the run notes it.",
+		"reconciler-fuzzer does not check your properties where a wait ends with a request held, or released within `timeouts.stable`, and the run notes it.",
 	} {
 		if !reference.Says(t, opsHeading, says) {
 			t.Errorf("%s does not say under %q: %s", reference.Path, opsHeading, says)

@@ -12,7 +12,7 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 // line decodes one objects.jsonl line into the generic shape a report reads.
@@ -56,7 +56,7 @@ func TestWriteHistoryWritesOneLinePerVersionInOrder(t *testing.T) {
 		decoded := line(t, []byte(raw))
 		recorded = append(recorded, fmt.Sprintf("%s@%s", decoded["kind"], decoded["resourceVersion"]))
 	}
-	want := []string{"v1/ConfigMap@10", "toy.botbox/v1/Widget@11", "v1/ConfigMap@12"}
+	want := []string{"v1/ConfigMap@10", "toy.reconciler-fuzzer/v1/Widget@11", "v1/ConfigMap@12"}
 	if !slices.Equal(recorded, want) {
 		t.Errorf("The lines hold %v, want %v: the versions in the order recorded.", recorded, want)
 	}
@@ -74,7 +74,7 @@ func TestAHistoryLineCarriesWhatTheInvariantsRead(t *testing.T) {
 		"observedGeneration": int64(4),
 	})
 	obj.SetGeneration(5)
-	obj.SetFinalizers([]string{"widget.botbox/cleanup"})
+	obj.SetFinalizers([]string{"widget.reconciler-fuzzer/cleanup"})
 	obj.SetLabels(map[string]string{"app": "toy"})
 	obj.SetDeletionTimestamp(&deletionTimestamp)
 

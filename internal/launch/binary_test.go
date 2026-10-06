@@ -17,7 +17,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/launch"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/launch"
 )
 
 // forever keeps the shell alive without exec'ing away, so that it can still
@@ -139,7 +139,7 @@ func TestStartSubstitutesKubeconfig(t *testing.T) {
 	waitForLog(t, log, "env="+kubeconfig)
 }
 
-const runNamespace = "botbox-run-x"
+const runNamespace = "reconciler-fuzzer-run-x"
 
 func newBinaryInNamespace(t *testing.T, script string, env map[string]string, args ...string) (*launch.Binary, *safeBuffer) {
 	t.Helper()
@@ -167,8 +167,8 @@ func TestStartSubstitutesNamespace(t *testing.T) {
 
 func TestEnvOverridesAnInheritedVariable(t *testing.T) {
 	t.Setenv("WATCH_NAMESPACE", "default")
-	t.Setenv("BOTBOX_INHERITED", "kept")
-	binary, log := newBinaryInNamespace(t, `echo "env=${WATCH_NAMESPACE} ${BOTBOX_INHERITED}"; `+forever,
+	t.Setenv("RECONCILER_FUZZER_INHERITED", "kept")
+	binary, log := newBinaryInNamespace(t, `echo "env=${WATCH_NAMESPACE} ${RECONCILER_FUZZER_INHERITED}"; `+forever,
 		map[string]string{"WATCH_NAMESPACE": "$NAMESPACE"})
 
 	mustStart(t, binary)
@@ -450,8 +450,8 @@ func TestStatusWhileTheTargetRuns(t *testing.T) {
 	}
 }
 
-// Before Start and after Stop, botbox is running no target and nothing stopped
-// on its own.
+// Before Start and after Stop, reconciler-fuzzer is running no target and
+// nothing stopped on its own.
 func TestStatusWithNoTargetRunning(t *testing.T) {
 	binary, log := newBinary(t, 0, "echo started; "+forever)
 
@@ -505,8 +505,8 @@ func TestExitedClosesWhenTheTargetStops(t *testing.T) {
 	requireClosed(t, exited, "after the target exited")
 }
 
-// Before Start and after Stop botbox runs no target, and a caller has nothing
-// to wait for.
+// Before Start and after Stop reconciler-fuzzer runs no target, and a caller
+// has nothing to wait for.
 func TestExitedWithNoTargetRunning(t *testing.T) {
 	binary, log := newBinary(t, 0, "echo started; "+forever)
 	requireClosed(t, binary.Exited(), "before Start")
@@ -713,7 +713,7 @@ func TestAStopOrRestartIsNoExit(t *testing.T) {
 	time.Sleep(300 * time.Millisecond)
 
 	if seen := heard.all(); len(seen) != 0 {
-		t.Errorf("The supervisor reported the exits %v, and botbox ended every process itself.", seen)
+		t.Errorf("The supervisor reported the exits %v, and reconciler-fuzzer ended every process itself.", seen)
 	}
 	waitForLogCount(t, log, "started", 2)
 	if status := binary.Status(); status.Running {

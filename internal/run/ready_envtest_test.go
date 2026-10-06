@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosenhouse/botbox/internal/run"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // A G4 on op 0 has three usual causes, and the run says which.
@@ -78,7 +78,7 @@ func withReady(t *testing.T, binary, ready string) *target.Target {
 	if err != nil {
 		t.Fatal(err)
 	}
-	declared := fmt.Sprintf("name: toy-widget\nprimary: toy.botbox/v1/Widget\nsample: %s\nready: '%s'\nlaunch: {binary: %s}\n",
+	declared := fmt.Sprintf("name: toy-widget\nprimary: toy.reconciler-fuzzer/v1/Widget\nsample: %s\nready: '%s'\nlaunch: {binary: %s}\n",
 		sample, ready, binary)
 	path := filepath.Join(t.TempDir(), "target.yaml")
 	if err := os.WriteFile(path, []byte(declared), 0o644); err != nil {

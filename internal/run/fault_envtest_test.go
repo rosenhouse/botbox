@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
 )
 
 // seededBugB11 selects the bug of DESIGN.md §9.1 that a refused create makes
@@ -206,20 +206,20 @@ const keptCR = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "patch", "resource": "widgets"}, "action": {"error": 500}, "until": {"op": 3}}},
-    {"i": 2, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 2, "t": "recreate", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 3, "t": "settle"}
   ]
 }`
 
-// lostChild refuses the toy's ConfigMap creates while botbox deletes a child,
-// so status.ready counts the child until the update after the fault.
+// lostChild refuses the toy's ConfigMap creates while reconciler-fuzzer deletes
+// a child, so status.ready counts the child until the update after the fault.
 const lostChild = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"error": 500}, "until": {"op": 3}}},
     {"i": 2, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
     {"i": 3, "t": "update", "patch": {"spec": {"count": 3}}}
@@ -279,10 +279,10 @@ const refusedAcrossARecreate = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"error": 500}, "until": {"op": 4}}},
     {"i": 2, "t": "update", "patch": {"spec": {"count": 2}}},
-    {"i": 3, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 3, "t": "recreate", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 4, "t": "settle"}
   ]
 }`
@@ -312,7 +312,7 @@ func TestAFinalizerThatNeverClearsFailsG4OnceAFaultThatStoppedARecreateIsCleared
 		result := runUnder(t, "--bug=13")
 
 		if v := result.Violation; v == nil || v.ID != "G4" || !strings.Contains(v.Statement, "after the last fault stopped") ||
-			!strings.Contains(v.Statement, "held by the finalizers widget.botbox/cleanup") {
+			!strings.Contains(v.Statement, "held by the finalizers widget.reconciler-fuzzer/cleanup") {
 			t.Errorf("The run reported %v, want the G4 of the wait after the last fault stopped, naming the finalizer.", v)
 		}
 	})
@@ -331,7 +331,7 @@ const leaseFault = `{
   "seed": 23,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "update", "resource": "leases", "fraction": 0.8}, "action": {"error": 500}}},
     {"i": 2, "t": "update", "patch": {"spec": {"count": 2}}},
     {"i": 3, "t": "update", "patch": {"spec": {"count": 3}}},
@@ -340,8 +340,8 @@ const leaseFault = `{
   ]
 }`
 
-// The toy with no bug exits whenever it loses its lease, and botbox restarts
-// it. Once the teardown clears the fault, it recovers.
+// The toy with no bug exits whenever it loses its lease, and reconciler-fuzzer
+// restarts it. Once the teardown clears the fault, it recovers.
 func TestAToyThatLosesItsLeaseUnderAFaultPasses(t *testing.T) {
 	t.Parallel()
 	toy := loadTarget(t, buildToy(t))
@@ -383,7 +383,7 @@ const leaseSlow = `{
   "seed": 23,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "update", "resource": "leases", "fraction": 0.8}, "action": {"error": 500}}},
     {"i": 2, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"delay": "1.5s"}}},
     {"i": 3, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
@@ -423,7 +423,8 @@ func TestAToyThatWinsItsLeaseBackLatePasses(t *testing.T) {
 }
 
 // A toy with a field index watches Widgets before it leads. The toy with no
-// bug passes, because botbox counts it back only once it wins its lease.
+// bug passes, because reconciler-fuzzer counts it back only once it wins its
+// lease.
 func TestAToyThatWatchesBeforeItLeadsPasses(t *testing.T) {
 	t.Parallel()
 	toy := loadTarget(t, buildToy(t))
@@ -483,7 +484,7 @@ const heldCreate = `{
   "seed": 23,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"delay": "3s"}}},
     {"i": 2, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
   ]
@@ -496,7 +497,7 @@ const heldReads = `{
   "seed": 23,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "list", "resource": "configmaps"}, "action": {"delay": "1s"}}},
     {"i": 2, "t": "fault", "spec": {"match": {"verb": "watch", "resource": "configmaps"}, "action": {"delay": "1s"}}},
     {"i": 3, "t": "restart"},
@@ -560,7 +561,7 @@ const heldDeletes = `{
   "seed": 23,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
     {"i": 1, "t": "fault", "spec": {"match": {"resource": "configmaps"}, "action": {"delay": "6s"}}},
     {"i": 2, "t": "delete"}
   ]
@@ -574,7 +575,7 @@ const heldChildDeletes = `{
   "seed": 23,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 3}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 3}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "delete", "resource": "configmaps"}, "action": {"delay": "5s"}}},
     {"i": 2, "t": "delete"}
   ]
@@ -587,9 +588,9 @@ const heldFinalizer = `{
   "seed": 23,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "patch", "resource": "widgets"}, "action": {"delay": "12s"}, "until": {"count": 1}}},
-    {"i": 2, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}}
+    {"i": 2, "t": "recreate", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}}
   ]
 }`
 
@@ -633,7 +634,7 @@ const informerFault = `{
   "seed": 20260924,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 1, "t": "restart"},
     {"i": 2, "t": "fault", "spec": {"match": {"resource": "configmaps"}, "action": {"error": 500}, "until": {"for": "4s"}}},
     {"i": 3, "t": "settle"},

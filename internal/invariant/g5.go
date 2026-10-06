@@ -7,15 +7,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 // RestartStable is G5: restarting the target does not change converged state.
 // It compares the last converged snapshot before each Restart with the first
 // converged one after it, keyed by kind and name. A Restart missing either
 // snapshot, or with a fault between them, is not evaluated, and the result
-// says so. G5 leaves out what a change of botbox's between them may have
-// changed, and says so too.
+// says so. G5 leaves out what a change of reconciler-fuzzer's between them may
+// have changed, and says so too.
 func RestartStable(in Input) (Result, error) {
 	out := Result{ID: "G5"}
 	for _, op := range in.Ops {
@@ -123,7 +123,7 @@ type changedObject struct {
 }
 
 // compare reports every object that the Restart added, dropped or changed, in
-// one violation. It leaves out what botbox's changes reached.
+// one violation. It leaves out what reconciler-fuzzer's changes reached.
 func (out *Result) compare(in Input, op Op, before, after Checkpoint, reached reach) {
 	states := in.statesAt([]time.Time{before.Time, after.Time})
 	differ := in.differ(states[0], states[1], out)

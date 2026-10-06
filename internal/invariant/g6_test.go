@@ -8,9 +8,9 @@ import (
 
 	"k8s.io/client-go/util/workqueue"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // loop repeats a request every 500ms from 1s into the run, which keeps every
@@ -104,7 +104,7 @@ func TestG6CountsAFailingWatch(t *testing.T) {
 func TestG6CountsOneRequestAtATime(t *testing.T) {
 	// An earlier run's namespace, which the target can still reconcile.
 	elsewhere := failedGet("w-0", 404)
-	elsewhere.Namespace = "botbox-run-0"
+	elsewhere.Namespace = "reconciler-fuzzer-run-0"
 	for _, differs := range []struct {
 		field string
 		other proxy.Request
@@ -127,7 +127,7 @@ func TestG6CountsOneRequestAtATime(t *testing.T) {
 // A run keeps its first violation, so G6 reports the loop that began first.
 func TestG6OrdersLoopsByWhenTheyBegan(t *testing.T) {
 	elsewhere := failedGet("w-0", 404)
-	elsewhere.Namespace = "botbox-run-0"
+	elsewhere.Namespace = "reconciler-fuzzer-run-0"
 	for _, test := range []struct {
 		name          string
 		first, second proxy.Request
@@ -139,7 +139,7 @@ func TestG6OrdersLoopsByWhenTheyBegan(t *testing.T) {
 		{"together, by request", failedGet("w-1", 404), failedGet("w-0", 404), 0,
 			[]string{namespace + "/w-0", namespace + "/w-1"}},
 		{"together, by namespace", failedGet("w-0", 404), elsewhere, 0,
-			[]string{"botbox-run-0/w-0", namespace + "/w-0"}},
+			[]string{"reconciler-fuzzer-run-0/w-0", namespace + "/w-0"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			// The first loop also ends last.

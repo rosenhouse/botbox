@@ -65,8 +65,8 @@ func must(err error) {
 	}
 }
 
-// counter is botbox's proxy log cut down to what this spike reports: the verb
-// and resource of every request the controller makes.
+// counter is reconciler-fuzzer's proxy log cut down to what this spike reports:
+// the verb and resource of every request the controller makes.
 type counter struct {
 	mu   sync.Mutex
 	log  []string
@@ -418,8 +418,8 @@ func main() {
 	fmt.Printf("  writes over the restart:%s\n", tally(writes(proxy.since())))
 
 	// Delete: this spike runs no garbage collector, so whatever is left is
-	// either the controller's own cleanup or something botbox's collector
-	// would resolve from its ownerReferences.
+	// either the controller's own cleanup or something reconciler-fuzzer's
+	// collector would resolve from its ownerReferences.
 	proxy.mark()
 	t1 = time.Now()
 	must(dyn.Resource(esGVR).Namespace(namespace).Delete(ctx, esName, metav1.DeleteOptions{}))

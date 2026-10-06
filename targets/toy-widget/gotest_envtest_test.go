@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// docs/ci.md embeds botbox_test.go for adopters to copy. This runs it from a
+// docs/ci.md embeds reconciler_fuzzer_test.go for adopters to copy. This runs it from a
 // copy of the repository's layout, so that it builds nothing into the checkout.
 func TestTheGoTestRecipe(t *testing.T) {
 	dir := t.TempDir()
@@ -21,15 +21,15 @@ func TestTheGoTestRecipe(t *testing.T) {
 	if err := os.CopyFS(toy, os.DirFS(".")); err != nil {
 		t.Fatal(err)
 	}
-	goBuild(t, "../..", filepath.Join(repo, "bin", "botbox"), "./cmd/botbox")
+	goBuild(t, "../..", filepath.Join(repo, "bin", "reconciler-fuzzer"), "./cmd/reconciler-fuzzer")
 	controller := filepath.Join(repo, "bin", "toy-widget")
 	goBuild(t, ".", controller, ".")
 	recipe := filepath.Join(dir, "recipe.test")
-	if out, err := exec.Command("go", "test", "-c", "-tags", "botbox", "-o", recipe, ".").CombinedOutput(); err != nil {
+	if out, err := exec.Command("go", "test", "-c", "-tags", "reconciler_fuzzer", "-o", recipe, ".").CombinedOutput(); err != nil {
 		t.Fatalf("Compiling the recipe failed: %v\n%s", err, out)
 	}
 	runRecipe := func(timeout string) (string, error) {
-		cmd := exec.Command(recipe, "-test.run", "^TestBotbox$", "-test.v", "-test.timeout", timeout)
+		cmd := exec.Command(recipe, "-test.run", "^TestReconcilerFuzzer$", "-test.v", "-test.timeout", timeout)
 		cmd.Dir = toy
 		out, err := cmd.CombinedOutput()
 		return string(out), err
@@ -38,7 +38,7 @@ func TestTheGoTestRecipe(t *testing.T) {
 		t.Helper()
 		out, err := runRecipe(timeout)
 		var exit *exec.ExitError
-		if !errors.As(err, &exit) || !strings.Contains(out, "--- FAIL: TestBotbox") {
+		if !errors.As(err, &exit) || !strings.Contains(out, "--- FAIL: TestReconcilerFuzzer") {
 			t.Fatalf("The recipe returned %v, and must fail:\n%s", err, out)
 		}
 		for _, want := range shown {
@@ -51,26 +51,26 @@ func TestTheGoTestRecipe(t *testing.T) {
 
 	t.Run("passes the toy with no bug", func(t *testing.T) {
 		out, err := runRecipe("10m")
-		if err != nil || !strings.Contains(out, "--- PASS: TestBotbox") {
+		if err != nil || !strings.Contains(out, "--- PASS: TestReconcilerFuzzer") {
 			t.Fatalf("The recipe returned %v, and must pass:\n%s", err, out)
 		}
 	})
 
-	// The three runs take longer than the timeout leaves botbox.
-	t.Run("stops botbox before go test's timeout", func(t *testing.T) {
-		out := fails(t, "40s", "botbox: exit status 2")
+	// The three runs take longer than the timeout leaves reconciler-fuzzer.
+	t.Run("stops reconciler-fuzzer before go test's timeout", func(t *testing.T) {
+		out := fails(t, "40s", "reconciler-fuzzer: exit status 2")
 		if !regexp.MustCompile(`the --deadline of \d+s ended`).MatchString(out) {
-			t.Errorf("botbox names no deadline in whole seconds:\n%s", out)
+			t.Errorf("reconciler-fuzzer names no deadline in whole seconds:\n%s", out)
 		}
 	})
 
-	t.Run("fails when go test's timeout leaves botbox no time", func(t *testing.T) {
-		if out := fails(t, "31s", "leaves botbox no time"); strings.Contains(out, "botbox: exit status") {
-			t.Errorf("The recipe ran botbox:\n%s", out)
+	t.Run("fails when go test's timeout leaves reconciler-fuzzer no time", func(t *testing.T) {
+		if out := fails(t, "31s", "leaves reconciler-fuzzer no time"); strings.Contains(out, "reconciler-fuzzer: exit status") {
+			t.Errorf("The recipe ran reconciler-fuzzer:\n%s", out)
 		}
 	})
 
-	t.Run("fails B4 and shows what botbox found", func(t *testing.T) {
+	t.Run("fails B4 and shows what reconciler-fuzzer found", func(t *testing.T) {
 		declared := filepath.Join(toy, "target.yaml")
 		yaml, err := os.ReadFile(declared)
 		if err != nil {
@@ -83,14 +83,14 @@ func TestTheGoTestRecipe(t *testing.T) {
 		if err := os.WriteFile(declared, []byte(buggy), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		fails(t, "10m", "run 1: G4 ", "botbox: exit status 1")
+		fails(t, "10m", "run 1: G4 ", "reconciler-fuzzer: exit status 1")
 	})
 
-	t.Run("fails a controller botbox cannot launch, and shows why", func(t *testing.T) {
+	t.Run("fails a controller reconciler-fuzzer cannot launch, and shows why", func(t *testing.T) {
 		if err := os.Remove(controller); err != nil {
 			t.Fatal(err)
 		}
-		fails(t, "10m", "launch.binary", "botbox: exit status 2")
+		fails(t, "10m", "launch.binary", "reconciler-fuzzer: exit status 2")
 	})
 }
 

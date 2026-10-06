@@ -23,7 +23,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 const (
@@ -184,7 +184,7 @@ func (c *Collector) unresolvedOwners() []Unresolved {
 // user agent tells the collector's writes from the target's.
 func collectorConfig(config *rest.Config) *rest.Config {
 	config = rest.CopyConfig(config)
-	config.UserAgent = "botbox-collector"
+	config.UserAgent = "reconciler-fuzzer-collector"
 	return config
 }
 

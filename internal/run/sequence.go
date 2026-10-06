@@ -14,9 +14,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // Sequence is one test sequence, as a sequence file holds it. It is the unit
@@ -48,14 +48,15 @@ type Op struct {
 	Patch map[string]any `json:"patch,omitempty"`
 	// Fault is the fault a fault op injects.
 	Fault *Fault `json:"spec,omitempty"`
-	// Until is where botbox creates the fixture of a deleteFixture op again.
+	// Until is where reconciler-fuzzer creates the fixture of a deleteFixture op
+	// again.
 	Until *Until `json:"until,omitempty"`
 	// NoSettle skips the Runner's implicit settle wait.
 	NoSettle bool `json:"noSettle,omitempty"`
 }
 
-// Until names the op before which botbox creates a deleted fixture again, as
-// it last wrote it.
+// Until names the op before which reconciler-fuzzer creates a deleted fixture
+// again, as it last wrote it.
 type Until struct {
 	Op int `json:"op"`
 }

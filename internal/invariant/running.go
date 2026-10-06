@@ -4,16 +4,16 @@ import (
 	"slices"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
 // Back is when the target first made a request after since that shows it
-// running, and whether it has. botbox has no other sign that a process it
-// started is running. A process starting up can request leader election and
-// paths that name no resource, such as discovery. A process that elects a
-// leader can start its informers before it leads, so only a lease it won
-// shows it running. It gets the lease before it wins it, while the leader it
-// replaces renews without a get until a renewal fails.
+// running, and whether it has. reconciler-fuzzer has no other sign that a
+// process it started is running. A process starting up can request leader
+// election and paths that name no resource, such as discovery. A process that
+// elects a leader can start its informers before it leads, so only a lease it
+// won shows it running. It gets the lease before it wins it, while the leader
+// it replaces renews without a get until a renewal fails.
 func Back(requests []proxy.Request, since time.Time) (time.Time, bool) {
 	if !electing(requests) {
 		return first(requests, since, func(r proxy.Request) bool { return r.Resource != "" && !leaderElection(r) })
@@ -60,9 +60,9 @@ func won(r proxy.Request) bool {
 
 func isLease(r proxy.Request) bool { return leaderElection(r) && r.Resource == "leases" }
 
-// settledBy is when a target botbox restarted at restart must have converged:
-// timeouts.settle past its return where it returned within timeouts.settle,
-// or else timeouts.settle past the restart.
+// settledBy is when a target reconciler-fuzzer restarted at restart must have
+// converged: timeouts.settle past its return where it returned within
+// timeouts.settle, or else timeouts.settle past the restart.
 func (in Input) settledBy(restart time.Time) time.Time {
 	settle := in.timeouts().Settle
 	if back, found := Back(in.Requests, restart); found && back.Before(restart.Add(settle)) {

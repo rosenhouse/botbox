@@ -12,9 +12,9 @@ import (
 	"slices"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
 // A failing run writes these two files.
@@ -32,9 +32,9 @@ const maxEvidence = invariant.MaxEvidence
 type Report struct {
 	Check  Check
 	Target Target
-	// Botbox is the version of botbox that ran the sequence. A bug report
-	// needs it beside the target's own.
-	Botbox string
+	// ReconcilerFuzzer is the version of reconciler-fuzzer that ran the sequence.
+	// A bug report needs it beside the target's own.
+	ReconcilerFuzzer string
 	// Seed is the sequence's seed, which the run is reproducible from.
 	Seed int64
 	// Notes name what a check could not judge, and what the test cluster
@@ -48,7 +48,7 @@ type Report struct {
 	// Applied is how many of the sequence's ops the run reached, and Ops is
 	// how many it holds. A run that ended at its violation reached fewer.
 	Applied, Ops int
-	// Collector says botbox's garbage collector ran.
+	// Collector says reconciler-fuzzer's garbage collector ran.
 	Collector bool
 	// Requests and Versions are the evidence the check quoted, and
 	// RequestsTotal and VersionsTotal how many entries it chose them from. A
@@ -117,7 +117,7 @@ func Write(dir string, r Report) error {
 type document struct {
 	Check            Check                  `json:"check"`
 	Target           Target                 `json:"target"`
-	Botbox           string                 `json:"botbox,omitempty"`
+	ReconcilerFuzzer string                 `json:"reconcilerFuzzer,omitempty"`
 	Seed             int64                  `json:"seed"`
 	Notes            []string               `json:"notes,omitempty"`
 	Replay           string                 `json:"replay"`
@@ -142,7 +142,7 @@ func (r Report) document() document {
 	return document{
 		Check:            r.Check,
 		Target:           r.Target,
-		Botbox:           r.Botbox,
+		ReconcilerFuzzer: r.ReconcilerFuzzer,
 		Seed:             r.Seed,
 		Notes:            r.Notes,
 		Replay:           r.Replay,

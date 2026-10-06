@@ -1,11 +1,11 @@
-# This sets every key but equal, which botbox refuses beside equalIgnore. It
-# loads, because it names the toy controller's files. It would not run: the toy
-# has no spec.prefix, labels no child and manages no Secret.
+# This sets every key but equal, which reconciler-fuzzer refuses beside
+# equalIgnore. It loads, because it names the toy controller's files. It would
+# not run: the toy has no spec.prefix, labels no child and manages no Secret.
 name: widget-controller
 version: v1.2.3
 crds:
   - ../../targets/toy-widget/crds/
-primary: toy.botbox/v1/Widget
+primary: toy.reconciler-fuzzer/v1/Widget
 sample: ../../targets/toy-widget/widget.yaml
 fixtures:
   - ../../targets/toy-widget/config.yaml

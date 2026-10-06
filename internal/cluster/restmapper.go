@@ -44,7 +44,7 @@ func ServedResources(config *rest.Config) ([]metav1.APIResource, error) {
 func discover(config *rest.Config) ([]*restmapper.APIGroupResources, error) {
 	client, err := discovery.NewDiscoveryClientForConfig(config)
 	if err != nil {
-		return nil, fmt.Errorf("building botbox's discovery client: %w", err)
+		return nil, fmt.Errorf("building reconciler-fuzzer's discovery client: %w", err)
 	}
 	groups, err := restmapper.GetAPIGroupResources(client)
 	if err != nil {

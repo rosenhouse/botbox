@@ -1,4 +1,4 @@
-package botbox_test
+package reconcilerfuzzer_test
 
 import (
 	"go/ast"
@@ -20,11 +20,11 @@ var designVocabulary = regexp.MustCompile(`§|DESIGN|T_settle|T_stable|T_delete|
 // citesDesign are the strings that may cite DESIGN.md, by file. The bug
 // matrix is a page for developers, and DESIGN.md holds the bug catalog.
 var citesDesign = map[string]string{
-	"cmd/botbox/matrix.go": "seeded bug of DESIGN.md §9.1",
+	"cmd/reconciler-fuzzer/matrix.go": "seeded bug of DESIGN.md §9.1",
 }
 
-// Every string botbox prints comes from a literal, so no literal may need
-// DESIGN.md to be understood.
+// Every string reconciler-fuzzer prints comes from a literal, so no literal may
+// need DESIGN.md to be understood.
 func TestNoStringLiteralUsesTheDesignsVocabulary(t *testing.T) {
 	read := map[string]bool{}
 	for _, path := range goFilesOutsideTests(t, "docs") {
@@ -51,7 +51,7 @@ func TestNoStringLiteralUsesTheDesignsVocabulary(t *testing.T) {
 			return true
 		})
 	}
-	requireRead(t, read, "cmd/botbox/main.go", "internal/invariant/g2.go", "targets/toy-widget/controller/bug.go")
+	requireRead(t, read, "cmd/reconciler-fuzzer/main.go", "internal/invariant/g2.go", "targets/toy-widget/controller/bug.go")
 }
 
 // A comment must make sense without DESIGN.md open. go doc prints some of
@@ -73,7 +73,7 @@ func TestNoCommentUsesTheDesignsVocabulary(t *testing.T) {
 			}
 		}
 	}
-	requireRead(t, read, "cmd/botbox/main.go", "internal/invariant/g2.go", "targets/toy-widget/controller/bug.go", "docs/spikes/cert-manager-envtest/main.go")
+	requireRead(t, read, "cmd/reconciler-fuzzer/main.go", "internal/invariant/g2.go", "targets/toy-widget/controller/bug.go", "docs/spikes/cert-manager-envtest/main.go")
 }
 
 // requireRead fails unless the scan read something in each of paths.

@@ -228,7 +228,7 @@ little it refuses to guess rather than inventing a value: naming such a path in
 `generate.mutate` is a configuration error, not a silent no-op. The shrinker keeps a
 candidate only while it fails with the same check ID, so a shorter sequence that trips a
 different check is reported as the different bug it is, and the minimized sequence is
-re-run so the run directory's evidence is of the sequence botbox prints.
+re-run so the run directory's evidence is of the sequence reconciler-fuzzer prints.
 
 ### Wrong in the first draft
 
@@ -308,8 +308,8 @@ toy's 10s deletion window closes before the teardown reaches a verdict. Those ce
 read as passes. It is the first time D31's notes are visible in the matrix.
 
 Two runs against cert-manager cannot overlap, and only the quickstart's port guard keeps
-them apart. A caller that drives `botbox` directly gets no warning: the second controller
-dies on bind and botbox reports a harness error several ops later.
+them apart. A caller that drives `reconciler-fuzzer` directly gets no warning: the second controller
+dies on bind and reconciler-fuzzer reports a harness error several ops later.
 
 M5 outcome: `make test-example` draws its sequences, and a nightly workflow draws its own
 seeds.
@@ -392,7 +392,7 @@ Neither would have found the other's.
 
 Nine mutations of the M6 code outside `internal/report` survived the first draft. The sharpest
 was §10 M6's own acceptance: nothing tied a report to the minimized sequence, so the
-report could have carried the sequence botbox drew and every test would have passed.
+report could have carried the sequence reconciler-fuzzer drew and every test would have passed.
 A milestone's acceptance sentence deserves a test that reads like it.
 
 One of the tests written to close those holes passed for the wrong reason: it looked for an
@@ -402,7 +402,7 @@ unnoticed. Mutating each field separately caught it; running the test did not.
 Two retimings of the acceptance test were tried and both were invalid. A one-second settle
 breaks the toy's first reconcile before any fault exists. A wider stable makes convergence
 impossible, because a settle wait needs `T_stable` of quiet inside `T_settle` — which is
-issue #10, a target configured that way fails G4 on every op and botbox blames the
+issue #10, a target configured that way fails G4 on every op and reconciler-fuzzer blames the
 controller.
 
 M6 outcome: a failing run writes a report that quotes its evidence, a fault shrinks toward
@@ -412,7 +412,7 @@ a shorter duration, and a fault makes the toy fail an invariant it otherwise pas
 
 ### Right
 
-external-secrets v2.11.0 runs unmodified, and this adoption changed no Go code in botbox.
+external-secrets v2.11.0 runs unmodified, and this adoption changed no Go code in reconciler-fuzzer.
 A spike measured the controller against §8's contract before anything was written
 (`docs/spikes/2026-09-22-external-secrets-envtest.md`), so the target file was right the
 first time. `make test-example-external-secrets` passes from a checkout holding no binary,
@@ -489,7 +489,7 @@ generation reaches the API server with mutated values on a seed the spike never 
 
 cert-manager's fixed healthz port keeps its runs sequential and external-secrets' do not,
 which is worth having in the repo: the first example's port guard could be read as
-something botbox requires rather than something one controller forces.
+something reconciler-fuzzer requires rather than something one controller forces.
 
 M7 outcome: `make test-example-external-secrets` runs on every pull request, and one
 nightly workflow draws seeds for both examples.
@@ -498,7 +498,7 @@ nightly workflow draws seeds for both examples.
 
 The nightly workflow's "Report the find" steps had `if: steps.<id>.conclusion == 'failure'`
 without `failure()`, so GitHub Actions skipped them after a failed step. `make` also
-always exits 2 on a recipe failure, losing botbox's exit code. The fix adds `failure()`,
+always exits 2 on a recipe failure, losing reconciler-fuzzer's exit code. The fix adds `failure()`,
 a `must-pass` Makefile macro that preserves the exit code, exit 2 in quickstarts for
 their own failures, and jq-based verdict logic that reads `summary.json` to file under
 `nightly-find-` or `nightly-error-`.

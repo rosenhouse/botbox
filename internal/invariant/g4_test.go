@@ -11,7 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
 )
 
 func TestG4PassesWhenTheCRIsReadyWithinTheSettleTimeout(t *testing.T) {
@@ -100,7 +100,7 @@ func TestG4RequiresConvergenceAfterAFixtureChanges(t *testing.T) {
 	}{
 		{"an update", func(r *run) *run { return r.op(invariant.OpUpdateFixture, 10*time.Second) }, "op 1 (updateFixture)"},
 		{"a restore", func(r *run) *run { return r.restoring(invariant.OpSettle, 10*time.Second) },
-			"op 1 (settle), where botbox restored a fixture"},
+			"op 1 (settle), where reconciler-fuzzer restored a fixture"},
 	} {
 		t.Run(change.name, func(t *testing.T) {
 			in := change.apply(newRun().
@@ -263,8 +263,8 @@ func TestG4GivesASpecChangeAfterAFaultTheTimeTheFaultLeaves(t *testing.T) {
 	silent(t, invariant.Convergence, in)
 }
 
-// botbox chose to restart the target, so G4 gives it T_settle past its return
-// to converge on a spec change made around the restart.
+// reconciler-fuzzer chose to restart the target, so G4 gives it T_settle past
+// its return to converge on a spec change made around the restart.
 func TestG4GivesARestartedTargetTSettlePastItsReturn(t *testing.T) {
 	converged := func() *run {
 		return newRun().
@@ -387,8 +387,8 @@ func TestG4ExcusesAnExpiredWaitUntilTheTargetHadTimeToRecover(t *testing.T) {
 	}
 }
 
-// A target that exits on a fault's error waits out botbox's backoff, which is
-// not the target's to answer for. An exit no fault excused is.
+// A target that exits on a fault's error waits out reconciler-fuzzer's backoff,
+// which is not the target's to answer for. An exit no fault excused is.
 func TestG4JudgesNoDeadlineAnExitAFaultExcusedFellBefore(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -482,8 +482,8 @@ func TestG4ReadsAHistoryTheObserverRecordedOutOfOrder(t *testing.T) {
 }
 
 // The teardown's own delete bumps metadata.generation while
-// status.observedGeneration lags, so the CR botbox is deleting reads as not
-// ready (DESIGN.md §5.5, step 4).
+// status.observedGeneration lags, so the CR reconciler-fuzzer is deleting reads
+// as not ready (DESIGN.md §5.5, step 4).
 func TestG4IgnoresAWindowTheTeardownReachedInto(t *testing.T) {
 	in := newRun().
 		op(invariant.OpCreate, 0).

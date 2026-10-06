@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosenhouse/botbox/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
 )
 
 // The README tells a reader to pin a sequence that deletes an object of each

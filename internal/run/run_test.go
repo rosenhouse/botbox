@@ -28,17 +28,17 @@ import (
 	"k8s.io/client-go/rest"
 	clienttesting "k8s.io/client-go/testing"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
-	"github.com/rosenhouse/botbox/internal/launch"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/launch"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 var (
-	widgetKind        = schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
+	widgetKind        = schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Widget"}
 	configMapKind     = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
-	widgetResource    = schema.GroupVersionResource{Group: "toy.botbox", Version: "v1", Resource: "widgets"}
+	widgetResource    = schema.GroupVersionResource{Group: "toy.reconciler-fuzzer", Version: "v1", Resource: "widgets"}
 	configMapResource = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
 )
 
@@ -96,7 +96,7 @@ var serviceAccountKind = schema.GroupVersionKind{Version: "v1", Kind: "ServiceAc
 func inRunNamespace(gvk schema.GroupVersionKind, name string) *unstructured.Unstructured {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(gvk)
-	u.SetNamespace("botbox-run-1")
+	u.SetNamespace("reconciler-fuzzer-run-1")
 	u.SetName(name)
 	return u
 }
@@ -133,7 +133,7 @@ func TestAwaitNamespaceDefaults(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			store := observe.NewStore(observe.Options{Namespace: "botbox-run-1"})
+			store := observe.NewStore(observe.Options{Namespace: "reconciler-fuzzer-run-1"})
 			for _, made := range test.made {
 				store.Record(made.GroupVersionKind(), made, time.Now())
 			}
@@ -157,7 +157,7 @@ func TestAwaitNamespaceDefaults(t *testing.T) {
 }
 
 func TestExcludePresentLeavesWhatComesLaterManaged(t *testing.T) {
-	store := observe.NewStore(observe.Options{Namespace: "botbox-run-1", Manages: []schema.GroupVersionKind{configMapKind}})
+	store := observe.NewStore(observe.Options{Namespace: "reconciler-fuzzer-run-1", Manages: []schema.GroupVersionKind{configMapKind}})
 	store.Record(configMapKind, inRunNamespace(configMapKind, "kube-root-ca.crt"), time.Now())
 
 	excludePresent(store, []schema.GroupVersionKind{widgetKind, configMapKind})
@@ -192,7 +192,7 @@ func TestNewNamespaceNameIsFreshAndServable(t *testing.T) {
 // The Observer watches what the Runner and the collector act on.
 func TestTheObserverWatchesTheTargetsKinds(t *testing.T) {
 	h := &Harness{
-		Namespace: "botbox-run-1",
+		Namespace: "reconciler-fuzzer-run-1",
 		mapper:    mapperFor(),
 		target:    &target.Target{Primary: widgetKind, Manages: []schema.GroupVersionKind{configMapKind}},
 	}
@@ -225,7 +225,7 @@ func TestStartReportsADiscoveryThatFailed(t *testing.T) {
 // never discovers for itself.
 func TestNewLiveRunResolvesThroughTheHarnessMapper(t *testing.T) {
 	h := &Harness{
-		Namespace: "botbox-run-1",
+		Namespace: "reconciler-fuzzer-run-1",
 		Config:    unreachable(),
 		mapper:    mapperFor(widgetKind, configMapKind),
 	}
@@ -249,7 +249,7 @@ func TestNewLiveRunResolvesThroughTheHarnessMapper(t *testing.T) {
 // once the Observer sees the deletion.
 func TestAwaitCRGoneWaitsUntilTheInstantTheRunnerGives(t *testing.T) {
 	cr := widget("widget")
-	cr.SetNamespace("botbox-run-1")
+	cr.SetNamespace("reconciler-fuzzer-run-1")
 	live := liveOver(widgetsClient(cr))
 	began := time.Now()
 	moved, due := began.Add(100*time.Millisecond), began.Add(300*time.Millisecond)
@@ -286,7 +286,7 @@ func TestAwaitCRGoneReportsAReadThatFailed(t *testing.T) {
 // liveOver is a live run of a toy whose T_delete is too short to matter.
 func liveOver(client dynamic.Interface) *liveRun {
 	return &liveRun{
-		h:         &Harness{Namespace: "botbox-run-1"},
+		h:         &Harness{Namespace: "reconciler-fuzzer-run-1"},
 		target:    &target.Target{Primary: widgetKind, Timeouts: target.Timeouts{Delete: time.Millisecond}},
 		client:    client,
 		resources: map[schema.GroupVersionKind]schema.GroupVersionResource{widgetKind: widgetResource},
@@ -300,9 +300,9 @@ func widgetsClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
 // What the live run says names a kind as target.yaml writes it.
 func TestTheLiveRunNamesKindsAsTargetYAMLDoes(t *testing.T) {
 	fixture := widget("fixture")
-	fixture.SetNamespace("botbox-run-1")
+	fixture.SetNamespace("reconciler-fuzzer-run-1")
 	held := fixture.DeepCopy()
-	held.SetFinalizers([]string{"toy.botbox/hold"})
+	held.SetFinalizers([]string{"toy.reconciler-fuzzer/hold"})
 	held.SetDeletionTimestamp(&metav1.Time{Time: time.Now()})
 	type reactors map[string]clienttesting.ReactionFunc
 	refused := func(clienttesting.Action) (bool, runtime.Object, error) { return true, nil, errors.New("refused") }
@@ -317,60 +317,60 @@ func TestTheLiveRunNamesKindsAsTargetYAMLDoes(t *testing.T) {
 		{name: "an unresolved kind", do: func(context.Context, *liveRun) string {
 			_, err := newLiveRun(&Harness{Config: unreachable(), mapper: mapperFor()}, &target.Target{Primary: widgetKind})
 			return fmt.Sprint(err)
-		}, want: "resolving the resource of toy.botbox/v1/Widget:"},
+		}, want: "resolving the resource of toy.reconciler-fuzzer/v1/Widget:"},
 		{name: "a CR of another kind", do: func(ctx context.Context, live *liveRun) string {
 			cr := &unstructured.Unstructured{}
 			cr.SetGroupVersionKind(configMapKind)
 			return fmt.Sprint(live.createCR(ctx, cr))
-		}, want: "the op creates a v1/ConfigMap, and the target's primary CR is a toy.botbox/v1/Widget"},
+		}, want: "the op creates a v1/ConfigMap, and the target's primary CR is a toy.reconciler-fuzzer/v1/Widget"},
 		{name: "a refused deleteManaged", reactors: reactors{"delete": refused},
 			do: func(ctx context.Context, live *liveRun) string {
 				_, err := live.deleteManaged(ctx, widgetKind, "child")
 				return fmt.Sprint(err)
-			}, want: "deleting the managed toy.botbox/v1/Widget child: refused"},
+			}, want: "deleting the managed toy.reconciler-fuzzer/v1/Widget child: refused"},
 		{name: "a refused patchFixture", reactors: reactors{"patch": refused},
 			do: func(ctx context.Context, live *liveRun) string {
 				return fmt.Sprint(live.patchFixture(ctx, widgetKind, "fixture", map[string]any{}))
-			}, want: "patching the fixture toy.botbox/v1/Widget fixture: refused"},
+			}, want: "patching the fixture toy.reconciler-fuzzer/v1/Widget fixture: refused"},
 		{name: "a refused deleteFixture", reactors: reactors{"delete": refused},
 			do: func(ctx context.Context, live *liveRun) string {
 				return fmt.Sprint(live.deleteFixture(ctx, widgetKind, "fixture"))
-			}, want: "deleting the fixture toy.botbox/v1/Widget fixture: refused"},
+			}, want: "deleting the fixture toy.reconciler-fuzzer/v1/Widget fixture: refused"},
 		{name: "a refused read after deleteFixture", reactors: reactors{"delete": accepted, "get": refused},
 			do: func(ctx context.Context, live *liveRun) string {
 				return fmt.Sprint(live.deleteFixture(ctx, widgetKind, "fixture"))
-			}, want: "waiting for the fixture toy.botbox/v1/Widget fixture to go: refused"},
+			}, want: "waiting for the fixture toy.reconciler-fuzzer/v1/Widget fixture to go: refused"},
 		{name: "a fixture its finalizers hold", objects: []runtime.Object{held}, reactors: reactors{"delete": accepted},
 			do: func(ctx context.Context, live *liveRun) string {
 				return fmt.Sprint(live.deleteFixture(ctx, widgetKind, "fixture"))
-			}, want: "the fixture toy.botbox/v1/Widget fixture was still there"},
+			}, want: "the fixture toy.reconciler-fuzzer/v1/Widget fixture was still there"},
 		{name: "a fixture something recreated", objects: []runtime.Object{fixture.DeepCopy()},
 			do: func(ctx context.Context, live *liveRun) string {
 				return fmt.Sprint(live.createFixture(ctx, fixture.DeepCopy()))
-			}, want: "something created the fixture toy.botbox/v1/Widget fixture again"},
+			}, want: "something created the fixture toy.reconciler-fuzzer/v1/Widget fixture again"},
 		{name: "a refused createFixture", reactors: reactors{"create": refused},
 			do: func(ctx context.Context, live *liveRun) string {
 				return fmt.Sprint(live.createFixture(ctx, fixture.DeepCopy()))
-			}, want: "restoring the fixture toy.botbox/v1/Widget fixture: refused"},
+			}, want: "restoring the fixture toy.reconciler-fuzzer/v1/Widget fixture: refused"},
 		{name: "a refused list of what is left", reactors: reactors{"list": refused},
 			do: func(ctx context.Context, live *liveRun) string {
 				_, err := live.forceFinalizers(ctx)
 				return fmt.Sprint(err)
-			}, want: "listing the toy.botbox/v1/Widget left behind: refused"},
+			}, want: "listing the toy.reconciler-fuzzer/v1/Widget left behind: refused"},
 		{name: "a refused patch of finalizers", objects: []runtime.Object{held}, reactors: reactors{"patch": refused},
 			do: func(ctx context.Context, live *liveRun) string {
 				_, err := live.forceFinalizers(ctx)
 				return fmt.Sprint(err)
-			}, want: "clearing the finalizers of toy.botbox/v1/Widget fixture: refused"},
+			}, want: "clearing the finalizers of toy.reconciler-fuzzer/v1/Widget fixture: refused"},
 		{name: "finalizers it forced off", objects: []runtime.Object{held},
 			do: func(ctx context.Context, live *liveRun) string {
 				forced, err := live.forceFinalizers(ctx)
 				return fmt.Sprint(forced, err)
-			}, want: "[toy.botbox/v1/Widget fixture] <nil>"},
+			}, want: "[toy.reconciler-fuzzer/v1/Widget fixture] <nil>"},
 		{name: "a refused delete of what is left", reactors: reactors{"delete-collection": refused},
 			do: func(ctx context.Context, live *liveRun) string {
 				return fmt.Sprint(live.empty(ctx))
-			}, want: "deleting the toy.botbox/v1/Widget left behind: refused"},
+			}, want: "deleting the toy.reconciler-fuzzer/v1/Widget left behind: refused"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			client := widgetsClient(test.objects...)
@@ -388,9 +388,9 @@ func TestTheLiveRunNamesKindsAsTargetYAMLDoes(t *testing.T) {
 }
 
 func TestAwaitCleanWaitsOutItsWindow(t *testing.T) {
-	store := observe.NewStore(observe.Options{Namespace: "botbox-run-1"})
+	store := observe.NewStore(observe.Options{Namespace: "reconciler-fuzzer-run-1"})
 	cr := widget("widget")
-	cr.SetNamespace("botbox-run-1")
+	cr.SetNamespace("reconciler-fuzzer-run-1")
 	store.Record(widgetKind, cr, time.Now())
 	live := &liveRun{h: &Harness{Observer: &observe.Observer{Store: store}}, target: &target.Target{Primary: widgetKind}}
 	began := time.Now()
@@ -445,7 +445,7 @@ func TestApplyFixturesResolvesThroughTheHarnessMapper(t *testing.T) {
 	fixture.SetGroupVersionKind(configMapKind)
 	fixture.SetName("fixture")
 	h := &Harness{
-		Namespace: "botbox-run-1",
+		Namespace: "reconciler-fuzzer-run-1",
 		Config:    unreachable(),
 		mapper:    mapperFor(widgetKind),
 		target:    &target.Target{Primary: widgetKind, Fixtures: []*unstructured.Unstructured{fixture}},
@@ -470,7 +470,7 @@ func TestApplyFixturesSkipsClusterScopedFixtures(t *testing.T) {
 	fixture.SetGroupVersionKind(clusterRoleKind)
 	fixture.SetName("shared")
 	h := &Harness{
-		Namespace: "botbox-run-1",
+		Namespace: "reconciler-fuzzer-run-1",
 		Config:    unreachable(),
 		mapper:    mapper,
 		target: &target.Target{
@@ -496,7 +496,7 @@ func TestApplyFixturesRefusesAFixtureThatSetsANamespace(t *testing.T) {
 	fixture.SetName("shared")
 	fixture.SetNamespace("elsewhere")
 	h := &Harness{
-		Namespace: "botbox-run-1",
+		Namespace: "reconciler-fuzzer-run-1",
 		Config:    unreachable(),
 		mapper:    mapper,
 		target:    &target.Target{Primary: widgetKind, Fixtures: []*unstructured.Unstructured{fixture}},
@@ -513,7 +513,7 @@ func TestApplyFixturesRefusesAFixtureThatSetsANamespace(t *testing.T) {
 // A settle wait ends at the first reading of a ready that yields no bool,
 // rather than waiting out settle on it.
 func TestTheHarnessReadsAReadyThatYieldsNoBoolAsAnError(t *testing.T) {
-	store := observe.NewStore(observe.Options{Namespace: "botbox-run-x"})
+	store := observe.NewStore(observe.Options{Namespace: "reconciler-fuzzer-run-x"})
 	store.Record(widgetKind, widget("widget"), time.Now())
 	yieldsAnInt := &target.Target{Primary: widgetKind, Ready: func(*unstructured.Unstructured) (bool, error) {
 		return false, &target.EvalError{Predicate: "ready", Expr: "status.ready", Err: fmt.Errorf("%w: it yielded int64", target.ErrNotBool)}
@@ -583,14 +583,14 @@ func (l launcherReporting) Status() launch.Status { return l.status }
 func harnessOver(status launch.Status, p *proxy.Proxy) *Harness {
 	return &Harness{
 		target:   &target.Target{Primary: widgetKind},
-		Observer: &observe.Observer{Store: observe.NewStore(observe.Options{Namespace: "botbox-run-1"})},
+		Observer: &observe.Observer{Store: observe.NewStore(observe.Options{Namespace: "reconciler-fuzzer-run-1"})},
 		Launcher: launcherReporting{status: status},
 		Proxy:    p,
 	}
 }
 
 // listConfigMaps is the path of a request that shows the target runs.
-const listConfigMaps = "/api/v1/namespaces/botbox-run-1/configmaps"
+const listConfigMaps = "/api/v1/namespaces/reconciler-fuzzer-run-1/configmaps"
 
 // proxyThatSaw is a proxy that has recorded a request to each path.
 func proxyThatSaw(t *testing.T, paths ...string) *proxy.Proxy {
@@ -715,7 +715,7 @@ func TestTheHarnessRecordsWhatTheTargetWroteAsItExited(t *testing.T) {
 // would merge lists that the sequence's merge patch replaces.
 func TestAFixtureTakesAJSONMergePatch(t *testing.T) {
 	fixture := widget("fixture")
-	fixture.SetNamespace("botbox-run-1")
+	fixture.SetNamespace("reconciler-fuzzer-run-1")
 	client := widgetsClient(fixture)
 
 	err := liveOver(client).patchFixture(t.Context(), widgetKind, "fixture", map[string]any{"spec": map[string]any{"count": 2}})
@@ -775,7 +775,7 @@ func TestTheRunNamespaceIsDeletedAfterAnInterruptWithinABound(t *testing.T) {
 	cancel()
 
 	deleted := make(chan error, 1)
-	go func() { deleted <- deleteNamespace(ended, core, "botbox-run", 100*time.Millisecond) }()
+	go func() { deleted <- deleteNamespace(ended, core, "reconciler-fuzzer-run", 100*time.Millisecond) }()
 
 	select {
 	case err := <-deleted:
@@ -787,7 +787,7 @@ func TestTheRunNamespaceIsDeletedAfterAnInterruptWithinABound(t *testing.T) {
 	}
 	select {
 	case got := <-requests:
-		if want := "DELETE /api/v1/namespaces/botbox-run"; got != want {
+		if want := "DELETE /api/v1/namespaces/reconciler-fuzzer-run"; got != want {
 			t.Errorf("The API server got %q, want %q.", got, want)
 		}
 	default:
@@ -809,7 +809,7 @@ func TestTheRunNamespaceIsDeletedOnTheBudgetBoundGivesIt(t *testing.T) {
 			fmt.Fprint(w, `{"kind":"APIResourceList","groupVersion":"v1","resources":[]}`)
 		case "POST /api/v1/namespaces":
 			w.WriteHeader(http.StatusCreated)
-			fmt.Fprint(w, `{"kind":"Namespace","apiVersion":"v1","metadata":{"name":"botbox-run"}}`)
+			fmt.Fprint(w, `{"kind":"Namespace","apiVersion":"v1","metadata":{"name":"reconciler-fuzzer-run"}}`)
 		default:
 			fmt.Fprint(w, `{"kind":"Status","apiVersion":"v1","status":"Success"}`)
 		}

@@ -14,8 +14,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
-	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
 const namespace = "default"
@@ -158,7 +158,7 @@ func TestProxyInFrontOfTheAPIServer(t *testing.T) {
 		if status.Status().Code != 500 || status.Status().Reason != metav1.StatusReasonInternalError {
 			t.Errorf("The target decoded %+v, want a 500 InternalError.", status.Status())
 		}
-		if want := "botbox fault: create /api/v1/namespaces/default/configmaps"; status.Status().Message != want {
+		if want := "reconciler-fuzzer fault: create /api/v1/namespaces/default/configmaps"; status.Status().Message != want {
 			t.Errorf("The target decoded the message %q, want %q.", status.Status().Message, want)
 		}
 		requireRecords(t, recordsAfter(t, p, mark, 1), []proxy.Request{
@@ -193,7 +193,7 @@ func TestProxyInFrontOfTheAPIServer(t *testing.T) {
 		if !errors.As(err, &status) {
 			t.Fatalf("A protobuf client got %v, want a decodable status error.", err)
 		}
-		if want := "botbox fault: create /api/v1/namespaces/default/configmaps"; status.Status().Message != want {
+		if want := "reconciler-fuzzer fault: create /api/v1/namespaces/default/configmaps"; status.Status().Message != want {
 			t.Errorf("A protobuf client decoded the message %q, want %q.", status.Status().Message, want)
 		}
 	})

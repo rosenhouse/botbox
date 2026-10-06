@@ -1,4 +1,4 @@
-package botbox_test
+package reconcilerfuzzer_test
 
 import (
 	"os"
@@ -70,8 +70,8 @@ func anchors(page string) []string {
 }
 
 func TestAnchorsFollowGitHub(t *testing.T) {
-	page := "# botbox\n\n## Keep botbox out of your go.mod\n\n```sh\n# not a heading\n```\n\n### 6. Generic invariants\n## `target.yaml` keys\n"
-	if got, want := anchors(page), []string{"botbox", "keep-botbox-out-of-your-gomod", "6-generic-invariants", "targetyaml-keys"}; !slices.Equal(got, want) {
+	page := "# reconciler-fuzzer\n\n## Keep reconciler-fuzzer out of your go.mod\n\n```sh\n# not a heading\n```\n\n### 6. Generic invariants\n## `target.yaml` keys\n"
+	if got, want := anchors(page), []string{"reconciler-fuzzer", "keep-reconciler-fuzzer-out-of-your-gomod", "6-generic-invariants", "targetyaml-keys"}; !slices.Equal(got, want) {
 		t.Errorf("anchors gave %q, want %q.", got, want)
 	}
 }

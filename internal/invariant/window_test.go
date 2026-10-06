@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 // A violation quotes the evidence nearest it, because that is what explains it
@@ -60,7 +60,7 @@ func TestSampleQuotesOneFromEachKindInTurnNewestFirst(t *testing.T) {
 	}
 }
 
-// KindName orders the kinds, so toy.botbox/v1/Widget comes before
+// KindName orders the kinds, so toy.reconciler-fuzzer/v1/Widget comes before
 // v1/ConfigMap.
 func TestSampleTakesTheKindsInTheOrderOfTheirNames(t *testing.T) {
 	managed := []observe.Version{version(configMapGVK, "c", 0), version(widgetGVK, "w", 0)}
@@ -100,7 +100,7 @@ func TestRecentHistoryNamesTheObjectItQuotes(t *testing.T) {
 
 	got := invariant.RecentHistory(history[0].Key, history)
 
-	if want := "toy.botbox/v1/Widget w"; got.Of != want {
+	if want := "toy.reconciler-fuzzer/v1/Widget w"; got.Of != want {
 		t.Errorf("RecentHistory quotes the versions of %q, want %q.", got.Of, want)
 	}
 	if len(got.Quoted) != invariant.MaxEvidence || got.Total != len(history) {

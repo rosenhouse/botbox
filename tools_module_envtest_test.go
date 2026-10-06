@@ -1,6 +1,6 @@
 //go:build envtest
 
-package botbox_test
+package reconcilerfuzzer_test
 
 import (
 	"fmt"
@@ -14,9 +14,9 @@ import (
 	"testing"
 )
 
-// docs/ci.md's recipe pins botbox in a module of its own. This runs it in a
-// fresh operator module, on the oldest go that the README says fetches a newer
-// one, and on the go before it.
+// docs/ci.md's recipe pins reconciler-fuzzer in a module of its own. This runs
+// it in a fresh operator module, on the oldest go that the README says fetches
+// a newer one, and on the go before it.
 func TestTheToolsModuleRecipe(t *testing.T) {
 	install := section(t, readFile(t, "README.md"), "## Install")
 	oldest := regexp.MustCompile(`from Go (1\.\d+) on`).FindStringSubmatch(install)
@@ -24,7 +24,7 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 	if oldest == nil || remedy == nil {
 		t.Fatalf("README.md's Install section names no oldest go, or no GOTOOLCHAIN to run the commands with:\n%s", install)
 	}
-	keep := section(t, readFile(t, ciPage), "## Keep botbox out of your go.mod")
+	keep := section(t, readFile(t, ciPage), "## Keep reconciler-fuzzer out of your go.mod")
 	stopped := regexp.MustCompile("Under\\s+`GOTOOLCHAIN=local`, a\\s+`go`\\s+before\\s+[\\d.]+\\s+stops\\s+this\\s+recipe\\s+with\\s+`([^`]+)`").FindStringSubmatch(keep)
 	if stopped == nil {
 		t.Fatalf("%s's tools module section names no error that stops the recipe under GOTOOLCHAIN=local:\n%s", ciPage, keep)
@@ -34,7 +34,7 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 		t.Fatal(err)
 	}
 	script := readFile(t, toolsRecipe)
-	toolsDir, recipe := toolsModuleDir(t, script), replacingBotbox(t, script, checkout)
+	toolsDir, recipe := toolsModuleDir(t, script), replacingReconcilerFuzzer(t, script, checkout)
 	oldGo := oldest[1] + ".0"
 	goroot := gorootOf(t, "go"+oldGo)
 	operatorGoMod := "module example.com/operator\n\ngo " + oldGo + "\n"
@@ -53,7 +53,7 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 		return cmd.Env, string(out), err
 	}
 
-	t.Run("builds bin/botbox and leaves the operator's module and workspace alone", func(t *testing.T) {
+	t.Run("builds bin/reconciler-fuzzer and leaves the operator's module and workspace alone", func(t *testing.T) {
 		operator := newOperator(t)
 		// The operator pins its own tools in tools/tools.go, a common place for them.
 		writeFile(t, filepath.Join(operator, "tools", "tools.go"), "//go:build tools\n\npackage tools\n")
@@ -73,16 +73,16 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 		if out, err := list.CombinedOutput(); err != nil || string(out) != "example.com/operator/tools\n" {
 			t.Errorf("The recipe took the operator's tools package out of its module: %v\n%s", err, out)
 		}
-		version, err := exec.Command(filepath.Join(operator, "bin", "botbox"), "version").CombinedOutput()
+		version, err := exec.Command(filepath.Join(operator, "bin", "reconciler-fuzzer"), "version").CombinedOutput()
 		if err != nil {
-			t.Errorf("The recipe built no bin/botbox: %v\n%s", err, version)
+			t.Errorf("The recipe built no bin/reconciler-fuzzer: %v\n%s", err, version)
 		} else if !slices.Contains(strings.Split(out, "\n"), strings.TrimSuffix(string(version), "\n")) {
-			t.Errorf("The recipe does not run bin/botbox, which prints %q:\n%s", version, out)
+			t.Errorf("The recipe does not run bin/reconciler-fuzzer, which prints %q:\n%s", version, out)
 		}
-		tool := exec.Command("go", "-C", toolsDir, "tool", "botbox", "version")
+		tool := exec.Command("go", "-C", toolsDir, "tool", "reconciler-fuzzer", "version")
 		tool.Dir, tool.Env = operator, append(env, "GOWORK=off")
 		if out, err := tool.CombinedOutput(); err != nil {
-			t.Errorf("%s/go.mod does not pin botbox as a tool: %v\n%s", toolsDir, err, out)
+			t.Errorf("%s/go.mod does not pin reconciler-fuzzer as a tool: %v\n%s", toolsDir, err, out)
 		}
 	})
 
@@ -121,15 +121,16 @@ func gorootOf(t *testing.T, toolchain string) string {
 	return strings.TrimSpace(string(goroot))
 }
 
-// replacingBotbox has the tools module build this checkout's botbox.
-func replacingBotbox(t *testing.T, recipe, checkout string) string {
+// replacingReconcilerFuzzer has the tools module build this checkout's
+// reconciler-fuzzer.
+func replacingReconcilerFuzzer(t *testing.T, recipe, checkout string) string {
 	t.Helper()
 	modInit := regexp.MustCompile(`(?m)^go mod init .*\n`)
 	if n := len(modInit.FindAllString(recipe, -1)); n != 1 {
 		t.Fatalf("%s runs go mod init %d times, not once.", toolsRecipe, n)
 	}
 	return modInit.ReplaceAllStringFunc(recipe, func(line string) string {
-		return line + "go mod edit -replace=github.com/rosenhouse/botbox=" + strconv.Quote(checkout) + "\n"
+		return line + "go mod edit -replace=github.com/rosenhouse/reconciler-fuzzer=" + strconv.Quote(checkout) + "\n"
 	})
 }
 

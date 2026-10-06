@@ -1,4 +1,4 @@
-module github.com/rosenhouse/botbox
+module github.com/rosenhouse/reconciler-fuzzer
 
 go 1.26.0
 

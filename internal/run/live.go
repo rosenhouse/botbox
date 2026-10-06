@@ -19,11 +19,11 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/util/retry"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
-	"github.com/rosenhouse/botbox/internal/launch"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/launch"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // clearFinalizers is the merge patch the teardown forces on an object whose
@@ -47,7 +47,7 @@ var _ harness = (*liveRun)(nil)
 func newLiveRun(h *Harness, t *target.Target) (*liveRun, error) {
 	client, err := dynamic.NewForConfig(h.Config)
 	if err != nil {
-		return nil, fmt.Errorf("building botbox's dynamic client: %w", err)
+		return nil, fmt.Errorf("building reconciler-fuzzer's dynamic client: %w", err)
 	}
 	emptied := t.WatchedKinds()
 	for _, fixture := range t.Fixtures {
@@ -103,7 +103,7 @@ func (l *liveRun) servedResources() ([]metav1.APIResource, error) {
 }
 
 // createCR creates the op's object as the primary CR and tells the Observer
-// botbox created it, so that it never counts as managed.
+// reconciler-fuzzer created it, so that it never counts as managed.
 func (l *liveRun) createCR(ctx context.Context, obj *unstructured.Unstructured) error {
 	cr := obj.DeepCopy()
 	switch gvk := cr.GroupVersionKind(); {
@@ -205,7 +205,7 @@ func (l *liveRun) patchFixture(ctx context.Context, gvk schema.GroupVersionKind,
 }
 
 // deleteFixture deletes the fixture and waits timeouts.delete for it to go,
-// so that botbox can create it again.
+// so that reconciler-fuzzer can create it again.
 func (l *liveRun) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind, name string) error {
 	fixtures := l.of(gvk)
 	if err := fixtures.Delete(ctx, name, metav1.DeleteOptions{}); err != nil {
@@ -224,14 +224,14 @@ func (l *liveRun) deleteFixture(ctx context.Context, gvk schema.GroupVersionKind
 	case err != nil:
 		return fmt.Errorf("waiting for the fixture %s %s to go: %w", observe.KindName(gvk), name, err)
 	case !gone:
-		return fmt.Errorf("the fixture %s %s was still there %v (timeouts.delete) after botbox deleted it, held by the finalizers %v",
+		return fmt.Errorf("the fixture %s %s was still there %v (timeouts.delete) after reconciler-fuzzer deleted it, held by the finalizers %v",
 			observe.KindName(gvk), name, l.target.Timeouts.Delete, held)
 	}
 	return nil
 }
 
-// fixtureGone reads a Get of a fixture botbox deleted. An object that is not
-// being deleted is another under the fixture's name.
+// fixtureGone reads a Get of a fixture reconciler-fuzzer deleted. An object
+// that is not being deleted is another under the fixture's name.
 func fixtureGone(fixture *unstructured.Unstructured, err error) (bool, error) {
 	switch {
 	case apierrors.IsNotFound(err):
@@ -247,7 +247,7 @@ func (l *liveRun) createFixture(ctx context.Context, fixture *unstructured.Unstr
 	_, err := l.of(gvk).Create(ctx, fixture, metav1.CreateOptions{})
 	switch {
 	case apierrors.IsAlreadyExists(err):
-		return fmt.Errorf("something created the fixture %s %s again after botbox deleted it, so botbox cannot restore it",
+		return fmt.Errorf("something created the fixture %s %s again after reconciler-fuzzer deleted it, so reconciler-fuzzer cannot restore it",
 			observe.KindName(gvk), fixture.GetName())
 	case err != nil:
 		return fmt.Errorf("restoring the fixture %s %s: %w", observe.KindName(gvk), fixture.GetName(), err)

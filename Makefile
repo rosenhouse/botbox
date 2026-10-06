@@ -74,7 +74,7 @@ EXTERNAL_SECRETS_CONTROL_SEQUENCE := examples/external-secrets/sequences/orphan.
 EXTERNAL_SECRETS_SEQUENCES := $(filter-out $(EXTERNAL_SECRETS_CONTROL_SEQUENCE),$(wildcard examples/external-secrets/sequences/*.json))
 # The directory carries the pin, so bumping KIND_VERSION reinstalls.
 KIND := $(LOCALBIN)/kind-$(KIND_VERSION)/kind
-KIND_CLUSTER := botbox-test-kind
+KIND_CLUSTER := reconciler-fuzzer-test-kind
 KIND_KUBECONFIG := $(LOCALBIN)/kind-kubeconfig
 
 # Let go fetch the toolchain go.mod asks for.
@@ -89,7 +89,7 @@ help:
 	@echo "Targets:"
 	@echo "  setup                                  Download modules and install the envtest control plane."
 	@echo "  assets-path                            Print the KUBEBUILDER_ASSETS directory and nothing else."
-	@echo "  build                                  Build bin/botbox and bin/toy-widget."
+	@echo "  build                                  Build bin/reconciler-fuzzer and bin/toy-widget."
 	@echo "  generate                               Write the toy target's deepcopy code and CRD YAML."
 	@echo "  verify-generate                        Fail if a generated file is stale."
 	@echo "  bug-matrix                             Write docs/bug-matrix.md from the toy's seeded bugs."
@@ -107,8 +107,8 @@ help:
 	@echo "  test-envtest                           Run the envtest tier."
 	@echo "  test-example                           Run the cert-manager example and its negative control."
 	@echo "  test-example-external-secrets          Run the external-secrets example and its negative control."
-	@echo "  test-example-nightly                   Run the cert-manager example on seeds botbox draws."
-	@echo "  test-example-external-secrets-nightly  Run the external-secrets example on seeds botbox draws."
+	@echo "  test-example-nightly                   Run the cert-manager example on seeds reconciler-fuzzer draws."
+	@echo "  test-example-external-secrets-nightly  Run the external-secrets example on seeds reconciler-fuzzer draws."
 	@echo "  hunt-cert-manager                      Hunt for bugs in cert-manager for HUNT_MINUTES or HUNT_RUNS seeds."
 	@echo "  hunt-external-secrets                  Hunt for bugs in external-secrets for HUNT_MINUTES or HUNT_RUNS seeds."
 	@echo "  test-kind                              Run the toy through --kubeconfig against a throwaway kind cluster."
@@ -134,7 +134,7 @@ assets-path: $(SETUP_ENVTEST)
 
 .PHONY: build
 build:
-	go build -o bin/botbox ./cmd/botbox
+	go build -o bin/reconciler-fuzzer ./cmd/reconciler-fuzzer
 	go build -o bin/toy-widget ./targets/toy-widget
 
 .PHONY: generate
@@ -156,7 +156,7 @@ verify-generate: generate
 # the bug and without it. The deadline covers every run of the invocation.
 .PHONY: bug-matrix
 bug-matrix: build setup
-	KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox matrix \
+	KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/reconciler-fuzzer matrix \
 		--target targets/toy-widget/target.yaml \
 		--sequences targets/toy-widget/sequences \
 		--out docs/bug-matrix.md \
@@ -313,11 +313,11 @@ define hides-the-secret
 		|| { echo "$(1): the files above hold the Secret's $(3)."; exit 1; }
 endef
 
-CERT_MANAGER_CONTROL_OUT = botbox-out/cert-manager-control
+CERT_MANAGER_CONTROL_OUT = reconciler-fuzzer-out/cert-manager-control
 CERT_MANAGER_CONTROL = examples/cert-manager/quickstart.sh --seed $(EXAMPLE_SEED) --runs 1 --deadline $(EXAMPLE_DEADLINE) --out $(CERT_MANAGER_CONTROL_OUT) --launch-arg --enable-certificate-owner-ref=false
 CERT_MANAGER_CONTROL_CLAUSE = G3 the v1/Secret example-tls was still there
-EXTERNAL_SECRETS_CONTROL_OUT = botbox-out/external-secrets-control
-EXTERNAL_SECRETS_CONTROL = KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox run --target examples/external-secrets/target.yaml --deadline $(EXAMPLE_DEADLINE) --out $(EXTERNAL_SECRETS_CONTROL_OUT) $(EXTERNAL_SECRETS_CONTROL_SEQUENCE)
+EXTERNAL_SECRETS_CONTROL_OUT = reconciler-fuzzer-out/external-secrets-control
+EXTERNAL_SECRETS_CONTROL = KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/reconciler-fuzzer run --target examples/external-secrets/target.yaml --deadline $(EXAMPLE_DEADLINE) --out $(EXTERNAL_SECRETS_CONTROL_OUT) $(EXTERNAL_SECRETS_CONTROL_SEQUENCE)
 EXTERNAL_SECRETS_CONTROL_CLAUSE = G3 the v1/Secret example-secret was still there
 
 # Each example's control: (tier name). tls.key holds a PEM private key. The
@@ -347,16 +347,17 @@ test-example: verify-cert-manager-pin setup build
 	@echo "==> the default configuration, which must pass"
 	$(call must-pass,examples/cert-manager/quickstart.sh --seed $(EXAMPLE_SEED) --runs $(EXAMPLE_RUNS) --deadline $(EXAMPLE_DEADLINE))
 	@echo "==> the pinned sequences, which must pass as written"
-	$(call must-pass,KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox run \
+	$(call must-pass,KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/reconciler-fuzzer run \
 		--target examples/cert-manager/target.yaml --deadline $(EXAMPLE_DEADLINE) \
 		examples/cert-manager/sequences/*.json)
 	$(call cert-manager-control,test-example)
 
-# test-example-nightly is the nightly tier of DESIGN.md §10 (M5). botbox draws
-# the seeds, so a find here is a new one rather than the fixed seeds again, and
-# every run prints its seed, so the find replays (§11). It carries the same
-# negative control as test-example, because a nightly that only ever passes
-# cannot tell a quiet night from a harness that stopped judging.
+# test-example-nightly is the nightly tier of DESIGN.md §10 (M5).
+# reconciler-fuzzer draws the seeds, so a find here is a new one rather than the
+# fixed seeds again, and every run prints its seed, so the find replays (§11).
+# It carries the same negative control as test-example, because a nightly that
+# only ever passes cannot tell a quiet night from a harness that stopped
+# judging.
 .PHONY: test-example-nightly
 test-example-nightly: verify-cert-manager-pin
 	@echo "==> drawn seeds, which must pass"
@@ -374,7 +375,7 @@ test-example-external-secrets: verify-external-secrets-pin setup build
 	@echo "==> the pinned sequences, which must pass as written"
 	@test -n "$(EXTERNAL_SECRETS_SEQUENCES)" \
 		|| { echo "test-example-external-secrets: no pinned sequences to run."; exit 1; }
-	$(call must-pass,KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox run \
+	$(call must-pass,KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/reconciler-fuzzer run \
 		--target examples/external-secrets/target.yaml --deadline $(EXAMPLE_DEADLINE) \
 		$(EXTERNAL_SECRETS_SEQUENCES))
 	$(call external-secrets-control,test-example-external-secrets)
@@ -386,13 +387,14 @@ test-example-external-secrets-nightly: verify-external-secrets-pin setup build
 	$(call external-secrets-control,test-example-external-secrets-nightly)
 
 # A hunt takes hours, so no pull request runs one. Each invocation writes under
-# botbox-out/hunt-<example>/, which keeps every failing run's evidence.
+# reconciler-fuzzer-out/hunt-<example>/, which keeps every failing run's
+# evidence.
 HUNT = HUNT_MINUTES=$(HUNT_MINUTES) HUNT_RUNS=$(HUNT_RUNS) HUNT_SEED=$(HUNT_SEED) \
 	KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" examples/hunt.sh
 
 .PHONY: hunt-cert-manager
 hunt-cert-manager: verify-cert-manager-port verify-cert-manager-pin setup build cert-manager
-	$(HUNT) examples/cert-manager/target.yaml examples/cert-manager/sequences/hunt botbox-out/hunt-cert-manager
+	$(HUNT) examples/cert-manager/target.yaml examples/cert-manager/sequences/hunt reconciler-fuzzer-out/hunt-cert-manager
 
 # cert-manager's healthz port is fixed, so its runs cannot overlap.
 .PHONY: verify-cert-manager-port
@@ -406,23 +408,23 @@ verify-cert-manager-port:
 
 .PHONY: hunt-external-secrets
 hunt-external-secrets: verify-external-secrets-pin setup build external-secrets
-	$(HUNT) examples/external-secrets/target.yaml examples/external-secrets/sequences/hunt botbox-out/hunt-external-secrets
+	$(HUNT) examples/external-secrets/target.yaml examples/external-secrets/sequences/hunt reconciler-fuzzer-out/hunt-external-secrets
 
 $(KIND):
 	GOBIN=$(dir $@) go install sigs.k8s.io/kind@$(KIND_VERSION)
 
-KIND_BOTBOX = ./bin/botbox run --target targets/toy-widget/target.yaml --kubeconfig $(KIND_KUBECONFIG) --deadline $(KIND_DEADLINE)
+KIND_RECONCILER_FUZZER = ./bin/reconciler-fuzzer run --target targets/toy-widget/target.yaml --kubeconfig $(KIND_KUBECONFIG) --deadline $(KIND_DEADLINE)
 
 .PHONY: kind-cluster
 kind-cluster: $(KIND)
 	$(KIND) create cluster --name $(KIND_CLUSTER) --image $(KIND_NODE_IMAGE) \
 		--config targets/toy-widget/kind.yaml --kubeconfig $(KIND_KUBECONFIG) --wait 3m
 
-# test-kind is the kind tier of DESIGN.md §11. botbox installs the toy's CRD,
-# and the cluster's own controller manager collects garbage and populates each
-# namespace. The toy runs on the host, so no image is loaded. The trap deletes
-# the cluster however the runs end. A failed create sets no trap, so a cluster
-# that already had the name survives.
+# test-kind is the kind tier of DESIGN.md §11. reconciler-fuzzer installs the
+# toy's CRD, and the cluster's own controller manager collects garbage and
+# populates each namespace. The toy runs on the host, so no image is loaded. The
+# trap deletes the cluster however the runs end. A failed create sets no trap,
+# so a cluster that already had the name survives.
 .PHONY: test-kind
 test-kind: kind-cluster
 	@trap '$(KIND) delete cluster --name $(KIND_CLUSTER) --kubeconfig $(KIND_KUBECONFIG)' EXIT INT TERM; \
@@ -431,11 +433,11 @@ test-kind: kind-cluster
 .PHONY: test-kind-runs
 test-kind-runs: build
 	@echo "==> the toy with no bug, which must pass"
-	$(call must-pass,$(KIND_BOTBOX) targets/toy-widget/sequences/b0.json)
+	$(call must-pass,$(KIND_RECONCILER_FUZZER) targets/toy-widget/sequences/b0.json)
 	@echo "==> drawn seeds, which must pass"
-	$(call must-pass,$(KIND_BOTBOX) --seed $(KIND_SEED) --runs $(KIND_RUNS))
-	$(call negative-control,test-kind,$(KIND_BOTBOX) --launch-arg --bug=3 targets/toy-widget/sequences/b3.json,G3 the v1/ConfigMap widget-0 was still there)
-	$(call negative-control,test-kind,$(KIND_BOTBOX) --launch-arg --bug=8 --out botbox-out/kind-control targets/toy-widget/sequences/b8.json,G7 the v1/ConfigMap widget-0 that op 1 (deleteManaged) deleted never came back)
+	$(call must-pass,$(KIND_RECONCILER_FUZZER) --seed $(KIND_SEED) --runs $(KIND_RUNS))
+	$(call negative-control,test-kind,$(KIND_RECONCILER_FUZZER) --launch-arg --bug=3 targets/toy-widget/sequences/b3.json,G3 the v1/ConfigMap widget-0 was still there)
+	$(call negative-control,test-kind,$(KIND_RECONCILER_FUZZER) --launch-arg --bug=8 --out reconciler-fuzzer-out/kind-control targets/toy-widget/sequences/b8.json,G7 the v1/ConfigMap widget-0 that op 1 (deleteManaged) deleted never came back)
 
 .PHONY: fmt
 fmt:

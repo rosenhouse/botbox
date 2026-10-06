@@ -6,7 +6,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 // namedCRs are the primary CRs among the object's owners, by UID.
@@ -74,8 +74,8 @@ func (in Input) askedFor(v observe.Version, s state) bool {
 	})
 }
 
-// reach is what botbox's changes may have changed: the CRs they acted on and
-// what those CRs own, or everything.
+// reach is what reconciler-fuzzer's changes may have changed: the CRs they
+// acted on and what those CRs own, or everything.
 type reach struct {
 	any, all bool
 	crs      map[types.UID]bool

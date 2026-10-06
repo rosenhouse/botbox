@@ -5,7 +5,7 @@ import (
 	"slices"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 // SelfHealing is G7: an object a DeleteManaged op deleted exists again, by

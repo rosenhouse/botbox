@@ -5,9 +5,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // Engine is the invariant engine as a Checker: the generic invariants and the
@@ -81,7 +81,7 @@ func engineInput(in Input) invariant.Input {
 // engineOps carries each op's index, which is what a checkpoint names and not
 // the op's position in the timeline, the CR a CR op wrote, and the object a
 // deleteManaged op deleted: G3 does not credit the target for a cleanup
-// botbox performed.
+// reconciler-fuzzer performed.
 func engineOps(t *target.Target, timeline Timeline) []invariant.Op {
 	ops := make([]invariant.Op, len(timeline.Ops))
 	for i, op := range timeline.Ops {

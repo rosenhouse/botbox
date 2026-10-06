@@ -15,9 +15,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"pgregory.net/rapid"
 
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/run"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // defaultMaxOps bounds a sequence that Options does not bound.
@@ -310,7 +310,8 @@ type state struct {
 	gone []string
 }
 
-// drawnCR is a CR as botbox last wrote it, which it keeps once deleted.
+// drawnCR is a CR as reconciler-fuzzer last wrote it, which it keeps once
+// deleted.
 type drawnCR struct {
 	object map[string]any
 	live   bool

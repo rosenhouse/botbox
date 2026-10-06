@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/reference"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/reference"
 )
 
 type (

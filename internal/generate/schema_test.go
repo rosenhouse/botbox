@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 const (
@@ -174,7 +174,7 @@ func TestPathsTheSchemaDoesNotDescribeAreConfigurationErrors(t *testing.T) {
 	}
 }
 
-func TestAnOverlayKeywordBotboxDoesNotReadIsAConfigurationError(t *testing.T) {
+func TestAnOverlayKeywordReconcilerFuzzerDoesNotReadIsAConfigurationError(t *testing.T) {
 	for _, testCase := range []struct {
 		path, dotted string
 		overlay      map[string]any
@@ -193,7 +193,7 @@ func TestAnOverlayKeywordBotboxDoesNotReadIsAConfigurationError(t *testing.T) {
 			loaded.Generate.Overlay = map[string]map[string]any{testCase.dotted: testCase.overlay}
 			_, err := New(loaded, Options{})
 			if err == nil {
-				t.Fatalf("New accepted the overlay %v, whose %s botbox does not read.", testCase.overlay, testCase.unread)
+				t.Fatalf("New accepted the overlay %v, whose %s reconciler-fuzzer does not read.", testCase.overlay, testCase.unread)
 			}
 			for _, want := range []string{testCase.dotted, testCase.unread, "maximum", "pattern"} {
 				if !strings.Contains(err.Error(), want) {
@@ -225,7 +225,7 @@ func TestNewReportsTheSpecPathsItLeavesAlone(t *testing.T) {
 	g := newGenerator(t, loaded, Options{})
 	leftAlone := g.LeftAlone()
 	want := [][]string{
-		{"spec.right", "the CRD refuses every value botbox drew for it in the sample", "exactly one of left and right"},
+		{"spec.right", "the CRD refuses every value reconciler-fuzzer drew for it in the sample", "exactly one of left and right"},
 		{"spec.surge", "x-kubernetes-int-or-string"},
 	}
 	if len(leftAlone) != len(want) {

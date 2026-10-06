@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
 )
 
-// beingDeleted is a converged Widget that botbox deletes at 10s, recorded under
-// deletion at 10.1s. Its deletion deadline is 20.1s.
+// beingDeleted is a converged Widget that reconciler-fuzzer deletes at 10s,
+// recorded under deletion at 10.1s. Its deletion deadline is 20.1s.
 func beingDeleted() *run {
 	return converged().
 		running(5*time.Second).

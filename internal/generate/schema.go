@@ -12,7 +12,7 @@ import (
 	gvkschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"pgregory.net/rapid"
 
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // schema is the part of a CRD's OpenAPI v3 schema the generator reads. What
@@ -72,7 +72,7 @@ func overlaid(root map[string]any, overlays map[string]map[string]any) (*schema,
 	for _, dotted := range slices.Sorted(maps.Keys(overlays)) {
 		overlay := overlays[dotted]
 		if unread := unreadKeywords(overlay, ""); len(unread) > 0 {
-			return nil, fmt.Errorf("generate.overlay %s: botbox does not read %s; it reads %s",
+			return nil, fmt.Errorf("generate.overlay %s: reconciler-fuzzer does not read %s; it reads %s",
 				dotted, strings.Join(unread, ", "), strings.Join(keywords, ", "))
 		}
 		node, err := schemaNode(root, strings.Split(dotted, "."))

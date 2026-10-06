@@ -98,7 +98,7 @@ fell inside the window.
   then skips a spec change outright unless the change renames the target Secret, so
   readiness never catches up to the new generation. `OnChange` refreshes exactly when the
   generation or the labels or the annotations change, and writes nothing otherwise. It
-  costs coverage: under `OnChange` nothing botbox does reaches the periodic refresh path.
+  costs coverage: under `OnChange` nothing reconciler-fuzzer does reaches the periodic refresh path.
 - **Runs may overlap.** Every port the controller binds moves under a flag. With
   `--metrics-addr` and `--live-addr` on ephemeral ports it bound two ephemeral sockets and
   nothing else. Port 9443, the controller-runtime webhook server's default, stayed free:
@@ -139,18 +139,18 @@ fell inside the window.
 - envtest takes 4.1 s to 5.0 s to install the 25 CRDs, against 3.2 s for cert-manager's
   six in the 2026-09-20 spike.
 
-## Against botbox
+## Against reconciler-fuzzer
 
-A draft `target.yaml` ran under `botbox` itself, outside the repository, with the release
+A draft `target.yaml` ran under `reconciler-fuzzer` itself, outside the repository, with the release
 asset as its `crds` and the binary as `bin/external-secrets`. It declares `v1/Secret` as
 its only managed kind, the predicate above as `ready`, the SecretStore as its one fixture,
 and mutates `spec.target.name` and `spec.refreshInterval`.
 
 | Invocation | Result |
 |---|---|
-| `botbox run --runs 5 --seed 23`, the seeds the cert-manager example fixes | every run passed, 184 s |
-| `botbox run` on a create-and-delete and on an update-and-restart sequence | both passed, 82 s |
-| `botbox run` on a create-and-delete sequence whose ExternalSecret sets `creationPolicy: Orphan` | exit 1 in 100 s: `G3 the v1/Secret example-secret was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR` |
+| `reconciler-fuzzer run --runs 5 --seed 23`, the seeds the cert-manager example fixes | every run passed, 184 s |
+| `reconciler-fuzzer run` on a create-and-delete and on an update-and-restart sequence | both passed, 82 s |
+| `reconciler-fuzzer run` on a create-and-delete sequence whose ExternalSecret sets `creationPolicy: Orphan` | exit 1 in 100 s: `G3 the v1/Secret example-secret was still there 1m0s after the CR was deleted, orphaned: it carries no ownerReference to the CR` |
 
 The negative control is a sequence rather than a `--launch-arg`, because no flag makes the
 controller orphan its Secret.

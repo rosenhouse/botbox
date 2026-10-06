@@ -14,16 +14,16 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // The fixtures are the toy target of DESIGN.md §9: a Widget owning one
 // ConfigMap per index, with the toy's short windows.
 const (
-	namespace     = "botbox-run-1"
+	namespace     = "reconciler-fuzzer-run-1"
 	widgetName    = "w"
 	widgetUID     = "uid-w"
 	settleTimeout = 5 * time.Second
@@ -33,7 +33,7 @@ const (
 )
 
 var (
-	widgetGVK    = schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
+	widgetGVK    = schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Widget"}
 	configMapGVK = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
 	secretGVK    = schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
 	epoch        = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -88,8 +88,8 @@ type run struct {
 	store *observe.Store
 }
 
-// newRun returns a run of the toy target whose primary CR botbox created, so
-// that the CR is never a managed object (DESIGN.md §6).
+// newRun returns a run of the toy target whose primary CR reconciler-fuzzer
+// created, so that the CR is never a managed object (DESIGN.md §6).
 func newRun() *run { return newRunManaging(configMapGVK) }
 
 // newRunManaging returns a run of a target that manages the kinds named, since
@@ -111,7 +111,8 @@ func toyMapper() meta.RESTMapper {
 	return mapper
 }
 
-// fixture marks an object as botbox's, so that it is never managed (§6).
+// fixture marks an object as reconciler-fuzzer's, so that it is never managed
+// (§6).
 func (r *run) fixture(obj *unstructured.Unstructured) *run {
 	r.store.Exclude(obj.GroupVersionKind(), obj.GetName())
 	return r
@@ -132,15 +133,15 @@ func (r *run) opOn(opType invariant.OpType, when time.Duration, cr string) *run 
 	return r
 }
 
-// withSecondWidget has botbox create the Widget w2 too, so that it is never
-// managed either.
+// withSecondWidget has reconciler-fuzzer create the Widget w2 too, so that it
+// is never managed either.
 func (r *run) withSecondWidget() *run {
 	r.store.Exclude(widgetGVK, secondName)
 	return r
 }
 
 // deletedManaged is a DeleteManaged op and the object it resolved to, which
-// botbox deleted behind the target's back (DESIGN.md §5.4).
+// reconciler-fuzzer deleted behind the target's back (DESIGN.md §5.4).
 func (r *run) deletedManaged(when time.Duration, name string) *run {
 	return r.deletedManagedOf(when, configMapGVK, name)
 }
@@ -155,8 +156,8 @@ func (r *run) deletedManagedOf(when time.Duration, gvk schema.GroupVersionKind, 
 	return r
 }
 
-// restoring is an op of the type given, before which botbox restored a fixture
-// it had deleted.
+// restoring is an op of the type given, before which reconciler-fuzzer restored
+// a fixture it had deleted.
 func (r *run) restoring(opType invariant.OpType, when time.Duration) *run {
 	r.op(opType, when)
 	r.in.Ops[len(r.in.Ops)-1].Restored = true
@@ -209,7 +210,8 @@ func (r *run) teardownCheckpoint(when time.Duration) *run {
 	return r
 }
 
-// teardown is when botbox began emptying the namespace (DESIGN.md §5.5).
+// teardown is when reconciler-fuzzer began emptying the namespace (DESIGN.md
+// §5.5).
 func (r *run) teardown(when time.Duration) *run {
 	r.in.Teardown = at(when)
 	return r
@@ -222,7 +224,8 @@ func (r *run) quiet(from time.Duration) *run {
 	return r.teardown(from + stableWindow)
 }
 
-// cleaned is when botbox saw the run namespace empty (DESIGN.md §5.5).
+// cleaned is when reconciler-fuzzer saw the run namespace empty (DESIGN.md
+// §5.5).
 func (r *run) cleaned(when time.Duration) *run {
 	r.in.Cleaned = at(when)
 	return r
@@ -239,8 +242,8 @@ func (r *run) activeFault(from time.Duration) *run {
 	return r
 }
 
-// exit is the target stopping on its own at when, and botbox starting it again
-// at restart.
+// exit is the target stopping on its own at when, and reconciler-fuzzer
+// starting it again at restart.
 func (r *run) exit(when, restart time.Duration) *run {
 	r.in.Exits = append(r.in.Exits, invariant.Exit{At: at(when), Restart: at(restart), Why: "the exit at " + when.String()})
 	return r

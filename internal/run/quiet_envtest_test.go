@@ -5,7 +5,7 @@ package run_test
 import (
 	"testing"
 
-	"github.com/rosenhouse/botbox/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
 )
 
 // Under --resync the toy writes its unchanged status on every tick. Ticks

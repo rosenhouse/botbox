@@ -8,13 +8,13 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
 )
 
-const cleanup = "widget.botbox/cleanup"
+const cleanup = "widget.reconciler-fuzzer/cleanup"
 
-// deletedRun is a run whose CR botbox deletes at 10s, with the children the
-// options build.
+// deletedRun is a run whose CR reconciler-fuzzer deletes at 10s, with the
+// children the options build.
 func deletedRun() *run {
 	return newRun().
 		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup))).
@@ -301,7 +301,7 @@ func TestG3StillFiresOnAnOrphanTheRunRecreatedTheCRPast(t *testing.T) {
 
 // A deleteManaged op takes the object out of the target's hands, so whether
 // the target would have cleaned it is nobody's to say (DESIGN.md §5.4, D38).
-func TestG3DoesNotCreditACleanupBotboxPerformed(t *testing.T) {
+func TestG3DoesNotCreditACleanupReconcilerFuzzerPerformed(t *testing.T) {
 	in := deletedRun().
 		record(time.Second, child("w-0", "12", orphaned)).
 		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
@@ -324,7 +324,7 @@ func TestG3DoesNotCreditACleanupBotboxPerformed(t *testing.T) {
 
 // The window is the deletion's own. An op before the CR went, or after its
 // deadline, says nothing about whether the target cleaned up (D38).
-func TestG3NotesOnlyWhatBotboxTookInsideTheWindow(t *testing.T) {
+func TestG3NotesOnlyWhatReconcilerFuzzerTookInsideTheWindow(t *testing.T) {
 	for _, taken := range []struct {
 		name  string
 		when  time.Duration
@@ -355,10 +355,10 @@ func TestG3NotesOnlyWhatBotboxTookInsideTheWindow(t *testing.T) {
 	}
 }
 
-// An object the run recreated carries the same name and a new UID. botbox
-// taking that one says nothing about the CR that went before it (D38), and
-// this is the shape generation reaches: it draws deleteManaged only while a
-// CR is live, which a recreate makes true again.
+// An object the run recreated carries the same name and a new UID.
+// reconciler-fuzzer taking that one says nothing about the CR that went before
+// it (D38), and this is the shape generation reaches: it draws deleteManaged
+// only while a CR is live, which a recreate makes true again.
 func TestG3DoesNotNoteAnObjectTheRunRecreated(t *testing.T) {
 	in := deletedRun().
 		record(time.Second, child("w-0", "12", orphaned)).
@@ -373,7 +373,7 @@ func TestG3DoesNotNoteAnObjectTheRunRecreated(t *testing.T) {
 	result := evaluate(t, invariant.CleanDeletion, in)
 
 	if len(result.Notes) != 0 {
-		t.Errorf("G3 noted %v, and botbox took the object that came after this CR.", result.Notes)
+		t.Errorf("G3 noted %v, and reconciler-fuzzer took the object that came after this CR.", result.Notes)
 	}
 	if len(result.Violations) != 0 {
 		t.Errorf("G3 reported %v, and the CR's own child went on time.", result.Violations)
@@ -392,12 +392,12 @@ func TestG3NotesOnlyTheObjectsTheCRHad(t *testing.T) {
 	result := evaluate(t, invariant.CleanDeletion, in)
 
 	if len(result.Notes) != 0 {
-		t.Errorf("G3 noted %v, and the CR never had the object botbox took.", result.Notes)
+		t.Errorf("G3 noted %v, and the CR never had the object reconciler-fuzzer took.", result.Notes)
 	}
 }
 
 // twoWidgetsDeleted is a run of two Widgets with a child each, whose first
-// botbox deletes at 10s.
+// reconciler-fuzzer deletes at 10s.
 func twoWidgetsDeleted() *run {
 	return newRun().withSecondWidget().
 		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup)),
@@ -586,9 +586,9 @@ func TestG3LeavesAnObjectToACRThatAdoptedIt(t *testing.T) {
 	silent(t, invariant.CleanDeletion, in)
 }
 
-// w answers for an object that names no CR, since w2 goes first, and botbox
-// took the object inside w's window.
-func TestG3NotesAnObjectBotboxTookFromTheLastOfItsCRs(t *testing.T) {
+// w answers for an object that names no CR, since w2 goes first, and
+// reconciler-fuzzer took the object inside w's window.
+func TestG3NotesAnObjectReconcilerFuzzerTookFromTheLastOfItsCRs(t *testing.T) {
 	in := newRun().withSecondWidget().
 		record(0, widget("10", spec(1), status(1, 1), finalizers(cleanup)),
 			secondWidget("20", spec(1), status(1, 1), finalizers(cleanup))).
@@ -611,7 +611,7 @@ func TestG3NotesAnObjectBotboxTookFromTheLastOfItsCRs(t *testing.T) {
 	}
 }
 
-func TestG3NotesNothingBotboxTookFromAnotherCR(t *testing.T) {
+func TestG3NotesNothingReconcilerFuzzerTookFromAnotherCR(t *testing.T) {
 	in := twoWidgetsDeleted().
 		remove(11*time.Second, child("w-0", "13")).
 		remove(12*time.Second, widget("14", spec(1), status(1, 1), deleting(10*time.Second))).
@@ -621,6 +621,6 @@ func TestG3NotesNothingBotboxTookFromAnotherCR(t *testing.T) {
 		through(21 * time.Second)
 
 	if notes := silent(t, invariant.CleanDeletion, in).Notes; len(notes) > 0 {
-		t.Errorf("G3 noted %v, and botbox took w2's child, not w's.", notes)
+		t.Errorf("G3 noted %v, and reconciler-fuzzer took w2's child, not w's.", notes)
 	}
 }

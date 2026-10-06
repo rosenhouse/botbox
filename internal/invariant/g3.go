@@ -8,7 +8,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 // CleanDeletion is G3: after the CR is deleted with no fault active, every
@@ -19,7 +19,7 @@ func CleanDeletion(in Input) (Result, error) {
 	out := Result{ID: "G3"}
 	for _, deleted := range in.crDeletions() {
 		deadline := deleted.deadline
-		out.noteWhatBotboxTook(in, deleted, deadline)
+		out.noteWhatReconcilerFuzzerTook(in, deleted, deadline)
 		switch {
 		case in.cleanedBy(deadline): // The namespace emptied, so nothing was left.
 		case in.faulted(deleted.at, deadline):
@@ -33,12 +33,12 @@ func CleanDeletion(in Input) (Result, error) {
 	return out, nil
 }
 
-// noteWhatBotboxTook records the objects botbox deleted inside the window
-// after the CR went. A deleteManaged op takes an object out of the target's
-// hands, and the target had until the deadline, so whether it would have
-// cleaned that object is nobody's to say. Judging it either way would be a
-// guess; a silent pass reads as cleanup that happened.
-func (out *Result) noteWhatBotboxTook(in Input, deleted deletion, deadline time.Time) {
+// noteWhatReconcilerFuzzerTook records the objects reconciler-fuzzer deleted
+// inside the window after the CR went. A deleteManaged op takes an object out
+// of the target's hands, and the target had until the deadline, so whether it
+// would have cleaned that object is nobody's to say. Judging it either way
+// would be a guess; a silent pass reads as cleanup that happened.
+func (out *Result) noteWhatReconcilerFuzzerTook(in Input, deleted deletion, deadline time.Time) {
 	states := in.statesAt([]time.Time{deleted.at, deadline})
 	had, since := states[0], states[1]
 	for _, op := range in.Ops {
@@ -51,7 +51,8 @@ func (out *Result) noteWhatBotboxTook(in Input, deleted deletion, deadline time.
 			continue
 		}
 		// An object the run recreated carries the same name and a new UID, so
-		// botbox took the one that came after and not the one this CR left.
+		// reconciler-fuzzer took the one that came after and not the one this CR
+		// left.
 		if took, found := in.versionAt(op.Deleted, op.Time); !found || took.UID != was.UID ||
 			!in.leftBy(deleted, took, had, since) {
 			continue
@@ -73,8 +74,8 @@ func (in Input) versionAt(key observe.Key, t time.Time) (observe.Version, bool) 
 	return latest, found
 }
 
-// cleanedBy reports whether botbox saw the run namespace empty by t, which
-// leaves nothing for G3 to find at t.
+// cleanedBy reports whether reconciler-fuzzer saw the run namespace empty by t,
+// which leaves nothing for G3 to find at t.
 func (in Input) cleanedBy(t time.Time) bool {
 	return !in.Cleaned.IsZero() && !in.Cleaned.After(t)
 }
@@ -141,7 +142,8 @@ func (out *Result) reportLeftovers(in Input, deleted deletion, deadline time.Tim
 	}
 }
 
-// describeDeletion names the CR and what deleted it where botbox can tell.
+// describeDeletion names the CR and what deleted it where reconciler-fuzzer can
+// tell.
 func (in Input) describeDeletion(deleted deletion) string {
 	return "the deletion of " + deleted.key.Name + in.deletedBy(deleted)
 }

@@ -10,8 +10,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // noSuchKey is the ready of a target that misspelled a field.
@@ -248,8 +248,8 @@ func TestAnExpiredWaitSaysARestartKeptItFromConverging(t *testing.T) {
 	}
 }
 
-// Only a request shows botbox that the process it started last runs, so a
-// wait does not converge before one, nor within stable of the first.
+// Only a request shows reconciler-fuzzer that the process it started last runs,
+// so a wait does not converge before one, nor within stable of the first.
 func TestAnExpiredWaitSaysTheTargetHadNotShownItRuns(t *testing.T) {
 	readyCR := func() *run { return newRun().record(time.Second, widget("10", spec(1), status(1, 1))) }
 	unreadySettle := func() *run {
@@ -527,7 +527,7 @@ func TestAnExpiredWaitQuotesTheCRReadyFailedOn(t *testing.T) {
 	if ready := violation.Ready; ready == nil || ready.CR != "w" || ready.Status["ready"] != int64(0) {
 		t.Errorf("The violation quotes %+v, want the status of w, where ready failed.", ready)
 	}
-	if want := "toy.botbox/v1/Widget w"; violation.VersionsOf != want {
+	if want := "toy.reconciler-fuzzer/v1/Widget w"; violation.VersionsOf != want {
 		t.Errorf("The timeline is of %q, want %q.", violation.VersionsOf, want)
 	}
 }
@@ -686,7 +686,7 @@ func TestAVerdictNamesTheRequestThatFirstFailedMostOften(t *testing.T) {
 
 func TestAVerdictCountsARequestInEachNamespaceApart(t *testing.T) {
 	elsewhere := failedGet("w-0", http.StatusNotFound)
-	elsewhere.Namespace = "botbox-run-0"
+	elsewhere.Namespace = "reconciler-fuzzer-run-0"
 	in := unreadyCreate(0, 1).
 		request(1100*time.Millisecond, failedGet("w-0", http.StatusNotFound)).
 		request(1200*time.Millisecond, elsewhere).

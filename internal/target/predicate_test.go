@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 func loadWith(t *testing.T, extraYAML string) *target.Target {

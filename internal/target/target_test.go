@@ -11,11 +11,11 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 func TestWatchedKindsHoldThePrimaryOnce(t *testing.T) {
-	widget := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
+	widget := schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Widget"}
 	configMap := schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
 
 	watched := (&target.Target{
@@ -24,12 +24,12 @@ func TestWatchedKindsHoldThePrimaryOnce(t *testing.T) {
 	}).WatchedKinds()
 
 	if want := []schema.GroupVersionKind{widget, configMap}; !slices.Equal(watched, want) {
-		t.Errorf("botbox watches %v, want %v.", watched, want)
+		t.Errorf("reconciler-fuzzer watches %v, want %v.", watched, want)
 	}
 }
 
 func TestCheckScopesRefusesPrimaryAndManagedButAcceptsFixtures(t *testing.T) {
-	widget := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
+	widget := schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Widget"}
 	clusterRole := schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"}
 	webhook := schema.GroupVersionKind{Group: "admissionregistration.k8s.io", Version: "v1", Kind: "ValidatingWebhookConfiguration"}
 	unserved := schema.GroupVersionKind{Group: "example.com", Version: "v1", Kind: "Unserved"}
@@ -72,9 +72,9 @@ func TestCheckScopesRefusesPrimaryAndManagedButAcceptsFixtures(t *testing.T) {
 }
 
 func TestCheckScopesJudgesFixtureScopesAndNamespaces(t *testing.T) {
-	widget := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
+	widget := schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Widget"}
 	secret := schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
-	gadget := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Gadget"}
+	gadget := schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Gadget"}
 	unserved := schema.GroupVersionKind{Group: "example.com", Version: "v1", Kind: "Unserved"}
 	mapper := meta.NewDefaultRESTMapper(nil)
 	mapper.Add(widget, meta.RESTScopeNamespace)
@@ -116,7 +116,7 @@ func TestCheckScopesJudgesFixtureScopesAndNamespaces(t *testing.T) {
 	}
 }
 
-func TestLaunchCheckFindsTheBinaryWhereBotboxRuns(t *testing.T) {
+func TestLaunchCheckFindsTheBinaryWhereReconcilerFuzzerRuns(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	for name, mode := range map[string]os.FileMode{"operator": 0o755, "notes": 0o644} {

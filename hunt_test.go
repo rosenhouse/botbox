@@ -1,4 +1,4 @@
-package botbox_test
+package reconcilerfuzzer_test
 
 import (
 	"errors"
@@ -16,16 +16,16 @@ import (
 
 // huntRun is what one run of examples/hunt.sh did.
 type huntRun struct {
-	// invocations are botbox's arguments, one invocation each.
+	// invocations are reconciler-fuzzer's arguments, one invocation each.
 	invocations []string
 	output      string
 	code        int
 }
 
-// runHunt runs examples/hunt.sh over the named families with a bin/botbox that
-// exits with each code in turn, then 0, and a clock that moves on a minute each
-// time it is read. TICK in env sets another step in seconds. AFTER_<n> in env
-// is a command the n-th invocation runs.
+// runHunt runs examples/hunt.sh over the named families with a
+// bin/reconciler-fuzzer that exits with each code in turn, then 0, and a clock
+// that moves on a minute each time it is read. TICK in env sets another step in
+// seconds. AFTER_<n> in env is a command the n-th invocation runs.
 func runHunt(t *testing.T, families []string, codes []int, env ...string) huntRun {
 	t.Helper()
 	return runHuntWithArgs(t, []string{"target.yaml", "families", "out"}, families, codes, env...)
@@ -53,7 +53,7 @@ func runHuntWithArgs(t *testing.T, args, families []string, codes []int, env ...
 	if err := os.MkdirAll(filepath.Join(workspace, "bin"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeStub(t, filepath.Join(workspace, "bin", "botbox"), `printf '%s\n' "$*" >>"$STUBS/invocations"
+	writeStub(t, filepath.Join(workspace, "bin", "reconciler-fuzzer"), `printf '%s\n' "$*" >>"$STUBS/invocations"
 n=$(wc -l <"$STUBS/invocations")
 after=$(printenv "AFTER_$n" || true)
 [ -z "$after" ] || sh -c "$after"
@@ -108,7 +108,7 @@ func TestTheHuntRunsEachFamilyAndThenEachSeedInAnInvocationOfItsOwn(t *testing.T
 		"run --target target.yaml --deadline D --out out/seed-8 --seed 8 --runs 1",
 	}
 	if got := withoutDeadlines(h.invocations); !slices.Equal(got, want) {
-		t.Errorf("The hunt ran botbox as\n%s\nnot as\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		t.Errorf("The hunt ran reconciler-fuzzer as\n%s\nnot as\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	if h.code != 0 || !strings.Contains(h.output, "4 passed.") {
 		t.Errorf("The hunt exited %d when every invocation passed, and printed\n%s", h.code, h.output)
@@ -129,7 +129,7 @@ func TestTheHuntSkipsAFamilyGoneByItsTurn(t *testing.T) {
 		"run --target target.yaml --deadline D --out out/seed-7 --seed 7 --runs 1",
 	}
 	if got := withoutDeadlines(h.invocations); !slices.Equal(got, want) {
-		t.Errorf("The hunt ran botbox as\n%s\nnot as\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+		t.Errorf("The hunt ran reconciler-fuzzer as\n%s\nnot as\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
 
@@ -138,7 +138,7 @@ func TestTheHuntWithNoFamiliesDrawsSeeds(t *testing.T) {
 
 	want := []string{"run --target target.yaml --deadline D --out out/seed-7 --seed 7 --runs 1"}
 	if got := withoutDeadlines(h.invocations); !slices.Equal(got, want) {
-		t.Errorf("The hunt ran botbox as %q, not as %q", got, want)
+		t.Errorf("The hunt ran reconciler-fuzzer as %q, not as %q", got, want)
 	}
 }
 
@@ -169,7 +169,7 @@ func TestTheHuntGivesEachInvocationWhatTheTimeBoxHasLeftAndStopsWhenItRunsOut(t 
 		"run --target target.yaml --deadline 60s --out out/seed-7 --seed 7 --runs 1",
 	}
 	if !slices.Equal(h.invocations, want) {
-		t.Errorf("The hunt ran botbox as\n%s\nnot as\n%s", strings.Join(h.invocations, "\n"), strings.Join(want, "\n"))
+		t.Errorf("The hunt ran reconciler-fuzzer as\n%s\nnot as\n%s", strings.Join(h.invocations, "\n"), strings.Join(want, "\n"))
 	}
 	if h.code != 0 || !strings.Contains(h.output, "the time box ran out before seed-8.") ||
 		strings.Count(h.output, "the time box ran out") != 1 {
@@ -181,7 +181,7 @@ func TestTheHuntRunsAnInvocationInTheBoxsLastSecond(t *testing.T) {
 	h := runHunt(t, []string{"a"}, nil, "HUNT_MINUTES=1", "HUNT_RUNS=1", "HUNT_SEED=7", "TICK=59")
 
 	if want := "run --target target.yaml --deadline 1s --out out/a families/a.json"; len(h.invocations) != 1 || h.invocations[0] != want {
-		t.Errorf("The hunt ran botbox as %q, not as %q:\n%s", h.invocations, want, h.output)
+		t.Errorf("The hunt ran reconciler-fuzzer as %q, not as %q:\n%s", h.invocations, want, h.output)
 	}
 }
 
@@ -203,8 +203,8 @@ func TestTheHuntBlamesNothingForARunItsTimeBoxCut(t *testing.T) {
 	}
 }
 
-// botbox can report a find after its deadline, since it finishes the run it is
-// in.
+// reconciler-fuzzer can report a find after its deadline, since it finishes the
+// run it is in.
 func TestTheHuntKeepsAFindThatEndsAfterItsTimeBox(t *testing.T) {
 	h := runHunt(t, []string{"a", "b"}, []int{1}, "HUNT_MINUTES=2", "HUNT_RUNS=2", "HUNT_SEED=7")
 
@@ -214,7 +214,7 @@ func TestTheHuntKeepsAFindThatEndsAfterItsTimeBox(t *testing.T) {
 }
 
 func TestARebuildDuringAHuntChangesNothing(t *testing.T) {
-	rebuild := `printf '#!/bin/sh\nexit 3\n' >bin/new && chmod +x bin/new && mv bin/new bin/botbox`
+	rebuild := `printf '#!/bin/sh\nexit 3\n' >bin/new && chmod +x bin/new && mv bin/new bin/reconciler-fuzzer`
 	h := runHunt(t, []string{"a"}, nil, "HUNT_MINUTES=1000", "HUNT_RUNS=2", "HUNT_SEED=7", "AFTER_1="+rebuild)
 
 	if len(h.invocations) != 3 || h.code != 0 {
@@ -243,11 +243,11 @@ func TestTheHuntNeedsItsTimeBoxRunsAndSeed(t *testing.T) {
 	}
 }
 
-func TestTheHuntStopsWhenBotboxDiesOfASignal(t *testing.T) {
+func TestTheHuntStopsWhenReconcilerFuzzerDiesOfASignal(t *testing.T) {
 	h := runHunt(t, []string{"a", "b"}, []int{130}, "HUNT_MINUTES=1000", "HUNT_RUNS=2", "HUNT_SEED=7")
 
 	if len(h.invocations) != 1 || h.code != 130 {
-		t.Errorf("The hunt ran %d invocations and exited %d after botbox died of SIGINT:\n%s", len(h.invocations), h.code, h.output)
+		t.Errorf("The hunt ran %d invocations and exited %d after reconciler-fuzzer died of SIGINT:\n%s", len(h.invocations), h.code, h.output)
 	}
 }
 
@@ -289,7 +289,7 @@ func TestEachHuntTargetPreparesItsExampleAndHuntsIt(t *testing.T) {
 
 			hunt := regexp.MustCompile(`(?m)^.*examples/hunt\.sh .*$`).FindString(dry)
 			want := `HUNT_MINUTES=5 HUNT_RUNS=3 HUNT_SEED=9 KUBEBUILDER_ASSETS="$(` + assetsPath + `)" examples/hunt.sh examples/` +
-				example.name + "/target.yaml examples/" + example.name + "/sequences/hunt botbox-out/hunt-" + example.name
+				example.name + "/target.yaml examples/" + example.name + "/sequences/hunt reconciler-fuzzer-out/hunt-" + example.name
 			if hunt != want {
 				t.Fatalf("make hunt-%s runs\n%s\nnot\n%s", example.name, hunt, want)
 			}

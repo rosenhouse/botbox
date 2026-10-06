@@ -20,10 +20,10 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/run"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // toySequence drives the toy through every op the Runner executes in M3.
@@ -31,7 +31,7 @@ const toySequence = `{
   "seed": 20260920,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 3}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 3}}},
     {"i": 1, "t": "update", "patch": {"spec": {"count": 5}}},
     {"i": 2, "t": "settle"},
     {"i": 3, "t": "restart"},
@@ -46,8 +46,8 @@ const oneOutlivesTheOther = `{
   "seed": 20260920,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
-    {"i": 1, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget-2"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget-2"}, "spec": {"count": 1}}},
     {"i": 2, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
     {"i": 3, "t": "delete"},
     {"i": 4, "t": "restart"},
@@ -64,7 +64,7 @@ const oneCreate = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}}
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}}
   ]
 }`
 
@@ -72,7 +72,7 @@ const createThenDelete = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 1, "t": "delete"}
   ]
 }`
@@ -81,8 +81,8 @@ const createThenRecreate = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
-    {"i": 1, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}}
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "recreate", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}}
   ]
 }`
 
@@ -90,7 +90,7 @@ const createThenDeleteManaged = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 1, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
   ]
 }`
@@ -99,7 +99,7 @@ const createThenRestart = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 1, "t": "restart"},
     {"i": 2, "t": "settle"}
   ]
@@ -109,7 +109,7 @@ const restartThenDeleteManaged = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 1, "t": "restart"},
     {"i": 2, "t": "settle"},
     {"i": 3, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
@@ -120,7 +120,7 @@ const changeThenDeleteTheFixture = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 1, "t": "updateFixture", "kind": "v1/ConfigMap", "name": "widget-config", "patch": {"data": {"label": "blue"}}},
     {"i": 2, "t": "deleteFixture", "kind": "v1/ConfigMap", "name": "widget-config", "until": {"op": 3}},
     {"i": 3, "t": "settle"},
@@ -133,7 +133,7 @@ const deleteTheFixture = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 1, "t": "deleteFixture", "kind": "v1/ConfigMap", "name": "fixture", "until": {"op": 2}},
     {"i": 2, "t": "settle"}
   ]
@@ -143,7 +143,7 @@ const deleteTheFixtureOverASettle = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
     {"i": 1, "t": "deleteFixture", "kind": "v1/ConfigMap", "name": "fixture", "until": {"op": 3}},
     {"i": 2, "t": "settle"},
     {"i": 3, "t": "settle"}
@@ -152,7 +152,7 @@ const deleteTheFixtureOverASettle = `{
 
 // recreatingChecker judges as the engine does. At the checkpoint of the op
 // that at names, it then creates the fixture ConfigMap, as something other
-// than botbox might.
+// than reconciler-fuzzer might.
 type recreatingChecker struct {
 	configMaps dynamic.NamespaceableResourceInterface
 	at         int
@@ -170,8 +170,8 @@ const twoWidgets = `{
   "seed": 1,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
-    {"i": 1, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget-2"}, "spec": {"count": 1}}}
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "metadata": {"name": "widget-2"}, "spec": {"count": 1}}}
   ]
 }`
 
@@ -316,7 +316,7 @@ func TestRunner(t *testing.T) {
 		requireNamespaceEmpty(t, ctx, testCluster.Config(), result.Timeline.Namespace)
 	})
 
-	t.Run("changes, deletes and restores the toy's fixture, which stays botbox's", func(t *testing.T) {
+	t.Run("changes, deletes and restores the toy's fixture, which stays reconciler-fuzzer's", func(t *testing.T) {
 		toy := loadTarget(t, binary)
 
 		result, err := run.Run(ctx, toy, readSequence(t, changeThenDeleteTheFixture), run.Options{
@@ -347,7 +347,7 @@ func TestRunner(t *testing.T) {
 			t.Errorf("The fixture went through %v, want %v.", labels, want)
 		}
 		if store.IsManaged(fixture) {
-			t.Errorf("The fixture botbox restored counts as the target's.")
+			t.Errorf("The fixture reconciler-fuzzer restored counts as the target's.")
 		}
 		child := store.HistoryOf(configMapKind, "widget-0")
 		if label, _, _ := unstructured.NestedString(child[len(child)-1].Object.Object, "data", "label"); label != "blue" {
@@ -356,7 +356,7 @@ func TestRunner(t *testing.T) {
 	})
 
 	// b10.json scales the toy down right after a restart, before anything
-	// settles, so botbox's update lies between the states G5 compares.
+	// settles, so reconciler-fuzzer's update lies between the states G5 compares.
 	t.Run("passes the toy without a bug on b10.json and notes the restart", func(t *testing.T) {
 		toy := loadTarget(t, binary)
 		sequence, err := run.ReadSequence(repoRoot + "/targets/toy-widget/sequences/b10.json")
@@ -423,14 +423,14 @@ func TestRunner(t *testing.T) {
 		}
 		for _, state := range check.checkpoints {
 			if len(state.managedCRs) > 0 {
-				t.Errorf("After op %d the run counted the Widgets %v as managed, want none: botbox created them.",
+				t.Errorf("After op %d the run counted the Widgets %v as managed, want none: reconciler-fuzzer created them.",
 					state.op, state.managedCRs)
 			}
 		}
 	})
 
-	// B8 never recreates the child botbox deleted, and the toy's P1 is not
-	// what catches it.
+	// B8 never recreates the child reconciler-fuzzer deleted, and the toy's P1 is
+	// not what catches it.
 	t.Run("fails G7 where b8.json deletes a child B8 never recreates", func(t *testing.T) {
 		toy := loadTarget(t, binary)
 		toy.Launch.Args = append(toy.Launch.Args, "--bug=8")
@@ -456,8 +456,8 @@ func TestRunner(t *testing.T) {
 	})
 
 	// A target can delete the object a deleteManaged op resolved to before
-	// botbox deletes it. The op then deleted nothing, so G7 has nothing to
-	// require back.
+	// reconciler-fuzzer deletes it. The op then deleted nothing, so G7 has nothing
+	// to require back.
 	t.Run("notes a deleteManaged whose object was gone", func(t *testing.T) {
 		toy := loadTarget(t, binary)
 
@@ -469,9 +469,9 @@ func TestRunner(t *testing.T) {
 			t.Fatalf("The run failed: %v", err)
 		}
 		if result.Violation != nil {
-			t.Errorf("The run reported %s, want none: botbox deleted nothing.", result.Violation)
+			t.Errorf("The run reported %s, want none: reconciler-fuzzer deleted nothing.", result.Violation)
 		}
-		want := "op 1 (deleteManaged) deleted nothing: index 0 resolved to the v1/ConfigMap " + vanished + ", which was gone before botbox could delete it"
+		want := "op 1 (deleteManaged) deleted nothing: index 0 resolved to the v1/ConfigMap " + vanished + ", which was gone before reconciler-fuzzer could delete it"
 		if !slices.Equal(result.Notes, []string{want}) {
 			t.Errorf("The run noted %q, want %q.", result.Notes, want)
 		}
@@ -499,8 +499,8 @@ func TestRunner(t *testing.T) {
 		}
 	})
 
-	// B8 never recreates the child botbox deleted until a restart does. P1
-	// and G7 would end the run before the restart, so the target declares no
+	// B8 never recreates the child reconciler-fuzzer deleted until a restart does.
+	// P1 and G7 would end the run before the restart, so the target declares no
 	// property and leaves ConfigMaps deleted.
 	t.Run("names what the restart of b8.json brought back", func(t *testing.T) {
 		toy := loadTarget(t, binary)
@@ -596,10 +596,10 @@ func TestRunner(t *testing.T) {
 			if result.Violation == nil || result.Violation.ID != "G3" {
 				t.Fatalf("The run reported %v, want G3.", result.Violation)
 			}
-			if want := "the CR widget still carried the finalizers [widget.botbox/cleanup] 4s (timeouts.delete) after its deletion"; result.Violation.Statement != want {
+			if want := "the CR widget still carried the finalizers [widget.reconciler-fuzzer/cleanup] 4s (timeouts.delete) after its deletion"; result.Violation.Statement != want {
 				t.Errorf("G3 says %q, want %q.", result.Violation.Statement, want)
 			}
-			if want := "toy.botbox/v1/Widget widget"; result.Violation.VersionsOf != want || len(result.Violation.Versions) == 0 {
+			if want := "toy.reconciler-fuzzer/v1/Widget widget"; result.Violation.VersionsOf != want || len(result.Violation.Versions) == 0 {
 				t.Errorf("G3 quotes %d versions of %q, want the history of %s.", len(result.Violation.Versions), result.Violation.VersionsOf, want)
 			}
 		})
@@ -680,7 +680,7 @@ func TestRunner(t *testing.T) {
 			Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{},
 		})
 
-		want := "op 1 (deleteFixture): the fixture v1/ConfigMap fixture was still there 2s (timeouts.delete) after botbox deleted it, held by the finalizers [example.com/hold]"
+		want := "op 1 (deleteFixture): the fixture v1/ConfigMap fixture was still there 2s (timeouts.delete) after reconciler-fuzzer deleted it, held by the finalizers [example.com/hold]"
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("The run returned %v, want an error saying %q.", err, want)
 		}
@@ -699,7 +699,7 @@ func TestRunner(t *testing.T) {
 			Dir: t.TempDir(), Config: testCluster.Config(), Check: check,
 		})
 
-		want := "op 3 (settle): something created the fixture v1/ConfigMap fixture again after botbox deleted it"
+		want := "op 3 (settle): something created the fixture v1/ConfigMap fixture again after reconciler-fuzzer deleted it"
 		if err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("The run returned %v, want an error saying %q.", err, want)
 		}
@@ -720,15 +720,15 @@ func TestRunner(t *testing.T) {
 		if err != nil {
 			t.Fatalf("The run failed: %v", err)
 		}
-		want := "botbox's garbage collector never deletes v1/ConfigMap " + fixtureName +
+		want := "reconciler-fuzzer's garbage collector never deletes v1/ConfigMap " + fixtureName +
 			", because it does not watch v1/Secret, the kind of its owner absent"
 		if !slices.Equal(result.Notes, []string{want}) {
 			t.Errorf("The run carried the notes %q, want %q.", result.Notes, want)
 		}
 	})
 
-	// Only its requests show botbox that a restarted target is back, and the
-	// wait gives it T_settle from there.
+	// Only its requests show reconciler-fuzzer that a restarted target is back,
+	// and the wait gives it T_settle from there.
 	t.Run("passes a target that takes a while to come back from a restart", func(t *testing.T) {
 		const delay = 3500 * time.Millisecond
 		toy := loadTarget(t, restartsAfter(t, binary, fmt.Sprintf("sleep %v", delay.Seconds())))

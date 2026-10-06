@@ -7,7 +7,7 @@ import (
 
 	rbacv1 "k8s.io/api/rbac/v1"
 
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 func TestLoadRBACRolesAndClusterRoles(t *testing.T) {
@@ -25,7 +25,7 @@ kind: ClusterRole
 metadata:
   name: widget-clusterrole
 rules:
-  - apiGroups: ["toy.botbox"]
+  - apiGroups: ["toy.reconciler-fuzzer"]
     resources: ["widgets", "widgets/status"]
     verbs: ["get", "list", "watch", "update", "patch"]
 `

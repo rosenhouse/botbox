@@ -13,10 +13,10 @@ flags are its own. From a clean checkout, this script is the whole run:
 <!-- embed: examples/cert-manager/quickstart.sh -->
 ```sh
 #!/bin/sh
-# Exercise cert-manager with botbox. It builds what it needs, so a clean checkout
-# is enough. Arguments go to botbox: --seed picks the sequences it draws, and a
-# later --runs wins over the one here.
-# Exit codes: 0, all runs passed; 1, a check failed; 2, could not test.
+# Exercise cert-manager with reconciler-fuzzer. It builds what it needs, so a clean checkout
+# is enough. Arguments go to reconciler-fuzzer: --seed picks the sequences it
+# draws, and a later --runs wins over the one here. Exit codes: 0, all runs
+# passed; 1, a check failed; 2, could not test.
 set -eu
 cd "$(dirname "$0")/../.."
 
@@ -28,10 +28,10 @@ elif lsof -nP -iTCP:9403 -sTCP:LISTEN >/dev/null; then
   exit 2
 fi
 
-go build -o bin/botbox ./cmd/botbox || exit 2
+go build -o bin/reconciler-fuzzer ./cmd/reconciler-fuzzer || exit 2
 make --no-print-directory cert-manager || exit 2
 
-KUBEBUILDER_ASSETS="$(make --no-print-directory assets-path)" ./bin/botbox run \
+KUBEBUILDER_ASSETS="$(make --no-print-directory assets-path)" ./bin/reconciler-fuzzer run \
   --target examples/cert-manager/target.yaml --runs 5 "$@"
 ```
 
@@ -54,7 +54,7 @@ run 5: seed 27, generated
 every run passed.
 ```
 
-botbox derives the deadline from the `timeouts` your target declares, or their defaults. It
+reconciler-fuzzer derives the deadline from the `timeouts` your target declares, or their defaults. It
 allows the longest the runs' waits can take, and at least 4 minutes to minimize a failure. A
 correct controller finishes well inside it.
 
@@ -72,11 +72,11 @@ examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 5m --launch-ar
 run 1: seed 23, generated
 run 1: G3 the v1/Secret example-tls was still there 1m0s (timeouts.delete) after example, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-21T05:59:08.980624165Z; 1 version, the first v1/Secret example-tls
-  the evidence is in botbox-out/20260921T055744Z-23/run-1
-  the sequence is 1 op, in botbox-out/20260921T055744Z-23/run-1/sequence.json
+  the evidence is in reconciler-fuzzer-out/20260921T055744Z-23/run-1
+  the sequence is 1 op, in reconciler-fuzzer-out/20260921T055744Z-23/run-1/sequence.json
 ```
 
-Seed 23 draws a single op, so there is nothing to minimize. botbox cuts a longer sequence to the
+Seed 23 draws a single op, so there is nothing to minimize. reconciler-fuzzer cuts a longer sequence to the
 ops the failure needs before it reports. Each removal it tries replays a whole run. A derived
 deadline gives minimizing at least 4 minutes, and a longer `--deadline` gives it more.
 
@@ -114,5 +114,5 @@ control. It fails unless the control reports G3 and its evidence hides the Secre
 run 1: seed 20260922, sequence examples/external-secrets/sequences/orphan.json
 run 1: G3 the v1/Secret example-secret was still there 1m0s (timeouts.delete) after example, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-22T16:43:05.836050746Z; 1 version, the first v1/Secret example-secret
-  the evidence is in botbox-out/external-secrets-control/20260922T164150Z-20260922/run-1
+  the evidence is in reconciler-fuzzer-out/external-secrets-control/20260922T164150Z-20260922/run-1
 ```

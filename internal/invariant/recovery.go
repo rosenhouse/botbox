@@ -7,10 +7,10 @@ import (
 
 // Owed is when the target must have converged by, after the faults that
 // stopped by t. An exit the faults excused owes what settledBy gives its
-// restart, since botbox chose the restart's backoff. While a fault is active,
-// only the first such exit since the last op stamped before that time owes
-// it, so that a crash loop under a fault is not owed time for good. Owed is
-// zero where the target owes nothing.
+// restart, since reconciler-fuzzer chose the restart's backoff. While a fault
+// is active, only the first such exit since the last op stamped before that
+// time owes it, so that a crash loop under a fault is not owed time for good.
+// Owed is zero where the target owes nothing.
 func (in Input) Owed(t time.Time) time.Time {
 	owed := in.faultsOwed(t)
 	recovered := in.lastConverged(t)

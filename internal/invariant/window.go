@@ -9,7 +9,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 // MaxEvidence caps how much of a request log or a version history one
@@ -84,8 +84,8 @@ func (in Input) settleEnd(op int) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// tornDown reports whether botbox had started emptying the namespace by t, so
-// that what happened then is no longer the target's doing.
+// tornDown reports whether reconciler-fuzzer had started emptying the namespace
+// by t, so that what happened then is no longer the target's doing.
 func (in Input) tornDown(t time.Time) bool {
 	return !in.Teardown.IsZero() && t.After(in.Teardown)
 }

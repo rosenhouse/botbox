@@ -1,6 +1,6 @@
 //go:build envtest
 
-package botbox_test
+package reconcilerfuzzer_test
 
 import (
 	"errors"
@@ -13,9 +13,10 @@ import (
 	"testing"
 )
 
-// A reader who followed Install has botbox on PATH and KUBEBUILDER_ASSETS
-// set. Each command of the quick start then prints what the README shows, from
-// its first run on, up to the instants and directory names a run stamps.
+// A reader who followed Install has reconciler-fuzzer on PATH and
+// KUBEBUILDER_ASSETS set. Each command of the quick start then prints what the
+// README shows, from its first run on, up to the instants and directory names a
+// run stamps.
 func TestTheREADMEsQuickStartRunsAsShown(t *testing.T) {
 	if _, err := exec.LookPath("make"); err != nil {
 		t.Skipf("The test installs the control plane with make: %v", err)
@@ -59,14 +60,14 @@ func TestTheREADMEsQuickStartRunsAsShown(t *testing.T) {
 	}
 }
 
-// installed is the environment Install leaves: botbox, built from this
-// checkout, first on PATH, and KUBEBUILDER_ASSETS naming the pinned control
-// plane.
+// installed is the environment Install leaves: reconciler-fuzzer, built from
+// this checkout, first on PATH, and KUBEBUILDER_ASSETS naming the pinned
+// control plane.
 func installed(t *testing.T) []string {
 	t.Helper()
 	bin := t.TempDir()
-	if out, err := exec.Command("go", "build", "-o", filepath.Join(bin, "botbox"), "./cmd/botbox").CombinedOutput(); err != nil {
-		t.Fatalf("Building botbox failed: %v\n%s", err, out)
+	if out, err := exec.Command("go", "build", "-o", filepath.Join(bin, "reconciler-fuzzer"), "./cmd/reconciler-fuzzer").CombinedOutput(); err != nil {
+		t.Fatalf("Building reconciler-fuzzer failed: %v\n%s", err, out)
 	}
 	assets := exec.Command("make", "--no-print-directory", "assets-path")
 	assets.Env = outsideMake(os.Environ())
@@ -98,9 +99,10 @@ func unstamped(output string) string {
 	return dirStamp.ReplaceAllString(instant.ReplaceAllString(output, "<instant>"), "<stamp>")
 }
 
-const defaultOut = "botbox-out"
+const defaultOut = "reconciler-fuzzer-out"
 
-// invocations are the directories botbox has written under defaultOut.
+// invocations are the directories reconciler-fuzzer has written under
+// defaultOut.
 func invocations(t *testing.T) []string {
 	t.Helper()
 	entries, err := os.ReadDir(defaultOut)

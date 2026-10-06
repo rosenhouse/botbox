@@ -32,10 +32,10 @@ var (
 	configMapKind     = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
 	configMapResource = schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
 	secretKind        = schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
-	widgetKind        = schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
-	widgetResource    = schema.GroupVersionResource{Group: "toy.botbox", Version: "v1", Resource: "widgets"}
+	widgetKind        = schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Widget"}
+	widgetResource    = schema.GroupVersionResource{Group: "toy.reconciler-fuzzer", Version: "v1", Resource: "widgets"}
 	// widgetV1alpha1 is another version the API server serves Widgets at.
-	widgetV1alpha1 = schema.GroupVersionKind{Group: "toy.botbox", Version: "v1alpha1", Kind: "Widget"}
+	widgetV1alpha1 = schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1alpha1", Kind: "Widget"}
 )
 
 const runNamespace = "run-1"
@@ -451,7 +451,7 @@ func TestWriteLogWritesEachDeleteInTheOrderTried(t *testing.T) {
 	for _, line := range lines {
 		got = append(got, fmt.Sprint(line["kind"], " ", line["name"]))
 	}
-	if want := []string{"toy.botbox/v1/Widget first", "v1/ConfigMap second"}; !slices.Equal(got, want) {
+	if want := []string{"toy.reconciler-fuzzer/v1/Widget first", "v1/ConfigMap second"}; !slices.Equal(got, want) {
 		t.Errorf("The collector recorded the deletes %q, want %q.", got, want)
 	}
 }

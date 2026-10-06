@@ -12,9 +12,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 
-	"github.com/rosenhouse/botbox/internal/launch"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/launch"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // waitingHarness runs the Runner on a clock that each wait moves by the
@@ -34,8 +34,8 @@ type waitingHarness struct {
 	// each restart, at back.
 	returnsLate bool
 	back        time.Time
-	// goesLate has deleting, the CR botbox deleted last, go just before the
-	// wait for it ends.
+	// goesLate has deleting, the CR reconciler-fuzzer deleted last, go just before
+	// the wait for it ends.
 	goesLate bool
 	deleting *unstructured.Unstructured
 	// delay has the proxy hold a request for that long from just before each
@@ -162,7 +162,7 @@ func (w *waitingHarness) deleteCR(ctx context.Context, name string) error {
 	w.deleting.SetNamespace(fakeNamespace)
 	w.deleting.SetResourceVersion(w.at.Format(time.RFC3339Nano))
 	w.deleting.SetUID(types.UID(w.deleting.GetResourceVersion()))
-	w.deleting.SetFinalizers([]string{"toy.botbox/cleanup"})
+	w.deleting.SetFinalizers([]string{"toy.reconciler-fuzzer/cleanup"})
 	w.deleting.SetDeletionTimestamp(&metav1.Time{Time: w.at})
 	w.store.Record(widgetKind, w.deleting, w.at)
 	return w.fakeHarness.deleteCR(ctx, name)

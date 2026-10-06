@@ -286,7 +286,7 @@ func faultStatus(code int, r Request) metav1.Status {
 	resource := schema.GroupResource{Group: r.Group, Resource: r.Resource}
 	status := apierrors.NewGenericServerResponse(code, r.Verb, resource, r.Name, "", 0, false).ErrStatus
 	status.TypeMeta = metav1.TypeMeta{Kind: "Status", APIVersion: "v1"}
-	status.Message = fmt.Sprintf("botbox fault: %s %s", r.Verb, r.Path)
+	status.Message = fmt.Sprintf("reconciler-fuzzer fault: %s %s", r.Verb, r.Path)
 	return status
 }
 

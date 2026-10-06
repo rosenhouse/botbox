@@ -11,9 +11,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
-	"github.com/rosenhouse/botbox/internal/run"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 func TestInvocationCreatesAndDeletesClusterScopedFixtures(t *testing.T) {
@@ -23,12 +23,12 @@ func TestInvocationCreatesAndDeletesClusterScopedFixtures(t *testing.T) {
 	fixture := &unstructured.Unstructured{Object: map[string]any{
 		"apiVersion": "networking.k8s.io/v1",
 		"kind":       "IngressClass",
-		"metadata":   map[string]any{"name": "botbox-test"},
+		"metadata":   map[string]any{"name": "reconciler-fuzzer-test"},
 		"spec":       map[string]any{"controller": "example.com/test"},
 	}}
 	toy := &target.Target{
 		Name:            "toy-widget",
-		Primary:         schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"},
+		Primary:         schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1", Kind: "Widget"},
 		Fixtures:        []*unstructured.Unstructured{fixture},
 		ClusterFixtures: []schema.GroupVersionKind{ingressClassGVK},
 	}
@@ -62,7 +62,7 @@ func TestInvocationCreatesAndDeletesClusterScopedFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Building a dynamic client failed: %v", err)
 	}
-	got, err := client.Resource(ingressClassGVR).Get(ctx, "botbox-test", metav1.GetOptions{})
+	got, err := client.Resource(ingressClassGVR).Get(ctx, "reconciler-fuzzer-test", metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("The cluster fixture was not created: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestInvocationCreatesAndDeletesClusterScopedFixtures(t *testing.T) {
 	}
 
 	// The IngressClass is gone.
-	_, err = client.Resource(ingressClassGVR).Get(ctx, "botbox-test", metav1.GetOptions{})
+	_, err = client.Resource(ingressClassGVR).Get(ctx, "reconciler-fuzzer-test", metav1.GetOptions{})
 	if !apierrors.IsNotFound(err) {
 		t.Errorf("After Close the cluster fixture returned %v, want not-found.", err)
 	}

@@ -1,4 +1,4 @@
-package botbox_test
+package reconcilerfuzzer_test
 
 import (
 	"fmt"
@@ -15,28 +15,28 @@ import (
 
 const toolsRecipe = "examples/tools-module.sh"
 
-func TestTheCIPageSaysWhereTheToolsModuleRecipePinsBotbox(t *testing.T) {
+func TestTheCIPageSaysWhereTheToolsModuleRecipePinsReconcilerFuzzer(t *testing.T) {
 	script := readFile(t, toolsRecipe)
 	lines := strings.Split(strings.TrimSpace(script), "\n")
-	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "bin/botbox ") {
-		t.Errorf("%s ends with %q, and %s says its last line runs bin/botbox.", toolsRecipe, last, ciPage)
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "bin/reconciler-fuzzer ") {
+		t.Errorf("%s ends with %q, and %s says its last line runs bin/reconciler-fuzzer.", toolsRecipe, last, ciPage)
 	}
 	dir := toolsModuleDir(t, script)
-	keep := oneLine(section(t, readFile(t, ciPage), "## Keep botbox out of your go.mod"))
-	for _, says := range []string{"`" + dir + "/go.mod` then pins botbox", "not `go -C " + dir + " tool botbox`", "runs botbox in `" + dir + "/`",
+	keep := oneLine(section(t, readFile(t, ciPage), "## Keep reconciler-fuzzer out of your go.mod"))
+	for _, says := range []string{"`" + dir + "/go.mod` then pins reconciler-fuzzer", "not `go -C " + dir + " tool reconciler-fuzzer`", "runs reconciler-fuzzer in `" + dir + "/`",
 		"Your own go.mod and go.work, and any package of yours in `" + path.Dir(dir) + "/`, stay as they were."} {
 		if !strings.Contains(keep, says) {
-			t.Errorf("%s does not say %q, and %s pins botbox in %s.", ciPage, says, toolsRecipe, dir)
+			t.Errorf("%s does not say %q, and %s pins reconciler-fuzzer in %s.", ciPage, says, toolsRecipe, dir)
 		}
 	}
 }
 
-// toolsModuleDir is the directory where script builds bin/botbox.
+// toolsModuleDir is the directory where script builds bin/reconciler-fuzzer.
 func toolsModuleDir(t *testing.T, script string) string {
 	t.Helper()
 	dir := regexp.MustCompile(`(?m)^(?:\S+=\S+ )*go -C (\S+) build `).FindStringSubmatch(script)
 	if dir == nil {
-		t.Fatalf("%s builds bin/botbox with no go -C <dir> build.", toolsRecipe)
+		t.Fatalf("%s builds bin/reconciler-fuzzer with no go -C <dir> build.", toolsRecipe)
 	}
 	return dir[1]
 }
@@ -54,7 +54,7 @@ func TestTheToolsModuleRecipeLeavesItsShellsVariablesAlone(t *testing.T) {
 
 func TestVariablesChangedByFindsEachWayToChangeOne(t *testing.T) {
 	for set, want := range map[string]string{"GOWORK=off; export GOWORK": "GOWORK", "  export GOWORK=off": "GOWORK",
-		"set -a; GOWORK=off; set +a": "GOWORK", "GOWORK=$(echo off)": "GOWORK", "GOWORK=off; mkdir -p tools/botbox": "GOWORK",
+		"set -a; GOWORK=off; set +a": "GOWORK", "GOWORK=$(echo off)": "GOWORK", "GOWORK=off; mkdir -p tools/reconciler-fuzzer": "GOWORK",
 		"unset GOWORK": "GOWORK", "PATH=$PATH:/x": "PATH", "GOTOOLCHAIN=auto": "GOTOOLCHAIN", "unset GOFLAGS": "GOFLAGS",
 		"GOFLAGS=": "GOFLAGS", "unset gopath": "gopath",
 		`: "${GOFLAGS:=-mod=mod}"`: "GOFLAGS", "GOTOOLCHAIN=${GOTOOLCHAIN:-auto}": "GOTOOLCHAIN", "export GOFLAGS": "GOFLAGS", "unset GO111MODULE": "GO111MODULE",
@@ -63,7 +63,7 @@ func TestVariablesChangedByFindsEachWayToChangeOne(t *testing.T) {
 			t.Errorf("variablesChangedBy found %q and %v where the recipe begins %q, want %s.", changed, err, set, want)
 		}
 	}
-	if changed, err := variablesChangedBy(t, readFile(t, toolsRecipe)+"cd tools/botbox\n"); err != nil || !slices.Equal(changed, []string{"PWD"}) {
+	if changed, err := variablesChangedBy(t, readFile(t, toolsRecipe)+"cd tools/reconciler-fuzzer\n"); err != nil || !slices.Equal(changed, []string{"PWD"}) {
 		t.Errorf("variablesChangedBy found %q and %v where the recipe ends in another directory, want PWD.", changed, err)
 	}
 	for _, line := range []string{`: "$PWD"`, "# Run this from your repository root && with go on PATH.", "  # Or || not."} {
@@ -121,9 +121,9 @@ var runsSometimes = regexp.MustCompile(`\|\||&&|(?:^|;)\s*(?:if|case|while|until
 // exportedName is a variable that export -p lists.
 var exportedName = regexp.MustCompile(`(?m)^export (\w+)`)
 
-// variablesChangedBy runs script, with go and bin/botbox stubbed, and returns
-// each variable it sets, changes, exports or unsets. A script names each
-// variable it changes, but cd changes PWD and OLDPWD, so the check watches
+// variablesChangedBy runs script, with go and bin/reconciler-fuzzer stubbed,
+// and returns each variable it sets, changes, exports or unsets. A script names
+// each variable it changes, but cd changes PWD and OLDPWD, so the check watches
 // PATH, PWD and each word of the script. It runs the script twice: in a shell
 // that holds an unexported value for each other word, and in one that holds
 // none. Each line but a comment must run every time.
@@ -165,7 +165,7 @@ func shellStates(t *testing.T, assignments, script string, names []string) (befo
 	if err := os.Mkdir(filepath.Join(work, "bin"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeStub(t, filepath.Join(work, "bin", "botbox"), "")
+	writeStub(t, filepath.Join(work, "bin", "reconciler-fuzzer"), "")
 	writeStub(t, filepath.Join(stubs, "go"), "")
 	writeFile(t, filepath.Join(stubs, "script.sh"), script)
 	probe := "export -p\nprintf '\\0'\n"

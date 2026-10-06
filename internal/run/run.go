@@ -4,7 +4,7 @@
 // emulation and the target process. Run then applies each op, waits for it to
 // settle, has a Checker judge each checkpoint and tears the run down.
 // Shrink minimizes a failing sequence by replaying simpler ones. A Sequence is
-// the JSON that botbox draws, replays and reports.
+// the JSON that reconciler-fuzzer draws, replays and reports.
 package run
 
 import (
@@ -29,11 +29,11 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
-	"github.com/rosenhouse/botbox/internal/launch"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/launch"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // The run directory holds these files.
@@ -47,7 +47,7 @@ const (
 )
 
 // namespacePrefix opens the name of a run namespace.
-const namespacePrefix = "botbox-run-"
+const namespacePrefix = "reconciler-fuzzer-run-"
 
 // Options configure one run.
 type Options struct {
@@ -62,8 +62,9 @@ type Options struct {
 	// starts an envtest cluster for this run alone.
 	Config *rest.Config
 	// ControllerManager says the cluster runs kube-controller-manager, as kind
-	// does and envtest does not. Its garbage collector replaces botbox's
-	// emulation, and botbox waits for what it adds to every namespace.
+	// does and envtest does not. Its garbage collector replaces
+	// reconciler-fuzzer's emulation, and reconciler-fuzzer waits for what it adds
+	// to every namespace.
 	ControllerManager bool
 	// NamespaceDefaultsWithin bounds the wait for what the controller manager
 	// adds to the run namespace. Zero takes 30 s.
@@ -94,8 +95,8 @@ func (o Options) namespaceDefaultsWithin() time.Duration {
 type Harness struct {
 	// Namespace is private to this run and never reused.
 	Namespace string
-	// Config reaches the API server directly. botbox's own writes never go
-	// through the proxy.
+	// Config reaches the API server directly. reconciler-fuzzer's own writes never
+	// go through the proxy.
 	Config   *rest.Config
 	Proxy    *proxy.Proxy
 	Observer *observe.Observer
@@ -120,10 +121,10 @@ type Harness struct {
 }
 
 // Start creates the run directory, then brings up in order: a cluster, unless
-// opts.Config reaches one; the namespace; the proxy; the Observer; botbox's
-// garbage collector, unless the cluster runs a controller manager; the
-// fixtures; and the target, which it leaves running. A failure takes back down
-// whatever came up. The caller must call Stop.
+// opts.Config reaches one; the namespace; the proxy; the Observer;
+// reconciler-fuzzer's garbage collector, unless the cluster runs a controller
+// manager; the fixtures; and the target, which it leaves running. A failure
+// takes back down whatever came up. The caller must call Stop.
 func Start(ctx context.Context, t *target.Target, opts Options) (*Harness, error) {
 	if err := validate(t, opts); err != nil {
 		return nil, fmt.Errorf("starting the run: %w", err)
@@ -143,7 +144,7 @@ func validate(t *target.Target, opts Options) error {
 		return errors.New("an output directory is required")
 	}
 	if opts.ControllerManager && opts.Config == nil {
-		return errors.New("a cluster with a controller manager must come with a Config: botbox starts envtest, which runs none")
+		return errors.New("a cluster with a controller manager must come with a Config: reconciler-fuzzer starts envtest, which runs none")
 	}
 	return nil
 }
@@ -172,7 +173,7 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 
 	core, err := kubernetes.NewForConfig(h.Config)
 	if err != nil {
-		return fmt.Errorf("building botbox's client: %w", err)
+		return fmt.Errorf("building reconciler-fuzzer's client: %w", err)
 	}
 	if err := h.createNamespace(ctx, core); err != nil {
 		return err
@@ -305,14 +306,15 @@ func (h *Harness) observeOptions() observe.Options {
 }
 
 // applyFixtures creates the target's fixtures in the run namespace and tells
-// the Observer botbox created them, so that they never count as managed.
+// the Observer reconciler-fuzzer created them, so that they never count as
+// managed.
 func (h *Harness) applyFixtures(ctx context.Context) error {
 	if len(h.target.Fixtures) == 0 {
 		return nil
 	}
 	client, err := dynamic.NewForConfig(h.Config)
 	if err != nil {
-		return fmt.Errorf("building botbox's dynamic client: %w", err)
+		return fmt.Errorf("building reconciler-fuzzer's dynamic client: %w", err)
 	}
 	for _, fixture := range h.target.Fixtures {
 		gvk := fixture.GroupVersionKind()
@@ -371,7 +373,7 @@ func awaitNamespaceDefaults(ctx context.Context, store *observe.Store, watched [
 		for len(store.HistoryOf(object.gvk, object.name)) == 0 {
 			if !time.Now().Before(deadline) {
 				return fmt.Errorf("the cluster created no %s %s in the run namespace within %v. "+
-					"kube-controller-manager creates one in every namespace, and botbox waits for it so as not to count it as the target's",
+					"kube-controller-manager creates one in every namespace, and reconciler-fuzzer waits for it so as not to count it as the target's",
 					observe.KindName(object.gvk), object.name, within)
 			}
 			if err := sleep(ctx, settlePoll); err != nil {

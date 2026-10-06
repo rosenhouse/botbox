@@ -20,12 +20,12 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/launch"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/launch"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // fakeHarness records what the Runner did to the run, in order, and answers
@@ -64,7 +64,8 @@ type fakeHarness struct {
 	fail    map[string]error
 	// unresolved is what the collector reports once the harness has stopped.
 	unresolved []cluster.Unresolved
-	// gone names the managed objects the target deleted before botbox could.
+	// gone names the managed objects the target deleted before reconciler-fuzzer
+	// could.
 	gone []string
 
 	// deleteCRDelay holds the CR delete open, and deletedCRAt is when it began.
@@ -113,7 +114,7 @@ type fakeHarness struct {
 	// cancel ends the run's context at the call cancelsAfter names.
 	cancel       context.CancelFunc
 	cancelsAfter string
-	// restoredAt is when botbox last created a fixture.
+	// restoredAt is when reconciler-fuzzer last created a fixture.
 	restoredAt time.Time
 	// supervising is the context the run supervised the target under, and
 	// stoppedAtOnce is whether the teardown stopped the target under a
@@ -151,7 +152,7 @@ func (f *fakeHarness) record(call string) error {
 	return f.fail[call]
 }
 
-const fakeNamespace = "botbox-run-test"
+const fakeNamespace = "reconciler-fuzzer-run-test"
 
 func (f *fakeHarness) namespace() string { return fakeNamespace }
 
@@ -553,7 +554,7 @@ func TestRunAppliesTheOpsInOrder(t *testing.T) {
 	if result.Violation != nil {
 		t.Errorf("The run reported %v, want no violation.", result.Violation)
 	}
-	// The first wait that converged shows the target runs, so botbox
+	// The first wait that converged shows the target runs, so reconciler-fuzzer
 	// supervises it from there on, once.
 	want := []string{
 		"createCR widget", "settle", "supervise",
@@ -621,7 +622,7 @@ func TestRunChangesDeletesAndRestoresAFixture(t *testing.T) {
 	}
 	// Anything the target did in reply came after op 4 began.
 	if h.restoredAt.Before(result.Timeline.Ops[4].At) {
-		t.Errorf("botbox restored the fixture at %v, before op 4 began at %v.", h.restoredAt, result.Timeline.Ops[4].At)
+		t.Errorf("reconciler-fuzzer restored the fixture at %v, before op 4 began at %v.", h.restoredAt, result.Timeline.Ops[4].At)
 	}
 	if token := declared.Fixtures[0].Object["data"].(map[string]any)["token"]; token != "czNjcjN0" {
 		t.Errorf("The target's fixture holds the token %v, want the one it declares: the next run starts from it.", token)
@@ -1837,7 +1838,7 @@ func TestAnAbandonedRunWaitsForNothing(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newFakeHarness()
-			h.clean, h.forced = false, []string{"toy.botbox/v1/Widget widget"}
+			h.clean, h.forced = false, []string{"toy.reconciler-fuzzer/v1/Widget widget"}
 			ctx, cancel := context.WithCancel(t.Context())
 			h.cancel, h.cancelsAfter = cancel, test.at
 			ops := []Op{{Type: OpCreate, Obj: widget("widget"), NoSettle: true}, {Type: OpCreate, Obj: widget("widget-2")}}
@@ -2011,7 +2012,7 @@ func TestRunNotesADeleteManagedWhoseObjectWasGone(t *testing.T) {
 	if got := result.Timeline.Ops[0].Deleted; got != "" {
 		t.Errorf("The op recorded %q as the object it deleted, and it deleted nothing.", got)
 	}
-	want := "op 0 (deleteManaged) deleted nothing: index 1 resolved to the v1/ConfigMap widget-1, which was gone before botbox could delete it"
+	want := "op 0 (deleteManaged) deleted nothing: index 1 resolved to the v1/ConfigMap widget-1, which was gone before reconciler-fuzzer could delete it"
 	if !slices.Equal(result.Notes, []string{want}) {
 		t.Errorf("The run reported the notes %q, want %q.", result.Notes, want)
 	}
@@ -2050,7 +2051,7 @@ func TestRunReportsADeleteManagedOfAKindTheTargetDoesNotManage(t *testing.T) {
 
 func TestRunTearsDownInTheOrderTheDesignGives(t *testing.T) {
 	h := newFakeHarness()
-	h.forced = []string{"v1/ConfigMap widget-0", "toy.botbox/v1/Widget widget"}
+	h.forced = []string{"v1/ConfigMap widget-0", "toy.reconciler-fuzzer/v1/Widget widget"}
 	sequence := sequenceOf(Op{Type: OpCreate, Obj: widget("widget")})
 
 	result, err := runFake(t, h, nil, sequence)
@@ -2073,8 +2074,8 @@ func TestRunTearsDownInTheOrderTheDesignGives(t *testing.T) {
 	if !slices.Equal(result.Timeline.Forced, h.forced) {
 		t.Errorf("The run recorded the forced finalizers %v, want %v.", result.Timeline.Forced, h.forced)
 	}
-	// A namespace botbox emptied by hand is not one the target cleaned, and no
-	// check judges what the teardown did (DESIGN.md §5.5, D37).
+	// A namespace reconciler-fuzzer emptied by hand is not one the target cleaned,
+	// and no check judges what the teardown did (DESIGN.md §5.5, D37).
 	note := strings.Join(result.Notes, "\n")
 	for _, forced := range h.forced {
 		if !strings.Contains(note, forced) {
@@ -2194,8 +2195,8 @@ func TestRunReportsAFailedOp(t *testing.T) {
 }
 
 func TestAWriteTheAPIServerRefusesIsARefusalOfItsOp(t *testing.T) {
-	widgets := schema.GroupResource{Group: "toy.botbox", Resource: "widgets"}
-	invalid := apierrors.NewInvalid(schema.GroupKind{Group: "toy.botbox", Kind: "Widget"}, "widget",
+	widgets := schema.GroupResource{Group: "toy.reconciler-fuzzer", Resource: "widgets"}
+	invalid := apierrors.NewInvalid(schema.GroupKind{Group: "toy.reconciler-fuzzer", Kind: "Widget"}, "widget",
 		field.ErrorList{field.Invalid(field.NewPath("spec"), "object", "maxUnavailable must not exceed count")})
 	for _, test := range []struct {
 		name, call string
@@ -2205,11 +2206,11 @@ func TestAWriteTheAPIServerRefusesIsARefusalOfItsOp(t *testing.T) {
 		{"a create its CRD refuses", "createCR widget", invalid, 0},
 		{"an update its CRD refuses", "patchCR widget map[spec:map[count:5]]", invalid, 2},
 		{"a create a webhook denies with its default code", "createCR widget",
-			apierrors.NewBadRequest(`admission webhook "validate.toy.botbox" denied the request: no`), 0},
+			apierrors.NewBadRequest(`admission webhook "validate.toy.reconciler-fuzzer" denied the request: no`), 0},
 		{"a create a webhook forbids", "createCR widget",
-			apierrors.NewForbidden(widgets, "widget", errors.New(`admission webhook "validate.toy.botbox" denied the request`)), 0},
+			apierrors.NewForbidden(widgets, "widget", errors.New(`admission webhook "validate.toy.reconciler-fuzzer" denied the request`)), 0},
 		{"a server that fails", "createCR widget", apierrors.NewInternalError(errors.New("etcd is down")), -1},
-		{"a managed object botbox may not delete", "deleteManaged v1/ConfigMap widget-0",
+		{"a managed object reconciler-fuzzer may not delete", "deleteManaged v1/ConfigMap widget-0",
 			apierrors.NewForbidden(schema.GroupResource{Resource: "configmaps"}, "widget-0", errors.New("no")), -1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -2241,8 +2242,8 @@ func TestAWriteTheAPIServerRefusesIsARefusalOfItsOp(t *testing.T) {
 }
 
 func TestADeleteAWebhookForbidsIsNoRefusedWrite(t *testing.T) {
-	protected := apierrors.NewForbidden(schema.GroupResource{Group: "toy.botbox", Resource: "widgets"}, "widget",
-		errors.New(`admission webhook "protect.toy.botbox" denied the request: deletion is protected`))
+	protected := apierrors.NewForbidden(schema.GroupResource{Group: "toy.reconciler-fuzzer", Resource: "widgets"}, "widget",
+		errors.New(`admission webhook "protect.toy.reconciler-fuzzer" denied the request: deletion is protected`))
 	for _, deleting := range []Op{{Type: OpDelete}, {Type: OpRecreate, Obj: widget("widget")}} {
 		t.Run(string(deleting.Type), func(t *testing.T) {
 			h := newFakeHarness()
@@ -2603,7 +2604,7 @@ func TestRunNotesEachOwnerTheCollectorCouldNotResolve(t *testing.T) {
 	h.unresolved = []cluster.Unresolved{
 		{
 			DependentKind: configMapKind, DependentName: "widget-cfg",
-			OwnerKind: schema.GroupVersionKind{Group: "toy.botbox", Version: "v1alpha9", Kind: "Widget"}, OwnerName: "widget",
+			OwnerKind: schema.GroupVersionKind{Group: "toy.reconciler-fuzzer", Version: "v1alpha9", Kind: "Widget"}, OwnerName: "widget",
 			Unserved: true,
 		},
 		{
@@ -2619,8 +2620,8 @@ func TestRunNotesEachOwnerTheCollectorCouldNotResolve(t *testing.T) {
 		t.Fatalf("The run failed: %v", err)
 	}
 	want := []string{
-		"botbox's garbage collector never deletes v1/ConfigMap widget-cfg, because the API server does not serve toy.botbox/v1alpha9/Widget, the kind of its owner widget",
-		"botbox's garbage collector never deletes v1/Secret widget-tls, because it does not watch apps/v1/Deployment, the kind of its owner issuer",
+		"reconciler-fuzzer's garbage collector never deletes v1/ConfigMap widget-cfg, because the API server does not serve toy.reconciler-fuzzer/v1alpha9/Widget, the kind of its owner widget",
+		"reconciler-fuzzer's garbage collector never deletes v1/Secret widget-tls, because it does not watch apps/v1/Deployment, the kind of its owner issuer",
 		"G3 is not evaluated for the deletion of widget",
 	}
 	if !slices.Equal(result.Notes, want) {
@@ -2709,9 +2710,9 @@ func TestRunHoldsTheDeletionWindowOpenPastTDelete(t *testing.T) {
 
 // TestTheTeardownIsStampedBeforeItChangesAnything pins Timeline.Deletion.Start
 // to the instant before the CR delete. The invariants take it as the moment
-// botbox became the one changing the namespace (DESIGN.md §6), so a stamp taken
-// after the delete returns leaves a window in which the CR botbox is deleting is
-// judged against the target.
+// reconciler-fuzzer became the one changing the namespace (DESIGN.md §6), so a
+// stamp taken after the delete returns leaves a window in which the CR
+// reconciler-fuzzer is deleting is judged against the target.
 func TestTheTeardownIsStampedBeforeItChangesAnything(t *testing.T) {
 	h := &fakeHarness{converged: true, clean: true, deleteCRDelay: 50 * time.Millisecond}
 	sequence := sequenceOf(Op{Type: OpCreate, Obj: widget("widget")})
@@ -2846,8 +2847,8 @@ func TestASettleExpiryWithADeadTargetIsAHarnessError(t *testing.T) {
 	}
 }
 
-// A target that stopped once botbox had created the CR, and before it ran
-// supervised, may have crashed on it if it had read a resource. The run
+// A target that stopped once reconciler-fuzzer had created the CR, and before
+// it ran supervised, may have crashed on it if it had read a resource. The run
 // directory holds the sequence that replays it. A supervised target stops only
 // where a restart failed.
 func TestAStoppedTargetsErrorSaysWhetherTheCRMayHaveCrashedIt(t *testing.T) {
@@ -2880,7 +2881,7 @@ func TestAStoppedTargetsErrorSaysWhetherTheCRMayHaveCrashedIt(t *testing.T) {
 			if err == nil {
 				t.Fatal("The run reported no error although the target had stopped.")
 			}
-			pointer := "botbox had created the CR, so the CR may have crashed the target, and " +
+			pointer := "reconciler-fuzzer had created the CR, so the CR may have crashed the target, and " +
 				filepath.Join(dir, "sequence.json") + " replays the run"
 			if says := strings.Contains(err.Error(), pointer); says != test.created {
 				t.Errorf("The error is %q; want it to say %q: %t.", err, pointer, test.created)
@@ -2958,7 +2959,7 @@ func TestWhatTheTargetSaidOnTheWayOut(t *testing.T) {
 		})
 	}
 	if got, _ := whyItStopped(filepath.Join(t.TempDir(), "no-such-log"), 0); got != "" {
-		t.Errorf("A log botbox never wrote reads as %q.", got)
+		t.Errorf("A log reconciler-fuzzer never wrote reads as %q.", got)
 	}
 }
 
@@ -2972,7 +2973,7 @@ func TestWhatTheTargetSaidAboveItsStackTrace(t *testing.T) {
 			`{"controller": "configmap", "controllerGroup": "", "controllerKind": "ConfigMap", "ConfigMap": {"name":"widget-0","namespace":"default"}, "namespace": "default", "name": "widget-0", "reconcileID": "8a0fad41-f98f-47ea-87d1-990173d1d560", "error": "spec.count 11 is out of range"}`},
 		{"panic.log", "panic: runtime error: index out of range [150] with length 0"},
 		{"klog-fatal.log", "F0923 16:05:39.116650    7054 main.go:30] reconciling widget: the cache never synced"},
-		{"zap-json.log", `{"level":"error","ts":"2026-09-23T16:04:03Z","logger":"setup","msg":"unable to create controller","controller":"Widget","error":"no matches for kind \"Widget\" in version \"toy.botbox/v1\"","stacktrace":"main.main\n\tgithub.com/rosenhouse/botbox/zzprobe/main.go:39\nruntime.main\n\truntime/proc.go:290"}`},
+		{"zap-json.log", `{"level":"error","ts":"2026-09-23T16:04:03Z","logger":"setup","msg":"unable to create controller","controller":"Widget","error":"no matches for kind \"Widget\" in version \"toy.reconciler-fuzzer/v1\"","stacktrace":"main.main\n\tgithub.com/rosenhouse/reconciler-fuzzer/zzprobe/main.go:39\nruntime.main\n\truntime/proc.go:290"}`},
 		// Go's flag package prints the error above its usage text.
 		{"flag-usage.log", "flag provided but not defined: -no-such-flag"},
 		{"cobra-usage.log", "Error: unknown flag: --no-such-flag"},
@@ -3201,8 +3202,8 @@ func TestACheckpointIsWhereItsWaitEnded(t *testing.T) {
 	}
 }
 
-// Until a settle wait converges, botbox has not seen the target work, and an
-// exit reads like a bad flag or a taken port: a harness error.
+// Until a settle wait converges, reconciler-fuzzer has not seen the target
+// work, and an exit reads like a bad flag or a taken port: a harness error.
 func TestAnExitBeforeAnyWaitConvergedEndsTheRun(t *testing.T) {
 	h := newFakeHarness()
 	h.converged, h.faulting = false, true
@@ -3385,8 +3386,8 @@ func TestAnExitAFaultExcusedIsOwedTSettlePastItsRestart(t *testing.T) {
 	}
 }
 
-// botbox chose to restart the target, so the wait after the restart gives it
-// T_settle past its return.
+// reconciler-fuzzer chose to restart the target, so the wait after the restart
+// gives it T_settle past its return.
 func TestTheWaitAfterARestartIsOwedTSettlePastTheTargetsReturn(t *testing.T) {
 	h := newFakeHarness()
 	var back time.Time

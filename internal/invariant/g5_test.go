@@ -15,9 +15,9 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"pgregory.net/rapid"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 // restartRun converges after the create at 5s, restarts the target at 10s and
@@ -126,8 +126,8 @@ func TestG5NamesTheFieldThatChanged(t *testing.T) {
 }
 
 func TestG5QuotesNoFieldItIgnores(t *testing.T) {
-	live := metav1.OwnerReference{APIVersion: "toy.botbox/v1", Kind: "Widget", Name: widgetName, UID: widgetUID}
-	gone := metav1.OwnerReference{APIVersion: "toy.botbox/v1", Kind: "Widget", Name: "gone", UID: "uid-gone"}
+	live := metav1.OwnerReference{APIVersion: "toy.reconciler-fuzzer/v1", Kind: "Widget", Name: widgetName, UID: widgetUID}
+	gone := metav1.OwnerReference{APIVersion: "toy.reconciler-fuzzer/v1", Kind: "Widget", Name: "gone", UID: "uid-gone"}
 	in := restarted(
 		child("w-0", "11", data("0"), uid("uid-old"), generation(1), created(0), managedFields("one"),
 			ownedBy(gone, live), annotations(map[string]string{startedAt: "1"})),
@@ -540,13 +540,13 @@ func TestG5IgnoresAnOwnerReferenceWhoseOwnerIsGone(t *testing.T) {
 
 // An ownerReference may name any version the API server serves.
 func TestG5IgnoresADanglingOwnerReferenceThatNamesAnotherVersion(t *testing.T) {
-	live := metav1.OwnerReference{APIVersion: "toy.botbox/v1", Kind: "Widget", Name: widgetName, UID: widgetUID}
+	live := metav1.OwnerReference{APIVersion: "toy.reconciler-fuzzer/v1", Kind: "Widget", Name: widgetName, UID: widgetUID}
 	for _, dangling := range []struct {
 		name string
 		ref  metav1.OwnerReference
 	}{
-		{"the owner is gone", metav1.OwnerReference{APIVersion: "toy.botbox/v1alpha1", Kind: "Widget", Name: "gone", UID: "uid-gone"}},
-		{"the owner's name has a new UID", metav1.OwnerReference{APIVersion: "toy.botbox/v1alpha1", Kind: "Widget", Name: widgetName, UID: "uid-w-before"}},
+		{"the owner is gone", metav1.OwnerReference{APIVersion: "toy.reconciler-fuzzer/v1alpha1", Kind: "Widget", Name: "gone", UID: "uid-gone"}},
+		{"the owner's name has a new UID", metav1.OwnerReference{APIVersion: "toy.reconciler-fuzzer/v1alpha1", Kind: "Widget", Name: widgetName, UID: "uid-w-before"}},
 	} {
 		t.Run(dangling.name, func(t *testing.T) {
 			in := restarted(child("w-0", "11", ownedBy(dangling.ref, live)), child("w-0", "21", ownedBy(live)))
@@ -557,7 +557,7 @@ func TestG5IgnoresADanglingOwnerReferenceThatNamesAnotherVersion(t *testing.T) {
 }
 
 func TestG5ComparesALiveOwnerReferenceThatNamesAnotherVersion(t *testing.T) {
-	live := metav1.OwnerReference{APIVersion: "toy.botbox/v1alpha1", Kind: "Widget", Name: widgetName, UID: widgetUID}
+	live := metav1.OwnerReference{APIVersion: "toy.reconciler-fuzzer/v1alpha1", Kind: "Widget", Name: widgetName, UID: widgetUID}
 	in := restarted(child("w-0", "11", ownedBy(live)), child("w-0", "21", orphaned))
 
 	fired(t, invariant.RestartStable, in)
@@ -583,8 +583,8 @@ func TestG5ComparesAnOwnerReferenceThatFollowedARecreatedOwner(t *testing.T) {
 	}
 }
 
-// botbox cannot tell that an owner of a kind the target does not declare is
-// gone.
+// reconciler-fuzzer cannot tell that an owner of a kind the target does not
+// declare is gone.
 func TestG5ComparesAnOwnerReferenceOfAnUndeclaredKind(t *testing.T) {
 	absent := metav1.OwnerReference{APIVersion: "apps/v1", Kind: "Deployment", Name: "absent", UID: "uid-absent"}
 	in := restarted(child("w-0", "11", ownedBy(absent)), child("w-0", "21", orphaned))
@@ -768,7 +768,7 @@ func TestG5RunsOncePerRestart(t *testing.T) {
 }
 
 // changedAcross converges at 5s and at 15s on states that differ, with
-// whatever ops botbox runs in between.
+// whatever ops reconciler-fuzzer runs in between.
 func changedAcross(ops func(*run) *run) invariant.Input {
 	return ops(newRun().
 		record(time.Second, widget("10", spec(1), status(1, 1)), child("w-0", "11", data("0"))).
@@ -779,12 +779,13 @@ func changedAcross(ops func(*run) *run) invariant.Input {
 }
 
 // changedAround restarts the target at 10s between states converged at 5s and
-// 15s that differ, and then runs whatever ops botbox runs next.
+// 15s that differ, and then runs whatever ops reconciler-fuzzer runs next.
 func changedAround(next func(*run) *run) invariant.Input {
 	return changedAcross(func(r *run) *run { return next(r.op(invariant.OpRestart, 10*time.Second)) })
 }
 
-// updatedAround is changedAround with botbox's update at the given time.
+// updatedAround is changedAround with reconciler-fuzzer's update at the given
+// time.
 func updatedAround(update time.Duration) invariant.Input {
 	if update > 10*time.Second {
 		return changedAround(func(r *run) *run { return r.op(invariant.OpUpdate, update) })
@@ -999,7 +1000,7 @@ func TestG5JudgesWhatEitherStateHoldsThatTheOpsLeftAlone(t *testing.T) {
 }
 
 // An object that names no CR may be any CR's, so deleting one may change any.
-func TestG5LeavesARestartUnjudgedWhereBotboxTookAnObjectThatNamesNoCR(t *testing.T) {
+func TestG5LeavesARestartUnjudgedWhereReconcilerFuzzerTookAnObjectThatNamesNoCR(t *testing.T) {
 	in := changedAround(func(r *run) *run {
 		return r.record(time.Second, child("kept", "12", orphaned)).deletedManaged(11*time.Second, "kept")
 	})

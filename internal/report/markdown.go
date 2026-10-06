@@ -9,9 +9,9 @@ import (
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/rosenhouse/botbox/internal/invariant"
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/invariant"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
 // markdown renders report.md. It opens with what failed and the command that
@@ -210,8 +210,8 @@ func table(md *strings.Builder, header []string, rows [][]string) {
 // how far the run got.
 func (d document) provenance() string {
 	who := "The run"
-	if d.Botbox != "" {
-		who = "botbox " + d.Botbox
+	if d.ReconcilerFuzzer != "" {
+		who = "reconciler-fuzzer " + d.ReconcilerFuzzer
 	}
 	ran := fmt.Sprintf("%s exercised %s on seed %d", who, d.Target.describe(), d.Seed)
 	if d.Applied < d.Ops {
@@ -226,7 +226,7 @@ func (d document) recordings() string {
 		return "The run directory holds `requests.jsonl`, `objects.jsonl` and `target.log`."
 	}
 	return "The run directory holds `requests.jsonl`, `objects.jsonl`, `collector.jsonl` and `target.log`. " +
-		"`collector.jsonl` holds each delete that botbox's garbage collector tried."
+		"`collector.jsonl` holds each delete that reconciler-fuzzer's garbage collector tried."
 }
 
 // describe names the target and the version it declares.

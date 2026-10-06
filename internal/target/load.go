@@ -21,7 +21,7 @@ import (
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"sigs.k8s.io/yaml"
 
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 // declaration mirrors target.yaml. Decoding is strict, so a misspelled key is
@@ -381,7 +381,7 @@ func checkEnv(data []byte, env map[string]string) error {
 		case value != written.Launch.Env[name]:
 			return fmt.Errorf("YAML reads %s: %s as %s; quote the value", name, written.Launch.Env[name], value)
 		case name == "KUBECONFIG":
-			return errors.New("botbox sets KUBECONFIG itself, to the kubeconfig it writes")
+			return errors.New("reconciler-fuzzer sets KUBECONFIG itself, to the kubeconfig it writes")
 		case name == "" || strings.ContainsAny(name, "=\x00"):
 			return fmt.Errorf("%q is not a variable name", name)
 		case strings.Contains(value, "\x00"):

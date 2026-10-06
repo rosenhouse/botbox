@@ -1,6 +1,6 @@
 // Package v1 holds the API of the toy target.
 // +kubebuilder:object:generate=true
-// +groupName=toy.botbox
+// +groupName=toy.reconciler-fuzzer
 package v1
 
 import (
@@ -10,7 +10,7 @@ import (
 )
 
 // GroupVersion is the group and version this package serves.
-var GroupVersion = schema.GroupVersion{Group: "toy.botbox", Version: "v1"}
+var GroupVersion = schema.GroupVersion{Group: "toy.reconciler-fuzzer", Version: "v1"}
 
 var schemeBuilder = &scheme.Builder{GroupVersion: GroupVersion}
 

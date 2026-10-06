@@ -12,7 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
 )
 
 func TestIdentityTokenReachesTheAPIServer(t *testing.T) {
@@ -31,7 +31,7 @@ func TestIdentityTokenReachesTheAPIServer(t *testing.T) {
 	role := rbacv1.Role{
 		ObjectMeta: metav1.ObjectMeta{Name: "thing-reader"},
 		Rules: []rbacv1.PolicyRule{{
-			APIGroups: []string{"test.botbox"},
+			APIGroups: []string{"test.reconciler-fuzzer"},
 			Resources: []string{"things"},
 			Verbs:     []string{"get", "list"},
 		}},
@@ -78,7 +78,7 @@ func TestIdentityClusterRoleBindsClusterWide(t *testing.T) {
 	cr := rbacv1.ClusterRole{
 		ObjectMeta: metav1.ObjectMeta{Name: "thing-viewer"},
 		Rules: []rbacv1.PolicyRule{{
-			APIGroups: []string{"test.botbox"},
+			APIGroups: []string{"test.reconciler-fuzzer"},
 			Resources: []string{"things"},
 			Verbs:     []string{"get", "list", "watch"},
 		}},

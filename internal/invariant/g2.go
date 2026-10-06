@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"slices"
 
-	"github.com/rosenhouse/botbox/internal/observe"
-	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
 // NoChurn is G2: once converged under a stable spec, the target changes

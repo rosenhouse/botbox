@@ -19,8 +19,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
-	"github.com/rosenhouse/botbox/internal/observe"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/observe"
 )
 
 const (
@@ -72,7 +72,7 @@ func restMapper(t *testing.T, config *rest.Config) meta.RESTMapper {
 func createNamespace(t *testing.T, ctx context.Context, client *kubernetes.Clientset) string {
 	t.Helper()
 	ns, err := client.CoreV1().Namespaces().Create(ctx,
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "botbox-run-"}}, metav1.CreateOptions{})
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{GenerateName: "reconciler-fuzzer-run-"}}, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("Creating the run namespace failed: %v", err)
 	}
@@ -94,7 +94,7 @@ func writeConfigMap(t *testing.T, ctx context.Context, client *kubernetes.Client
 		return
 	}
 	cm.OwnerReferences = []metav1.OwnerReference{{
-		APIVersion: "toy.botbox/v1", Kind: "Widget", Name: "widget", UID: widgetUID,
+		APIVersion: "toy.reconciler-fuzzer/v1", Kind: "Widget", Name: "widget", UID: widgetUID,
 	}}
 	if _, err := client.CoreV1().ConfigMaps(ns).Create(ctx, cm, metav1.CreateOptions{}); err != nil {
 		t.Fatalf("Creating the ConfigMap %s failed: %v", name, err)
@@ -161,13 +161,13 @@ func TestObserverRecordsTheRunNamespace(t *testing.T) {
 		}
 	})
 
-	t.Run("an object botbox created is not managed", func(t *testing.T) {
+	t.Run("an object reconciler-fuzzer created is not managed", func(t *testing.T) {
 		obs.Exclude(configMapGVK, "fixture")
-		writeConfigMap(t, ctx, client, ns, "fixture", "applied by botbox")
+		writeConfigMap(t, ctx, client, ns, "fixture", "applied by reconciler-fuzzer")
 		requireVersions(t, obs, observe.Key{GVK: configMapGVK, Namespace: ns, Name: "fixture"}, 1)
 
 		if got := names(obs.Managed()); !slices.Equal(got, []string{"child"}) {
-			t.Errorf("Managed returned %v, want only the object botbox did not create.", got)
+			t.Errorf("Managed returned %v, want only the object reconciler-fuzzer did not create.", got)
 		}
 		if got := names(obs.ManagedBy(widgetUID)); !slices.Equal(got, []string{"child"}) {
 			t.Errorf("ManagedBy returned %v, want the object whose ownerReference names the widget.", got)

@@ -8,7 +8,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"pgregory.net/rapid"
 
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 func TestTheCRDJudgesWhatTheOverlayLoosens(t *testing.T) {
@@ -55,8 +55,8 @@ func TestAMutatePathTheCRDRefusesInTheSampleIsAConfigurationError(t *testing.T) 
 	}
 }
 
-func TestNewReportsAFieldBotboxCannotDraw(t *testing.T) {
-	const cannotDraw = "botbox cannot draw a value its schema allows; a set whose items allow fewer values than its minItems, or a pattern nothing matches, does this"
+func TestNewReportsAFieldReconcilerFuzzerCannotDraw(t *testing.T) {
+	const cannotDraw = "reconciler-fuzzer cannot draw a value its schema allows; a set whose items allow fewer values than its minItems, or a pattern nothing matches, does this"
 	for _, testCase := range []struct {
 		name, path string
 		overlay    map[string]any
@@ -72,7 +72,7 @@ func TestNewReportsAFieldBotboxCannotDraw(t *testing.T) {
 			loaded.Generate = target.GenerateSpec{Mutate: []string{testCase.path}, Overlay: overlay}
 			_, err := New(loaded, Options{})
 			if err == nil {
-				t.Fatalf("New accepted generate.mutate %s, which botbox cannot draw.", testCase.path)
+				t.Fatalf("New accepted generate.mutate %s, which reconciler-fuzzer cannot draw.", testCase.path)
 			}
 			// rapid's own reason names its internals, not the bound to relax.
 			want := "generate.mutate " + testCase.path + ": " + cannotDraw

@@ -41,7 +41,7 @@ type Identity struct {
 }
 
 // saName is the ServiceAccount name in every run namespace.
-const saName = "botbox-target"
+const saName = "reconciler-fuzzer-target"
 
 // NewIdentity creates a ServiceAccount in the namespace, creates and binds the
 // roles, requests a token and returns an Identity whose Config carries it. The
@@ -94,7 +94,7 @@ func (id *Identity) create(opts IdentityOptions) error {
 		// Per-run copy so that concurrent runs do not collide.
 		copied := cr.DeepCopy()
 		copied.Name = cr.Name + "-" + opts.Namespace
-		copied.Labels = map[string]string{"botbox.dev/namespace": opts.Namespace}
+		copied.Labels = map[string]string{"reconciler-fuzzer.dev/namespace": opts.Namespace}
 		if _, err := client.RbacV1().ClusterRoles().Create(ctx, copied, metav1.CreateOptions{}); err != nil {
 			return fmt.Errorf("creating ClusterRole %s: %w", copied.Name, err)
 		}
@@ -103,7 +103,7 @@ func (id *Identity) create(opts IdentityOptions) error {
 		binding := &rbacv1.ClusterRoleBinding{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:   copied.Name,
-				Labels: map[string]string{"botbox.dev/namespace": opts.Namespace},
+				Labels: map[string]string{"reconciler-fuzzer.dev/namespace": opts.Namespace},
 			},
 			Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: saName, Namespace: opts.Namespace}},
 			RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: copied.Name},

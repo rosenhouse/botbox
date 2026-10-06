@@ -1,6 +1,6 @@
-# botbox
+# reconciler-fuzzer
 
-botbox finds bugs in Kubernetes controllers. It runs your controller on your machine, against
+reconciler-fuzzer finds bugs in Kubernetes controllers. It runs your controller on your machine, against
 a real kube-apiserver and etcd from envtest, and records every request your controller makes.
 Each run applies a random sequence of ops, drawn from a seed. The ops:
 
@@ -9,32 +9,32 @@ Each run applies a random sequence of ops, drawn from a seed. The ops:
 - delete objects your controller manages
 - inject API errors and delays
 
-botbox checks that your controller converges, goes quiet, cleans up after a deleted CR, and
-recreates the objects that botbox deletes. It also checks properties you declare. When a check
-fails, botbox minimizes a drawn sequence to the ops the failure needs, and writes a report.
+reconciler-fuzzer checks that your controller converges, goes quiet, cleans up after a deleted CR, and
+recreates the objects that reconciler-fuzzer deletes. It also checks properties you declare. When a check
+fails, reconciler-fuzzer minimizes a drawn sequence to the ops the failure needs, and writes a report.
 
 You write no test code. One `target.yaml` describes your controller.
 
-## What botbox cannot test yet
+## What reconciler-fuzzer cannot test yet
 
 Your controller runs on your machine, not in a Pod. It cannot reach a Pod or a Service, and no
 admission or conversion webhook of yours runs. So keep your controller and your CRs on the
 version your CRD stores, and keep drawn CRs
-[within what your webhooks admit](docs/targets.md#generated-values). botbox generates sequences
+[within what your webhooks admit](docs/targets.md#generated-values). reconciler-fuzzer generates sequences
 only for a custom resource whose CRD your `target.yaml` lists. If your controller reconciles a
 built-in kind, such as a Service, [write the sequences](docs/targets.md#sequences-you-write)
 yourself. envtest runs no Pod, so a Deployment, a Job or a PersistentVolumeClaim never becomes
-ready. If your controller waits on one, run botbox
+ready. If your controller waits on one, run reconciler-fuzzer
 [against a cluster](docs/targets.md#against-a-cluster), such as kind.
 
-- botbox tests namespaced kinds only, in one namespace per run. It misses a child your
+- reconciler-fuzzer tests namespaced kinds only, in one namespace per run. It misses a child your
   controller leaks into another namespace, and it cannot supply an object your controller
-  reads from another namespace ([#38](https://github.com/rosenhouse/botbox/issues/38)).
+  reads from another namespace ([#38](https://github.com/rosenhouse/reconciler-fuzzer/issues/38)).
 
 ## Install
 
 ```sh
-go install github.com/rosenhouse/botbox/cmd/botbox@latest
+go install github.com/rosenhouse/reconciler-fuzzer/cmd/reconciler-fuzzer@latest
 go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
 export PATH="$(go env GOPATH)/bin:$PATH"
 index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
@@ -42,23 +42,23 @@ export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 ```
 
 `setup-envtest` downloads etcd and kube-apiserver. Run the last three lines again in each new
-shell. botbox has no release yet, so `@latest` installs the tip of main.
+shell. reconciler-fuzzer has no release yet, so `@latest` installs the tip of main.
 
-Building botbox takes Go 1.26.0 or later. Releases from Go 1.21 on download it for you. Many CI
+Building reconciler-fuzzer takes Go 1.26.0 or later. Releases from Go 1.21 on download it for you. Many CI
 images set `GOTOOLCHAIN=local`, which stops the download, and `go install` fails with
 `requires go >= 1.26.0`. Install a newer Go, or run the commands with `GOTOOLCHAIN=auto`.
 
-`botbox --help` lists the commands, and `botbox run --help` lists the flags.
+`reconciler-fuzzer --help` lists the commands, and `reconciler-fuzzer run --help` lists the flags.
 
 ## Quick start
 
 This repository holds a toy controller with bugs you can switch on. Clone it with
-`git clone https://github.com/rosenhouse/botbox`, and run this in the clone. The build takes a
+`git clone https://github.com/rosenhouse/reconciler-fuzzer`, and run this in the clone. The build takes a
 minute or two the first time, and the runs about half a minute:
 
 ```sh
 go build -o bin/toy-widget ./targets/toy-widget
-botbox run --target targets/toy-widget/target.yaml --seed 1 --runs 3
+reconciler-fuzzer run --target targets/toy-widget/target.yaml --seed 1 --runs 3
 ```
 
 ```
@@ -77,24 +77,24 @@ an extra flag to the controller. `replay` runs a sequence file rather than a dra
 This one creates a Widget and deletes it:
 
 ```sh
-botbox replay --target targets/toy-widget/target.yaml --launch-arg --bug=3 targets/toy-widget/sequences/b3.json
+reconciler-fuzzer replay --target targets/toy-widget/target.yaml --launch-arg --bug=3 targets/toy-widget/sequences/b3.json
 ```
 
 ```
 run 1: seed 20260920, sequence targets/toy-widget/sequences/b3.json
 run 1: G3 the v1/ConfigMap widget-0 was still there 10s (timeouts.delete) after widget, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
   at 2026-09-30T19:50:43.395112151Z; 1 version, the first v1/ConfigMap widget-0
-  the evidence is in botbox-out/20260930T195026Z-20260920/run-1
+  the evidence is in reconciler-fuzzer-out/20260930T195026Z-20260920/run-1
 ```
 
-botbox exits 1, and `report.md` in the evidence directory says what failed. All looks well
+reconciler-fuzzer exits 1, and `report.md` in the evidence directory says what failed. All looks well
 until the Widget is deleted and its ConfigMap stays. envtest has no garbage collector, so an
-envtest suite misses this bug unless it checks each ownerReference. botbox emulates the garbage
+envtest suite misses this bug unless it checks each ownerReference. reconciler-fuzzer emulates the garbage
 collector and checks every object your controller manages in every run.
 
 ## Your own controller
 
-[docs/examples.md](docs/examples.md) runs botbox on two real controllers, cert-manager and
+[docs/examples.md](docs/examples.md) runs reconciler-fuzzer on two real controllers, cert-manager and
 external-secrets.
 
 ### Write target.yaml
@@ -103,13 +103,14 @@ A target is one YAML file. This is the toy's:
 
 <!-- embed: targets/toy-widget/target.yaml -->
 ```yaml
-# botbox reads crds, sample and fixtures relative to this file, and
+# reconciler-fuzzer reads crds, sample and fixtures relative to this file, and
 # launch.binary relative to the directory it runs in.
 name: toy-widget
 version: dev                       # Reports print it.
-crds:                              # botbox installs the CRDs in these files and directories.
+crds:                              # reconciler-fuzzer installs the CRDs in these files and directories.
   - crds/
-primary: toy.botbox/v1/Widget      # botbox creates, changes and deletes CRs of this kind.
+# reconciler-fuzzer creates, changes and deletes CRs of this kind.
+primary: toy.reconciler-fuzzer/v1/Widget
 sample: widget.yaml                # Each drawn sequence creates a variant of this CR first.
 manages:                           # The controller creates objects of these kinds.
   - v1/ConfigMap
@@ -118,11 +119,11 @@ rbac:
 launch:
   binary: bin/toy-widget
   args:
-    - --kubeconfig=$KUBECONFIG     # botbox writes a kubeconfig for its proxy.
+    - --kubeconfig=$KUBECONFIG     # reconciler-fuzzer writes a kubeconfig for its proxy.
     - --label-from=widget-config
     - --bug=0                      # A later --bug wins, so --launch-arg --bug=3 switches on B3.
   env:
-    WATCH_NAMESPACE: $NAMESPACE    # botbox replaces $NAMESPACE with each run's namespace.
+    WATCH_NAMESPACE: $NAMESPACE    # reconciler-fuzzer replaces $NAMESPACE with each run's namespace.
 fixtures:                          # The controller reads these objects and owns none.
   - config.yaml
 ready: >-                          # This CEL holds once the controller has converged.
@@ -145,9 +146,9 @@ thresholds:
 
 Beyond what its comments say:
 
-- `manages` names each kind as `group/version/Kind`, or `v1/Kind` for the core group. botbox
+- `manages` names each kind as `group/version/Kind`, or `v1/Kind` for the core group. reconciler-fuzzer
   checks only objects of these kinds.
-- botbox replaces `$KUBECONFIG` and `$NAMESPACE` in `launch.args` and `launch.env`. Turn off
+- reconciler-fuzzer replaces `$KUBECONFIG` and `$NAMESPACE` in `launch.args` and `launch.env`. Turn off
   leader election, and bind each listener to a free port, such as `127.0.0.1:0`.
 - `ready` is CEL over the CR's `metadata`, `spec` and `status`. The default compares
   `status.observedGeneration` with `metadata.generation`.
@@ -168,14 +169,14 @@ controller.
 
 ### Run it
 
-botbox resolves `launch.binary` from the directory it runs in, so run it from your repository
+reconciler-fuzzer resolves `launch.binary` from the directory it runs in, so run it from your repository
 root:
 
 ```sh
-botbox run --target target.yaml --runs 5
+reconciler-fuzzer run --target target.yaml --runs 5
 ```
 
-botbox prints each run's seed. `--seed` draws the same sequences again, as long as botbox, your
+reconciler-fuzzer prints each run's seed. `--seed` draws the same sequences again, as long as reconciler-fuzzer, your
 CRDs and `target.yaml` are unchanged.
 
 ### Pin sequences
@@ -193,22 +194,22 @@ This sequence does both for the toy:
 
 ```json
 {"seed": 1, "target": "toy-widget", "ops": [
-  {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget",
+  {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget",
     "metadata": {"name": "widget"}, "spec": {"count": 3}}},
   {"i": 1, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
   {"i": 2, "t": "update", "patch": {"spec": {"count": 2}}}]}
 ```
 
-`botbox run --target target.yaml sequences/*.json` runs your sequences.
+`reconciler-fuzzer run --target target.yaml sequences/*.json` runs your sequences.
 [docs/targets.md](docs/targets.md#sequences-you-write) says how to write them.
 
 ## Reading a failure
 
-botbox exits 0 when every run passes, 1 when a check fails, and 2 when it could not test your
+reconciler-fuzzer exits 0 when every run passes, 1 when a check fails, and 2 when it could not test your
 controller. On exit 2, the message says why, and
-[docs/failures.md](docs/failures.md#when-botbox-exits-2) lists the usual causes.
+[docs/failures.md](docs/failures.md#when-reconciler-fuzzer-exits-2) lists the usual causes.
 
-When a run fails, botbox prints the check that failed. It then minimizes a drawn sequence, which
+When a run fails, reconciler-fuzzer prints the check that failed. It then minimizes a drawn sequence, which
 can take minutes, and prints the run's evidence directory. Start with `report.md` there. It
 says what failed, quotes what the check read, and gives the command that replays it.
 
@@ -227,26 +228,26 @@ says what each file and message means.
 
 ## Running in CI
 
-In CI, `go install` botbox at a commit of main, not `@latest`. Keep it out of your go.mod,
-because requiring botbox raises your Go and Kubernetes versions to its own.
+In CI, `go install` reconciler-fuzzer at a commit of main, not `@latest`. Keep it out of your go.mod,
+because requiring reconciler-fuzzer raises your Go and Kubernetes versions to its own.
 
 Run fixed seeds on a pull request, and fresh seeds nightly:
 
 ```sh
 # On a pull request:
-botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-out
+reconciler-fuzzer run --target target.yaml --seed 23 --runs 5 --deadline 10m --out reconciler-fuzzer-out
 # Nightly:
-botbox run --target target.yaml --runs 20 --deadline 30m --out botbox-out
+reconciler-fuzzer run --target target.yaml --runs 20 --deadline 30m --out reconciler-fuzzer-out
 ```
 
 The default `--deadline` assumes every wait times out, so it is long. Set it to the command's
-usual time plus 4m, which leaves botbox time to minimize a failure.
+usual time plus 4m, which leaves reconciler-fuzzer time to minimize a failure.
 
-Upload `botbox-out/`, so that you can replay a failure. Anyone who can read the repository can
-then read it, and botbox redacts only the values of a Secret's `data` and annotations.
+Upload `reconciler-fuzzer-out/`, so that you can replay a failure. Anyone who can read the repository can
+then read it, and reconciler-fuzzer redacts only the values of a Secret's `data` and annotations.
 
 [docs/ci.md](docs/ci.md) holds a GitHub Actions workflow to copy. It also says how to pin
-botbox in a tools module, and how to run botbox from `go test`.
+reconciler-fuzzer in a tools module, and how to run reconciler-fuzzer from `go test`.
 
 ## Development and internals
 

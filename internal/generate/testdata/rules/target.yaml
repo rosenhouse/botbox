@@ -3,7 +3,7 @@
 name: rules
 crds:
   - crd.yaml
-primary: rules.botbox/v1/Gadget
+primary: rules.reconciler-fuzzer/v1/Gadget
 sample: gadget.yaml
 launch:
   binary: bin/none

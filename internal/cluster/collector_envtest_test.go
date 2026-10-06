@@ -20,13 +20,13 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 
-	"github.com/rosenhouse/botbox/internal/cluster"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/cluster"
 )
 
 var (
 	configMapKind  = schema.GroupVersionKind{Version: "v1", Kind: "ConfigMap"}
-	gadgetKind     = schema.GroupVersionKind{Group: "test.botbox", Version: "v1", Kind: "Gadget"}
-	gadgetResource = schema.GroupVersionResource{Group: "test.botbox", Version: "v1", Resource: "gadgets"}
+	gadgetKind     = schema.GroupVersionKind{Group: "test.reconciler-fuzzer", Version: "v1", Kind: "Gadget"}
+	gadgetResource = schema.GroupVersionResource{Group: "test.reconciler-fuzzer", Version: "v1", Resource: "gadgets"}
 )
 
 // collectionBudget is the bound DESIGN.md §5.8 puts on the collector: it

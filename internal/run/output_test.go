@@ -33,7 +33,7 @@ func TestOutputNamesTheInvocationByTimestampAndSeed(t *testing.T) {
 // theirs (DESIGN.md §11).
 func TestOutputNeverSharesADirectoryWithAnotherInvocation(t *testing.T) {
 	// The root is what --out names, which a first run creates.
-	root := filepath.Join(t.TempDir(), "botbox-out")
+	root := filepath.Join(t.TempDir(), "reconciler-fuzzer-out")
 	at := time.Date(2026, 9, 20, 18, 45, 30, 0, time.UTC)
 
 	first, err := OpenOutput(root, 1, at)
@@ -130,7 +130,7 @@ func TestAFailedWriteAtomicLeavesNothingBehind(t *testing.T) {
 
 // underFileSizeLimit is where the test binary, run again under a file size
 // limit, writes.
-const underFileSizeLimit = "BOTBOX_TEST_UNDER_FILE_SIZE_LIMIT"
+const underFileSizeLimit = "RECONCILER_FUZZER_TEST_UNDER_FILE_SIZE_LIMIT"
 
 // A write that runs out of room, as on a full disk, keeps the old file.
 func TestAWriteThatFailsKeepsTheOldFile(t *testing.T) {

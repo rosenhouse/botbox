@@ -1,6 +1,6 @@
 // Checks that span the whole repository rather than any one package. This one
 // enforces the embed marker of DESIGN.md §11 over every Markdown file.
-package botbox_test
+package reconcilerfuzzer_test
 
 import (
 	"fmt"
@@ -38,7 +38,7 @@ func TestMarkdownEmbedsMatchTheirFiles(t *testing.T) {
 func TestPagesEmbedTheFilesTheyShow(t *testing.T) {
 	for page, paths := range map[string][]string{
 		"README.md":         {"targets/toy-widget/target.yaml"},
-		ciPage:              {"examples/ci/github-actions.yml", "examples/tools-module.sh", "targets/toy-widget/botbox_test.go"},
+		ciPage:              {"examples/ci/github-actions.yml", "examples/tools-module.sh", "targets/toy-widget/reconciler_fuzzer_test.go"},
 		"docs/targets.md":   {"targets/toy-widget/sequences/fault.json"},
 		"docs/examples.md":  {"examples/cert-manager/quickstart.sh"},
 		"docs/reference.md": {"docs/reference/target.yaml", "docs/reference/sequence.json"},

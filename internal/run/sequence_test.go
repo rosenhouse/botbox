@@ -10,7 +10,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/internal/target"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 const goldenSequence = "testdata/sequence.json"
@@ -20,7 +20,7 @@ const designExample = `{
   "seed": 8675309,
   "target": "toy-widget",
   "ops": [
-    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "spec": {"count": 3}}},
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget", "spec": {"count": 3}}},
     {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps", "fraction": 0.5}, "action": {"error": 500}, "until": {"op": 3}}},
     {"i": 2, "t": "update", "patch": {"spec": {"count": 5}}, "noSettle": true},
     {"i": 3, "t": "settle"},
@@ -395,7 +395,8 @@ func TestSequenceNamesTheFieldsAnOpNeedsBesideOneItTakesNot(t *testing.T) {
 	}
 }
 
-// The JSON parses, but botbox would read a count or for of 0 as no trigger.
+// The JSON parses, but reconciler-fuzzer would read a count or for of 0 as no
+// trigger.
 func TestSequenceRefusesATriggerOf0AtItsOp(t *testing.T) {
 	for until, want := range map[string]string{
 		`{"count": 0}`:              "op 1: until.count is 0; give a count above 0, or leave it out",
@@ -528,8 +529,9 @@ func TestADeletedFixtureComesBackByTheLastOp(t *testing.T) {
 	}
 }
 
-// botbox restores the fixture before op until, so that op and the ops after
-// it may act on the fixture again, and ops before it may act on another.
+// reconciler-fuzzer restores the fixture before op until, so that op and the
+// ops after it may act on the fixture again, and ops before it may act on
+// another.
 func TestAFixtureOpActsOnAFixtureThatIsThere(t *testing.T) {
 	ops := `{"i": 0, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 2}},
 		{"i": 1, "t": "updateFixture", "kind": "v1/Secret", "name": "other", "patch": {"data": {"token": "abcd"}}},

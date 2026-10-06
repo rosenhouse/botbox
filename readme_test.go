@@ -11,8 +11,8 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/rosenhouse/botbox/pkg/run"
-	"github.com/rosenhouse/botbox/pkg/target"
+	"github.com/rosenhouse/botbox/internal/run"
+	"github.com/rosenhouse/botbox/internal/target"
 )
 
 const limitsHeading = "## What botbox cannot test yet"

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosenhouse/botbox/pkg/target"
+	"github.com/rosenhouse/botbox/internal/target"
 )
 
 // An interrupt leaves nothing behind: not the control plane and not the target,

@@ -51,7 +51,7 @@ func TestNoStringLiteralUsesTheDesignsVocabulary(t *testing.T) {
 			return true
 		})
 	}
-	requireRead(t, read, "cmd/botbox/main.go", "pkg/invariant/g2.go", "targets/toy-widget/controller/bug.go")
+	requireRead(t, read, "cmd/botbox/main.go", "internal/invariant/g2.go", "targets/toy-widget/controller/bug.go")
 }
 
 // A comment must make sense without DESIGN.md open. go doc prints some of
@@ -73,7 +73,7 @@ func TestNoCommentUsesTheDesignsVocabulary(t *testing.T) {
 			}
 		}
 	}
-	requireRead(t, read, "cmd/botbox/main.go", "pkg/invariant/g2.go", "targets/toy-widget/controller/bug.go", "docs/spikes/cert-manager-envtest/main.go")
+	requireRead(t, read, "cmd/botbox/main.go", "internal/invariant/g2.go", "targets/toy-widget/controller/bug.go", "docs/spikes/cert-manager-envtest/main.go")
 }
 
 // requireRead fails unless the scan read something in each of paths.

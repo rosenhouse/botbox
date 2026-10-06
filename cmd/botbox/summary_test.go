@@ -19,10 +19,10 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/rosenhouse/botbox/pkg/proxy"
-	"github.com/rosenhouse/botbox/pkg/report"
-	"github.com/rosenhouse/botbox/pkg/run"
-	"github.com/rosenhouse/botbox/pkg/target"
+	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/botbox/internal/report"
+	"github.com/rosenhouse/botbox/internal/run"
+	"github.com/rosenhouse/botbox/internal/target"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite the goldens under testdata from what botbox writes now")

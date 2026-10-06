@@ -15,7 +15,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/runtime"
 
-	"github.com/rosenhouse/botbox/pkg/target"
+	"github.com/rosenhouse/botbox/internal/target"
 	"github.com/rosenhouse/botbox/targets/toy-widget/controller"
 )
 

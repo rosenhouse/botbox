@@ -22,8 +22,8 @@ import (
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 
-	"github.com/rosenhouse/botbox/pkg/cluster"
-	"github.com/rosenhouse/botbox/pkg/target"
+	"github.com/rosenhouse/botbox/internal/cluster"
+	"github.com/rosenhouse/botbox/internal/target"
 )
 
 func TestTheSessionRefusesAKindTheClusterServesAtClusterScope(t *testing.T) {

@@ -6,14 +6,14 @@ description: Add a new generic invariant (G-series) to botbox: design row, pure-
 # Add a generic invariant
 
 A generic invariant (`G7` and later) is a pure check applied to every target, defined
-in DESIGN.md §6 and implemented in `pkg/invariant`. Follow this procedure.
+in DESIGN.md §6 and implemented in `internal/invariant`. Follow this procedure.
 
 1. **Design first.** Add or change the row in DESIGN.md §6, in the same PR as the
    code. State the invariant's window and its stability requirement, the way G1–G6
    do. Note the change under a "Design change" heading in the PR description
    (§11, §12).
 
-2. **Implement as a pure function.** Add it to `pkg/invariant` as a pure function over
+2. **Implement as a pure function.** Add it to `internal/invariant` as a pure function over
    the Proxy request log, the Observer state history, and the target declaration
    (§5.6). Give it a per-target configurable window with a sensible default.
 

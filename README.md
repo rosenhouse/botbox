@@ -207,7 +207,7 @@ Each run draws a sequence of ops from `create`, `update`, `delete`, `recreate`, 
 where `generate.fixtures` names a fixture. A drawn `create` adds a second or a third CR beside
 your sample. A drawn `fault` injects an API error or delay on the primary or a managed kind's
 requests for a span of the sequence. Without `--seed`, botbox draws a seed and prints it.
-`--seed` draws the same sequences again.
+`--seed` draws the same sequences again while botbox, your CRDs and `target.yaml` stay the same.
 
 ### Pin sequences
 
@@ -367,14 +367,13 @@ The job caches botbox and setup-envtest in `~/go/bin`, and the control plane in 
 under a key of their versions. A Go repository may instead read Go's version from its go.mod
 and turn setup-go's cache on.
 
-A pull request runs fixed seeds, so its runs repeat from one commit to the next. The nightly run
-draws fresh seeds. GitHub tells only whoever last edited the schedule when a nightly run fails.
-botbox's own [nightly.yml](.github/workflows/nightly.yml) reads `summary.json` to tell a find
-(a check failed, exit 1) from an error (exit 2 or no output) and files an issue under the
-matching label. A seed names a sequence only for one build of botbox and one `target.yaml`, so
-upgrading botbox, or editing your CRD or `target.yaml`, can draw other sequences. To tell
-whether a failure comes from the change under review, replay its `sequence.json` against the
-base branch's controller.
+A pull request runs fixed seeds. Its runs repeat until a change upgrades botbox or edits your
+CRDs or `target.yaml`, which can draw other sequences. To tell whether a failure comes from the
+change under review, replay its `sequence.json` against the base branch's controller. The
+nightly run draws fresh seeds. GitHub tells only whoever last edited the schedule when a nightly
+run fails. botbox's own [nightly.yml](.github/workflows/nightly.yml) reads `summary.json` to tell
+a find (a check failed, exit 1) from an error (exit 2 or no output) and files an issue under the
+matching label.
 
 Add a step that runs your pinned sequences, such as
 `exec botbox run --target target.yaml --deadline 10m --out botbox-out sequences/*.json`.

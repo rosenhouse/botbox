@@ -13,7 +13,7 @@ import (
 // faultVerbs are the verbs a generated fault may match. An unset verb matches
 // all. list and watch are excluded: outside a restart an informer rarely lists
 // or starts a watch, so such a fault would fault nothing, and a relist's
-// jittered backoff can outrun D44's allowance.
+// jittered backoff can outrun the owed recovery time.
 var faultVerbs = []string{"", "get", "create", "update", "patch", "delete"}
 
 // faultErrors are the HTTP status codes a generated fault may return.

@@ -53,6 +53,7 @@ generate:
   maxCRs: 2
   distinct:
     - spec.prefix
+  faults: true
   fixtures:
     ../../targets/toy-widget/config.yaml:
       mutate:

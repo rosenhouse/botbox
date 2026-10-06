@@ -16,7 +16,7 @@ import (
 // A reader who followed Install has botbox on PATH and KUBEBUILDER_ASSETS
 // set. Each command of the quick start then prints what the README shows, from
 // its first run on, up to the instants and directory names a run stamps.
-func TestTheREADMEsFirstRunAndFirstFindRunAsShown(t *testing.T) {
+func TestTheREADMEsQuickStartRunsAsShown(t *testing.T) {
 	if _, err := exec.LookPath("make"); err != nil {
 		t.Skipf("The test installs the control plane with make: %v", err)
 	}

@@ -1,7 +1,7 @@
 # Reading a failure
 
-The [README](../README.md#reading-a-failure) shows where a failure's evidence lands. This page
-says what each file holds, and what each message means.
+The [README](../README.md#reading-a-failure) shows how to read a failure. This page says what
+each file holds, and what each message means.
 
 ## The summary
 

@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// The README embeds botbox_test.go for adopters to copy. This runs it from a
+// docs/ci.md embeds botbox_test.go for adopters to copy. This runs it from a
 // copy of the repository's layout, so that it builds nothing into the checkout.
 func TestTheGoTestRecipe(t *testing.T) {
 	dir := t.TempDir()

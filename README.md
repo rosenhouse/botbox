@@ -11,7 +11,7 @@ Each run applies a random sequence of ops, drawn from a seed. The ops:
 
 botbox checks that your controller converges, goes quiet, cleans up after a deleted CR, and
 recreates the objects that botbox deletes. It also checks properties you declare. When a check
-fails, botbox minimizes the failing sequence and writes a report.
+fails, botbox minimizes a drawn sequence to the ops the failure needs, and writes a report.
 
 You write no test code. One `target.yaml` describes your controller.
 
@@ -19,11 +19,13 @@ You write no test code. One `target.yaml` describes your controller.
 
 Your controller runs on your machine, not in a Pod. It cannot reach a Pod or a Service, and no
 admission or conversion webhook of yours runs. So keep your controller and your CRs on the
-version your CRD stores. botbox generates sequences only for custom resources. If your
-controller reconciles a built-in kind, such as a Service,
-[write the sequences](docs/targets.md#sequences-you-write) yourself. envtest runs no Pod, so a
-Deployment, a Job or a PersistentVolumeClaim never becomes ready. If your controller waits on
-one, run botbox [against a cluster](docs/targets.md#against-a-cluster), such as kind.
+version your CRD stores, and keep drawn CRs
+[within what your webhooks admit](docs/targets.md#generated-values). botbox generates sequences
+only for a custom resource whose CRD your `target.yaml` lists. If your controller reconciles a
+built-in kind, such as a Service, [write the sequences](docs/targets.md#sequences-you-write)
+yourself. envtest runs no Pod, so a Deployment, a Job or a PersistentVolumeClaim never becomes
+ready. If your controller waits on one, run botbox
+[against a cluster](docs/targets.md#against-a-cluster), such as kind.
 
 - botbox tests namespaced kinds only, in one namespace per run. It misses a child your
   controller leaks into another namespace, and it cannot supply an object your controller
@@ -184,7 +186,8 @@ change. Write a sequence for each:
 
 - For each managed kind, create your sample and delete its first object of that kind with
   `deleteManaged`. Your controller must recreate it.
-- For each property, create your sample and update a spec field that the property reads.
+- For each property, create your sample and update a spec field that changes what the property
+  reads.
 
 This sequence does both for the toy:
 
@@ -205,8 +208,8 @@ botbox exits 0 when every run passes, 1 when a check fails, and 2 when it could 
 controller. On exit 2, the message says why, and
 [docs/failures.md](docs/failures.md#when-botbox-exits-2) lists the usual causes.
 
-When a run fails, botbox prints the check that failed. It then minimizes the sequence, which can
-take minutes, and prints the run's evidence directory. Start with `report.md` there. It
+When a run fails, botbox prints the check that failed. It then minimizes a drawn sequence, which
+can take minutes, and prints the run's evidence directory. Start with `report.md` there. It
 says what failed, quotes what the check read, and gives the command that replays it.
 
 | Check | Fails when | Usual cause |

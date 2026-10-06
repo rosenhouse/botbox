@@ -15,7 +15,7 @@ import (
 
 const toolsRecipe = "examples/tools-module.sh"
 
-func TestTheReadmeSaysWhereTheToolsModuleRecipePinsBotbox(t *testing.T) {
+func TestTheCIPageSaysWhereTheToolsModuleRecipePinsBotbox(t *testing.T) {
 	script := readFile(t, toolsRecipe)
 	lines := strings.Split(strings.TrimSpace(script), "\n")
 	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "bin/botbox ") {

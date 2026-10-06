@@ -1261,8 +1261,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   block and the CI recipe repeat the envtest pins for adopters to copy. The recipe also
   repeats go.mod's module and Go version, and the runner and action releases of
   `.github/workflows/`. The README's Install section and the tools module section of
-  `docs/ci.md` quote go.mod's Go version and the k8s.io/api and controller-runtime versions that requiring botbox forces
-  on a module (D80).
+  `docs/ci.md` quote go.mod's Go version and the k8s.io/api and controller-runtime versions
+  that requiring botbox forces on a module (D80).
   `make test` holds each copy to its source. Each `--deadline` in the
   recipe gives a run at least the time that the Makefile's example tiers give one. Bumps
   are their own PRs, never mixed with features.
@@ -1932,8 +1932,8 @@ built from source and run as a black-box binary.
   `-update`. The quickstarts of `docs/examples.md` must run the Makefile's example seed,
   and the drawn runs that page shows must start at that seed. Another test runs its
   cert-manager quickstart command as `quickstart.sh` passes it on, and fails unless the
-  page shows what botbox prints. The README tells CI to pin botbox to a commit, and
-  `docs/ci.md` to replay a failing `sequence.json` against the base branch.
+  page shows what botbox prints. The README tells CI to pin botbox to a commit and to
+  replay a failing `sequence.json` against the base branch.
 - **D55 Generation keeps the CRD's own rules, judged by the API server's code.** The
   generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
   rule `self.maxUnavailable <= self.count`, 15 of 100 drawn sequences broke it, and the
@@ -2596,11 +2596,14 @@ built from source and run as a black-box binary.
   inserts the fault after `checkpointed` has placed settles, so the fault's span starts at
   an eligible op (preceded by a settle) and ends at a settle it inserts. A target may set
   `generate.faults: false` to keep its seeds stable while it does not handle faults.
-- **D95 The README is short, and `docs/ci.md` holds the CI detail.** After D83 the README
-  still ran to 3,800 words, more than the READMEs of kind, kubebuilder and ripgrep. A
-  fresh-context editorial review found it dense and spec-like. The rewrite halves it. The
-  CI recipe, the tools module and the `go test` recipe move to `docs/ci.md`, with the tests
-  that hold them. The two check tables merge into one, with each check's usual cause. The
-  quick start shows botbox's output from its first run on, without the deadline line.
-  Minimizing and the `jq` recipe move to `docs/failures.md`. The limits stay before
-  Install, so that a team learns whether its controller fits before it installs anything.
+- **D95 The README is short, and `docs/ci.md` holds the CI detail.** The README ran to
+  3,800 words, and read as dense and spec-like to a fresh-context editorial review. It now
+  runs to half that. What D54, D68, D80 and D81 say the README holds, the replay against
+  the base branch, the CI recipe, the tools module and the `go test` recipe, `docs/ci.md`
+  holds instead, with the tests that hold them. One table gives each check and its usual
+  cause, and a test holds its rows to §6. The quick start shows botbox's output from its
+  first run on, without the deadline line, and says the toy's bugs are ones you switch on,
+  in place of D79's statement that every find shown is planted. The limits' opening also
+  states that envtest runs no Pod, beside D76's three. Minimizing and the `jq` recipe move
+  to `docs/failures.md`. The limits stay before Install, so that a team learns whether its
+  controller fits before it installs anything.

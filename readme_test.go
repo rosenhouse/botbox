@@ -24,7 +24,7 @@ var limits = []limit{
 	{"cannot reach a Pod or a Service", 0, "It runs on botbox's host, which routes to no Pod"},
 	{"no admission or conversion webhook of yours runs", 0, "No admission or conversion webhooks."},
 	{"on the version your CRD stores", 0, "A kubeconfig cluster keeps the webhook."},
-	{"generates sequences only for custom resources", 0, "botbox draws no sequence for a built-in primary kind"},
+	{"generates sequences only for a custom resource whose CRD your `target.yaml` lists", 0, "botbox draws no sequence for a built-in primary kind"},
 	{"envtest runs no Pod", 0, "no pods run, and no workload's status changes"},
 	{"tests namespaced kinds only", 38, "every managed kind and every fixture must be namespaced"},
 	{"misses a child your controller leaks into another namespace", 38, "it does not see a child the target creates in another"},
@@ -247,13 +247,10 @@ func TestTheReadmeNeedsNoDesignDocument(t *testing.T) {
 			if milestone.MatchString(line) {
 				t.Errorf("%s:%d names a milestone: %s", page, i+1, line)
 			}
-			said := line
-			switch {
-			case page != "README.md":
-			case section == "Development and internals":
+			if page == "README.md" && section == "Development and internals" {
 				continue
 			}
-			if found := designVocabulary.FindString(said); found != "" {
+			if found := designVocabulary.FindString(line); found != "" {
 				t.Errorf("%s:%d, under %q, uses %q, which only DESIGN.md explains: %s", page, i+1, section, found, line)
 			}
 		}
@@ -306,7 +303,7 @@ func TestTheExamplesPageShowsRunsOfTheMakefilesExampleSeeds(t *testing.T) {
 }
 
 // Requiring botbox raises a module to these versions, as go prints them.
-func TestTheREADMEQuotesGoModsVersions(t *testing.T) {
+func TestTheREADMEAndTheCIPageQuoteGoModsVersions(t *testing.T) {
 	required := goModVersions(t)
 	install := section(t, readFile(t, "README.md"), "## Install") + section(t, readFile(t, ciPage), "## Keep botbox out of your go.mod")
 	quoted := map[string]bool{}
@@ -331,7 +328,7 @@ func TestTheREADMEQuotesGoModsVersions(t *testing.T) {
 
 // go test caches a pass, and cannot see the controller or target.yaml that
 // botbox reads.
-func TestTheREADMERunsTheGoTestRecipeUncachedUnderItsBuildTag(t *testing.T) {
+func TestTheCIPageRunsTheGoTestRecipeUncachedUnderItsBuildTag(t *testing.T) {
 	const recipe = "targets/toy-widget/botbox_test.go"
 	tag := regexp.MustCompile(`^//go:build (\w+)\n`).FindStringSubmatch(readFile(t, recipe))
 	if tag == nil {
@@ -445,16 +442,37 @@ func TestTheReadmesReadyConditionExampleHoldsOnlyOnACurrentReadyCondition(t *tes
 }
 
 // botbox --help sends a reader to docs/failures.md for what each failure means.
-func TestTheFailuresPageNamesEveryCheck(t *testing.T) {
-	checks := regexp.MustCompile(`(?m)^\| (G[0-9]+) \|`).FindAllStringSubmatch(section(t, readFile(t, "README.md"), "## Reading a failure"), -1)
+// readmeChecks are the checks of the README's table, in order.
+func readmeChecks(t *testing.T) []string {
+	t.Helper()
+	checks := firstGroups(`(?m)^\| (G[0-9]+) \|`, section(t, readFile(t, "README.md"), "## Reading a failure"))
 	if len(checks) == 0 {
 		t.Fatal("README.md's Reading a failure section lists no check, so this test checks nothing.")
 	}
+	return checks
+}
+
+func firstGroups(pattern, text string) []string {
+	var groups []string
+	for _, m := range regexp.MustCompile(pattern).FindAllStringSubmatch(text, -1) {
+		groups = append(groups, m[1])
+	}
+	return groups
+}
+
+func TestTheREADMEsTableGivesEveryGenericInvariant(t *testing.T) {
+	invariants := firstGroups(`(?m)^\| \*\*(G[0-9]+)\*\* \|`, readFile(t, "DESIGN.md"))
+	if checks := readmeChecks(t); !slices.Equal(checks, invariants) {
+		t.Errorf("README.md's table gives %v, and DESIGN.md's generic invariants are %v.", checks, invariants)
+	}
+}
+
+func TestTheFailuresPageNamesEveryCheck(t *testing.T) {
 	// A heading that names a check says nothing of what its failure means.
 	text := regexp.MustCompile(`(?m)^#.*$`).ReplaceAllString(readFile(t, "docs/failures.md"), "")
-	for _, check := range checks {
-		if !regexp.MustCompile(`\b` + check[1] + `\b`).MatchString(text) {
-			t.Errorf("docs/failures.md does not say what a %s failure means.", check[1])
+	for _, check := range readmeChecks(t) {
+		if !regexp.MustCompile(`\b` + check + `\b`).MatchString(text) {
+			t.Errorf("docs/failures.md does not say what a %s failure means.", check)
 		}
 	}
 }

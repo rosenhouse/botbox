@@ -142,7 +142,8 @@ bin/botbox version
 `tools/botbox/go.mod` then pins botbox. Your own go.mod and go.work, and any package of yours
 in `tools/`, stay as they were.
 
-Keep `go mod edit -go` first, because a `go` before 1.24 lacks `-tool`. Keep `GOWORK=off`, or
+Keep `go mod edit -go` first, so that a `go` before 1.24, which lacks `-tool`, first switches
+to a newer Go. Keep `GOWORK=off`, or
 `go get` raises the go line of your go.work. Under
 `GOTOOLCHAIN=local`, a `go` before 1.24 stops this recipe with
 `flag provided but not defined: -tool`.
@@ -198,6 +199,6 @@ Build `bin/botbox` with the [tools module](#keep-botbox-out-of-your-gomod), buil
 controller and set `KUBEBUILDER_ASSETS`. Then run `go test -count=1 -tags botbox ./...`.
 `go test` cannot see a change to your controller or `target.yaml`, so `-count=1` stops it from
 reusing a cached pass. The build tag keeps the test out of a plain `go test ./...`. The test
-stops botbox 30s before `go test`'s `-timeout`, so raise `-timeout` for more runs.
+stops botbox before `go test`'s `-timeout`, so raise `-timeout` for more runs.
 
 botbox has no Go API to call instead.

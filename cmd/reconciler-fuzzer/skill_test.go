@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
@@ -13,7 +15,7 @@ import (
 
 const skillPage = "../../skills/adopt-reconciler-fuzzer/SKILL.md"
 
-var targetBlock = regexp.MustCompile("(?s)```yaml\n(name:.*?)```")
+var yamlBlock = regexp.MustCompile("(?s)```yaml\n(.*?)```")
 
 var skillCommand = regexp.MustCompile(`(?m)reconciler-fuzzer (run|replay)( [^\n` + "`" + `]*)?$`)
 
@@ -34,7 +36,7 @@ func TestTheAdoptionSkillPassesOnlyFlagsReconcilerFuzzerTakes(t *testing.T) {
 // A target.yaml the skill shows uses only keys reconciler-fuzzer takes.
 func TestTheAdoptionSkillsTargetUsesOnlyKeysTheReferenceLists(t *testing.T) {
 	documented := reference.Listed(t, "## target.yaml")
-	blocks := targetBlock.FindAllStringSubmatch(readFile(t, skillPage), -1)
+	blocks := yamlBlock.FindAllStringSubmatch(readFile(t, skillPage), -1)
 	if len(blocks) == 0 {
 		t.Fatal("The skill shows no target.yaml, so this test checks nothing.")
 	}
@@ -84,5 +86,30 @@ func TestUndocumentedKeysDescendsToTheKeysTheReferenceLists(t *testing.T) {
 	slices.Sort(got)
 	if want := []string{"launch.bogus", "properties[*].nope"}; !slices.Equal(got, want) {
 		t.Errorf("undocumentedKeys gave %q, want %q.", got, want)
+	}
+}
+
+var versionSubstitution = regexp.MustCompile(`\$\(reconciler-fuzzer version[^)]*\)`)
+
+// The skill and the README name the installed module's directory by the
+// version that reconciler-fuzzer version prints.
+func TestTheSkillAndTheReadmeReadTheVersionReconcilerFuzzerPrints(t *testing.T) {
+	_, printed, _ := invoke(t, &fakeSession{}, "version")
+	for _, page := range []string{skillPage, "../../README.md"} {
+		substitutions := versionSubstitution.FindAllString(readFile(t, page), -1)
+		if len(substitutions) == 0 {
+			t.Errorf("%s reads no version, so this test checks nothing there.", page)
+		}
+		for _, substitution := range substitutions {
+			bash := exec.Command("bash", "-c", `reconciler-fuzzer() { printf %s "$PRINTED"; }; printf %s "`+substitution+`"`)
+			bash.Env = append(os.Environ(), "PRINTED="+printed)
+			got, err := bash.Output()
+			if err != nil {
+				t.Fatalf("bash: %v", err)
+			}
+			if string(got) != version() {
+				t.Errorf("%s reads the version as %s, which gives %q, want %q.", page, substitution, got, version())
+			}
+		}
 	}
 }

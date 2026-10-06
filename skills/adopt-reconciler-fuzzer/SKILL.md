@@ -46,15 +46,17 @@ If `reconciler-fuzzer` is not on `PATH` or in `$(go env GOPATH)/bin`, install it
 GOTOOLCHAIN=auto go install github.com/rosenhouse/reconciler-fuzzer/cmd/reconciler-fuzzer@latest
 ```
 
-Then print the directory of the module it was built from:
+`go install` writes to `$(go env GOPATH)/bin`. If that is not on `PATH`, prefix each command
+with `PATH="$(go env GOPATH)/bin:$PATH"`. Then print the directory of the module it was built
+from:
 
 ```sh
-echo "$(go env GOMODCACHE)/github.com/rosenhouse/reconciler-fuzzer@$(reconciler-fuzzer version)"
+echo "$(go env GOMODCACHE)/github.com/rosenhouse/reconciler-fuzzer@$(reconciler-fuzzer version | cut -d' ' -f2)"
 ```
 
 Below, `<module>` stands for that directory. If it is missing, run
 `go mod download github.com/rosenhouse/reconciler-fuzzer@<version>`. If the version is
-`dev`, reconciler-fuzzer was built from a clone, and `<module>` is that clone.
+`(devel)`, reconciler-fuzzer was built from a clone, and `<module>` is that clone.
 
 The docs there match the installed binary. Read them rather than guessing:
 
@@ -105,7 +107,6 @@ ready: >-
 launch:
   binary: bin/manager
   args:
-    - --kubeconfig=$KUBECONFIG
     - --leader-elect=false
     - --health-probe-bind-address=0
     - --metrics-bind-address=0
@@ -128,7 +129,8 @@ Fill each key from the project:
     this `ready` cannot tell a stale status from a current one.
 - `launch.args` holds kubebuilder's flags. `0` turns off the health probe and metrics
   servers, so no port collides. Drop each flag that `main.go` does not define. Set
-  `ENABLE_WEBHOOKS` only where `main.go` reads it.
+  `ENABLE_WEBHOOKS` only where `main.go` reads it. reconciler-fuzzer sets `KUBECONFIG` for
+  the controller.
 - `fixtures` lists files of objects the controller reads and does not create, such as a
   Secret the spec names. Write each beside target.yaml, with no `metadata.namespace`. See
   `<module>/docs/targets.md#fixtures`.
@@ -137,12 +139,23 @@ Leave out `timeouts`, `thresholds`, `properties` and `generate`. Their defaults 
 run.
 
 Copy the sample from `config/samples/`. Drop `metadata.namespace`, and replace each `TODO`
-with a spec the controller accepts. No webhook runs, so also set each field that a defaulting
-webhook sets. Look for `Default(` under `internal/webhook/`.
+with a spec the controller accepts.
+
+No webhook runs. Look for `Default(` under `internal/webhook/`. Set each field it defaults in
+the sample. Generation drops optional fields, so also make each such field required. An
+overlay's `required` replaces the CRD's list, so keep the CRD's required fields in it:
+
+```yaml
+generate:
+  overlay:
+    spec: {required: [message, pages]}
+```
 
 ## 6. Run until reconciler-fuzzer tests the controller
 
-Run this from the repository root, with a timeout of at least 15 minutes:
+Run this from the repository root. A run that fails takes 10 minutes or more, because
+reconciler-fuzzer then minimizes its sequence, so give the command a timeout of at least 20
+minutes:
 
 ```sh
 KUBEBUILDER_ASSETS=<path> reconciler-fuzzer run --target test/reconciler-fuzzer/target.yaml --seed 1 --runs 3
@@ -171,7 +184,7 @@ hide a finding to make a check pass. Do not drop a kind from `manages`, raise a 
 narrow generation unless the controller's design calls for it. Ask the user when in doubt.
 
 On a finding, stop. Give the user the check, the line reconciler-fuzzer printed, the path of
-`report.md`, and the replay command that `report.md` gives.
+`report.md`, and the replay command that `report.md` gives, with `KUBEBUILDER_ASSETS` set.
 
 **Exit 0**: every run passed.
 

@@ -108,7 +108,7 @@ install, copy the skill into your repository:
 
 ```sh
 mkdir -p .claude/skills
-cp -r "$(go env GOMODCACHE)/github.com/rosenhouse/reconciler-fuzzer@$(reconciler-fuzzer version)/skills/adopt-reconciler-fuzzer" .claude/skills/
+cp -r "$(go env GOMODCACHE)/github.com/rosenhouse/reconciler-fuzzer@$(reconciler-fuzzer version | cut -d' ' -f2)/skills/adopt-reconciler-fuzzer" .claude/skills/
 chmod -R u+w .claude/skills/adopt-reconciler-fuzzer
 ```
 
@@ -120,7 +120,7 @@ A target is one YAML file. This is the toy's:
 
 <!-- embed: targets/toy-widget/target.yaml -->
 ```yaml
-# reconciler-fuzzer reads crds, sample and fixtures relative to this file, and
+# reconciler-fuzzer reads crds, sample, fixtures and rbac relative to this file, and
 # launch.binary relative to the directory it runs in.
 name: toy-widget
 version: dev                       # Reports print it.

@@ -449,21 +449,68 @@ func TestTheChecksPageGivesEveryGenericInvariant(t *testing.T) {
 	}
 }
 
-// checkMessages are words each check's violation prints, as its source in
-// internal/invariant spells them.
-var checkMessages = map[string]string{
-	"G1": "where thresholds.quiet allows",
-	"G2": "where a converged target changes nothing",
-	"G3": "(timeouts.delete) after",
-	"G4": "expired with no fault active",
-	"G5": "the Restart at",
-	"G6": "repeated the failing request",
-	"G7": "deleted never came back",
+// checkMessages are words each form of each check's violation prints, as its
+// source in internal/invariant spells them.
+var checkMessages = map[string][]string{
+	"G1":         {"where thresholds.quiet allows"},
+	"G2":         {"where a converged target changes nothing"},
+	"G3":         {"was still there", "still carried the finalizers"},
+	"G4":         {"expired with no fault active", "was not ready"},
+	"G5":         {"the Restart at"},
+	"G6":         {"repeated the failing request"},
+	"G7":         {"deleted never came back"},
+	"Properties": {"the property did not hold on the CR", "the property did not hold where no CR existed"},
 }
 
 // A reader who searches the checks page for what a failure printed finds it.
 func TestTheChecksPageQuotesWhatEachCheckPrints(t *testing.T) {
-	paths, err := filepath.Glob("internal/invariant/*.go")
+	source := sources(t, "internal/invariant/*.go")
+	page := readFile(t, checksPage)
+	for _, heading := range regexp.MustCompile(`(?m)^## (G[0-9]+ .*|Properties)$`).FindAllString(page, -1) {
+		check, _, _ := strings.Cut(strings.TrimPrefix(heading, "## "), " ")
+		messages, found := checkMessages[check]
+		if !found {
+			t.Errorf("checkMessages has no words for %s.", check)
+		}
+		for _, says := range messages {
+			if !strings.Contains(source, says) {
+				t.Errorf("internal/invariant never prints %q, which checkMessages gives for %s.", says, check)
+			}
+			if !strings.Contains(oneLine(section(t, page, heading)), says) {
+				t.Errorf("%s's %s section does not quote %q.", checksPage, check, says)
+			}
+		}
+	}
+}
+
+// runNotes are words of each note a run prints about what the target did, as
+// internal/run spells them.
+var runNotes = []string{
+	"the API server forbade the target",
+	"the teardown force-removed the finalizers of",
+}
+
+// A reader who searches the pages for a note a run printed finds it.
+func TestThePagesQuoteEachRunNote(t *testing.T) {
+	source := sources(t, "internal/run/*.go")
+	pages := ""
+	for _, page := range userPages {
+		pages += oneLine(readFile(t, page))
+	}
+	for _, note := range runNotes {
+		if !strings.Contains(source, note) {
+			t.Errorf("internal/run never prints %q, which runNotes gives.", note)
+		}
+		if !strings.Contains(pages, note) {
+			t.Errorf("No user page quotes the run note %q.", note)
+		}
+	}
+}
+
+// sources joins the non-test Go files that pattern matches.
+func sources(t *testing.T, pattern string) string {
+	t.Helper()
+	paths, err := filepath.Glob(pattern)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -473,21 +520,7 @@ func TestTheChecksPageQuotesWhatEachCheckPrints(t *testing.T) {
 			source += readFile(t, path)
 		}
 	}
-	page := readFile(t, checksPage)
-	for _, check := range firstGroups(`(?m)^## (G[0-9]+) `, page) {
-		says, found := checkMessages[check]
-		if !found {
-			t.Errorf("checkMessages has no words for %s.", check)
-			continue
-		}
-		if !strings.Contains(source, says) {
-			t.Errorf("internal/invariant never prints %q, which checkMessages gives for %s.", says, check)
-		}
-		heading := regexp.MustCompile(`(?m)^## ` + check + ` .*$`).FindString(page)
-		if !strings.Contains(oneLine(section(t, page, heading)), says) {
-			t.Errorf("%s's %s section does not quote %q.", checksPage, check, says)
-		}
-	}
+	return source
 }
 
 var (

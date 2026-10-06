@@ -27,6 +27,7 @@ func (d document) markdown() []byte {
 		fmt.Fprintf(&md, "\n%s\n", d.Check.Evidence)
 	}
 	fmt.Fprintf(&md, "\n```sh\n%s\n```\n", d.Replay)
+	fmt.Fprintf(&md, "\n[docs/checks.md](%s) says what %s requires.\n", CheckSection(d.Check.ID), d.Check.ID)
 	fmt.Fprintf(&md, "\n%s %s\n", d.provenance(), d.recordings())
 	if len(d.Notes) > 0 {
 		md.WriteString("\n## Notes\n\n")
@@ -248,4 +249,28 @@ func yes(set bool) string {
 		return "yes"
 	}
 	return ""
+}
+
+// ChecksPage says what each check requires.
+const ChecksPage = "https://github.com/rosenhouse/reconciler-fuzzer/blob/main/docs/checks.md"
+
+// checkAnchors are the anchors of the generic checks' sections of ChecksPage.
+var checkAnchors = map[string]string{
+	"G1": "g1-bounded-reconciliation",
+	"G2": "g2-no-churn",
+	"G3": "g3-clean-deletion",
+	"G4": "g4-convergence",
+	"G5": "g5-restart-stable",
+	"G6": "g6-no-error-loop",
+	"G7": "g7-self-healing",
+}
+
+// CheckSection links the section of ChecksPage for the check id, where any id
+// but a generic check's names a property.
+func CheckSection(id string) string {
+	anchor, generic := checkAnchors[id]
+	if !generic {
+		anchor = "properties"
+	}
+	return ChecksPage + "#" + anchor
 }

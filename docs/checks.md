@@ -8,7 +8,8 @@ Every run applies [G1](#g1-bounded-reconciliation) to [G7](#g7-self-healing) and
 Once a settle wait has ended, your controller makes no more than `thresholds.quiet` requests
 in the next `timeouts.stable`. Watches, leader election and requests that name no resource,
 such as a health probe, do not count. A resync timer usually fails it, and needs a `quiet` that
-[fits the timer](targets.md#thresholds).
+[fits the timer](targets.md#thresholds). A requeue of a converged CR every few seconds, which
+polls for what a watch would deliver, is a bug: remove it rather than raise `quiet`.
 
 `the target made … API requests in …, where thresholds.quiet allows …` counts the requests
 your controller made while reconciler-fuzzer expected it to be quiet.
@@ -31,8 +32,20 @@ to its CR usually fails it, since [the garbage collector](targets.md#garbage-col
 deletes only what names an owner.
 
 `the … was still there … (timeouts.delete) after … was deleted` names an object left behind,
-and says whether it is orphaned. `the CR … still carried the finalizers … (timeouts.delete)
-after its deletion` names the finalizers still on a CR that did not go.
+and says whether it is orphaned:
+
+- An orphaned object carries no ownerReference to the CR, so no garbage collector deletes it.
+  Give it one, or delete it before your controller removes the CR's finalizer.
+- An object that is not orphaned waited on something else: a finalizer, another owner that
+  still exists, or an owner the collector could not resolve, which it counts as live.
+  `collector.jsonl` shows each delete the collector tried, and the run notes each owner it
+  could not resolve.
+
+`the CR … still carried the finalizers … (timeouts.delete) after its deletion` means your
+controller did not remove its finalizer. Check that its cleanup runs, and that it removes the
+finalizer once the cleanup ends. A cleanup that ends only later needs a wider
+[`timeouts.delete`](targets.md#timeouts). The run then also notes `the teardown force-removed
+the finalizers of …`, since the teardown removed the finalizer to empty the namespace.
 
 Where a fault reached into the deletion, the run notes the deletion rather than judging it,
 and [G4](#g4-convergence) judges the settle wait instead.
@@ -71,6 +84,10 @@ out otherwise fails, and what follows `expired with no fault active` says why:
   fault reached into never went. Where its deletion deadline held the wait open past `settle`,
   the line gives `timeouts.delete is …` in place of `timeouts.settle is …`.
 
+A line that begins `the CR … was not ready … after` judges a deadline where no settle wait
+ended, such as the time a [fault](targets.md#faults) leaves your controller to recover. It
+names the op, or `the fault stopped`, and then any error evaluating `ready`.
+
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
 `settle`. Where your controller [repeated a failing request](#g6-no-error-loop), the line names
 it and its count. A
@@ -101,7 +118,8 @@ Your controller repeats one failing request no more than `thresholds.errloop` ti
 that never clears usually fails it.
 
 `the target repeated the failing request … times within … (timeouts.settle), where
-thresholds.errloop allows …` names the request your controller kept retrying.
+thresholds.errloop allows …` names the request your controller kept retrying. A 403 usually
+means your [`rbac`](targets.md#rbac) lacks a permission.
 [Thresholds](targets.md#thresholds) says how `errloop` relates to `settle`. An error loop that
 backs off can repeat too rarely for this check to count it.
 
@@ -125,6 +143,9 @@ A property must hold on every CR where its `when` says. Its default `when`, `che
 evaluates it wherever a settle wait ends and at the end of the teardown, which deletes every CR.
 A property also runs where no CR exists, so guard it with `has()`, or begin it with
 `!has(metadata.name) ||`. [CEL and hooks](reference.md#cel-and-hooks) says what it binds.
+
+`the property did not hold on the CR …: …` quotes the property's description. `the property did
+not hold where no CR existed: …` usually comes from the teardown, after it deleted every CR.
 
 A `checkpoint` or `end` property skips a checkpoint your controller may not have caught up to:
 under a [fault or a held request](targets.md#faults), or while your controller is

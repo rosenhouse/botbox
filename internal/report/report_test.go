@@ -73,6 +73,19 @@ func TestReportLeadsWithTheFailureAndHowToReproduceIt(t *testing.T) {
 	}
 }
 
+func TestReportLinksTheFailingChecksSection(t *testing.T) {
+	for id, anchor := range map[string]string{"G3": "g3-clean-deletion", "P1": "properties"} {
+		failure := failingRun()
+		failure.Check.ID = id
+
+		md, _ := write(t, failure)
+
+		if want := "](https://github.com/rosenhouse/reconciler-fuzzer/blob/main/docs/checks.md#" + anchor + ")"; !strings.Contains(md, want) {
+			t.Errorf("A %s report does not link %q:\n%s", id, want, md)
+		}
+	}
+}
+
 func TestReportEmbedsTheSequenceSoItRoundTrips(t *testing.T) {
 	md, encoded := write(t, failingRun())
 

@@ -401,7 +401,8 @@ harness, not the target; tune windows, don't retry.
 A failing run emits `report.json` and `report.md` containing: the minimized sequence and
 how many of its ops the run reached, the violated invariant or property with the concrete
 evidence (request log excerpt, object version timeline), the target and versions, the
-seed, and a one-line replay command. That command repeats the target, the kubeconfig and
+seed, a one-line replay command, and a link to the failed check's section of
+`docs/checks.md`. That command repeats the target, the kubeconfig and
 every launch argument the run had, quoted so that `sh` and `zsh` read each word as
 written. It does not record what the target inherits from reconciler-fuzzer's environment, so a
 target declares what it needs in `launch.env` (§8.1). The run directory also holds

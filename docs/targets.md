@@ -68,6 +68,15 @@ Turn leader election off, as `--leader-elect=false` does in a kubebuilder projec
 controller would otherwise wait for its old lease to run out. Give each port your controller
 binds a free one, such as `127.0.0.1:0`, so that two invocations do not collide.
 
+## RBAC
+
+Without `rbac`, your controller runs as admin. With it, reconciler-fuzzer runs your controller as a
+ServiceAccount bound to the Roles in the run's namespace and to the ClusterRoles cluster-wide.
+The run notes each verb and resource the API server forbade, as in
+`the API server forbade the target: update widgets/status`. Add that verb to a Role or
+ClusterRole. Your controller's retries of the 403 then usually fail
+[G6](checks.md#g6-no-error-loop), or [G4](checks.md#g4-convergence) names the request.
+
 ## Garbage collection
 
 envtest runs no garbage collector, so reconciler-fuzzer runs its own over the kinds your target declares.

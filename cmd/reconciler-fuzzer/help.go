@@ -117,9 +117,12 @@ func (c command) synopsis() string {
 }
 
 // flagWord is the flag as a command line spells it, with the back-quoted name
-// in its usage as the value.
+// in its usage as the value. A boolean flag takes none.
 func flagWord(f *flag.Flag) string {
 	value, _ := flag.UnquoteUsage(f)
+	if value == "" {
+		return "--" + f.Name
+	}
 	return "--" + f.Name + " " + value
 }
 

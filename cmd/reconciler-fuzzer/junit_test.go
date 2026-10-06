@@ -122,7 +122,7 @@ func TestJUnitHasATestcasePerPlannedRun(t *testing.T) {
 		t.Fatalf("reconciler-fuzzer run exited %d, want %d: %s", code, exitViolation, stderr)
 	}
 	suite, claimed := readJUnit(t, junit)
-	if want := map[string]int{"tests": 3, "failures": 1, "errors": 0, "skipped": 1}; !maps.Equal(claimed, want) || !maps.Equal(counted(suite), want) {
+	if want := map[string]int{"tests": 4, "failures": 1, "errors": 0, "skipped": 2}; !maps.Equal(claimed, want) || !maps.Equal(counted(suite), want) {
 		t.Errorf("The testsuite claims %v and holds %v, want %v.", claimed, counted(suite), want)
 	}
 	var names []string
@@ -132,7 +132,7 @@ func TestJUnitHasATestcasePerPlannedRun(t *testing.T) {
 			t.Errorf("The testcase %q is of the class %q, want toy-widget.", c.Name, c.Classname)
 		}
 	}
-	if want := []string{"run 1: seed 7", "run 2: seed 8", "run 3: seed 9"}; !slices.Equal(names, want) {
+	if want := []string{"run 1: seed 7", "run 2: seed 8", "run 3: seed 9", "run 4: baseline"}; !slices.Equal(names, want) {
 		t.Fatalf("The testcases are %q, want %q.", names, want)
 	}
 	if suite.Name != "toy-widget" {
@@ -193,7 +193,7 @@ func TestJUnitCountsWhatStoppedTheInvocationAsAnError(t *testing.T) {
 			defer cancel(nil)
 			session := test.session(cancel)
 			junit := filepath.Join(t.TempDir(), "junit.xml")
-			args := slices.Concat([]string{"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3", "--seed", "7", "--junit", junit}, test.args)
+			args := slices.Concat([]string{"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3", "--seed", "7", "--no-baseline", "--junit", junit}, test.args)
 
 			invokeCtx(t, ctx, session, countingGenerator(nil), args...)
 
@@ -226,12 +226,12 @@ func TestJUnitSaysWhatStoppedAnInvocationBeforeItsRuns(t *testing.T) {
 	if err := os.WriteFile(taken, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	undrawable := func(*target.Target) (Generator, []string, error) {
-		return nil, nil, errors.New("the CRD has no schema")
+	undrawable := func(*target.Target) (Generator, error) {
+		return nil, errors.New("the CRD has no schema")
 	}
 	for _, test := range []struct {
 		name, suite, message string
-		generator            func(*target.Target) (Generator, []string, error)
+		generator            func(*target.Target) (Generator, error)
 		args                 []string
 	}{
 		{name: "a flag reconciler-fuzzer refuses", suite: "reconciler-fuzzer", message: "--runs is 0",

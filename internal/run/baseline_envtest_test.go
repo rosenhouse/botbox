@@ -3,21 +3,27 @@
 package run_test
 
 import (
-	"os"
 	"strings"
 	"testing"
 
+	"github.com/rosenhouse/reconciler-fuzzer/internal/generate"
 	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
 )
 
-// The README tells a reader to pin a sequence that deletes an object of each
-// managed kind and updates what each property reads. Its example passes the
-// toy with no bug, and each of those ops catches a bug the drawn runs seldom
-// reach.
-func TestTheREADMEsPinnedSequenceCatchesWhatItSays(t *testing.T) {
+// The README says the baseline catches a controller that does not watch a kind
+// it manages, or that ignores a spec change. Its toy's baseline passes the toy
+// with no bug, and catches each.
+func TestTheToysBaselineCatchesWhatTheREADMESays(t *testing.T) {
 	t.Parallel()
 	binary := buildToy(t)
-	sequence := readSequence(t, pinnedSequence(t))
+	g, err := generate.New(loadTarget(t, binary), generate.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sequence, err := g.Baseline()
+	if err != nil {
+		t.Fatal(err)
+	}
 	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
 
 	for _, test := range []struct {
@@ -48,21 +54,4 @@ func TestTheREADMEsPinnedSequenceCatchesWhatItSays(t *testing.T) {
 			}
 		})
 	}
-}
-
-// pinnedSequence is the sequence the README's Pin sequences section shows.
-func pinnedSequence(t *testing.T) string {
-	t.Helper()
-	readme, err := os.ReadFile(repoRoot + "/README.md")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, section, found := strings.Cut(string(readme), "\n### Pin sequences\n")
-	section, _, _ = strings.Cut(section, "\n## ")
-	_, block, shown := strings.Cut(section, "\n```json\n")
-	block, _, _ = strings.Cut(block, "```")
-	if !found || !shown {
-		t.Fatal("README.md has no Pin sequences section with a sequence in it.")
-	}
-	return block
 }

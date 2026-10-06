@@ -98,14 +98,14 @@ func withoutDeadlines(invocations []string) []string {
 	return stripped
 }
 
-func TestTheHuntRunsEachFamilyAndThenEachSeedInAnInvocationOfItsOwn(t *testing.T) {
+func TestTheHuntRunsEachFamilyAndThenEachSeedInAnInvocationOfItsOwnWithOneBaseline(t *testing.T) {
 	h := runHunt(t, []string{"a", "b"}, nil, "HUNT_MINUTES=1000", "HUNT_RUNS=2", "HUNT_SEED=7")
 
 	want := []string{
 		"run --target target.yaml --deadline D --out out/a families/a.json",
 		"run --target target.yaml --deadline D --out out/b families/b.json",
 		"run --target target.yaml --deadline D --out out/seed-7 --seed 7 --runs 1",
-		"run --target target.yaml --deadline D --out out/seed-8 --seed 8 --runs 1",
+		"run --target target.yaml --deadline D --out out/seed-8 --seed 8 --runs 1 --no-baseline",
 	}
 	if got := withoutDeadlines(h.invocations); !slices.Equal(got, want) {
 		t.Errorf("The hunt ran reconciler-fuzzer as\n%s\nnot as\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

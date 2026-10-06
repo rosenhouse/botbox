@@ -214,6 +214,9 @@ func (d document) provenance() string {
 		who = "reconciler-fuzzer " + d.ReconcilerFuzzer
 	}
 	ran := fmt.Sprintf("%s exercised %s on seed %d", who, d.Target.describe(), d.Seed)
+	if d.Baseline {
+		ran = fmt.Sprintf("%s exercised %s with the baseline", who, d.Target.describe())
+	}
 	if d.Applied < d.Ops {
 		ran += fmt.Sprintf(" and applied %d of the sequence's %d ops", d.Applied, d.Ops)
 	}

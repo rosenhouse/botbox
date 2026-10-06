@@ -137,7 +137,7 @@ kind under `notRecreated`. cert-manager lists CertificateRequest, because a Read
 does not replace a deleted request.
 
 Drawn sequences hold few `deleteManaged` ops, so
-[pin one per managed kind](../README.md#pin-sequences).
+[the baseline](../README.md#the-baseline) deletes an object of each managed kind.
 
 ## Fixtures
 

@@ -20,7 +20,8 @@ Once a settle wait has ended, your controller changes no CR and no object it man
 
 `the target changed … objects in …, where a converged target changes nothing` means your
 controller kept rewriting what it manages. `the target made … status writes in …` means it
-wrote status more often than `thresholds.quiet` allows, even where the writes changed nothing.
+wrote status more often than [`thresholds.quiet`](targets.md#thresholds) allows, even where the
+writes changed nothing.
 
 ## G3 Clean deletion
 
@@ -33,13 +34,8 @@ deletes only what names an owner.
 and says whether it is orphaned. `the CR … still carried the finalizers … (timeouts.delete)
 after its deletion` names the finalizers still on a CR that did not go.
 
-Where a fault reached into the deletion, the run notes the deletion rather than judging it.
-The settle wait's [G4](#g4-convergence) then says `the CR … was still being deleted, held by
-the finalizers …`. Where the CR's deletion deadline held the wait open past `settle`, the line
-gives `timeouts.delete is …` in place of `timeouts.settle is …`. A `recreate` whose old CR a
-fault keeps past the wait stops the run, and the run notes it. reconciler-fuzzer then clears
-the fault, and the settle wait after the last fault stopped says that line where the CR still
-does not go.
+Where a fault reached into the deletion, the run notes the deletion rather than judging it,
+and [G4](#g4-convergence) judges the settle wait instead.
 
 ## G4 Convergence
 
@@ -56,23 +52,28 @@ out otherwise fails, and what follows `expired with no fault active` says why:
   `ready`: a misspelled field under `has()` also evaluates to false. envtest runs no Pod, so a
   CR that waits on a Deployment's replicas never becomes ready there. Run such a target
   [against a cluster](targets.md#against-a-cluster).
-- `ready held from … on, but the namespace never held still for 2s (timeouts.stable)` means
+- `ready held from … on, but the namespace never held still for … (timeouts.stable)` means
   your controller converged and kept writing. The Object versions table lists the writes. A
   status field rewritten on every reconcile, such as a timestamp, does this.
-- `ready held until …` means `ready` held and then stopped holding.
-- `but the target was waiting to restart`, or `but the target restarted in the last 2s
+- `ready held until …` means `ready` held and then stopped holding. The Object versions table
+  shows the version where it stopped.
+- `but the target was waiting to restart`, or `but the target restarted in the last …
   (timeouts.stable)`, means your controller [exited](failures.md#restarts-and-crash-loops).
   The line counts the exits since it last converged, and quotes the last.
 - `but the target had requested no resource outside leader election since …`, or `but the
   target had won no lease since …` for a controller that elects a leader, means your
   controller had not come back from a restart, or had not started, when the wait gave up.
-  `until the last 2s (timeouts.stable)` means it came back too late to run for `stable` before
+  `until the last … (timeouts.stable)` means it came back too late to run for `stable` before
   then. A controller slow to start needs a wider `settle`.
 - `no CR was left to be ready, but the namespace never held still …` means something kept
   writing after the CR was gone.
+- `the CR … was still being deleted, held by the finalizers …` means a CR whose deletion a
+  fault reached into never went. Where its deletion deadline held the wait open past `settle`,
+  the line gives `timeouts.delete is …` in place of `timeouts.settle is …`.
 
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
-`settle`. Where your controller repeated a failing request, the line names it and its count. A
+`settle`. Where your controller [repeated a failing request](#g6-no-error-loop), the line names
+it and its count. A
 `ready` that yields something other than a bool is a configuration error, and
 reconciler-fuzzer exits 2 naming it.
 
@@ -88,9 +89,10 @@ does a change the controller sees only on restart, such as one to a
 [fixture](targets.md#fixtures) it does not watch.
 
 `… the Restart at op …` names the first object that changed, appeared or went. The report lists
-each field the restart changed, with its value before and after. If your controller stamps one
-of those fields at startup, paste its path into [`equalIgnore`](targets.md#equalignore) as
-written. A Secret's values appear there as markers.
+each field the restart changed, with its value before and after, and a Secret's values as
+markers. If your controller stamps one of those fields at startup, paste its path into
+[`equalIgnore`](targets.md#equalignore) as written. Otherwise, your controller missed a change
+before the restart, so check that it watches what it reads.
 
 ## G6 No error loop
 

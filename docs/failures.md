@@ -1,6 +1,5 @@
 # Reading a failure
 
-The [README](../README.md#reading-a-failure) shows how to read a failure, and
 [checks.md](checks.md) says what each check's message means. This page says what each file
 holds, and what to change when reconciler-fuzzer exits 2.
 
@@ -138,6 +137,7 @@ usual causes and what to change.
   the CR may have crashed it. The message then names the run's `sequence.json` for
   `reconciler-fuzzer replay`.
 - A controller that binds a fixed port, such as a health probe on `:8081`, collides with a
-  second invocation of itself. Give it a free port in `launch.args`, or with `--launch-arg`.
+  second invocation of itself. Give it a [free port](targets.md#launch) in `launch.args`, or
+  with `--launch-arg`.
 - reconciler-fuzzer exits 2, rather than reporting a find, when [the deadline](ci.md#deadlines)
   ends a run or stops reconciler-fuzzer before its last run.

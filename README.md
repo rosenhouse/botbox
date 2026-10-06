@@ -17,7 +17,8 @@ You write no test code. One `target.yaml` describes your controller.
 
 ## Limitations
 
-- Your controller runs on your machine, not in a Pod. It cannot reach a Pod or a Service.
+- Your controller runs on your machine, not in a Pod, even against a cluster. It cannot reach a
+  Pod or a Service.
 - No admission or conversion webhook of yours runs. Keep your controller and your CRs on the
   version your CRD stores, and keep drawn CRs
   [within what your webhooks admit](docs/targets.md#generated-values).

@@ -70,14 +70,14 @@ binds a free one, such as `127.0.0.1:0`, so that two invocations do not collide.
 
 ## RBAC
 
-Without `rbac`, your controller runs as admin. With it, reconciler-fuzzer runs your controller as a
-ServiceAccount bound to the Roles in the run's namespace and to the ClusterRoles cluster-wide.
+Without `rbac`, your controller runs with reconciler-fuzzer's own credentials, which are admin on
+envtest. With it, reconciler-fuzzer runs your controller as a ServiceAccount bound to the Roles in
+the run's namespace and to the ClusterRoles cluster-wide.
 
-A missing permission usually fails [G6](checks.md#g6-no-error-loop), or
-[G4](checks.md#g4-convergence) names the forbidden request. The run notes each verb and
-resource the API server forbade, as in `the API server forbade the target: update
-widgets/status`. Add the verb to a Role, or to a ClusterRole for a cluster-scoped resource or a
-watch across namespaces.
+A missing permission usually fails [G6](checks.md#g6-no-error-loop) or
+[G4](checks.md#g4-convergence). The run notes each verb, resource and subresource the API
+server forbade, as in `the API server forbade the target: update widgets/status`. Add the verb
+to a Role, or to a ClusterRole for a cluster-scoped resource or a watch across namespaces.
 
 ## Garbage collection
 

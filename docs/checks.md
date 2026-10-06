@@ -38,13 +38,14 @@ and says whether it is orphaned:
   your controller removes the CR's finalizer.
 - An object that is not orphaned waited on something else: a finalizer of its own, another
   owner that still exists, or an owner the collector could not resolve, which it counts as
-  live. `collector.jsonl` shows each delete the collector tried. The run notes each owner it
-  could not resolve with `reconciler-fuzzer's garbage collector never deletes …`.
+  live. `objects.jsonl` shows its finalizers and ownerReferences. The run notes each owner the
+  collector could not resolve with `reconciler-fuzzer's garbage collector never deletes …`.
 
 `the CR … still carried the finalizers … (timeouts.delete) after its deletion` means your
-controller did not remove its finalizer. Check that its cleanup runs and then removes the
-finalizer. A slow cleanup needs a wider [`timeouts.delete`](targets.md#timeouts). The run
-usually also notes `the teardown force-removed the finalizers of …`.
+controller did not remove its finalizer. Where the run also notes `the teardown force-removed
+the finalizers of …`, the cleanup never ended: check that it runs and then removes the
+finalizer, and look for a finalizer of a child's own that the note names. Without that note,
+the cleanup ended late and needs a wider [`timeouts.delete`](targets.md#timeouts).
 
 Where a fault reached into the deletion, the run notes the deletion rather than judging it,
 and [G4](#g4-convergence) judges the settle wait instead.
@@ -142,7 +143,8 @@ A property must hold on every CR where its `when` says. Its default `when`, `che
 evaluates it wherever a settle wait ends and at the end of the teardown, which deletes every CR.
 A property also runs where no CR exists, as after a `delete` or at the end of the teardown,
 and fails there with `the property did not hold where no CR existed: …`. Guard it with
-`has()`, or begin it with `!has(metadata.name) ||`. [CEL and hooks](reference.md#cel-and-hooks)
+`has()`, or begin it with `!has(metadata.name) ||`. reconciler-fuzzer exits 2 with `no such key`
+where a property reads a field that is missing. [CEL and hooks](reference.md#cel-and-hooks)
 says what it binds.
 
 A `checkpoint` or `end` property skips a checkpoint your controller may not have caught up to:

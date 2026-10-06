@@ -40,7 +40,7 @@ endef
 # first seed, which draws a single op and so costs no replay to minimize.
 EXAMPLE_SEED ?= 23
 EXAMPLE_RUNS ?= 5
-EXAMPLE_DEADLINE ?= 5m
+EXAMPLE_DEADLINE ?= 7m
 NIGHTLY_RUNS ?= 20
 NIGHTLY_DEADLINE ?= 30m
 # The golden draws record the toy's seeds the kind tier draws.

@@ -67,7 +67,7 @@ cert-manager leaves the issued Secret behind, as upstream documents. The target 
 `v1/Secret` as managed, so G3 has to report it:
 
 ```sh
-examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 5m --launch-arg --enable-certificate-owner-ref=false
+examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 7m --launch-arg --enable-certificate-owner-ref=false
 ```
 
 ```

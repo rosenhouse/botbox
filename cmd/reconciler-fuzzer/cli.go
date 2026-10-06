@@ -52,19 +52,24 @@ const (
 	shrunkFile = "sequence.shrunk.json"
 )
 
-// Generator draws a sequence from a seed, deterministically, for the target it
-// was built for.
-type Generator func(seed int64) (run.Sequence, error)
+// Generator builds the sequences of an invocation that names no sequence
+// file, deterministically, for the target it was built for.
+type Generator interface {
+	Draw(seed int64) (run.Sequence, error)
+	// Baseline is the sequence that runs after the drawn ones.
+	Baseline() (run.Sequence, error)
+	// LeftAlone says which spec paths generation never changes, and why.
+	LeftAlone() []string
+}
 
 // rapidGenerator draws sequences from the target's CRD schema. It reads the
-// CRDs once, because a draw itself does no I/O. It also says which spec paths
-// generation leaves alone.
-func rapidGenerator(t *target.Target) (Generator, []string, error) {
+// CRDs once, because a draw itself does no I/O.
+func rapidGenerator(t *target.Target) (Generator, error) {
 	g, err := generate.New(t, generate.Options{})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return g.Draw, g.LeftAlone(), nil
+	return g, nil
 }
 
 // cli is one invocation. Its writers, its generator, its test cluster, its
@@ -76,7 +81,7 @@ type cli struct {
 	// newGenerator builds the generator the invocation draws from, once, as
 	// pkg/generate's does: reading the target's CRDs costs I/O, drawing does
 	// not.
-	newGenerator func(*target.Target) (Generator, []string, error)
+	newGenerator func(*target.Target) (Generator, error)
 	now          func() time.Time
 	discard      func(out *run.Output, n int) error
 }
@@ -112,6 +117,7 @@ type options struct {
 	runsGiven     bool
 	seed          int64
 	seedGiven     bool
+	noBaseline    bool
 }
 
 // main returns what reconciler-fuzzer exits with. An invocation a signal
@@ -239,7 +245,7 @@ func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Tar
 			return c.stop(record, fmt.Errorf("%s stopped the invocation after %d of %d runs", opts.deadlineName(), i, len(runs)))
 		}
 		number := i + 1
-		fmt.Fprintf(c.stdout, "run %d: seed %d, %s\n", number, planned.sequence.Seed, planned.source())
+		fmt.Fprintf(c.stdout, "run %d: %s\n", number, planned.describe())
 		dir := out.RunDir(number)
 		ran := &record.Runs[i]
 		ran.Outcome = outcomeUnfinished
@@ -295,23 +301,30 @@ func (c *cli) stop(record *summary, err error) int {
 }
 
 // planned is one run's sequence and the file it was read from.
-// reconciler-fuzzer drew the sequences of a run that names no file.
+// reconciler-fuzzer generated the sequence of a run that names no file: it
+// drew it from a seed, or it is the baseline.
 type planned struct {
 	sequence run.Sequence
 	path     string
+	baseline bool
 }
 
 func (p planned) generated() bool { return p.path == "" }
 
-func (p planned) source() string {
-	if p.generated() {
-		return "generated"
+// describe is how a run's first line names its sequence.
+func (p planned) describe() string {
+	switch {
+	case p.baseline:
+		return "baseline"
+	case p.generated():
+		return fmt.Sprintf("seed %d, generated", p.sequence.Seed)
 	}
-	return "sequence " + p.path
+	return fmt.Sprintf("seed %d, sequence %s", p.sequence.Seed, p.path)
 }
 
 // plan reads the sequences the caller named, or draws one per run from
-// consecutive seeds, so that each run replays from its own.
+// consecutive seeds, so that each run replays from its own, and then adds the
+// baseline.
 func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, error) {
 	if len(paths) > 0 {
 		sequences, err := readSequences(paths)
@@ -324,25 +337,32 @@ func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, e
 		}
 		return runs, nil
 	}
-	draw, leftAlone, err := c.newGenerator(t)
+	g, err := c.newGenerator(t)
 	if err != nil {
 		return nil, err
 	}
-	for _, note := range leftAlone {
+	for _, note := range g.LeftAlone() {
 		fmt.Fprintln(c.stdout, note)
 	}
 	runs := make([]planned, opts.runs)
 	for i := range runs {
-		sequence, err := draw(opts.seed + int64(i))
+		sequence, err := g.Draw(opts.seed + int64(i))
 		if err != nil {
 			return nil, fmt.Errorf("generating run %d: %w", i+1, err)
 		}
 		runs[i] = planned{sequence: sequence}
 	}
-	return runs, nil
+	if opts.noBaseline {
+		return runs, nil
+	}
+	sequence, err := g.Baseline()
+	if err != nil {
+		return nil, err
+	}
+	return append(runs, planned{sequence: sequence, baseline: true}), nil
 }
 
-// reportFailure minimizes a sequence reconciler-fuzzer drew and leaves it in
+// reportFailure minimizes a sequence reconciler-fuzzer generated and leaves it in
 // the run directory with the evidence of a run of it. A sequence the caller
 // wrote is reported as it was written. It calls rerunning before it runs the
 // minimized sequence, and returns the violation and notes the report carries.
@@ -351,7 +371,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	violation := *result.Violation
 	if !failed.generated() {
 		// The caller's file is a better thing to replay than a copy of it.
-		c.warn(c.writeReport(dir, opts, t, failed.path, failed.sequence, result))
+		c.warn(c.writeReport(dir, opts, t, failed.path, failed, result))
 		c.printNotes(number, result.Notes)
 		c.report(number, violation, dir)
 		return violation, reportNotes(opts, t, result)
@@ -377,13 +397,13 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 		c.warn(fmt.Errorf("%s ended the shrink pass with %s, left unrun in %s",
 			ended(ctx), ops(shrunk), filepath.Join(dir, shrunkFile)))
 		result.Notes = append(result.Notes, fmt.Sprintf(
-			"%s ended minimization with %s, left unrun in %s: this is the sequence reconciler-fuzzer drew",
+			"%s ended minimization with %s, left unrun in %s: this is the sequence reconciler-fuzzer generated",
 			ended(ctx), ops(shrunk), shrunkFile))
 	case ctx.Err() != nil:
 		// A reader takes a report's sequence for the minimized one, and the
 		// pass never got to a smaller one.
 		result.Notes = append(result.Notes, ended(ctx)+
-			" ended minimization before it found a smaller sequence: this is the sequence reconciler-fuzzer drew")
+			" ended minimization before it found a smaller sequence: this is the sequence reconciler-fuzzer generated")
 	case simplified:
 		rerunning()
 		again, err := c.rerun(ctx, opts, s, t, shrunk, dir)
@@ -410,7 +430,7 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 	// The shrink pass's replays back no report, so they are deleted.
 	c.warn(os.RemoveAll(filepath.Join(dir, shrinkDir)))
 	c.warn(run.WriteRunSequence(dir, reported))
-	c.warn(c.writeReport(dir, opts, t, filepath.Join(dir, sequenceFile), reported, result))
+	c.warn(c.writeReport(dir, opts, t, filepath.Join(dir, sequenceFile), planned{sequence: reported, baseline: failed.baseline}, result))
 	// The violation is reported once the directory holds the run it belongs to.
 	c.printNotes(number, notes)
 	c.report(number, violation, dir)
@@ -468,13 +488,15 @@ func shellQuote(word string) string {
 	return "'" + strings.ReplaceAll(word, "'", `'\''`) + "'"
 }
 
-// writeReport leaves the report beside the recordings it describes. replay
-// names the sequence file a reader should run to see this again.
+// writeReport leaves the report of the reported sequence beside the
+// recordings it describes. replay names the sequence file a reader should run
+// to see this again.
 func (c *cli) writeReport(dir string, opts options, t *target.Target,
-	replay string, sequence run.Sequence, result run.Result) error {
+	replay string, reported planned, result run.Result) error {
 	if result.Violation == nil {
 		return nil
 	}
+	sequence := reported.sequence
 	encoded, err := sequence.Marshal()
 	if err != nil {
 		return err
@@ -485,6 +507,7 @@ func (c *cli) writeReport(dir string, opts options, t *target.Target,
 		Target:           report.Target{Name: t.Name, Version: t.Version},
 		ReconcilerFuzzer: version(),
 		Seed:             sequence.Seed,
+		Baseline:         reported.baseline,
 		Notes:            reportNotes(opts, t, result),
 		Replay:           opts.replayCommand(replay),
 		Sequence:         encoded,
@@ -788,14 +811,16 @@ func parseHelp(operands []string) (options, []string, error) {
 	return options{command: operands[0]}, nil, flag.ErrHelp
 }
 
-// validateRuns holds --runs to the sequences reconciler-fuzzer draws itself:
-// named sequence files are what they are.
+// validateRuns holds --runs and --no-baseline to the sequences
+// reconciler-fuzzer generates itself: named sequence files are what they are.
 func (o options) validateRuns(named int) error {
 	switch {
 	case o.runs < 1:
 		return fmt.Errorf("--runs is %d, and an invocation runs at least one sequence", o.runs)
 	case named > 0 && o.runsGiven:
 		return errors.New("--runs draws sequences, and naming sequence files runs those: give one or the other")
+	case named > 0 && o.noBaseline:
+		return errors.New("--no-baseline leaves the baseline out after drawn sequences, and naming sequence files runs those alone")
 	}
 	return nil
 }
@@ -825,6 +850,8 @@ func (o *options) flags() *flag.FlagSet {
 		flags.IntVar(&o.runs, "runs", defaultRuns, "Draw and run `n` sequences.")
 		flags.Int64Var(&o.seed, "seed", 0,
 			"Draw the first sequence from seed `n`, and each later one from the next seed. Without it, reconciler-fuzzer picks a seed and prints it.")
+		flags.BoolVar(&o.noBaseline, "no-baseline", false,
+			"Leave out the baseline, which runs after the drawn sequences.")
 	}
 	return flags
 }

@@ -6,7 +6,7 @@ reconciler-fuzzer v0.0.0-test ran 2 of 3 runs from seed 7 on envtest, with `--la
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | 1 | 7 | drawn | passed | 3 of 3 | 1 of 1, to 2 requests | 1 | 21.5s |
 | 2 | 8 | drawn | error | 3 of 3 | 0 of 1 | 0 | 31s |
-| 3 | 9 | drawn | not run | 0 of 3 | 0 of 1 | 0 |  |
+| 3 |  | baseline | not run | 0 of 3 | 0 of 1 | 0 |  |
 
 ## Run 1: passed
 

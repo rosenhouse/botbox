@@ -48,7 +48,7 @@ func TestEveryHelpFormPrintsItsHelpAndExitsZero(t *testing.T) {
 func TestTheSynopsisListsEveryFlag(t *testing.T) {
 	for name, want := range map[string]string{
 		"run": "reconciler-fuzzer run --target file [--deadline duration] [--junit file] [--kubeconfig file] " +
-			"[--launch-arg arg]... [--out dir] [--runs n] [--seed n] [sequence.json...]",
+			"[--launch-arg arg]... [--no-baseline] [--out dir] [--runs n] [--seed n] [sequence.json...]",
 		"replay":  "reconciler-fuzzer replay --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--out dir] sequence.json",
 		"version": "reconciler-fuzzer version",
 		"matrix":  "reconciler-fuzzer matrix --target file --sequences dir [--deadline duration] [--kubeconfig file] [--launch-arg arg]... [--out file]",
@@ -69,7 +69,8 @@ func TestACommandsHelpDescribesEachFlagWithItsDefault(t *testing.T) {
 		flat := strings.Join(strings.Fields(got), " ")
 		(&options{command: c.name}).flags().VisitAll(func(f *flag.Flag) {
 			placeholder, usage := flag.UnquoteUsage(f)
-			if want := "--" + f.Name + " " + placeholder + " " + usage; !strings.Contains(flat, want) {
+			want := strings.Join(strings.Fields("--"+f.Name+" "+placeholder+" "+usage), " ")
+			if !strings.Contains(flat, want) {
 				t.Errorf("reconciler-fuzzer %s --help does not describe --%s: want %q in\n%s", c.name, f.Name, want, got)
 			}
 		})
@@ -124,8 +125,8 @@ func TestWrapFillsEachLineUpToEightyColumns(t *testing.T) {
 func TestRunAndReplaySayWhichSequencesTheyRunAndMinimize(t *testing.T) {
 	for name, says := range map[string][]string{
 		"run": {
-			"reconciler-fuzzer run draws --runs sequences of ops on the target's custom resources and runs each against a fresh namespace.",
-			"It stops at the first sequence that fails a check, minimizes it, and writes a report.",
+			"reconciler-fuzzer run draws --runs sequences of ops on the target's custom resources and runs each against a fresh namespace, then runs the baseline.",
+			"reconciler-fuzzer stops at the first sequence that fails a check, minimizes it, and writes a report.",
 			"Sequence files given as arguments run as written instead, and reconciler-fuzzer does not minimize them.",
 		},
 		"replay": {"reconciler-fuzzer replay runs one sequence file as written, such as the sequence.json of a failing run, and writes a report if it fails."},

@@ -62,7 +62,7 @@ func widgetSequence(seed int64) run.Sequence {
 }
 
 // sampleSummary is an invocation of three runs: the first passed through a
-// fault and a crash, the second found G3, and the third never ran.
+// fault and a crash, the second found G3, and the baseline never ran.
 func sampleSummary(t *testing.T) *summary {
 	t.Helper()
 	toy, err := target.Load(toyTargetYAML)
@@ -72,7 +72,7 @@ func sampleSummary(t *testing.T) *summary {
 	start := time.Date(2026, 9, 24, 1, 2, 3, 0, time.UTC)
 	opts := options{command: "run", target: toyTargetYAML, launchArgs: []string{"--bug=3", "--name=a b"},
 		seed: 7, seedGiven: true, deadline: 5 * time.Minute, deadlineGiven: true}
-	runs := []planned{{sequence: widgetSequence(7)}, {sequence: widgetSequence(8)}, {sequence: widgetSequence(9)}}
+	runs := []planned{{sequence: widgetSequence(7)}, {sequence: widgetSequence(8)}, {sequence: widgetSequence(0), baseline: true}}
 	// reconciler-fuzzer writes UTC whatever the local zone.
 	berlin := time.FixedZone("CEST", 2*60*60)
 	s := newSummary(opts, toy, runs, start.In(berlin))
@@ -186,6 +186,7 @@ type writtenRun struct {
 	Run                                         int
 	Seed                                        int64
 	File                                        string
+	Baseline                                    bool
 	Outcome                                     string
 	Duration                                    string
 	Ops, Applied                                int
@@ -255,7 +256,7 @@ func TestAPassingInvocationWritesItsSummary(t *testing.T) {
 	before := time.Now()
 
 	code, stdout, stderr := invokeWith(t, session, countingGenerator(nil, run.OpRestart, run.OpSettle, run.OpSettle),
-		"run", "--target", toyTargetYAML, "--out", out, "--runs", "3", "--seed", "42", "--deadline", "5m",
+		"run", "--target", toyTargetYAML, "--out", out, "--runs", "3", "--seed", "42", "--no-baseline", "--deadline", "5m",
 		"--launch-arg", "--bug=0")
 
 	if code != exitOK {
@@ -315,7 +316,7 @@ func TestTheSummaryTimesTheInvocationAndEachRun(t *testing.T) {
 	session.after = func() { clock = clock.Add(1500 * time.Millisecond) }
 	out := t.TempDir()
 
-	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", out, "--runs", "2", "--seed", "1")
+	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", out, "--runs", "2", "--seed", "1", "--no-baseline")
 
 	if code != exitOK {
 		t.Fatalf("reconciler-fuzzer run exited %d: %s", code, stderr)
@@ -494,7 +495,7 @@ func TestTheSummaryCarriesTheReportsViolationAndNotes(t *testing.T) {
 				return s
 			},
 			args:      []string{"--runs", "1", "--seed", "1"},
-			violation: drawn, notes: []string{"an interrupt ended minimization before it found a smaller sequence: this is the sequence reconciler-fuzzer drew"}},
+			violation: drawn, notes: []string{"an interrupt ended minimization before it found a smaller sequence: this is the sequence reconciler-fuzzer generated"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(t.Context())
@@ -670,7 +671,7 @@ func TestTheSummaryRecordsEachRunAsItStarts(t *testing.T) {
 		suites = append(suites, suite)
 	}
 
-	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", out, "--runs", "2", "--seed", "1", "--junit", junit)
+	code, _, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", out, "--runs", "2", "--seed", "1", "--no-baseline", "--junit", junit)
 
 	if code != exitOK {
 		t.Fatalf("reconciler-fuzzer run exited %d: %s", code, stderr)
@@ -904,7 +905,7 @@ func TestEveryExitPathWritesTheSummary(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
 			out := t.TempDir()
-			args := slices.Concat([]string{"run", "--target", toyTargetYAML, "--out", out, "--runs", "3", "--seed", "7"}, test.args)
+			args := slices.Concat([]string{"run", "--target", toyTargetYAML, "--out", out, "--runs", "3", "--seed", "7", "--no-baseline"}, test.args)
 
 			code, _, stderr := invokeCtx(t, ctx, test.session(cancel), countingGenerator(nil), args...)
 

@@ -274,19 +274,24 @@ const updateDraws = 8
 // patch is a merge patch that changes one field of the n-th CR, or nil if the
 // CRD refused every one drawn or each gave the CR another's distinct value.
 func (g *Generator) patch(t *rapid.T, n int, at *state) map[string]any {
-	cr := at.crs[n].object
 	for range updateDraws {
 		mutable := rapid.SampledFrom(g.fields).Draw(t, "field")
 		value, _ := mutable.draw(t)
 		// A merge patch removes the field where the draw left it absent
 		// (RFC 7386).
-		patch := nest(mutable.path, value)
-		patched := run.MergePatch(runtime.DeepCopyJSON(cr), patch)
-		if g.rules.refusal(patched, cr) == nil && !g.collides(at, n, patched) {
+		if patch := nest(mutable.path, value); g.admits(at, n, patch) {
 			return patch
 		}
 	}
 	return nil
+}
+
+// admits reports whether the CRD accepts the patch to the n-th CR, and the
+// patch gives it no other CR's distinct value.
+func (g *Generator) admits(at *state, n int, patch map[string]any) bool {
+	cr := at.crs[n].object
+	patched := run.MergePatch(runtime.DeepCopyJSON(cr), patch)
+	return g.rules.refusal(patched, cr) == nil && !g.collides(at, n, patched)
 }
 
 // draw is one value for the field, or its removal where the schema allows the

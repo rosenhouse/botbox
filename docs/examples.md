@@ -36,21 +36,23 @@ KUBEBUILDER_ASSETS="$(make --no-print-directory assets-path)" ./bin/reconciler-f
 ```
 
 The first invocation installs `setup-envtest`, downloads the control plane and builds
-cert-manager, which takes a few minutes. The five runs then take about three minutes together.
-Each applies the Issuer fixture to a fresh namespace, launches the controller behind the proxy,
-and runs one drawn sequence. A fixed seed draws the same five sequences every time:
+cert-manager, which takes a few minutes. The five drawn runs and the baseline then take about
+five minutes together. Each applies the Issuer fixture to a fresh namespace, launches the
+controller behind the proxy, and runs one sequence. A fixed seed draws the same five sequences
+every time:
 
 ```sh
 examples/cert-manager/quickstart.sh --seed 23
 ```
 
 ```
-the deadline is 1h55m50s: these 5 runs can take 1h51m50s at the target's timeouts, and minimizing a failure gets the rest, at least 4m0s. --deadline sets another.
+the deadline is 2h2m10s: these 6 runs can take 1h58m10s at the target's timeouts, and minimizing a failure gets the rest, at least 4m0s. --deadline sets another.
 run 1: seed 23, generated
 run 2: seed 24, generated
 run 3: seed 25, generated
 run 4: seed 26, generated
 run 5: seed 27, generated
+run 6: baseline
 every run passed.
 ```
 
@@ -64,7 +66,7 @@ cert-manager leaves the issued Secret behind, as upstream documents. The target 
 `v1/Secret` as managed, so [G3](checks.md#g3-clean-deletion) has to report it:
 
 ```sh
-examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 5m --launch-arg --enable-certificate-owner-ref=false
+examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 7m --launch-arg --enable-certificate-owner-ref=false
 ```
 
 ```

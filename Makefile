@@ -34,13 +34,13 @@ endef
 # the seeds, so that a failing tier means the change under review and not a new
 # draw, and so a tier stays inside the ten minutes §11 budgets. The nightly
 # workflow draws its own seeds. Against cert-manager, these seeds draw a second
-# Certificate, a recreate and a restart between them. The pinned sequences
-# delete the Certificate and its managed objects, and run the rotationPolicy
-# Never that draws leave out. Its negative control runs the first seed alone,
-# which draws a single op and so costs no replay to minimize.
+# Certificate, a recreate and a restart between them, and the baseline deletes
+# its managed objects. The pinned sequences delete the Certificate, and run the
+# rotationPolicy Never that draws leave out. Its negative control fails on the
+# first seed, which draws a single op and so costs no replay to minimize.
 EXAMPLE_SEED ?= 23
 EXAMPLE_RUNS ?= 5
-EXAMPLE_DEADLINE ?= 5m
+EXAMPLE_DEADLINE ?= 7m
 NIGHTLY_RUNS ?= 20
 NIGHTLY_DEADLINE ?= 30m
 # The golden draws record the toy's seeds the kind tier draws.

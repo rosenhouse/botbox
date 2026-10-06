@@ -66,6 +66,7 @@ type runSummary struct {
 	Run             int                `json:"run"`
 	Seed            int64              `json:"seed"`
 	File            string             `json:"file,omitempty"`
+	Baseline        bool               `json:"baseline,omitempty"`
 	Outcome         outcome            `json:"outcome"`
 	Duration        *run.Duration      `json:"duration,omitempty"`
 	Ops             int                `json:"ops"`
@@ -113,6 +114,7 @@ func newSummary(opts options, t *target.Target, runs []planned, start time.Time)
 			Run:      i + 1,
 			Seed:     planned.sequence.Seed,
 			File:     planned.path,
+			Baseline: planned.baseline,
 			Outcome:  outcomeNotRun,
 			Ops:      len(planned.sequence.Ops),
 			OpTypes:  map[run.OpType]int{},

@@ -154,7 +154,8 @@
     },
     {
       "run": 3,
-      "seed": 9,
+      "seed": 0,
+      "baseline": true,
       "outcome": "not run",
       "ops": 3,
       "applied": 0,
@@ -167,7 +168,7 @@
       "faultedRequests": 0,
       "checkpoints": 0,
       "sequence": {
-        "seed": 9,
+        "seed": 0,
         "target": "toy-widget",
         "ops": [
           {

@@ -67,11 +67,13 @@ run 1: seed 1, generated
 run 2: seed 2, generated
 run 2: the proxy applied the fault of op 6 to no request
 run 3: seed 3, generated
+run 4: baseline
 every run passed.
 ```
 
 Each run starts the toy in a new namespace and applies a sequence of ops, drawn from the run's
-seed. Run 2 drew a fault that no request matched. The toy is correct, so every run passes.
+seed. Run 2 drew a fault that no request matched. Run 4 is [the baseline](#the-baseline). The
+toy is correct, so every run passes.
 
 Now switch on bug B3, which leaves a ConfigMap without an ownerReference. `--launch-arg` passes
 an extra flag to the controller. `replay` runs a sequence file rather than a drawn sequence.
@@ -180,27 +182,15 @@ reconciler-fuzzer run --target target.yaml --runs 5
 reconciler-fuzzer prints each run's seed. `--seed` draws the same sequences again, as long as reconciler-fuzzer, your
 CRDs and `target.yaml` are unchanged.
 
-### Pin sequences
+### The baseline
 
-Drawn sequences rarely delete a managed object, or update a CR that has settled. A few drawn
-runs can miss a controller that does not watch a kind it manages, or one that ignores a spec
-change. Write a sequence for each:
+Few drawn sequences delete a managed object, or update a CR that has settled. So after the
+drawn runs, reconciler-fuzzer runs the baseline. It creates your sample, and deletes the first
+object of each managed kind, which your controller must recreate. It then changes each field
+that generation may change, one at a time, and your controller must settle after each change.
+`--no-baseline` leaves the baseline out.
 
-- For each managed kind, create your sample and delete its first object of that kind with
-  `deleteManaged`. Your controller must recreate it.
-- For each property, create your sample and update a spec field that changes what the property
-  reads.
-
-This sequence does both for the toy:
-
-```json
-{"seed": 1, "target": "toy-widget", "ops": [
-  {"i": 0, "t": "create", "obj": {"apiVersion": "toy.reconciler-fuzzer/v1", "kind": "Widget",
-    "metadata": {"name": "widget"}, "spec": {"count": 3}}},
-  {"i": 1, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
-  {"i": 2, "t": "update", "patch": {"spec": {"count": 2}}}]}
-```
-
+To test what generation does not draw, write a sequence.
 `reconciler-fuzzer run --target target.yaml sequences/*.json` runs your sequences.
 [docs/targets.md](docs/targets.md#sequences-you-write) says how to write them.
 

@@ -195,8 +195,8 @@ func TestEverySequenceAPageShowsLoads(t *testing.T) {
 			}
 		}
 	}
-	if shown < 3 {
-		t.Fatalf("The pages show %d sequences, and the README and docs/targets.md show at least three.", shown)
+	if shown < 2 {
+		t.Fatalf("The pages show %d sequences, and docs/targets.md shows at least two.", shown)
 	}
 }
 

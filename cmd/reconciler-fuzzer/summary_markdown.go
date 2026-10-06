@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,8 +25,8 @@ func (s *summary) markdown() []byte {
 	md.WriteString("\n| run | seed | sequence | outcome | ops applied | faults applied | exits | took |\n")
 	md.WriteString("| --- | --- | --- | --- | --- | --- | --- | --- |\n")
 	for _, r := range s.Runs {
-		fmt.Fprintf(&md, "| %d | %d | %s | %s | %d of %d | %s | %d | %s |\n",
-			r.Run, r.Seed, r.source(), r.verdict(), r.Applied, r.Ops, r.faults(), len(r.Exits), r.took())
+		fmt.Fprintf(&md, "| %d | %s | %s | %s | %d of %d | %s | %d | %s |\n",
+			r.Run, r.seed(), r.source(), r.verdict(), r.Applied, r.Ops, r.faults(), len(r.Exits), r.took())
 	}
 	for _, r := range s.Runs {
 		r.details(&md, s.Outcome != outcomeUnfinished)
@@ -66,8 +67,19 @@ func (s *summary) provenance() string {
 	return said + fmt.Sprintf(", and exited %d.", *s.ExitCode)
 }
 
+// seed is empty for the baseline, which no seed draws.
+func (r runSummary) seed() string {
+	if r.Baseline {
+		return ""
+	}
+	return strconv.FormatInt(r.Seed, 10)
+}
+
 func (r runSummary) source() string {
-	if r.File == "" {
+	switch {
+	case r.Baseline:
+		return "baseline"
+	case r.File == "":
 		return "drawn"
 	}
 	return "`" + strings.ReplaceAll(r.File, "|", `\|`) + "`"

@@ -148,7 +148,7 @@ jobs:
           if-no-files-found: ignore
 
   # The external-secrets adoption example of DESIGN.md §10 (M7), on the same
-  # fixed seeds. The tier measures about six minutes, and the timeout adds the
+  # fixed seeds. The tier measures about eight minutes, and the timeout adds the
   # cold clone and build of the controller, about 150 seconds, that a cache miss
   # pays for.
   example-external-secrets:

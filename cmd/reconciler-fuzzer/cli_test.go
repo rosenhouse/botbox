@@ -134,14 +134,14 @@ func invoke(t *testing.T, fake *fakeSession, args ...string) (int, string, strin
 	return invokeWith(t, fake, countingGenerator(nil), args...)
 }
 
-func invokeWith(t *testing.T, fake *fakeSession, newGenerator func(*target.Target) (Generator, []string, error), args ...string) (int, string, string) {
+func invokeWith(t *testing.T, fake *fakeSession, newGenerator func(*target.Target) (Generator, error), args ...string) (int, string, string) {
 	t.Helper()
 	return invokeCtx(t, t.Context(), fake, newGenerator, args...)
 }
 
 // invokeCtx is invokeWith under a context the test controls, for the deadline.
 func invokeCtx(t *testing.T, ctx context.Context, fake *fakeSession,
-	newGenerator func(*target.Target) (Generator, []string, error), args ...string) (int, string, string) {
+	newGenerator func(*target.Target) (Generator, error), args ...string) (int, string, string) {
 	t.Helper()
 	var stdout, stderr bytes.Buffer
 	fake.printed = stdout.String
@@ -168,12 +168,12 @@ func invokeCtx(t *testing.T, ctx context.Context, fake *fakeSession,
 
 // countingGenerator draws sequences of the ops given, or of one settle, and
 // records every seed it was asked for.
-func countingGenerator(seeds *[]int64, ops ...run.OpType) func(*target.Target) (Generator, []string, error) {
+func countingGenerator(seeds *[]int64, ops ...run.OpType) func(*target.Target) (Generator, error) {
 	if len(ops) == 0 {
 		ops = []run.OpType{run.OpSettle}
 	}
-	return func(t *target.Target) (Generator, []string, error) {
-		return func(seed int64) (run.Sequence, error) {
+	return func(t *target.Target) (Generator, error) {
+		return drawing(func(seed int64) (run.Sequence, error) {
 			if seeds != nil {
 				*seeds = append(*seeds, seed)
 			}
@@ -182,9 +182,20 @@ func countingGenerator(seeds *[]int64, ops ...run.OpType) func(*target.Target) (
 				sequence.Ops = append(sequence.Ops, run.Op{Index: i, Type: opType})
 			}
 			return sequence, nil
-		}, nil, nil
+		}), nil
 	}
 }
+
+// drawing is a Generator that draws with the func. Its baseline is one settle.
+type drawing func(seed int64) (run.Sequence, error)
+
+func (d drawing) Draw(seed int64) (run.Sequence, error) { return d(seed) }
+
+func (drawing) Baseline() (run.Sequence, error) {
+	return run.Sequence{Target: "toy-widget", Ops: []run.Op{{Type: run.OpSettle}}}, nil
+}
+
+func (drawing) LeftAlone() []string { return nil }
 
 // writeSequence writes a one-op sequence for the toy target.
 func writeSequence(t *testing.T, seed int64) string {
@@ -224,6 +235,7 @@ func TestConfigurationErrorsExitTwo(t *testing.T) {
 		{name: "replay without a sequence", args: []string{"replay", "--target", toyTargetYAML}, want: "sequence"},
 		{name: "replay with two sequences", args: []string{"replay", "--target", toyTargetYAML, sequence, sequence}, want: "one sequence"},
 		{name: "--runs with a named sequence", args: []string{"run", "--target", toyTargetYAML, "--runs", "5", sequence}, want: "--runs"},
+		{name: "--no-baseline with a named sequence", args: []string{"run", "--target", toyTargetYAML, "--no-baseline", sequence}, want: "--no-baseline"},
 		{name: "no runs at all", args: []string{"run", "--target", toyTargetYAML, "--runs", "0"}, want: "--runs"},
 		{name: "a deadline of no time", args: []string{"replay", "--target", toyTargetYAML, "--deadline", "0s", sequence},
 			want: "--deadline is 0s, and an invocation needs time to run: leave the flag out, and reconciler-fuzzer derives one\n"},
@@ -242,7 +254,7 @@ func TestConfigurationErrorsExitTwo(t *testing.T) {
 	}
 }
 
-func TestRunGeneratesOneSequencePerRun(t *testing.T) {
+func TestRunGeneratesOneSequencePerRunThenTheBaseline(t *testing.T) {
 	session := &fakeSession{}
 	var seeds []int64
 
@@ -255,13 +267,26 @@ func TestRunGeneratesOneSequencePerRun(t *testing.T) {
 	if want := []int64{42, 43, 44}; !slices.Equal(seeds, want) {
 		t.Errorf("The generator drew the seeds %v, want %v: one run per seed, from the one given.", seeds, want)
 	}
-	if len(session.sequences) != 3 {
-		t.Errorf("The session executed %d sequences, want one per run.", len(session.sequences))
+	baseline, _ := drawing(nil).Baseline()
+	if len(session.sequences) != 4 || !reflect.DeepEqual(session.sequences[3], baseline) {
+		t.Errorf("The session executed %v, want one sequence per run and then the baseline.", session.sequences)
 	}
-	for _, seed := range seeds {
-		if !strings.Contains(stdout, fmt.Sprint(seed)) {
-			t.Errorf("reconciler-fuzzer run printed %q, want every seed printed.", stdout)
-		}
+	want := "run 1: seed 42, generated\nrun 2: seed 43, generated\nrun 3: seed 44, generated\nrun 4: baseline\nevery run passed.\n"
+	if !strings.HasSuffix(stdout, want) {
+		t.Errorf("reconciler-fuzzer run printed %q, want it to end %q.", stdout, want)
+	}
+}
+
+func TestNoBaselineRunsOnlyTheDrawnSequences(t *testing.T) {
+	session := &fakeSession{}
+
+	code, stdout, stderr := invoke(t, session, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "2", "--no-baseline")
+
+	if code != exitOK {
+		t.Fatalf("reconciler-fuzzer run exited %d: %s", code, stderr)
+	}
+	if len(session.sequences) != 2 || strings.Contains(stdout, "baseline") {
+		t.Errorf("The session executed %d sequences and printed %q, want the two drawn alone.", len(session.sequences), stdout)
 	}
 }
 
@@ -300,6 +325,58 @@ func TestANamedSequenceTakesPrecedenceOverGeneration(t *testing.T) {
 	}
 	if len(session.sequences) != 1 || session.sequences[0].Seed != 8675309 {
 		t.Errorf("The session executed %v, want the named sequence.", session.sequences)
+	}
+}
+
+// withBaseline is a Generator whose baseline is the sequence given.
+type withBaseline struct {
+	drawing
+	baseline run.Sequence
+}
+
+func (g withBaseline) Baseline() (run.Sequence, error) { return g.baseline, nil }
+
+// failingBaseline is a Generator whose baseline fails with the error given.
+type failingBaseline struct {
+	drawing
+	err error
+}
+
+func (g failingBaseline) Baseline() (run.Sequence, error) { return run.Sequence{}, g.err }
+
+func TestAFailingBaselineIsMinimizedAndReportedAsTheBaseline(t *testing.T) {
+	g4 := run.Violation{ID: "G4", Statement: "the target converges"}
+	session := &fakeSession{fails: func(candidate run.Sequence, _ string) *run.Violation {
+		if slices.ContainsFunc(candidate.Ops, func(op run.Op) bool { return op.Type == run.OpRestart }) {
+			return &g4
+		}
+		return nil
+	}}
+	baseline := run.Sequence{Target: "toy-widget", Ops: []run.Op{{Type: run.OpSettle}, {Index: 1, Type: run.OpRestart}, {Index: 2, Type: run.OpSettle}}}
+	generate := func(t *target.Target) (Generator, error) {
+		drawn, _ := countingGenerator(nil)(t)
+		return withBaseline{drawn.(drawing), baseline}, nil
+	}
+
+	code, stdout, _ := invokeWith(t, session, generate, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1")
+
+	if code != exitViolation {
+		t.Fatalf("reconciler-fuzzer run exited %d, want %d.", code, exitViolation)
+	}
+	dir := session.dirs[1]
+	written, err := run.ReadSequence(filepath.Join(dir, sequenceFile))
+	if err != nil {
+		t.Fatalf("The run directory holds no minimized sequence: %v", err)
+	}
+	if want := []run.OpType{run.OpRestart, run.OpSettle}; !slices.Equal(opTypesOf(written), want) {
+		t.Errorf("The run directory holds the sequence %v, want the minimized %v.", written.Ops, want)
+	}
+	if !strings.Contains(stdout, "run 2: baseline\n") {
+		t.Errorf("reconciler-fuzzer run printed %q, want run 2 named the baseline.", stdout)
+	}
+	md, err := os.ReadFile(filepath.Join(dir, "report.md"))
+	if err != nil || !strings.Contains(string(md), "with the baseline") {
+		t.Errorf("report.md is\n%s\nwant it to name the baseline: %v", md, err)
 	}
 }
 
@@ -784,7 +861,7 @@ func TestADeadlineThatStopsTheInvocationBetweenRunsExitsTwo(t *testing.T) {
 	session := &fakeSession{}
 
 	code, stdout, stderr := invokeWith(t, session, countingGenerator(nil),
-		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3", "--deadline", "1ns")
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3", "--no-baseline", "--deadline", "1ns")
 
 	if code != exitError {
 		t.Errorf("reconciler-fuzzer run exited %d, want %d.", code, exitError)
@@ -827,14 +904,14 @@ launch:
 
 // growingGenerator draws a create and as many settles as the seed, so that no
 // two runs take the same time.
-func growingGenerator(t *target.Target) (Generator, []string, error) {
-	return func(seed int64) (run.Sequence, error) {
+func growingGenerator(t *target.Target) (Generator, error) {
+	return drawing(func(seed int64) (run.Sequence, error) {
 		sequence := run.Sequence{Seed: seed, Target: t.Name, Ops: []run.Op{{Type: run.OpCreate}}}
 		for i := range int(seed) {
 			sequence.Ops = append(sequence.Ops, run.Op{Index: i + 1, Type: run.OpSettle})
 		}
 		return sequence, nil
-	}, nil, nil
+	}), nil
 }
 
 // Without --deadline, the runs get what they can take, and a sequence
@@ -858,8 +935,8 @@ func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
 		minimizing time.Duration
 		says       string
 	}{
-		{"drawn runs", []string{"run", "--runs", "10", "--seed", "1"}, 4 * time.Minute,
-			"the deadline is %[1]s: these 10 runs can take %[2]s at the target's timeouts, and minimizing a failure gets the rest, at least 4m0s. --deadline sets another.\n"},
+		{"drawn runs and the baseline", []string{"run", "--runs", "10", "--seed", "1"}, 4 * time.Minute,
+			"the deadline is %[1]s: these 11 runs can take %[2]s at the target's timeouts, and minimizing a failure gets the rest, at least 4m0s. --deadline sets another.\n"},
 		{"a named sequence", []string{"run", sequence}, 0, named},
 		{"named sequences", []string{"run", sequence, longer}, 0,
 			"the deadline is %[1]s: these 2 runs can take that long at the target's timeouts. --deadline sets another.\n"},
@@ -894,8 +971,8 @@ func TestWithoutADeadlineTheRunsGetWhatTheyCanTake(t *testing.T) {
 // Runs whose waits no duration can count get the longest deadline, not one
 // that has already passed.
 func TestADeadlineTooLongToCountIsTheLongest(t *testing.T) {
-	generate := func(t *target.Target) (Generator, []string, error) {
-		return func(seed int64) (run.Sequence, error) {
+	generate := func(t *target.Target) (Generator, error) {
+		return drawing(func(seed int64) (run.Sequence, error) {
 			ops := []run.Op{{Type: run.OpCreate}}
 			for range 64 {
 				ops = append(ops, run.Op{Type: run.OpFault, Fault: &run.Fault{Action: run.Action{Error: 500}, Until: run.Trigger{Count: 1}}})
@@ -905,11 +982,11 @@ func TestADeadlineTooLongToCountIsTheLongest(t *testing.T) {
 				ops[i].Index = i
 			}
 			return run.Sequence{Seed: seed, Target: t.Name, Ops: ops}, nil
-		}, nil, nil
+		}), nil
 	}
 	session := &fakeSession{}
 
-	code, stdout, stderr := invokeWith(t, session, generate, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "2")
+	code, stdout, stderr := invokeWith(t, session, generate, "run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "2", "--no-baseline")
 
 	if code != exitOK || len(session.sequences) != 2 {
 		t.Fatalf("reconciler-fuzzer run exited %d after %d runs: %s", code, len(session.sequences), stderr)
@@ -972,7 +1049,7 @@ func TestAnInterruptBeforeTheFirstRunStartsNone(t *testing.T) {
 	session := &fakeSession{}
 
 	code, _, stderr := invokeCtx(t, ctx, session, countingGenerator(nil),
-		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3")
+		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "3", "--no-baseline")
 
 	if code != 128+int(syscall.SIGINT) {
 		t.Errorf("reconciler-fuzzer run exited %d, want %d.", code, 128+int(syscall.SIGINT))
@@ -1201,16 +1278,23 @@ func TestAGeneratorThatFailsExitsTwo(t *testing.T) {
 	broken := errors.New("the CRD declares no schema to draw from")
 	for _, test := range []struct {
 		name         string
-		newGenerator func(*target.Target) (Generator, []string, error)
+		newGenerator func(*target.Target) (Generator, error)
 	}{
 		{
 			name:         "building it",
-			newGenerator: func(*target.Target) (Generator, []string, error) { return nil, nil, broken },
+			newGenerator: func(*target.Target) (Generator, error) { return nil, broken },
 		},
 		{
 			name: "drawing a sequence",
-			newGenerator: func(*target.Target) (Generator, []string, error) {
-				return func(int64) (run.Sequence, error) { return run.Sequence{}, broken }, nil, nil
+			newGenerator: func(*target.Target) (Generator, error) {
+				return drawing(func(int64) (run.Sequence, error) { return run.Sequence{}, broken }), nil
+			},
+		},
+		{
+			name: "building the baseline",
+			newGenerator: func(t *target.Target) (Generator, error) {
+				drawn, _ := countingGenerator(nil)(t)
+				return failingBaseline{drawn.(drawing), broken}, nil
 			},
 		},
 	} {
@@ -1691,7 +1775,7 @@ func TestTheReplayCommandQuotesEveryOtherByte(t *testing.T) {
 // carries it, or it does not. This test makes its author say which.
 func TestEveryFlagIsReplayedOrSelectsNothing(t *testing.T) {
 	replayed := []string{"target", "kubeconfig", "launch-arg"}
-	inert := []string{"runs", "seed", "out", "deadline", "sequences", "junit"}
+	inert := []string{"runs", "seed", "no-baseline", "out", "deadline", "sequences", "junit"}
 	for _, command := range []string{"run", "replay", "matrix"} {
 		(&options{command: command}).flags().VisitAll(func(f *flag.Flag) {
 			if !slices.Contains(replayed, f.Name) && !slices.Contains(inert, f.Name) {

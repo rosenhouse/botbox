@@ -40,7 +40,9 @@ var commands = []command{{
 	name:    "run",
 	summary: "Draw sequences of ops, run each, and minimize the first that fails.",
 	about: `reconciler-fuzzer run draws --runs sequences of ops on the target's custom
-resources and runs each against a fresh namespace. It stops at the first
+resources and runs each against a fresh namespace, then runs the baseline. The
+baseline creates the sample, deletes the first object of each managed kind, and
+changes each field generation may change. reconciler-fuzzer stops at the first
 sequence that fails a check, minimizes it, and writes a report. Sequence files
 given as arguments run as written instead, and reconciler-fuzzer does not
 minimize them.`,
@@ -117,9 +119,12 @@ func (c command) synopsis() string {
 }
 
 // flagWord is the flag as a command line spells it, with the back-quoted name
-// in its usage as the value.
+// in its usage as the value. A boolean flag takes none.
 func flagWord(f *flag.Flag) string {
 	value, _ := flag.UnquoteUsage(f)
+	if value == "" {
+		return "--" + f.Name
+	}
 	return "--" + f.Name + " " + value
 }
 
@@ -159,7 +164,7 @@ func (c command) annotation(f *flag.Flag) string {
 		return " (required)"
 	}
 	switch f.DefValue {
-	case "", "0", "0s":
+	case "", "0", "0s", "false":
 		return ""
 	}
 	return " (default " + f.DefValue + ")"

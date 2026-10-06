@@ -221,6 +221,13 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   to the target's `timeouts.stable`. The fault starts before an eligible op (one preceded
   by a settle) and ends at a settle the generator inserts after the span it covers.
   `generate.faults: false` disables fault generation for a target.
+- **Baseline.** After the drawn sequences, `reconciler-fuzzer run` runs the baseline,
+  unless `--no-baseline` is given. It creates the sample, deletes the first object of
+  each managed kind, and then updates each mutable field of the sample's CR, one op per
+  field. Each update sets a value the CR does not hold and the CRD accepts, drawn up to
+  eight times; a field no draw changes is left out. Every op settles. A fixed draw picks
+  the values, so the baseline changes only with reconciler-fuzzer, the CRDs and the target.
+  A failing baseline is minimized like a drawn sequence (D97).
 - **Schema-driven mutation** from the CRD's OpenAPI v3 schema: numeric ranges, enums,
   string patterns, optional-field presence, list length, map size. Generic and works on
   any CRD. reconciler-fuzzer draws no sequence for a built-in primary kind, whose schema it does not
@@ -1278,7 +1285,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   parses.
 
   ```
-  reconciler-fuzzer run --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--out dir] [--runs n] [--seed n] [sequence.json...]
+  reconciler-fuzzer run --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--no-baseline] [--out dir] [--runs n] [--seed n] [sequence.json...]
   reconciler-fuzzer replay --target file [--deadline duration] [--junit file] [--kubeconfig file] [--launch-arg arg]... [--out dir] sequence.json
   reconciler-fuzzer version
   reconciler-fuzzer matrix --target file --sequences dir [--deadline duration] [--kubeconfig file] [--launch-arg arg]... [--out file]
@@ -1299,8 +1306,9 @@ the proxy; the `Image` launcher. Separate design addendum.
   message names the target.yaml key and its value instead, as in `2s (timeouts.stable)`. A
   test scans the code's string literals for them.
   `reconciler-fuzzer run` draws its sequences or runs the ones named, never both, since `--runs`
-  says how many to draw. The deadline abandons the run under way (§5.5), and the
-  shrinker stops there and reports the smallest failing sequence it found. Without
+  says how many to draw and `--no-baseline` leaves out the baseline after them. The
+  deadline abandons the run under way (§5.5), and the shrinker stops there and reports
+  the smallest failing sequence it found. Without
   `--deadline`, reconciler-fuzzer prints and uses the longest the planned runs' waits can take at the
   target's timeouts, plus 4m to minimize a failure where reconciler-fuzzer drew the sequences
   (D64). A shrink pass can take minutes, so reconciler-fuzzer prints the failed check's ID before it
@@ -1380,7 +1388,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   `make hunt-external-secrets` hunt for bugs in the adopted examples, on demand and on no
   pull request. Each runs every family in `examples/<example>/sequences/hunt/`, then up to
   `HUNT_RUNS` seeds drawn from `HUNT_SEED` on, each in an invocation of its own, until
-  `HUNT_MINUTES` runs out. Each invocation writes under `reconciler-fuzzer-out/hunt-<example>/`. A
+  `HUNT_MINUTES` runs out. Seeds leave out the baseline once an invocation has passed it. Each invocation writes under `reconciler-fuzzer-out/hunt-<example>/`. A
   family is checked in only once it passes the pinned controller.
 - **Triage.** A hunt run that fails is a candidate, not a bug. Triage replays it three
   times, reproduces it by hand against envtest unless only reconciler-fuzzer's proxy can inject its
@@ -1411,7 +1419,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   the reconciler-fuzzer binary and the control plane that install leaves; writing `target.yaml` for your own
   controller, around the toy's `target.yaml` embedded as the worked example, with how to
   run it, a `ready` for a CR that reports a Ready condition, which `make test` evaluates,
-  and a sequence to pin per managed kind and per property, which the envtest tier runs;
+  and the baseline, which the envtest tier runs against B7 and B8 (D97);
   reading a failure, with links to `docs/checks.md` and to what to change when
   reconciler-fuzzer exits 2; running in CI, in brief; a closing "Development and internals"
   section that links to this document, its §6, and `docs/bug-matrix.md`.
@@ -2614,3 +2622,18 @@ built from source and run as a black-box binary.
   there, with what `docs/failures.md` said of each check's message and the `jq` recipe for
   a property, so that every page can link a check it names. The README's limits became
   one list.
+- **D97 Every invocation that draws ends with the baseline.** Of 1,000 seeds per example,
+  13 to 14% drew a `deleteManaged` and 11 to 13% updated a CR that had settled. So five
+  runs missed a `deleteManaged` about half the time, and a controller that does not watch
+  a kind it manages, or ignores a spec change, passed. D83 had the README tell a user to
+  write a sequence per managed kind and per property. The baseline does that for every
+  target. It updates every mutable field, because reconciler-fuzzer cannot tell which a
+  property reads. So a target without `generate.mutate` gets an update, and a settle wait,
+  per spec path it can draw. The updates accumulate, as a user's edits do, and a value
+  under which a later change leaves the controller waiting belongs out of the overlay, as
+  it does for drawn updates. Weighting the draws toward these ops was rejected: it changes
+  every golden seed and still guarantees neither. The baseline runs last, so a seed keeps
+  its run number and the negative controls still fail on their first run. A hunt runs
+  each seed in an invocation of its own, so seeds leave the baseline out once one
+  invocation has passed it. cert-manager's `heal.json` only deleted the objects the
+  baseline deletes, so it went.

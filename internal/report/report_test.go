@@ -247,6 +247,21 @@ func TestReportNamesWhatRanWhereNoVersionIsDeclared(t *testing.T) {
 	}
 }
 
+// No seed draws the baseline, so its report names the baseline instead.
+func TestAReportOfTheBaselineSaysSo(t *testing.T) {
+	failure := failingRun()
+	failure.Seed, failure.Baseline = 0, true
+
+	md, encoded := write(t, failure)
+
+	if want := "reconciler-fuzzer v1.2.3 exercised toy-widget v0.1.0 with the baseline."; !strings.Contains(md, want) {
+		t.Errorf("The report does not say %q:\n%s", want, md)
+	}
+	if !strings.Contains(encoded, "\n  \"baseline\": true,") {
+		t.Errorf("report.json does not mark the baseline:\n%s", encoded)
+	}
+}
+
 // A check that judged nothing reads like one that passed, so the report names
 // what each check could not judge (DESIGN.md §6, D31).
 func TestReportNamesWhatTheChecksCouldNotJudge(t *testing.T) {

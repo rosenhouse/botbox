@@ -37,6 +37,8 @@ type Report struct {
 	ReconcilerFuzzer string
 	// Seed is the sequence's seed, which the run is reproducible from.
 	Seed int64
+	// Baseline says the sequence is the baseline, which no seed draws.
+	Baseline bool
 	// Notes name what a check could not judge, and what the test cluster
 	// cannot run. Without them a report claims more than its run showed.
 	Notes []string
@@ -119,6 +121,7 @@ type document struct {
 	Target           Target                 `json:"target"`
 	ReconcilerFuzzer string                 `json:"reconcilerFuzzer,omitempty"`
 	Seed             int64                  `json:"seed"`
+	Baseline         bool                   `json:"baseline,omitempty"`
 	Notes            []string               `json:"notes,omitempty"`
 	Replay           string                 `json:"replay"`
 	Differences      []invariant.Difference `json:"differences,omitempty"`
@@ -144,6 +147,7 @@ func (r Report) document() document {
 		Target:           r.Target,
 		ReconcilerFuzzer: r.ReconcilerFuzzer,
 		Seed:             r.Seed,
+		Baseline:         r.Baseline,
 		Notes:            r.Notes,
 		Replay:           r.Replay,
 		Differences:      leading(r.Differences),

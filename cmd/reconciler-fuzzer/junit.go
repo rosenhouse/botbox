@@ -113,7 +113,10 @@ func (s *summary) reconcilerFuzzerCase(kind outcome, message string) junitCase {
 
 func (r runSummary) junit(class, dir string, reported bool) junitCase {
 	name := "seed " + strconv.FormatInt(r.Seed, 10)
-	if r.File != "" {
+	switch {
+	case r.Baseline:
+		name = "baseline"
+	case r.File != "":
 		name = r.File
 	}
 	c := junitCase{Name: fmt.Sprintf("run %d: %s", r.Run, name), Classname: class, SystemOut: strings.Join(r.Notes, "\n")}

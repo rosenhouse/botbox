@@ -3,14 +3,15 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
 	"testing"
 
-	"sigs.k8s.io/yaml"
-
+	"github.com/rosenhouse/reconciler-fuzzer/internal/generate"
 	"github.com/rosenhouse/reconciler-fuzzer/internal/reference"
+	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
 const skillPage = "../../skills/adopt-reconciler-fuzzer/SKILL.md"
@@ -33,59 +34,49 @@ func TestTheAdoptionSkillPassesOnlyFlagsReconcilerFuzzerTakes(t *testing.T) {
 	}
 }
 
-// A target.yaml the skill shows uses only keys reconciler-fuzzer takes.
-func TestTheAdoptionSkillsTargetUsesOnlyKeysTheReferenceLists(t *testing.T) {
+// The skill's target.yaml loads beside a kubebuilder project's files, and
+// generation draws from it.
+func TestTheAdoptionSkillsTargetLoads(t *testing.T) {
+	var declared strings.Builder
+	for _, block := range yamlBlock.FindAllStringSubmatch(readFile(t, skillPage), -1) {
+		declared.WriteString(block[1])
+	}
+	project := t.TempDir()
+	if err := os.CopyFS(project, os.DirFS("testdata/kubebuilder")); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(project, "test/reconciler-fuzzer/target.yaml")
+	if err := os.WriteFile(path, []byte(declared.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := target.Load(path)
+	if err != nil {
+		t.Fatalf("The skill's target.yaml does not load: %v\n%s", err, declared.String())
+	}
+	if _, err := generate.New(loaded, generate.Options{}); err != nil {
+		t.Errorf("Generation refuses the skill's target.yaml: %v", err)
+	}
+}
+
+var dottedKey = regexp.MustCompile("`([a-z]+[A-Za-z]*\\.[A-Za-z.]+)`")
+
+// Each target.yaml key the skill's prose names is one reconciler-fuzzer takes.
+func TestTheAdoptionSkillNamesOnlyKeysTheReferenceLists(t *testing.T) {
 	documented := reference.Listed(t, "## target.yaml")
-	blocks := yamlBlock.FindAllStringSubmatch(readFile(t, skillPage), -1)
-	if len(blocks) == 0 {
-		t.Fatal("The skill shows no target.yaml, so this test checks nothing.")
-	}
-	for _, m := range blocks {
-		block := m[1]
-		var declared map[string]any
-		if err := yaml.Unmarshal([]byte(block), &declared); err != nil {
-			t.Fatalf("The skill shows a target.yaml that is not YAML: %v\n%s", err, block)
+	named := 0
+	for _, m := range dottedKey.FindAllStringSubmatch(readFile(t, skillPage), -1) {
+		key := m[1]
+		top, _, _ := strings.Cut(key, ".")
+		if !slices.ContainsFunc(documented, func(d string) bool { return strings.HasPrefix(d, top+".") }) {
+			continue
 		}
-		for _, key := range undocumentedKeys(declared, "", documented) {
-			t.Errorf("The skill's target.yaml sets %s, which docs/reference.md does not list.", key)
+		named++
+		if !slices.Contains(documented, key) {
+			t.Errorf("The skill names %s, which docs/reference.md does not list.", key)
 		}
 	}
-}
-
-func undocumentedKeys(value any, prefix string, documented []string) []string {
-	if slices.Contains(documented, prefix) {
-		return nil
-	}
-	switch v := value.(type) {
-	case map[string]any:
-		var missing []string
-		for key, child := range v {
-			if prefix != "" {
-				key = prefix + "." + key
-			}
-			missing = append(missing, undocumentedKeys(child, key, documented)...)
-		}
-		return missing
-	case []any:
-		var missing []string
-		for _, item := range v {
-			missing = append(missing, undocumentedKeys(item, prefix+"[*]", documented)...)
-		}
-		return missing
-	}
-	return []string{prefix}
-}
-
-func TestUndocumentedKeysDescendsToTheKeysTheReferenceLists(t *testing.T) {
-	declared := map[string]any{
-		"name":       "x",
-		"launch":     map[string]any{"env": map[string]any{"ANY": "1"}, "bogus": 1},
-		"properties": []any{map[string]any{"id": "P1", "nope": true}},
-	}
-	got := undocumentedKeys(declared, "", []string{"name", "launch.env", "properties[*].id"})
-	slices.Sort(got)
-	if want := []string{"launch.bogus", "properties[*].nope"}; !slices.Equal(got, want) {
-		t.Errorf("undocumentedKeys gave %q, want %q.", got, want)
+	if named == 0 {
+		t.Fatal("The skill names no dotted key, so this test checks nothing.")
 	}
 }
 

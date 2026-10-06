@@ -693,3 +693,31 @@ func TestATargetWithNothingToMutateStillDrawsSequences(t *testing.T) {
 		}
 	})
 }
+
+// A defaulting webhook fills a field that the CRD leaves optional. No webhook
+// runs, so an overlay that requires the field keeps every draw from dropping it.
+func TestAnOverlayThatRequiresAFieldKeepsItInEveryDraw(t *testing.T) {
+	for _, overlaid := range []bool{false, true} {
+		loaded := loadTarget(t, certManagerTarget)
+		if overlaid {
+			loaded.Generate.Overlay["spec"] = map[string]any{"required": []any{"secretName", "issuerRef", "dnsNames"}}
+		}
+		g := newGenerator(t, loaded, Options{})
+		dropped := false
+		rapid.Check(t, func(rt *rapid.T) {
+			for _, op := range g.sequence(rt).Ops {
+				switch op.Type {
+				case run.OpCreate, run.OpRecreate:
+					_, found, _ := unstructured.NestedFieldNoCopy(op.Obj.Object, "spec", "dnsNames")
+					dropped = dropped || !found
+				case run.OpUpdate:
+					value, found, _ := unstructured.NestedFieldNoCopy(op.Patch, "spec", "dnsNames")
+					dropped = dropped || (found && value == nil)
+				}
+			}
+		})
+		if dropped == overlaid {
+			t.Errorf("With the overlay %v, a draw dropped spec.dnsNames: %v.", overlaid, dropped)
+		}
+	}
+}

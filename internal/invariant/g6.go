@@ -11,10 +11,9 @@ import (
 	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
-// NoErrorLoop is G6: the target does not make the same failing request, same
-// verb, resource, namespace, name and subresource, more than thresholds.errloop
-// times within timeouts.settle under an unchanged spec and fixtures, with no
-// faults.
+// NoErrorLoop is G6: the target does not make the same failing request (verb,
+// resource, namespace, name and subresource) more than thresholds.errloop times
+// within timeouts.settle under an unchanged spec and fixtures, with no faults.
 func NoErrorLoop(in Input) (Result, error) {
 	threshold := in.errLoop()
 	out := Result{ID: "G6"}

@@ -135,9 +135,9 @@ func TestG6CountsOneRequestAtATime(t *testing.T) {
 }
 
 func TestG6CountsTheMainResourceAndASubresourceApart(t *testing.T) {
-	main := failedStatusUpdate(403)
-	main.Subresource = ""
-	in := loop(errLoop, main).
+	onWidget := failedStatusUpdate(403)
+	onWidget.Subresource = ""
+	in := loop(errLoop, onWidget).
 		requests(1200*time.Millisecond, 500*time.Millisecond, errLoop, failedStatusUpdate(403)).
 		through(8 * time.Second)
 

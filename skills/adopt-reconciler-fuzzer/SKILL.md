@@ -146,7 +146,8 @@ Fill each key from the project:
   under `rbac`.
 - `fixtures` lists files of objects the controller reads and does not create, such as a
   ConfigMap the spec names. Write each beside target.yaml, with no `metadata.namespace`, under
-  the name the sample's spec gives. See `<module>/docs/targets.md#fixtures`.
+  the name the sample's spec gives. If the controller watches a fixture, let generation change
+  and delete it under `generate.fixtures`, as `<module>/docs/targets.md#fixtures` says.
 
 Leave out `timeouts`, `thresholds` and `properties`. Their defaults suit a first run.
 
@@ -156,7 +157,7 @@ with a spec the controller accepts.
 No webhook runs, so narrow generation to what the webhooks would admit. Search for
 `Default(`, `ValidateCreate(` and `ValidateUpdate(`. For each field a defaulting webhook
 sets, set it in the sample and make it required, because generation drops optional fields.
-List the CRD's required fields too. The guestbook's webhook defaults `pages`:
+Keep the CRD's own required fields in that list. The guestbook's webhook defaults `pages`:
 
 ```yaml
 generate:
@@ -203,8 +204,8 @@ narrow generation unless the controller's design calls for it. Ask the user when
 On a finding, stop. Give the user the check, the line reconciler-fuzzer printed, the path of
 `report.md`, and the replay command that `report.md` gives, with `KUBEBUILDER_ASSETS` set.
 
-**Exit 0**: every run passed. Three runs draw few ops, so run once more with `--runs 10`
-before you report.
+**Exit 0**: every run passed. Three runs draw few ops, so run once more with `--runs 10`, in
+the background, before you report.
 
 If five invocations in a row make no progress, stop and report what you tried.
 

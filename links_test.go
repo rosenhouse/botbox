@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"unicode"
+
+	"github.com/rosenhouse/reconciler-fuzzer/internal/report"
 )
 
 // A page that moved takes its headings with it, so each link from a page a
@@ -78,5 +80,27 @@ func TestAnchorsFollowGitHub(t *testing.T) {
 	page := "# reconciler-fuzzer\n\n## Keep reconciler-fuzzer out of your go.mod\n\n```sh\n# not a heading\n```\n\n### 6. Generic invariants\n## `target.yaml` keys\n"
 	if got, want := anchors(page), []string{"reconciler-fuzzer", "keep-reconciler-fuzzer-out-of-your-gomod", "6-generic-invariants", "targetyaml-keys"}; !slices.Equal(got, want) {
 		t.Errorf("anchors gave %q, want %q.", got, want)
+	}
+}
+
+// A report links the section of the checks page that its check has.
+func TestReportsLinkTheirChecksSection(t *testing.T) {
+	page := anchors(readFile(t, checksPage))
+	if !slices.Contains(page, "properties") {
+		t.Errorf("%s has no Properties section for a property's report to link.", checksPage)
+	}
+	sections := map[string]string{"P1": "properties"}
+	for _, anchor := range page {
+		if id, _, found := strings.Cut(anchor, "-"); found && checkName.MatchString(strings.ToUpper(id)) {
+			sections[strings.ToUpper(id)] = anchor
+		}
+	}
+	if len(sections) == 1 {
+		t.Fatalf("%s has no section for a generic check, so this test checks only properties.", checksPage)
+	}
+	for id, anchor := range sections {
+		if got, want := report.CheckSection(id), report.ChecksPage+"#"+anchor; got != want {
+			t.Errorf("A %s report links %q, want %q.", id, got, want)
+		}
 	}
 }

@@ -405,7 +405,8 @@ seed, and a one-line replay command. That command repeats the target, the kubeco
 every launch argument the run had, quoted so that `sh` and `zsh` read each word as
 written. It does not record what the target inherits from reconciler-fuzzer's environment, so a
 target declares what it needs in `launch.env` (§8.1). The run directory also holds
-recordings of the run (§11), so a report can be re-examined without re-running. A
+recordings of the run (§11), so a report can be re-examined without re-running.
+`report.md` also links the failed check's section of `docs/checks.md`. A
 readiness verdict and a
 property violation also quote the state of the objects the target managed where it failed,
 in a table of its own, bounded on its own, and say how many there were: a child the

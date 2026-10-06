@@ -8,7 +8,8 @@ Every run applies [G1](#g1-bounded-reconciliation) to [G7](#g7-self-healing) and
 Once a settle wait has ended, your controller makes no more than `thresholds.quiet` requests
 in the next `timeouts.stable`. Watches, leader election and requests that name no resource,
 such as a health probe, do not count. A resync timer usually fails it, and needs a `quiet` that
-[fits the timer](targets.md#thresholds).
+[fits the timer](targets.md#thresholds). A `RequeueAfter` that polls a converged CR for what
+a watch would deliver is a bug: watch the input rather than raise `quiet`.
 
 `the target made … API requests in …, where thresholds.quiet allows …` counts the requests
 your controller made while reconciler-fuzzer expected it to be quiet.
@@ -31,8 +32,20 @@ to its CR usually fails it, since [the garbage collector](targets.md#garbage-col
 deletes only what names an owner.
 
 `the … was still there … (timeouts.delete) after … was deleted` names an object left behind,
-and says whether it is orphaned. `the CR … still carried the finalizers … (timeouts.delete)
-after its deletion` names the finalizers still on a CR that did not go.
+and says whether it is orphaned:
+
+- An orphaned object carries no ownerReference to the CR. Give it one, or delete it before
+  your controller removes the CR's finalizer.
+- An object that is not orphaned waited on something else: a finalizer of its own, another
+  owner that still exists, or an owner the collector could not resolve, which it counts as
+  live. `objects.jsonl` shows its finalizers and ownerReferences. The run notes each owner the
+  collector could not resolve with `reconciler-fuzzer's garbage collector never deletes …`.
+
+`the CR … still carried the finalizers … (timeouts.delete) after its deletion` means your
+controller did not remove its finalizer. Where the run also notes `the teardown force-removed
+the finalizers of …`, the cleanup never ended: check that it runs and then removes the
+finalizer, and look for a finalizer of a child's own that the note names. Without that note,
+the cleanup ended late and needs a wider [`timeouts.delete`](targets.md#timeouts).
 
 Where a fault reached into the deletion, the run notes the deletion rather than judging it,
 and [G4](#g4-convergence) judges the settle wait instead.
@@ -71,9 +84,13 @@ out otherwise fails, and what follows `expired with no fault active` says why:
   fault reached into never went. Where its deletion deadline held the wait open past `settle`,
   the line gives `timeouts.delete is …` in place of `timeouts.settle is …`.
 
+`the CR … was not ready … after …` means `ready` did not hold `timeouts.settle` after an op or
+after a [fault](targets.md#faults) stopped, or by the later time a fault or restart gives your
+controller. It names the op or `the fault stopped`, then any error evaluating `ready`.
+
 A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
-`settle`. Where your controller [repeated a failing request](#g6-no-error-loop), the line names
-it and its count. A
+`settle`. Where your controller [repeated a failing request](#g6-no-error-loop), either line
+names it and its count. A
 `ready` that yields something other than a bool is a configuration error, and
 reconciler-fuzzer exits 2 naming it.
 
@@ -101,7 +118,8 @@ Your controller repeats one failing request no more than `thresholds.errloop` ti
 that never clears usually fails it.
 
 `the target repeated the failing request … times within … (timeouts.settle), where
-thresholds.errloop allows …` names the request your controller kept retrying.
+thresholds.errloop allows …` names the request your controller kept retrying. A 403 usually
+means your [`rbac`](targets.md#rbac) lacks a permission.
 [Thresholds](targets.md#thresholds) says how `errloop` relates to `settle`. An error loop that
 backs off can repeat too rarely for this check to count it.
 
@@ -123,14 +141,18 @@ from a restart, or one during which your controller exited or waited to restart.
 
 A property must hold on every CR where its `when` says. Its default `when`, `checkpoint`,
 evaluates it wherever a settle wait ends and at the end of the teardown, which deletes every CR.
-A property also runs where no CR exists, so guard it with `has()`, or begin it with
-`!has(metadata.name) ||`. [CEL and hooks](reference.md#cel-and-hooks) says what it binds.
+A property also runs where no CR exists, as after a `delete` or at the end of the teardown,
+and fails there with `the property did not hold where no CR existed: …`. Guard it with
+`has()`, or begin it with `!has(metadata.name) ||`. reconciler-fuzzer exits 2 with `no such key`
+where a property reads a field that is missing. [CEL and hooks](reference.md#cel-and-hooks)
+says what it binds.
 
 A `checkpoint` or `end` property skips a checkpoint your controller may not have caught up to:
 under a [fault or a held request](targets.md#faults), or while your controller is
 [still starting](failures.md#restarts-and-crash-loops). The run notes each.
 
-The report quotes the property's description, the versions of the CR it failed on, and the
+`the property did not hold on the CR …: …` and the report quote the property's description. The
+report also quotes the versions of the CR it failed on, and the
 managed objects' metadata. Read the values the property judged from `objects.jsonl`. From the
 evidence directory, this prints each version of the ConfigMap `widget-0`'s data:
 

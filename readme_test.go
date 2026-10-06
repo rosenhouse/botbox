@@ -24,10 +24,9 @@ var limits = []limit{
 	{"cannot reach a Pod or a Service", 0, "It runs on botbox's host, which routes to no Pod"},
 	{"no admission or conversion webhook of yours runs", 0, "No admission or conversion webhooks."},
 	{"on the version your CRD stores", 0, "A kubeconfig cluster keeps the webhook."},
-	{"generates sequences only for a primary kind your `crds` define", 0, "botbox draws no sequence for a built-in primary kind"},
+	{"generates sequences only for custom resources", 0, "botbox draws no sequence for a built-in primary kind"},
 	{"tests namespaced kinds only", 38, "every managed kind and every fixture must be namespaced"},
-	{"refuses a cluster-scoped primary, managed kind or fixture when it loads the target", 38, "each refuses every cluster-scoped kind it knows in one error"},
-	{"passes a controller that leaks a child in another namespace", 38, "it does not see a child the target creates in another"},
+	{"misses a child your controller leaks into another namespace", 38, "it does not see a child the target creates in another"},
 	{"cannot supply an object your controller reads from another namespace", 38, "A fixture sets no `metadata.namespace`"},
 }
 
@@ -169,11 +168,10 @@ func oneLine(text string) string {
 var readmeOrder = []struct{ heading, design string }{
 	{"What botbox cannot test yet", "what it cannot test yet"},
 	{"Install", "install"},
-	{"A first run and a first find", "a first run and a first find"},
+	{"Quick start", "a quick start"},
 	{"Your own controller", "writing `target.yaml` for your own controller"},
 	{"Reading a failure", "reading a failure"},
-	{"Running in CI", "a CI recipe for adopters"},
-	{"Invariants", "a one-line-per-invariant table"},
+	{"Running in CI", "running in CI"},
 	{"Development and internals", `a closing "Development and internals" section`},
 }
 
@@ -186,7 +184,9 @@ func TestTheReadmeOpensWithTheAPIServerBotboxRuns(t *testing.T) {
 }
 
 // userPages are the README and the pages it sends a reader to for detail.
-var userPages = []string{"README.md", "docs/targets.md", "docs/failures.md", "docs/examples.md"}
+var userPages = []string{"README.md", "docs/targets.md", "docs/failures.md", "docs/examples.md", ciPage}
+
+const ciPage = "docs/ci.md"
 
 // A reader who copies a sequence from a page gets one botbox runs.
 func TestEverySequenceAPageShowsLoads(t *testing.T) {
@@ -209,7 +209,7 @@ func TestEverySequenceAPageShowsLoads(t *testing.T) {
 
 func TestTheReadmeFollowsTheOrderDesignGives(t *testing.T) {
 	design := oneLine(readFile(t, "DESIGN.md"))
-	_, order, _ := strings.Cut(design, "**README.** Usage-first; internals live here and in `docs/`. Order: ")
+	_, order, _ := strings.Cut(design, "**README.** Usage-first and short; internals live here and in `docs/`. Order: ")
 	order, _, _ = strings.Cut(order, ". ")
 	var headings []string
 	for _, line := range strings.Split(readFile(t, "README.md"), "\n") {
@@ -234,8 +234,7 @@ func TestTheReadmeFollowsTheOrderDesignGives(t *testing.T) {
 }
 
 // A reader of the README, and of the pages it sends them to, needs no design
-// document outside the README's Invariants section, which links DESIGN.md's
-// statements, and its internals section.
+// document outside the README's internals section.
 func TestTheReadmeNeedsNoDesignDocument(t *testing.T) {
 	milestone := regexp.MustCompile(`\bM[0-9]+\b`)
 	for _, page := range userPages {
@@ -252,8 +251,6 @@ func TestTheReadmeNeedsNoDesignDocument(t *testing.T) {
 			case page != "README.md":
 			case section == "Development and internals":
 				continue
-			case section == "Invariants":
-				said = strings.ReplaceAll(said, "DESIGN.md", "")
 			}
 			if found := designVocabulary.FindString(said); found != "" {
 				t.Errorf("%s:%d, under %q, uses %q, which only DESIGN.md explains: %s", page, i+1, section, found, line)
@@ -309,13 +306,13 @@ func TestTheExamplesPageShowsRunsOfTheMakefilesExampleSeeds(t *testing.T) {
 
 // Requiring botbox raises a module to these versions, as go prints them.
 func TestTheREADMEQuotesGoModsVersions(t *testing.T) {
-	readme, required := readFile(t, "README.md"), goModVersions(t)
-	install := section(t, readme, "## Install") + section(t, readme, "### Keep botbox out of your go.mod")
+	required := goModVersions(t)
+	install := section(t, readFile(t, "README.md"), "## Install") + section(t, readFile(t, ciPage), "## Keep botbox out of your go.mod")
 	quoted := map[string]bool{}
 	check := func(text, module, version string) {
 		quoted[module] = true
 		if version != required[module] {
-			t.Errorf("README.md quotes %q, and go.mod requires %s %s.", text, module, required[module])
+			t.Errorf("README.md or %s quotes %q, and go.mod requires %s %s.", ciPage, text, module, required[module])
 		}
 	}
 	for _, m := range regexp.MustCompile(`(?:takes Go |requires go >= |go mod edit -go=|upgraded go \S+ => )([\d.]+)`).FindAllStringSubmatch(install, -1) {
@@ -326,7 +323,7 @@ func TestTheREADMEQuotesGoModsVersions(t *testing.T) {
 	}
 	for _, module := range []string{"go", "k8s.io/api", "sigs.k8s.io/controller-runtime"} {
 		if !quoted[module] {
-			t.Errorf("README.md's Install and tools module sections quote no version of %s.", module)
+			t.Errorf("README.md's Install section and %s's tools module section quote no version of %s.", ciPage, module)
 		}
 	}
 }
@@ -339,21 +336,21 @@ func TestTheREADMERunsTheGoTestRecipeUncachedUnderItsBuildTag(t *testing.T) {
 	if tag == nil {
 		t.Fatalf("%s has no build tag of one word.", recipe)
 	}
-	readme := section(t, readFile(t, "README.md"), "### From go test")
-	if plain := regexp.MustCompile("out of a plain\\s+`(go test [^`]*)`").FindStringSubmatch(readme); plain == nil {
-		t.Error("README.md does not say which go test the build tag keeps the recipe out of.")
+	page := section(t, readFile(t, ciPage), "## From go test")
+	if plain := regexp.MustCompile("out of a plain\\s+`(go test [^`]*)`").FindStringSubmatch(page); plain == nil {
+		t.Errorf("%s does not say which go test the build tag keeps the recipe out of.", ciPage)
 	} else if strings.Contains(plain[1], "-tags") {
-		t.Errorf("README.md says the build tag keeps the recipe out of %q, which sets -tags.", plain[1])
+		t.Errorf("%s says the build tag keeps the recipe out of %q, which sets -tags.", ciPage, plain[1])
 	}
-	commands := regexp.MustCompile("run\\s+`(go test [^`]*)`").FindAllStringSubmatch(readme, -1)
+	commands := regexp.MustCompile("run\\s+`(go test [^`]*)`").FindAllStringSubmatch(page, -1)
 	if len(commands) == 0 {
-		t.Fatal("README.md's From go test section runs no go test command.")
+		t.Fatalf("%s's From go test section runs no go test command.", ciPage)
 	}
 	for _, command := range commands {
 		flags := strings.Fields(command[1])
 		tags := slices.Index(flags, "-tags")
 		if !slices.Contains(flags, "-count=1") || tags < 0 || tags+1 == len(flags) || flags[tags+1] != tag[1] {
-			t.Errorf("README.md runs %q, and the recipe needs -count=1 and -tags %s.", command[1], tag[1])
+			t.Errorf("%s runs %q, and the recipe needs -count=1 and -tags %s.", ciPage, command[1], tag[1])
 		}
 	}
 }
@@ -448,9 +445,9 @@ func TestTheReadmesReadyConditionExampleHoldsOnlyOnACurrentReadyCondition(t *tes
 
 // botbox --help sends a reader to docs/failures.md for what each failure means.
 func TestTheFailuresPageNamesEveryCheck(t *testing.T) {
-	checks := regexp.MustCompile(`(?m)^\| (G[0-9]+) \|`).FindAllStringSubmatch(section(t, readFile(t, "README.md"), "## Invariants"), -1)
+	checks := regexp.MustCompile(`(?m)^\| (G[0-9]+) \|`).FindAllStringSubmatch(section(t, readFile(t, "README.md"), "## Reading a failure"), -1)
 	if len(checks) == 0 {
-		t.Fatal("README.md's Invariants section lists no check, so this test checks nothing.")
+		t.Fatal("README.md's Reading a failure section lists no check, so this test checks nothing.")
 	}
 	// A heading that names a check says nothing of what its failure means.
 	text := regexp.MustCompile(`(?m)^#.*$`).ReplaceAllString(readFile(t, "docs/failures.md"), "")

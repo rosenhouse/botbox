@@ -19,6 +19,12 @@ or a partial run of the minimized sequence.
 
 ## The evidence
 
+As soon as a drawn run fails, botbox prints the check, as in
+`run 1: G3 failed, and minimizing its 12 ops can take minutes.` Then it minimizes the
+sequence: it removes each op the failure does not need. Each removal it tries replays a whole
+run. Where your controller fails with no CR at all, the minimized sequence lacks even the
+`create`.
+
 A passing run leaves only its entry in the summary. A failing run writes its evidence in
 `run-<n>/`:
 
@@ -87,7 +93,12 @@ A `checkpoint` or `end` property skips a checkpoint where the proxy
 or your controller was still owed time to recover from one. The run notes each.
 
 The report quotes the property's description, the versions of the CR it failed on, and the
-managed objects' metadata. Read the values the property judged from `objects.jsonl`.
+managed objects' metadata. Read the values the property judged from `objects.jsonl`. From the
+evidence directory, this prints each version of the ConfigMap `widget-0`'s data:
+
+```sh
+jq -c 'select(.name == "widget-0") | .object.data' objects.jsonl
+```
 
 ## When a settle wait fails G4
 

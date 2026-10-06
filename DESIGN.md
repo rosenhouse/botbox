@@ -1260,8 +1260,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   asset fails rather than passing quietly. Values live in the Makefile. The README's Install
   block and the CI recipe repeat the envtest pins for adopters to copy. The recipe also
   repeats go.mod's module and Go version, and the runner and action releases of
-  `.github/workflows/`. The README's Install and tools module sections quote go.mod's Go
-  version and the k8s.io/api and controller-runtime versions that requiring botbox forces
+  `.github/workflows/`. The README's Install section and the tools module section of
+  `docs/ci.md` quote go.mod's Go version and the k8s.io/api and controller-runtime versions that requiring botbox forces
   on a module (D80).
   `make test` holds each copy to its source. Each `--deadline` in the
   recipe gives a run at least the time that the Makefile's example tiers give one. Bumps
@@ -1404,44 +1404,41 @@ the proxy; the `Image` launcher. Separate design addendum.
   cites no section or decision and uses none of this document's symbols. It names the
   target.yaml key instead, as a message does. A test scans every such comment, the
   spikes' included. Tests may cite this document, since they hold the code to it (D82).
-- **README.** Usage-first; internals live here and in `docs/`. Order: what botbox is and
-  is not, in a few sentences, which say that it runs the controller against a real
-  kube-apiserver and etcd behind a proxy; what it cannot test yet; install; a first run
-  and a first find, which draw runs on the toy and replay a bug seeded into it, say that
-  every find the README shows is seeded, and run as written in an envtest test, with the
-  botbox and the control plane that install leaves; writing `target.yaml` for your own
+- **README.** Usage-first and short; internals live here and in `docs/`. Order: what botbox
+  is, in a few sentences, which say that it runs the controller against a real
+  kube-apiserver and etcd; what it cannot test yet; install; a quick start, which draws runs
+  on the toy and replays a bug planted in it, and runs as written in an envtest test, with
+  the botbox and the control plane that install leaves; writing `target.yaml` for your own
   controller, around the toy's `target.yaml` embedded as the worked example, with how to
   run it, a `ready` for a CR that reports a Ready condition, which `make test` evaluates,
   and a sequence to pin per managed kind and per property, which the envtest tier runs;
-  reading a failure, with the usual cause of each check and a link to what to change
-  when botbox exits 2; a CI recipe for adopters,
-  embedded from `examples/ci/github-actions.yml`, a tools module that keeps botbox out of
-  an operator's go.mod, embedded from `examples/tools-module.sh`, which the envtest tier
-  runs (D80), and a test that runs botbox from `go test`, embedded from
-  `targets/toy-widget/botbox_test.go`, which the envtest tier runs (D81); a
-  one-line-per-invariant table linking to §6; a closing "Development and internals"
-  section that links to this document and to `docs/bug-matrix.md`. Detail lives in pages
-  the README links (D83): `docs/reference.md` lists every key and field,
-  `docs/targets.md` says how to write a target, `docs/failures.md` says what each file and
-  message of a failure means, and `docs/examples.md` runs the adopted examples and their
-  negative controls. Only the README's Invariants section and its closing section link
-  here, and only the closing section cites a section, a decision or a symbol of this
-  document. The three guide pages cite none. None of them names a milestone. Every
-  sequence they show loads, every link among them and `docs/reference.md` lands on a
-  file and a heading, and `docs/failures.md` names every check of the README's Invariants
-  table. `make test` enforces these rules. The limits section opens with each
-  limit no issue tracks. Each other limit is a `- ` bullet that links its issue, with its
-  other lines indented two spaces, and nothing follows the list. Each line's text begins with a
-  letter, `[` or `(`. The section holds no HTML, footnote or link definition, and no
-  bullet holds code or a backslash, so nothing hides a limit or its link. A test refuses
-  any other line, lists the limits, holds each bullet to a listed limit, and holds the
-  README and this document to each. A reviewer checks that the opening states
-  no other limit and that each linked issue is open (§12). A fenced block preceded by
-  `<!-- embed: <path> -->` has content, excluding the two fence lines, byte-identical to
-  that file including its trailing newline; `<path>` is relative to the repository root;
-  `make test` enforces it. It also runs the cert-manager quickstart command of
-  `docs/examples.md` against a fake session and requires the block after it to hold what
-  botbox prints.
+  reading a failure, with one table that gives each check and its usual cause, and a link
+  to what to change when botbox exits 2; running in CI, in brief; a closing "Development
+  and internals" section that links to this document, its §6, and `docs/bug-matrix.md`.
+  Detail lives in pages the README links (D83, D95): `docs/reference.md` lists every key
+  and field, `docs/targets.md` says how to write a target, `docs/failures.md` says what
+  each file and message of a failure means, `docs/examples.md` runs the adopted examples
+  and their negative controls, and `docs/ci.md` holds the CI recipe, embedded from
+  `examples/ci/github-actions.yml`, a tools module that keeps botbox out of an operator's
+  go.mod, embedded from `examples/tools-module.sh`, which the envtest tier runs (D80), and
+  a test that runs botbox from `go test`, embedded from `targets/toy-widget/botbox_test.go`,
+  which the envtest tier runs (D81). Only the README's closing section links here, or
+  cites a section, a decision or a symbol of this document. The guide pages cite none.
+  None of them names a milestone. Every sequence they show loads, every link among them
+  and `docs/reference.md` lands on a file and a heading, and `docs/failures.md` names every
+  check of the README's table. `make test` enforces these rules. The limits section opens
+  with each limit no issue tracks. Each other limit is a `- ` bullet that links its issue,
+  with its other lines indented two spaces, and nothing follows the list. Each line's text
+  begins with a letter, `[` or `(`. The section holds no HTML, footnote or link
+  definition, and no bullet holds code or a backslash, so nothing hides a limit or its
+  link. A test refuses any other line, lists the limits, holds each bullet to a listed
+  limit, and holds the README and this document to each. A reviewer checks that the
+  opening states no other limit and that each linked issue is open (§12). A fenced block
+  preceded by `<!-- embed: <path> -->` has content, excluding the two fence lines,
+  byte-identical to that file including its trailing newline; `<path>` is relative to the
+  repository root; `make test` enforces it. It also runs the cert-manager quickstart
+  command of `docs/examples.md` against a fake session and requires the block after it to
+  hold what botbox prints.
 - **PRs.** Every PR description, issue, review and comment a Claude session posts begins
   with the line `🤖 Created by Claude 🤖` (CLAUDE.md). The description then names the
   milestone and the invariant/property IDs it touches, and carries a "Design change"
@@ -1935,8 +1932,8 @@ built from source and run as a black-box binary.
   `-update`. The quickstarts of `docs/examples.md` must run the Makefile's example seed,
   and the drawn runs that page shows must start at that seed. Another test runs its
   cert-manager quickstart command as `quickstart.sh` passes it on, and fails unless the
-  page shows what botbox prints. The README tells CI to pin botbox to a commit and to
-  replay a failing `sequence.json` against the base branch.
+  page shows what botbox prints. The README tells CI to pin botbox to a commit, and
+  `docs/ci.md` to replay a failing `sequence.json` against the base branch.
 - **D55 Generation keeps the CRD's own rules, judged by the API server's code.** The
   generator read part of the OpenAPI schema and no `x-kubernetes-validations`. With the
   rule `self.maxUnavailable <= self.count`, 15 of 100 drawn sequences broke it, and the
@@ -2599,3 +2596,11 @@ built from source and run as a black-box binary.
   inserts the fault after `checkpointed` has placed settles, so the fault's span starts at
   an eligible op (preceded by a settle) and ends at a settle it inserts. A target may set
   `generate.faults: false` to keep its seeds stable while it does not handle faults.
+- **D95 The README is short, and `docs/ci.md` holds the CI detail.** After D83 the README
+  still ran to 3,800 words, more than the READMEs of kind, kubebuilder and ripgrep. A
+  fresh-context editorial review found it dense and spec-like. The rewrite halves it. The
+  CI recipe, the tools module and the `go test` recipe move to `docs/ci.md`, with the tests
+  that hold them. The two check tables merge into one, with each check's usual cause. The
+  quick start shows botbox's output from its first run on, without the deadline line.
+  Minimizing and the `jq` recipe move to `docs/failures.md`. The limits stay before
+  Install, so that a team learns whether its controller fits before it installs anything.

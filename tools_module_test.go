@@ -19,14 +19,14 @@ func TestTheReadmeSaysWhereTheToolsModuleRecipePinsBotbox(t *testing.T) {
 	script := readFile(t, toolsRecipe)
 	lines := strings.Split(strings.TrimSpace(script), "\n")
 	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "bin/botbox ") {
-		t.Errorf("%s ends with %q, and README.md says its last line runs bin/botbox.", toolsRecipe, last)
+		t.Errorf("%s ends with %q, and %s says its last line runs bin/botbox.", toolsRecipe, last, ciPage)
 	}
 	dir := toolsModuleDir(t, script)
-	keep := oneLine(section(t, readFile(t, "README.md"), "### Keep botbox out of your go.mod"))
+	keep := oneLine(section(t, readFile(t, ciPage), "## Keep botbox out of your go.mod"))
 	for _, says := range []string{"`" + dir + "/go.mod` then pins botbox", "not `go -C " + dir + " tool botbox`", "runs botbox in `" + dir + "/`",
 		"Your own go.mod and go.work, and any package of yours in `" + path.Dir(dir) + "/`, stay as they were."} {
 		if !strings.Contains(keep, says) {
-			t.Errorf("README.md does not say %q, and %s pins botbox in %s.", says, toolsRecipe, dir)
+			t.Errorf("%s does not say %q, and %s pins botbox in %s.", ciPage, says, toolsRecipe, dir)
 		}
 	}
 }

@@ -31,8 +31,8 @@ func TestTheExamplesPageShowsWhatBotboxPrintsInTheCertManagerQuickstart(t *testi
 	}
 }
 
-// The README quotes the line a drawn run of twelve ops prints once it fails.
-func TestTheREADMEQuotesTheLineBotboxPrintsBeforeItMinimizes(t *testing.T) {
+// docs/failures.md quotes the line a drawn run of twelve ops prints once it fails.
+func TestTheFailuresPageQuotesTheLineBotboxPrintsBeforeItMinimizes(t *testing.T) {
 	violation := run.Violation{ID: "G3"}
 	session := &fakeSession{fails: func(run.Sequence, string) *run.Violation { return &violation }}
 	twelve := slices.Repeat([]run.OpType{run.OpSettle}, 12)
@@ -41,9 +41,9 @@ func TestTheREADMEQuotesTheLineBotboxPrintsBeforeItMinimizes(t *testing.T) {
 		"run", "--target", toyTargetYAML, "--out", t.TempDir(), "--runs", "1", "--seed", "1")
 
 	line := regexp.MustCompile(`(?m)^run 1: G3 failed.*$`).FindString(stdout)
-	readme := strings.Join(strings.Fields(readFile(t, "../../README.md")), " ")
-	if line == "" || !strings.Contains(readme, "`"+line+"`") {
-		t.Errorf("botbox printed\n%s\nand README.md does not quote its line %q.", stdout, line)
+	page := strings.Join(strings.Fields(readFile(t, "../../docs/failures.md")), " ")
+	if line == "" || !strings.Contains(page, "`"+line+"`") {
+		t.Errorf("botbox printed\n%s\nand docs/failures.md does not quote its line %q.", stdout, line)
 	}
 }
 

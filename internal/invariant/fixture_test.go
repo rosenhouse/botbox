@@ -511,6 +511,13 @@ func failedWidgetGet(status int) proxy.Request {
 	}
 }
 
+// failedStatusUpdate is an update of the widget's status subresource.
+func failedStatusUpdate(status int) proxy.Request {
+	failed := failedWidgetGet(status)
+	failed.Verb, failed.Subresource = "update", "status"
+	return failed
+}
+
 func watch() proxy.Request {
 	return proxy.Request{Verb: "watch", Version: "v1", Resource: "configmaps", Namespace: namespace, Watch: true, Status: 200}
 }

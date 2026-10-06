@@ -128,7 +128,9 @@ webhook or a status rule might, botbox exits 2 and names the `sequence.json` tha
 A `deleteManaged` deletes one managed object behind your controller's back. G7 then requires
 your controller to recreate an object of that kind and name before the run settles. Where your
 `ready` still holds without the object, the run settles once nothing has changed for `stable`.
-Your controller then has `stable` to recreate it, however wide `settle` is.
+Your controller then has `stable` to recreate it, however wide `settle` is. After a fault, the
+run settles no sooner than as long past the fault's end as the fault lasted, plus `settle`,
+because an informer may still be backing off.
 
 If your controller leaves a kind deleted by design, or recreates it under a new name, list the
 kind under `notRecreated`. cert-manager lists CertificateRequest, because a Ready Certificate
@@ -239,7 +241,9 @@ The checks do not judge a window the proxy applied a fault in, so a fault tests 
 controller behaves once the fault stops. A controller backs off while its requests fail, so
 once the faults stop botbox gives it as long as they lasted, plus `settle`, to converge. That
 includes a fault still active when the sequence ends, like the one above. botbox clears it and
-waits for your controller before it tears the run down.
+waits for your controller before it tears the run down. botbox does not check a `checkpoint` or
+`end` property where a fault is active or your controller is still owed that time, and the run
+notes it. A property evaluated `always` still reads every change, a fault's included.
 
 A delay's window lasts until it stops and the proxy releases the last request it held. A settle
 wait counts a held request as a change until the proxy releases it. A watch counts only until
@@ -287,9 +291,7 @@ kind delete cluster --kubeconfig kind.kubeconfig
 - The cluster may add more objects later. If they are of a kind your target manages, label
   your own objects and declare a `selector`, such as
   `selector: app.kubernetes.io/managed-by=my-controller`. botbox then counts only those.
-- botbox counts a change the cluster makes to an object your target manages as your
-  controller's. The garbage collector can delete a child seconds after its owner, especially
-  just after botbox installs the owner's CRD. If that delete comes after `stable` of quiet, G2
-  fails. A wider `stable` avoids that.
+- G2 counts a change only where one of your controller's own writes explains it, so a delete
+  by the cluster's garbage collector is not churn.
 
 `make test-kind` runs the toy controller this way.

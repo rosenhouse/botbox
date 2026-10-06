@@ -98,6 +98,60 @@ func TestPropertyIsNotEvaluatedWhereTheProxyHeldARequest(t *testing.T) {
 	}
 }
 
+// overcounted is a running target whose CR counts two children it does not
+// have.
+func overcounted(when target.PropertyWhen) *run {
+	r := newRun().
+		op(invariant.OpCreate, 0).
+		running(100*time.Millisecond).
+		record(time.Second, widget("10", spec(2), status(2, 1)))
+	r.in.Target.Properties = []target.Property{property(when, readyCountsChildren)}
+	return r
+}
+
+// A fault excuses the target where G4 excuses it, so it may not yet have
+// repaired what the property reads.
+func TestPropertyIsNotEvaluatedWhereAFaultExcusesTheTarget(t *testing.T) {
+	for _, when := range []target.PropertyWhen{target.Checkpoint, target.End} {
+		for name, r := range map[string]*run{
+			"active where the wait expired":   overcounted(when).activeFault(500*time.Millisecond).checkpoint(4*time.Second, invariant.Expired),
+			"active where the wait converged": overcounted(when).activeFault(500*time.Millisecond).checkpoint(4*time.Second, invariant.Converged),
+			"stopped with time still owed":    overcounted(when).fault(500*time.Millisecond, 3*time.Second).checkpoint(4*time.Second, invariant.Expired),
+		} {
+			t.Run(string(when)+", "+name, func(t *testing.T) {
+				in := r.through(8 * time.Second)
+
+				noted(t, invariant.Property(in.Target.Properties[0]), in,
+					"P1 is not evaluated at the checkpoint after op 0 (create): a fault was active there, or the target was still owed time to recover from one, so it may not yet have repaired what P1 reads")
+			})
+		}
+	}
+}
+
+// The fault's 0.5s gives the target 0.5s and timeouts.settle past its end.
+func TestPropertyFiresWhereTheTargetRecoveredFromAFault(t *testing.T) {
+	for name, checkpoint := range map[string]struct {
+		at     time.Duration
+		result invariant.SettleResult
+	}{
+		"a wait that converged":             {4 * time.Second, invariant.Converged},
+		"a wait that expired past its owed": {6500 * time.Millisecond, invariant.Expired},
+	} {
+		t.Run(name, func(t *testing.T) {
+			in := overcounted(target.Checkpoint).
+				fault(500*time.Millisecond, time.Second).
+				checkpoint(checkpoint.at, checkpoint.result).
+				through(8 * time.Second)
+
+			violation := fired(t, invariant.Property(in.Target.Properties[0]), in)
+
+			if !violation.At.Equal(at(checkpoint.at)) {
+				t.Errorf("The violation is timestamped %v, want the checkpoint at %v.", violation.At, checkpoint.at)
+			}
+		})
+	}
+}
+
 // stale is a run whose CR counts a child botbox deleted, which a target still
 // starting has not yet seen go.
 func stale(when target.PropertyWhen) *run {
@@ -121,6 +175,8 @@ func TestPropertyIsNotEvaluatedWhereTheTargetWasStillStarting(t *testing.T) {
 			want string
 		}{
 			{"waiting to restart", stale(when).exit(4*time.Second, 9*time.Second),
+				"the target was waiting to restart"},
+			{"waiting to restart under a fault", stale(when).activeFault(3500*time.Millisecond).exit(4*time.Second, 9*time.Second),
 				"the target was waiting to restart"},
 			{"exited at the checkpoint", stale(when).exit(8*time.Second, 9*time.Second),
 				"the target was waiting to restart"},
@@ -281,6 +337,19 @@ func TestPropertyEvaluatedAlwaysIgnoresWhereTheTargetWasStillStarting(t *testing
 
 	if len(result.Violations) != 1 || !result.Violations[0].At.Equal(at(3100*time.Millisecond)) || len(result.Notes) > 0 {
 		t.Errorf("P1 reported %v and noted %q, want the event at 3.1s alone.", statements(result), result.Notes)
+	}
+}
+
+// A fault's transient states are what a property evaluated on every event
+// exists to catch.
+func TestPropertyEvaluatedAlwaysReadsEventsUnderAFault(t *testing.T) {
+	in := claimed(target.Always)
+	in.Faults = []invariant.FaultWindow{{Start: at(500 * time.Millisecond)}}
+
+	result := evaluate(t, invariant.Property(in.Target.Properties[0]), in)
+
+	if len(result.Violations) != 1 || !result.Violations[0].At.Equal(at(time.Second)) || len(result.Notes) > 0 {
+		t.Errorf("P1 reported %v and noted %q, want the event at 1s alone.", statements(result), result.Notes)
 	}
 }
 

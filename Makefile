@@ -22,6 +22,14 @@ KIND_VERSION ?= v0.33.0
 # The node image KIND_VERSION releases for ENVTEST_K8S_VERSION, by digest.
 KIND_NODE_IMAGE ?= kindest/node:v1.37.0@sha256:a1ed56cfb0e7b93589bdf97c8cd566405a265939e3620fc4f5de89adff580ae5
 
+# must-pass runs a command and exits make with the command's own exit code.
+# make always exits 2 on any recipe failure, so the nightly workflow cannot tell
+# a find (exit 1) from a harness error (exit 2) without this.
+define must-pass
+	@status=0; $(1) || status=$$?; \
+	if [ $$status -ne 0 ]; then exit $$status; fi
+endef
+
 # Each example draws its own sequences (DESIGN.md §10, M5). A pull request fixes
 # the seeds, so that a failing tier means the change under review and not a new
 # draw, and so a tier stays inside the ten minutes §11 budgets. The nightly
@@ -337,13 +345,11 @@ endef
 .PHONY: test-example
 test-example: verify-cert-manager-pin setup build
 	@echo "==> the default configuration, which must pass"
-	@examples/cert-manager/quickstart.sh --seed $(EXAMPLE_SEED) --runs $(EXAMPLE_RUNS) --deadline $(EXAMPLE_DEADLINE) \
-		|| { echo "test-example: the default configuration failed."; exit 1; }
+	$(call must-pass,examples/cert-manager/quickstart.sh --seed $(EXAMPLE_SEED) --runs $(EXAMPLE_RUNS) --deadline $(EXAMPLE_DEADLINE))
 	@echo "==> the pinned sequences, which must pass as written"
-	@KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox run \
+	$(call must-pass,KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox run \
 		--target examples/cert-manager/target.yaml --deadline $(EXAMPLE_DEADLINE) \
-		examples/cert-manager/sequences/*.json \
-		|| { echo "test-example: a pinned sequence failed."; exit 1; }
+		examples/cert-manager/sequences/*.json)
 	$(call cert-manager-control,test-example)
 
 # test-example-nightly is the nightly tier of DESIGN.md §10 (M5). botbox draws
@@ -354,8 +360,7 @@ test-example: verify-cert-manager-pin setup build
 .PHONY: test-example-nightly
 test-example-nightly: verify-cert-manager-pin
 	@echo "==> drawn seeds, which must pass"
-	@examples/cert-manager/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE) \
-		|| { echo "test-example-nightly: a drawn seed failed."; exit 1; }
+	$(call must-pass,examples/cert-manager/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE))
 	$(call cert-manager-control,test-example-nightly)
 
 # test-example-external-secrets has the shape of test-example. Its negative
@@ -365,22 +370,19 @@ test-example-nightly: verify-cert-manager-pin
 .PHONY: test-example-external-secrets
 test-example-external-secrets: verify-external-secrets-pin setup build
 	@echo "==> the default configuration, which must pass"
-	@examples/external-secrets/quickstart.sh --seed $(EXAMPLE_SEED) --runs $(EXAMPLE_RUNS) --deadline $(EXAMPLE_DEADLINE) \
-		|| { echo "test-example-external-secrets: the default configuration failed."; exit 1; }
+	$(call must-pass,examples/external-secrets/quickstart.sh --seed $(EXAMPLE_SEED) --runs $(EXAMPLE_RUNS) --deadline $(EXAMPLE_DEADLINE))
 	@echo "==> the pinned sequences, which must pass as written"
 	@test -n "$(EXTERNAL_SECRETS_SEQUENCES)" \
 		|| { echo "test-example-external-secrets: no pinned sequences to run."; exit 1; }
-	@KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox run \
+	$(call must-pass,KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/botbox run \
 		--target examples/external-secrets/target.yaml --deadline $(EXAMPLE_DEADLINE) \
-		$(EXTERNAL_SECRETS_SEQUENCES) \
-		|| { echo "test-example-external-secrets: a pinned sequence failed."; exit 1; }
+		$(EXTERNAL_SECRETS_SEQUENCES))
 	$(call external-secrets-control,test-example-external-secrets)
 
 .PHONY: test-example-external-secrets-nightly
 test-example-external-secrets-nightly: verify-external-secrets-pin setup build
 	@echo "==> drawn seeds, which must pass"
-	@examples/external-secrets/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE) \
-		|| { echo "test-example-external-secrets-nightly: a drawn seed failed."; exit 1; }
+	$(call must-pass,examples/external-secrets/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE))
 	$(call external-secrets-control,test-example-external-secrets-nightly)
 
 # A hunt takes hours, so no pull request runs one. Each invocation writes under
@@ -429,13 +431,11 @@ test-kind: kind-cluster
 .PHONY: test-kind-runs
 test-kind-runs: build
 	@echo "==> the toy with no bug, which must pass"
-	@$(KIND_BOTBOX) targets/toy-widget/sequences/b0.json \
-		|| { echo "test-kind: b0.json failed."; exit 1; }
+	$(call must-pass,$(KIND_BOTBOX) targets/toy-widget/sequences/b0.json)
 	@echo "==> drawn seeds, which must pass"
-	@$(KIND_BOTBOX) --seed $(KIND_SEED) --runs $(KIND_RUNS) \
-		|| { echo "test-kind: a drawn seed failed."; exit 1; }
+	$(call must-pass,$(KIND_BOTBOX) --seed $(KIND_SEED) --runs $(KIND_RUNS))
 	$(call negative-control,test-kind,$(KIND_BOTBOX) --launch-arg --bug=3 targets/toy-widget/sequences/b3.json,G3 the v1/ConfigMap widget-0 was still there)
-	$(call negative-control,test-kind,$(KIND_BOTBOX) --launch-arg --bug=8 targets/toy-widget/sequences/b8.json,G7 the v1/ConfigMap widget-0 that op 1 (deleteManaged) deleted never came back)
+	$(call negative-control,test-kind,$(KIND_BOTBOX) --launch-arg --bug=8 --out botbox-out/kind-control targets/toy-widget/sequences/b8.json,G7 the v1/ConfigMap widget-0 that op 1 (deleteManaged) deleted never came back)
 
 .PHONY: fmt
 fmt:

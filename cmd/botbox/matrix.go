@@ -66,6 +66,9 @@ func (c *cli) bugMatrix(ctx context.Context, opts options) int {
 	if err := s.vet(exercised); err != nil {
 		return c.fail(err)
 	}
+	if err := s.prepare(ctx, exercised); err != nil {
+		return c.fail(err)
+	}
 	dir, err := os.MkdirTemp("", "botbox-matrix-")
 	if err != nil {
 		return c.fail(fmt.Errorf("creating the matrix's run directory: %w", err))

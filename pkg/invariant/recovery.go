@@ -27,6 +27,21 @@ func (in Input) Owed(t time.Time) time.Time {
 	return owed
 }
 
+// RecreateOwed is when the target must have recreated an object deleted at t:
+// by Owed, and as long past each fault that stopped by t as the fault lasted,
+// and timeouts.settle more. A convergence since ends none of that time,
+// because a target can converge while an informer of its still backs off.
+func (in Input) RecreateOwed(t time.Time) time.Time {
+	owed := in.Owed(t)
+	for _, fault := range in.Faults {
+		if fault.End.IsZero() || fault.End.After(t) {
+			continue
+		}
+		owed = later(owed, fault.End.Add(fault.End.Sub(fault.Start)+in.timeouts().Settle))
+	}
+	return owed
+}
+
 // firstExcusedExitSince reports whether no other exit the faults excused came
 // between the op and this exit.
 func (in Input) firstExcusedExitSince(op Op, exit Exit) bool {

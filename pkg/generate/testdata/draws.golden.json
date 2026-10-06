@@ -200,6 +200,22 @@
         },
         {
           "i": 1,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "patch",
+              "resource": "secrets"
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 3
+            }
+          }
+        },
+        {
+          "i": 2,
           "t": "create",
           "obj": {
             "apiVersion": "cert-manager.io/v1",
@@ -221,7 +237,11 @@
           }
         },
         {
-          "i": 2,
+          "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
           "t": "settle"
         }
       ]
@@ -392,12 +412,33 @@
         },
         {
           "i": 1,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "get",
+              "resource": "certificaterequests",
+              "fraction": 0.5
+            },
+            "action": {
+              "delay": "5s"
+            },
+            "until": {
+              "op": 3
+            }
+          }
+        },
+        {
+          "i": 2,
           "t": "update",
           "patch": {
             "spec": {
               "duration": "24h"
             }
           }
+        },
+        {
+          "i": 3,
+          "t": "settle"
         }
       ]
     },
@@ -660,6 +701,22 @@
         },
         {
           "i": 2,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "resource": "certificates",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 5
+            }
+          }
+        },
+        {
+          "i": 3,
           "t": "create",
           "obj": {
             "apiVersion": "cert-manager.io/v1",
@@ -682,7 +739,7 @@
           "noSettle": true
         },
         {
-          "i": 3,
+          "i": 4,
           "t": "update",
           "cr": "example-2",
           "patch": {
@@ -692,6 +749,10 @@
               }
             }
           }
+        },
+        {
+          "i": 5,
+          "t": "settle"
         }
       ]
     }
@@ -773,6 +834,21 @@
         },
         {
           "i": 1,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "resource": "externalsecrets"
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 4
+            }
+          }
+        },
+        {
+          "i": 2,
           "t": "create",
           "obj": {
             "apiVersion": "external-secrets.io/v1",
@@ -801,7 +877,11 @@
           "noSettle": true
         },
         {
-          "i": 2,
+          "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
           "t": "settle"
         }
       ]
@@ -1044,6 +1124,23 @@
         },
         {
           "i": 6,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "create",
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 9
+            }
+          }
+        },
+        {
+          "i": 7,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -1058,7 +1155,7 @@
           "noSettle": true
         },
         {
-          "i": 7,
+          "i": 8,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -1070,6 +1167,10 @@
               "count": 4
             }
           }
+        },
+        {
+          "i": 9,
+          "t": "settle"
         }
       ]
     },
@@ -1199,12 +1300,33 @@
         },
         {
           "i": 1,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "get",
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 3
+            }
+          }
+        },
+        {
+          "i": 2,
           "t": "deleteManaged",
           "kind": "v1/ConfigMap",
           "index": 0
         },
         {
-          "i": 2,
+          "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
           "t": "create",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -1219,7 +1341,7 @@
           "noSettle": true
         },
         {
-          "i": 3,
+          "i": 5,
           "t": "update",
           "patch": {
             "spec": {
@@ -1228,7 +1350,7 @@
           }
         },
         {
-          "i": 4,
+          "i": 6,
           "t": "recreate",
           "cr": "widget-2",
           "obj": {
@@ -1243,7 +1365,7 @@
           }
         },
         {
-          "i": 5,
+          "i": 7,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -1258,7 +1380,7 @@
           "noSettle": true
         },
         {
-          "i": 6,
+          "i": 8,
           "t": "settle"
         }
       ]
@@ -1314,6 +1436,22 @@
         },
         {
           "i": 7,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 429
+            },
+            "until": {
+              "op": 9
+            }
+          }
+        },
+        {
+          "i": 8,
           "t": "create",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -1325,6 +1463,10 @@
               "count": 3
             }
           }
+        },
+        {
+          "i": 9,
+          "t": "settle"
         }
       ]
     },
@@ -1352,6 +1494,23 @@
         },
         {
           "i": 2,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "delete",
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "delay": "2s"
+            },
+            "until": {
+              "op": 4
+            }
+          }
+        },
+        {
+          "i": 3,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -1365,11 +1524,15 @@
           }
         },
         {
-          "i": 3,
+          "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
           "t": "restart"
         },
         {
-          "i": 4,
+          "i": 6,
           "t": "settle"
         }
       ]
@@ -1456,12 +1619,18 @@
         },
         {
           "i": 2,
-          "t": "updateFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "patch": {
-            "data": {
-              "label": "jxfabh6madhd"
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "patch",
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "delay": "1s"
+            },
+            "until": {
+              "op": 4
             }
           }
         },
@@ -1472,12 +1641,27 @@
           "name": "widget-config",
           "patch": {
             "data": {
-              "label": "ddamgjcs8qc9"
+              "label": "jxfabh6madhd"
             }
           }
         },
         {
           "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "ddamgjcs8qc9"
+            }
+          }
+        },
+        {
+          "i": 6,
           "t": "update",
           "patch": {
             "spec": {
@@ -1487,7 +1671,7 @@
           "noSettle": true
         },
         {
-          "i": 5,
+          "i": 7,
           "t": "settle"
         }
       ]
@@ -1578,15 +1762,36 @@
         },
         {
           "i": 1,
-          "t": "deleteFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "until": {
-            "op": 2
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "create",
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 4
+            }
           }
         },
         {
           "i": 2,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 3
+          }
+        },
+        {
+          "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
           "t": "settle"
         }
       ]
@@ -1669,6 +1874,21 @@
         },
         {
           "i": 1,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "resource": "configmaps"
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 3
+            }
+          }
+        },
+        {
+          "i": 2,
           "t": "update",
           "patch": {
             "spec": {
@@ -1677,7 +1897,11 @@
           }
         },
         {
-          "i": 2,
+          "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
           "t": "update",
           "patch": {
             "spec": {
@@ -1687,7 +1911,7 @@
           "noSettle": true
         },
         {
-          "i": 3,
+          "i": 5,
           "t": "create",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -1702,7 +1926,7 @@
           "noSettle": true
         },
         {
-          "i": 4,
+          "i": 6,
           "t": "settle"
         }
       ]
@@ -1956,12 +2180,32 @@
         },
         {
           "i": 3,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "get",
+              "resource": "configmaps"
+            },
+            "action": {
+              "delay": "2s"
+            },
+            "until": {
+              "op": 5
+            }
+          }
+        },
+        {
+          "i": 4,
           "t": "update",
           "patch": {
             "spec": {
               "count": 3
             }
           }
+        },
+        {
+          "i": 5,
+          "t": "settle"
         }
       ]
     },
@@ -2019,6 +2263,22 @@
         },
         {
           "i": 3,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 5
+            }
+          }
+        },
+        {
+          "i": 4,
           "t": "create",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -2032,7 +2292,11 @@
           }
         },
         {
-          "i": 4,
+          "i": 5,
+          "t": "settle"
+        },
+        {
+          "i": 6,
           "t": "updateFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
@@ -2105,14 +2369,25 @@
         },
         {
           "i": 2,
-          "t": "deleteManaged",
-          "kind": "v1/ConfigMap",
-          "index": 0
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "create",
+              "resource": "configmaps"
+            },
+            "action": {
+              "delay": "1s"
+            },
+            "until": {
+              "op": 4
+            }
+          }
         },
         {
           "i": 3,
-          "t": "delete",
-          "noSettle": true
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
         },
         {
           "i": 4,
@@ -2120,10 +2395,19 @@
         },
         {
           "i": 5,
-          "t": "restart"
+          "t": "delete",
+          "noSettle": true
         },
         {
           "i": 6,
+          "t": "settle"
+        },
+        {
+          "i": 7,
+          "t": "restart"
+        },
+        {
+          "i": 8,
           "t": "settle"
         }
       ]
@@ -2233,6 +2517,22 @@
         },
         {
           "i": 2,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "delete",
+              "resource": "configmaps"
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 6
+            }
+          }
+        },
+        {
+          "i": 3,
           "t": "update",
           "patch": {
             "spec": {
@@ -2242,16 +2542,20 @@
           "noSettle": true
         },
         {
-          "i": 3,
+          "i": 4,
           "t": "deleteFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
           "until": {
-            "op": 4
+            "op": 5
           }
         },
         {
-          "i": 4,
+          "i": 5,
+          "t": "settle"
+        },
+        {
+          "i": 6,
           "t": "settle"
         }
       ]
@@ -2312,15 +2616,35 @@
         },
         {
           "i": 2,
-          "t": "deleteFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "until": {
-            "op": 3
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "get",
+              "resource": "configmaps"
+            },
+            "action": {
+              "delay": "500ms"
+            },
+            "until": {
+              "op": 5
+            }
           }
         },
         {
           "i": 3,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 4
+          }
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
           "t": "settle"
         }
       ]
@@ -2501,8 +2825,29 @@
         },
         {
           "i": 3,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "delete",
+              "resource": "configmaps",
+              "fraction": 0.5
+            },
+            "action": {
+              "delay": "1s"
+            },
+            "until": {
+              "op": 5
+            }
+          }
+        },
+        {
+          "i": 4,
           "t": "delete",
           "cr": "widget-2"
+        },
+        {
+          "i": 5,
+          "t": "settle"
         }
       ]
     },
@@ -2526,15 +2871,35 @@
         },
         {
           "i": 1,
-          "t": "deleteFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "until": {
-            "op": 2
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "delete",
+              "resource": "configmaps"
+            },
+            "action": {
+              "delay": "500ms"
+            },
+            "until": {
+              "op": 4
+            }
           }
         },
         {
           "i": 2,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 3
+          }
+        },
+        {
+          "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
           "t": "settle"
         }
       ]
@@ -2634,6 +2999,22 @@
         },
         {
           "i": 4,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 7
+            }
+          }
+        },
+        {
+          "i": 5,
           "t": "update",
           "patch": {
             "spec": {
@@ -2643,7 +3024,11 @@
           "noSettle": true
         },
         {
-          "i": 5,
+          "i": 6,
+          "t": "settle"
+        },
+        {
+          "i": 7,
           "t": "settle"
         }
       ]
@@ -2778,6 +3163,22 @@
         },
         {
           "i": 3,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "get",
+              "resource": "configmaps"
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 5
+            }
+          }
+        },
+        {
+          "i": 4,
           "t": "updateFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
@@ -2786,6 +3187,10 @@
               "label": "dvwpfghvspba"
             }
           }
+        },
+        {
+          "i": 5,
+          "t": "settle"
         }
       ]
     },
@@ -2862,6 +3267,23 @@
         },
         {
           "i": 4,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "create",
+              "resource": "configmaps",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 6
+            }
+          }
+        },
+        {
+          "i": 5,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -2875,7 +3297,11 @@
           }
         },
         {
-          "i": 5,
+          "i": 6,
+          "t": "settle"
+        },
+        {
+          "i": 7,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -3049,6 +3475,22 @@
         },
         {
           "i": 3,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 429
+            },
+            "until": {
+              "op": 6
+            }
+          }
+        },
+        {
+          "i": 4,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -3063,7 +3505,11 @@
           "noSettle": true
         },
         {
-          "i": 4,
+          "i": 5,
+          "t": "settle"
+        },
+        {
+          "i": 6,
           "t": "settle"
         }
       ]
@@ -3113,10 +3559,30 @@
         },
         {
           "i": 3,
-          "t": "delete"
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "delete",
+              "resource": "configmaps"
+            },
+            "action": {
+              "delay": "2s"
+            },
+            "until": {
+              "op": 5
+            }
+          }
         },
         {
           "i": 4,
+          "t": "delete"
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        },
+        {
+          "i": 6,
           "t": "recreate",
           "cr": "widget-2",
           "obj": {
@@ -3131,11 +3597,11 @@
           }
         },
         {
-          "i": 5,
+          "i": 7,
           "t": "restart"
         },
         {
-          "i": 6,
+          "i": 8,
           "t": "settle"
         }
       ]
@@ -3217,12 +3683,31 @@
         },
         {
           "i": 5,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "resource": "widgets"
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 7
+            }
+          }
+        },
+        {
+          "i": 6,
           "t": "update",
           "patch": {
             "spec": {
               "count": 2
             }
           }
+        },
+        {
+          "i": 7,
+          "t": "settle"
         }
       ]
     },
@@ -3278,6 +3763,23 @@
         },
         {
           "i": 2,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "patch",
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 4
+            }
+          }
+        },
+        {
+          "i": 3,
           "t": "updateFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
@@ -3286,6 +3788,10 @@
               "label": "f1ddeu9gfdnd"
             }
           }
+        },
+        {
+          "i": 4,
+          "t": "settle"
         }
       ]
     },
@@ -3398,6 +3904,22 @@
         },
         {
           "i": 2,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "get",
+              "resource": "configmaps"
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 5
+            }
+          }
+        },
+        {
+          "i": 3,
           "t": "update",
           "patch": {
             "spec": {
@@ -3407,7 +3929,11 @@
           "noSettle": true
         },
         {
-          "i": 3,
+          "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
           "t": "settle"
         }
       ]
@@ -3581,6 +4107,22 @@
         },
         {
           "i": 4,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "resource": "configmaps",
+              "fraction": 0.5
+            },
+            "action": {
+              "delay": "500ms"
+            },
+            "until": {
+              "op": 6
+            }
+          }
+        },
+        {
+          "i": 5,
           "t": "updateFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
@@ -3589,6 +4131,10 @@
               "label": "xqchaa6b"
             }
           }
+        },
+        {
+          "i": 6,
+          "t": "settle"
         }
       ]
     },
@@ -3701,6 +4247,23 @@
         },
         {
           "i": 2,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "create",
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "delay": "2s"
+            },
+            "until": {
+              "op": 4
+            }
+          }
+        },
+        {
+          "i": 3,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -3714,16 +4277,20 @@
           }
         },
         {
-          "i": 3,
+          "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
           "t": "deleteFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
           "until": {
-            "op": 4
+            "op": 6
           }
         },
         {
-          "i": 4,
+          "i": 6,
           "t": "updateFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
@@ -3734,7 +4301,7 @@
           }
         },
         {
-          "i": 5,
+          "i": 7,
           "t": "deleteManaged",
           "kind": "v1/ConfigMap",
           "index": 0
@@ -3849,11 +4416,28 @@
         },
         {
           "i": 2,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "delete",
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "delay": "2s"
+            },
+            "until": {
+              "op": 5
+            }
+          }
+        },
+        {
+          "i": 3,
           "t": "delete",
           "noSettle": true
         },
         {
-          "i": 3,
+          "i": 4,
           "t": "create",
           "obj": {
             "apiVersion": "toy.botbox/v1",
@@ -3867,7 +4451,11 @@
           }
         },
         {
-          "i": 4,
+          "i": 5,
+          "t": "settle"
+        },
+        {
+          "i": 6,
           "t": "settle"
         }
       ]

@@ -181,7 +181,22 @@ func (h *Harness) start(ctx context.Context, opts Options) error {
 		return deleteNamespace(ctx, core, h.Namespace, namespaceDeletionBudget)
 	})
 
-	if h.Proxy, err = proxy.Start(h.Config, proxy.Options{Seed: opts.Seed}); err != nil {
+	proxyConfig := h.Config
+	if len(h.target.Roles) > 0 || len(h.target.ClusterRoles) > 0 {
+		identity, err := cluster.NewIdentity(cluster.IdentityOptions{
+			Config:       h.Config,
+			Namespace:    h.Namespace,
+			Roles:        h.target.Roles,
+			ClusterRoles: h.target.ClusterRoles,
+		})
+		if err != nil {
+			return err
+		}
+		h.down.push("deleting the target identity", identity.Delete)
+		proxyConfig = identity.Config()
+	}
+
+	if h.Proxy, err = proxy.Start(proxyConfig, proxy.Options{Seed: opts.Seed}); err != nil {
 		return err
 	}
 	h.down.push("stopping the proxy", func(context.Context) error { return h.Proxy.Stop() })
@@ -306,7 +321,7 @@ func (h *Harness) applyFixtures(ctx context.Context) error {
 			return fmt.Errorf("resolving the fixture %s %s: %w", gvk.Kind, fixture.GetName(), err)
 		}
 		if mapping.Scope.Name() != meta.RESTScopeNameNamespace {
-			return fmt.Errorf("the fixture %s %s is cluster-scoped, and a run owns one namespace", gvk.Kind, fixture.GetName())
+			continue // Cluster-scoped fixtures are applied per invocation, not per run.
 		}
 		if namespace := fixture.GetNamespace(); namespace != "" {
 			return fmt.Errorf("the fixture %s %s sets metadata.namespace %s, and a run creates fixtures in its own namespace", gvk.Kind, fixture.GetName(), namespace)

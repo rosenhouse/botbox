@@ -125,6 +125,19 @@ func (s *Store) ManagedBy(owner types.UID) []Version {
 	})
 }
 
+// Resource is the resource the API server serves the kind at, as a request's
+// path names it. It is empty for a kind the Store cannot resolve.
+func (s *Store) Resource(gvk schema.GroupVersionKind) schema.GroupResource {
+	if s.opts.Mapper == nil {
+		return schema.GroupResource{}
+	}
+	mapping, err := s.opts.Mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		return schema.GroupResource{}
+	}
+	return mapping.Resource.GroupResource()
+}
+
 // IsManaged reports whether the object is the target's, whether or not it is
 // still live, because G3 asks about objects that are gone.
 func (s *Store) IsManaged(key Key) bool {

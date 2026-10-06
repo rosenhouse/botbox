@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -96,9 +97,18 @@ func newRun() *run { return newRunManaging(configMapGVK) }
 func newRunManaging(kinds ...schema.GroupVersionKind) *run {
 	t := toyTarget()
 	t.Manages = kinds
-	store := observe.NewStore(observe.Options{Namespace: namespace, Manages: kinds})
+	store := observe.NewStore(observe.Options{Namespace: namespace, Manages: kinds, Mapper: toyMapper()})
 	store.Exclude(widgetGVK, widgetName)
 	return &run{in: invariant.Input{Target: t, History: store}, store: store}
+}
+
+// toyMapper serves every kind the fixtures record.
+func toyMapper() meta.RESTMapper {
+	mapper := meta.NewDefaultRESTMapper(nil)
+	for _, gvk := range []schema.GroupVersionKind{widgetGVK, configMapGVK, secretGVK} {
+		mapper.Add(gvk, meta.RESTScopeNamespace)
+	}
+	return mapper
 }
 
 // fixture marks an object as botbox's, so that it is never managed (§6).
@@ -220,6 +230,12 @@ func (r *run) cleaned(when time.Duration) *run {
 
 func (r *run) fault(from, to time.Duration) *run {
 	r.in.Faults = append(r.in.Faults, invariant.FaultWindow{Start: at(from), End: at(to)})
+	return r
+}
+
+// activeFault is a fault that has not stopped by the end of the observation.
+func (r *run) activeFault(from time.Duration) *run {
+	r.in.Faults = append(r.in.Faults, invariant.FaultWindow{Start: at(from)})
 	return r
 }
 
@@ -445,10 +461,25 @@ func get(name string) proxy.Request {
 	return proxy.Request{Verb: "get", Version: "v1", Resource: "configmaps", Namespace: namespace, Name: name, Status: 200}
 }
 
-func createChild(name string) proxy.Request {
-	created := get(name)
-	created.Verb, created.Name, created.Status = "create", name, 201
+// createChild is a create, which names its object in the body, not the path.
+func createChild() proxy.Request {
+	created := get("")
+	created.Verb, created.Status = "create", http.StatusCreated
 	return created
+}
+
+// write is a write of the verb to the ConfigMap named.
+func write(verb, name string) proxy.Request {
+	written := get(name)
+	written.Verb = verb
+	return written
+}
+
+// widgetPatch changes the Widget's metadata or spec, not its status.
+func widgetPatch() proxy.Request {
+	patched := statusPatch()
+	patched.Subresource = ""
+	return patched
 }
 
 func failedGet(name string, status int) proxy.Request {

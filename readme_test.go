@@ -29,8 +29,6 @@ var limits = []limit{
 	{"refuses a cluster-scoped primary, managed kind or fixture when it loads the target", 38, "each refuses every cluster-scoped kind it knows in one error"},
 	{"passes a controller that leaks a child in another namespace", 38, "it does not see a child the target creates in another"},
 	{"cannot supply an object your controller reads from another namespace", 38, "A fixture sets no `metadata.namespace`"},
-	{"does not test your controller's RBAC", 45, "the target's RBAC is never exercised"},
-	{"inject no faults", 47, "The generator draws no `Fault`"},
 }
 
 type limit struct {

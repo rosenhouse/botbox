@@ -31,6 +31,8 @@ manages:
   - v1/Secret
 notRecreated:
   - v1/Secret
+rbac:
+  - ../../targets/toy-widget/rbac/role.yaml
 selector: app.kubernetes.io/managed-by=widget-controller
 ready: >-
   has(status.observedGeneration) && status.observedGeneration == metadata.generation
@@ -51,6 +53,7 @@ generate:
   maxCRs: 2
   distinct:
     - spec.prefix
+  faults: true
   fixtures:
     ../../targets/toy-widget/config.yaml:
       mutate:
@@ -81,6 +84,7 @@ thresholds:
 | `fixtures` | none | It lists files of objects that botbox creates in each run's namespace before op 0, such as a Secret your controller reads. A fixture sets no `metadata.namespace`. botbox never counts a fixture as your controller's. |
 | `manages` | none | It lists the kinds your controller creates, as `group/version/Kind`, or `v1/Kind` for the core group. botbox watches them and judges your controller by them. |
 | `notRecreated` | none | It lists the managed kinds your controller leaves deleted, or recreates under another name. G7 does not require them back. Each is also under `manages`. |
+| `rbac` | none | It lists files of Role and ClusterRole YAML. botbox creates a ServiceAccount with these permissions for each run instead of running the target as admin. |
 | `selector` | every object | Only the managed objects this label selector matches count as your controller's. |
 | `ready` | `has(status.observedGeneration) && status.observedGeneration == metadata.generation` | It is CEL that says whether a CR is ready, or `go:<name>`. G4 requires it of every CR. |
 | `equal` | none | It names a `go:<name>` hook that replaces G5's comparison of the states on either side of a restart. It takes no `equalIgnore`. |
@@ -94,6 +98,7 @@ thresholds:
 | `generate.overlay` | none | It maps a dotted path to schema keywords. For generation, they win over the CRD's keywords there, and the CRD keeps those they do not name. botbox reads `additionalProperties`, `enum`, `exclusiveMaximum`, `exclusiveMinimum`, `format`, `items`, `maxItems`, `maxLength`, `maxProperties`, `maximum`, `minItems`, `minLength`, `minProperties`, `minimum`, `pattern`, `properties`, `required`, `type`, `x-kubernetes-int-or-string` and `x-kubernetes-list-type`, and refuses any other. |
 | `generate.maxCRs` | `3` | It bounds the CRs a sequence creates, the sample included. `1` keeps every sequence to the sample. |
 | `generate.distinct` | none | It lists dotted paths at which the sample holds a string, such as a field that names a child. Each CR after the first appends its `-2` or `-3` there, so no two CRs share a value. |
+| `generate.faults` | `true` | It says whether generation draws fault injection. `false` keeps every seed's sequence as it was before faults were added. |
 | `generate.fixtures` | none | It maps a file, written as `fixtures` lists it, to what generation may do to its objects. Generation may delete the objects of any file it names. |
 | `generate.fixtures[*].mutate` | none | It lists paths to strings that generation may set to a short word of letters and digits, written as `equalIgnore` writes a path. Every object in the file holds a string there. |
 | `launch.binary` | required | It names your controller's executable, relative to the directory botbox runs in, or a name on `PATH`. |
@@ -197,11 +202,12 @@ not check your properties where a wait ends with a request held, or released wit
 `timeouts.stable`, and the run notes it. Nor does it where your controller waits to restart,
 or has not been back for `timeouts.stable` since it last started. Your controller is back
 once it requests a resource outside leader election. botbox takes a controller that reads a
-Lease with a get to elect a leader, and counts it back only once it wins its lease. A
-property evaluated `always` is still checked at every change. botbox exits 2 where a
-`recreate`'s old CR outlasts the wait and no check fails, because the op cannot go on. A
-fault active during the `recreate` can do that to a correct controller, as a delay on each
-request it makes can. End the fault before the `recreate` with `until.op`.
+Lease with a get to elect a leader, and counts it back only once it wins its lease. Nor does
+it where a fault is active, or your controller is still owed time to recover from one. A
+property evaluated `always` is still checked at every change. A `recreate` whose old CR a
+fault keeps past the wait cannot create its CR, so it stops the run, and the run notes it.
+botbox then clears the fault and judges your controller as it tears the run down. End the
+fault before the `recreate` with `until.op` to test the ops after it.
 
 | Op | Needs | May carry | Settles | What it does |
 |---|---|---|---|---|
@@ -212,7 +218,7 @@ request it makes can. End the fault before the `recreate` with `until.op`.
 | `settle` | none | none | yes | It waits for your controller to converge. |
 | `restart` | none | none | no | It kills your controller and starts it again. |
 | `fault` | `spec` | none | no | It adds a fault the proxy applies to your controller's requests. |
-| `deleteManaged` | `kind`, `index` | none | yes | It deletes a managed object behind your controller's back. G7 requires an object of its kind and name once the wait ends, unless `notRecreated` lists the kind. |
+| `deleteManaged` | `kind`, `index` | none | yes | It deletes a managed object behind your controller's back. G7 requires an object of its kind and name once the wait ends, unless `notRecreated` lists the kind. After a fault, the wait runs at least as long past the fault's end as the fault lasted, plus `settle`. |
 | `updateFixture` | `kind`, `name`, `patch` | none | yes | It applies `patch` to a fixture as a JSON merge patch. |
 | `deleteFixture` | `kind`, `name`, `until.op` | none | no | It deletes a fixture, waits up to `timeouts.delete` for it to go, and creates it again before op `until.op` acts. |
 

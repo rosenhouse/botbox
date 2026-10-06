@@ -152,8 +152,10 @@ func TestAFaultLeavesTheTargetTimeToRecover(t *testing.T) {
 }
 
 // The reference's example holds every op and fault field. A correct
-// controller passes it, each of its faults applies to a request, and no fault
-// lasts long enough to leave a check unjudged.
+// controller passes it, and each of its faults applies to a request. The
+// faults leave no check unjudged but P1, which skips the checkpoints where a
+// fault excuses the target, the one after op 7 among them: a fault drops the
+// deletes op 7 asks for until op 8.
 func TestTheReferenceSequencePassesTheToy(t *testing.T) {
 	t.Parallel()
 	toy := loadTarget(t, buildToy(t))
@@ -171,8 +173,13 @@ func TestTheReferenceSequencePassesTheToy(t *testing.T) {
 	if result.Violation != nil {
 		t.Errorf("The run reported %s: %s", result.Violation.ID, result.Violation.Statement)
 	}
-	if len(result.Notes) > 0 {
-		t.Errorf("The run left checks unjudged: %q", result.Notes)
+	for _, note := range result.Notes {
+		if !strings.HasPrefix(note, "P1 is not evaluated at the checkpoint after op ") || !strings.Contains(note, faultExcused) {
+			t.Errorf("The run left a check unjudged where no fault excused P1: %q", note)
+		}
+	}
+	if want := "P1 is not evaluated at the checkpoint after op 7 (update): " + faultExcused; !slices.ContainsFunc(result.Notes, startsWith(want)) {
+		t.Errorf("The run noted %q, want one beginning %q.", result.Notes, want)
 	}
 	if got := len(result.Timeline.Faults); got != 3 {
 		t.Errorf("The run injected %d faults, want 3.", got)
@@ -182,6 +189,141 @@ func TestTheReferenceSequencePassesTheToy(t *testing.T) {
 			t.Errorf("The proxy applied fault %d to no request.", i)
 		}
 	}
+}
+
+// faultExcused is why a property skips a checkpoint where a fault excuses the
+// target.
+const faultExcused = "a fault was active there, or the target was still owed time to recover from one"
+
+func startsWith(prefix string) func(string) bool {
+	return func(note string) bool { return strings.HasPrefix(note, prefix) }
+}
+
+// keptCR fails the toy's patches of its Widget until after a recreate. The toy
+// deletes the Widget's child, and the patch that clears its finalizer fails,
+// so the Widget stays with status.ready 1.
+const keptCR = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "patch", "resource": "widgets"}, "action": {"error": 500}, "until": {"op": 3}}},
+    {"i": 2, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 3, "t": "settle"}
+  ]
+}`
+
+// lostChild refuses the toy's ConfigMap creates while botbox deletes a child,
+// so status.ready counts the child until the update after the fault.
+const lostChild = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 2}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"error": 500}, "until": {"op": 3}}},
+    {"i": 2, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0},
+    {"i": 3, "t": "update", "patch": {"spec": {"count": 3}}}
+  ]
+}`
+
+// The correct toy passes where a fault keeps it from repairing what P1 reads,
+// and the run notes where P1 was not evaluated.
+func TestTheCorrectToyPassesAFaultThatKeepsWhatP1Reads(t *testing.T) {
+	t.Parallel()
+	binary := buildToy(t)
+	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
+	runToy := func(t *testing.T, sequence string, noted ...string) run.Result {
+		t.Helper()
+		result, err := run.Run(t.Context(), loadTarget(t, binary), readSequence(t, sequence),
+			run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		if result.Violation != nil {
+			t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+		}
+		for _, want := range noted {
+			if !slices.ContainsFunc(result.Notes, startsWith(want)) {
+				t.Errorf("The run noted %q, want one beginning %q.", result.Notes, want)
+			}
+		}
+		return result
+	}
+
+	t.Run("a recreate whose old CR the fault keeps", func(t *testing.T) {
+		t.Parallel()
+
+		result := runToy(t, keptCR,
+			"op 2 (recreate) stopped the run: the CR widget was still there",
+			"P1 is not evaluated at the checkpoint after op 2 (recreate): "+faultExcused)
+
+		if recovery := result.Timeline.Recovery; recovery == nil || !recovery.Converged {
+			t.Errorf("The teardown recorded the recovery %+v, want a wait that converged.", recovery)
+		}
+	})
+
+	t.Run("a wait that converged under the fault", func(t *testing.T) {
+		t.Parallel()
+
+		result := runToy(t, lostChild, "P1 is not evaluated at the checkpoint after op 2 (deleteManaged): "+faultExcused)
+
+		if wait := result.Timeline.Ops[2].Settled; wait == nil || !wait.Converged {
+			t.Errorf("The deleteManaged's wait was %+v, want one that converged.", wait)
+		}
+	})
+}
+
+// refusedAcrossARecreate refuses the toy's ConfigMap creates from before a
+// scale-up until after a recreate.
+const refusedAcrossARecreate = `{
+  "seed": 1,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "fault", "spec": {"match": {"verb": "create", "resource": "configmaps"}, "action": {"error": 500}, "until": {"op": 4}}},
+    {"i": 2, "t": "update", "patch": {"spec": {"count": 2}}},
+    {"i": 3, "t": "recreate", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 4, "t": "settle"}
+  ]
+}`
+
+// A fault active during a recreate excuses a finalizer that never clears, and
+// stops the run. The teardown clears the fault, and its recovery wait blames
+// the finalizer.
+func TestAFinalizerThatNeverClearsFailsG4OnceAFaultThatStoppedARecreateIsCleared(t *testing.T) {
+	t.Parallel()
+	binary := buildToy(t)
+	testCluster := startCluster(t, loadTarget(t, binary).CRDs)
+	runUnder := func(t *testing.T, launchArgs ...string) run.Result {
+		t.Helper()
+		toy := loadTarget(t, binary)
+		toy.Launch.Args = append(toy.Launch.Args, launchArgs...)
+		result, err := run.Run(t.Context(), toy, readSequence(t, refusedAcrossARecreate),
+			run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+		if err != nil {
+			t.Fatalf("The run failed: %v", err)
+		}
+		return result
+	}
+
+	t.Run("B13", func(t *testing.T) {
+		t.Parallel()
+
+		result := runUnder(t, "--bug=13")
+
+		if v := result.Violation; v == nil || v.ID != "G4" || !strings.Contains(v.Statement, "after the last fault stopped") ||
+			!strings.Contains(v.Statement, "held by the finalizers widget.botbox/cleanup") {
+			t.Errorf("The run reported %v, want the G4 of the wait after the last fault stopped, naming the finalizer.", v)
+		}
+	})
+
+	t.Run("the correct toy", func(t *testing.T) {
+		t.Parallel()
+
+		if result := runUnder(t); result.Violation != nil {
+			t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+		}
+	})
 }
 
 // leaseFault fails most of the toy's lease updates until the teardown.
@@ -482,6 +624,48 @@ func TestTheCorrectToyPassesWhereAWaitEndsWithARequestHeld(t *testing.T) {
 				t.Errorf("The run noted %q, want one beginning %q.", result.Notes, test.noted)
 			}
 		})
+	}
+}
+
+// informerFault restarts the toy into a fault on ConfigMaps. Its ConfigMap
+// informer backs off past the fault, while the waits converge on the Widget.
+const informerFault = `{
+  "seed": 20260924,
+  "target": "toy-widget",
+  "ops": [
+    {"i": 0, "t": "create", "obj": {"apiVersion": "toy.botbox/v1", "kind": "Widget", "metadata": {"name": "widget"}, "spec": {"count": 1}}},
+    {"i": 1, "t": "restart"},
+    {"i": 2, "t": "fault", "spec": {"match": {"resource": "configmaps"}, "action": {"error": 500}, "until": {"for": "4s"}}},
+    {"i": 3, "t": "settle"},
+    {"i": 4, "t": "settle"},
+    {"i": 5, "t": "settle"},
+    {"i": 6, "t": "deleteManaged", "kind": "v1/ConfigMap", "index": 0}
+  ]
+}`
+
+// The wait after the deleteManaged lasts until the toy has had as long as the
+// fault lasted, and T_settle more, to see the deletion.
+func TestTheCorrectToyRecreatesAChildItsInformerMissedUnderAFault(t *testing.T) {
+	t.Parallel()
+	toy := loadTarget(t, buildToy(t))
+	testCluster := startCluster(t, toy.CRDs)
+
+	result, err := run.Run(t.Context(), toy, readSequence(t, informerFault),
+		run.Options{Dir: t.TempDir(), Config: testCluster.Config(), Check: run.Engine{}})
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	if result.Violation != nil {
+		t.Errorf("The run reported %s at %v: %s", result.Violation.ID, result.Violation.At, result.Violation.Statement)
+	}
+	fault := result.Timeline.Faults[0]
+	owed := fault.End.Add(fault.End.Sub(fault.Start) + toy.Timeouts.Settle)
+	if wait := result.Timeline.Ops[6].Settled; wait == nil || wait.Window.End.Before(owed) {
+		t.Errorf("The wait after the deleteManaged was %+v, want one that ended no sooner than %v.", wait, owed)
+	}
+	if slices.ContainsFunc(result.Notes, func(note string) bool { return strings.HasPrefix(note, "G7") }) {
+		t.Errorf("The run noted %q, want G7 judged.", result.Notes)
 	}
 }
 

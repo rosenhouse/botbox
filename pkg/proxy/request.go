@@ -74,6 +74,12 @@ func (r *Request) parsePath(segments []string) {
 	}
 }
 
+// Forbidden reports whether the API server rejected the request as forbidden
+// and the proxy did not inject that 403 itself.
+func (r Request) Forbidden() bool {
+	return r.Status == 403 && !strings.HasPrefix(r.Fault, "error(")
+}
+
 // Verbs are the verbs verb records for a resource request.
 var Verbs = []string{"get", "list", "watch", "create", "update", "patch", "delete", "deletecollection"}
 

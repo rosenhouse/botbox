@@ -35,6 +35,7 @@ type declaration struct {
 	Fixtures     []string              `json:"fixtures"`
 	Manages      []string              `json:"manages"`
 	NotRecreated []string              `json:"notRecreated"`
+	RBAC         []string              `json:"rbac"`
 	Selector     string                `json:"selector"`
 	Ready        string                `json:"ready"`
 	Equal        string                `json:"equal"`
@@ -58,6 +59,7 @@ type generateDeclaration struct {
 	Overlay  map[string]map[string]any     `json:"overlay"`
 	MaxCRs   *int                          `json:"maxCRs"`
 	Distinct []string                      `json:"distinct"`
+	Faults   *bool                         `json:"faults"`
 	Fixtures map[string]fixtureDeclaration `json:"fixtures"`
 }
 
@@ -120,12 +122,19 @@ func load(path string) (*Target, error) {
 		}
 		loaded.Generate.MaxCRs = *maxCRs
 	}
+	if declared.Generate.Faults != nil && !*declared.Generate.Faults {
+		loaded.Generate.NoFaults = true
+	}
 	for _, crd := range declared.CRDs {
 		crdPath := resolve(dir, crd)
 		if _, err := os.Stat(crdPath); err != nil {
 			return nil, fmt.Errorf("crds: %w", err)
 		}
 		loaded.CRDs = append(loaded.CRDs, crdPath)
+	}
+
+	if err := loadRBAC(dir, declared.RBAC, loaded); err != nil {
+		return nil, err
 	}
 
 	if declared.Primary == "" {
@@ -197,11 +206,34 @@ func load(path string) (*Target, error) {
 	if err != nil {
 		return nil, fmt.Errorf("crds: %w", err)
 	}
-	if err := loaded.checkScopes(scopeAtLoad(crds)); err != nil {
+	scope := scopeAtLoad(crds)
+	if err := loaded.checkScopes(scope); err != nil {
 		if misplaced := (*misplacedFixture)(nil); errors.As(err, &misplaced) {
 			return nil, fmt.Errorf("fixture %s: %w", fileOf[misplaced.fixture], err)
 		}
+		if clusterNS := (*clusterFixtureNamespace)(nil); errors.As(err, &clusterNS) {
+			return nil, fmt.Errorf("fixture %s: %w", fileOf[clusterNS.fixture], err)
+		}
 		return nil, err
+	}
+	for _, fixture := range loaded.Fixtures {
+		gvk := fixture.GroupVersionKind()
+		if namespaced, known := scope(gvk); known && !namespaced && !slices.Contains(loaded.ClusterFixtures, gvk) {
+			loaded.ClusterFixtures = append(loaded.ClusterFixtures, gvk)
+		}
+	}
+	for _, file := range slices.Sorted(maps.Keys(declared.Generate.Fixtures)) {
+		for _, fixture := range loaded.Fixtures {
+			if fileOf[fixture] != resolve(dir, file) {
+				continue
+			}
+			gvk := fixture.GroupVersionKind()
+			namespaced, known := scope(gvk)
+			if known && !namespaced {
+				return nil, fmt.Errorf("generate.fixtures %s: the %s %s is cluster-scoped, and fixture ops would change what every run shares",
+					file, observe.KindName(gvk), fixture.GetName())
+			}
+		}
 	}
 
 	if declared.Selector != "" {

@@ -51,7 +51,11 @@ func newLiveRun(h *Harness, t *target.Target) (*liveRun, error) {
 	}
 	emptied := t.WatchedKinds()
 	for _, fixture := range t.Fixtures {
-		if gvk := fixture.GroupVersionKind(); !slices.Contains(emptied, gvk) {
+		gvk := fixture.GroupVersionKind()
+		if slices.Contains(t.ClusterFixtures, gvk) {
+			continue // Cluster-scoped fixtures are cleaned up per invocation, not per run.
+		}
+		if !slices.Contains(emptied, gvk) {
 			emptied = append(emptied, gvk)
 		}
 	}
@@ -76,8 +80,8 @@ func (l *liveRun) namespace() string { return l.h.Namespace }
 
 func (l *liveRun) now() time.Time { return time.Now() }
 
-func (l *liveRun) settle(ctx context.Context, owed func() time.Time) (bool, error) {
-	return l.h.Settle(ctx, owed)
+func (l *liveRun) settle(ctx context.Context, owed func() time.Time, floor time.Time) (bool, error) {
+	return l.h.settleFrom(ctx, owed, floor)
 }
 
 func (l *liveRun) sleep(ctx context.Context, d time.Duration) error { return sleep(ctx, d) }

@@ -43,6 +43,8 @@ type Generator struct {
 	fields    []field
 	leftAlone []string
 	managed   []string
+	// faultables are the resource plurals faults may match.
+	faultables []string
 	// updatable are the fixtures generation may set a string in.
 	updatable []target.MutableFixture
 	maxOps    int
@@ -110,6 +112,12 @@ func build(t *target.Target, opts Options) (*Generator, error) {
 	for _, gvk := range t.Manages {
 		g.managed = append(g.managed, observe.KindName(gvk))
 	}
+	if !t.Generate.NoFaults {
+		g.faultables, err = buildFaultables(t)
+		if err != nil {
+			return nil, err
+		}
+	}
 	for _, fixture := range t.Generate.Fixtures {
 		if len(fixture.Mutate) > 0 {
 			g.updatable = append(g.updatable, fixture)
@@ -154,7 +162,9 @@ func (g *Generator) sequence(t *rapid.T) run.Sequence {
 	for range rapid.IntRange(0, g.maxOps-1).Draw(t, "ops") {
 		ops = append(ops, g.op(t, len(ops), &at))
 	}
-	return run.Sequence{Target: g.target.Name, Ops: checkpointed(ops)}
+	judged := checkpointed(ops)
+	judged = g.faulted(t, judged)
+	return run.Sequence{Target: g.target.Name, Ops: judged}
 }
 
 // checkpointed inserts the settle waits that leave the drawn ops judged. A

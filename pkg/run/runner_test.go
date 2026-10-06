@@ -103,6 +103,8 @@ type fakeHarness struct {
 	// applyingInWait replaces applying once a wait begins.
 	owed           []time.Time
 	applyingInWait []proxy.FaultWindow
+	// floors is the floor each settle wait was given.
+	floors []time.Time
 	// retiresInWait has the proxy retire the first fault this long into a
 	// wait, which then runs in real time until the target owes nothing.
 	retiresInWait time.Duration
@@ -160,7 +162,8 @@ func (f *fakeHarness) now() time.Time {
 	return f.clock()
 }
 
-func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time) (bool, error) {
+func (f *fakeHarness) settle(ctx context.Context, owed func() time.Time, floor time.Time) (bool, error) {
+	f.floors = append(f.floors, floor)
 	if f.applyingInWait != nil {
 		f.applying = f.applyingInWait
 	}
@@ -671,6 +674,39 @@ func TestRunRefusesAnOpOnAFixtureTheTargetDoesNotDeclare(t *testing.T) {
 
 	if want := "op 1 (deleteFixture): the target declares no fixture v1/Secret other"; err == nil || !strings.Contains(err.Error(), want) {
 		t.Errorf("The run returned %v, want an error saying %q.", err, want)
+	}
+}
+
+func TestRunRefusesAnOpOnAClusterScopedFixture(t *testing.T) {
+	clusterRoleKind := schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"}
+	withClusterRole := *toyTarget
+	fixture := &unstructured.Unstructured{}
+	fixture.SetGroupVersionKind(clusterRoleKind)
+	fixture.SetName("shared")
+	withClusterRole.Fixtures = []*unstructured.Unstructured{fixture}
+	withClusterRole.ClusterFixtures = []schema.GroupVersionKind{clusterRoleKind}
+	for _, opType := range []OpType{OpUpdateFixture, OpDeleteFixture} {
+		t.Run(string(opType), func(t *testing.T) {
+			op := Op{Type: opType, Kind: "rbac.authorization.k8s.io/v1/ClusterRole", Name: "shared"}
+			if opType == OpUpdateFixture {
+				op.Patch = map[string]any{"rules": []any{}}
+			}
+			if opType == OpDeleteFixture {
+				op.Until = &Until{Op: 2}
+			}
+			sequence := sequenceOf(
+				Op{Type: OpCreate, Obj: widget("widget")},
+				op,
+				Op{Type: OpSettle},
+			)
+
+			_, err := runSequence(t.Context(), &withClusterRole, sequence, Options{Check: &fakeChecker{}}, newFakeHarness())
+
+			want := "cluster-scoped"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("The run returned %v, want an error saying %q.", err, want)
+			}
+		})
 	}
 }
 
@@ -1300,6 +1336,47 @@ func TestRunTellsTheSettleWaitWhatRecoveryTheFaultsAreOwed(t *testing.T) {
 	}
 }
 
+// Nothing shows what a deleteManaged changed, and a target can converge while
+// an informer of its still backs off from a fault. So the wait after the op
+// does not converge before each fault that stopped has had as long as it
+// lasted, and T_settle more.
+func TestRunHoldsTheWaitAfterADeleteManagedForEachFaultThatStopped(t *testing.T) {
+	applied, retired := time.Now().Add(-6*time.Second), time.Now().Add(-2*time.Second)
+	owed := retired.Add(retired.Sub(applied) + testTimeouts.Settle)
+	fault := Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}, Until: Trigger{Count: 1}}}
+	create := Op{Type: OpCreate, Obj: widget("widget")}
+	for _, test := range []struct {
+		name     string
+		ops      []Op
+		applying []proxy.FaultWindow
+		// floors are the floors of the waits in turn.
+		floors []time.Time
+	}{
+		{name: "after a fault the run converged since",
+			ops:      []Op{create, fault, {Type: OpSettle}, {Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)}},
+			applying: []proxy.FaultWindow{{First: applied, Retired: retired}}, floors: []time.Time{{}, {}, owed}},
+		{name: "with no fault",
+			ops: []Op{create, {Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(0)}}, floors: []time.Time{{}, {}}},
+		{name: "that deleted nothing",
+			ops:      []Op{create, fault, {Type: OpSettle}, {Type: OpDeleteManaged, Kind: "v1/ConfigMap", Nth: nth(7)}},
+			applying: []proxy.FaultWindow{{First: applied, Retired: retired}}, floors: []time.Time{{}, {}, {}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			h := newFakeHarness()
+			h.applying = test.applying
+
+			_, err := runFake(t, h, nil, sequenceOf(test.ops...))
+
+			if err != nil {
+				t.Fatalf("The run failed: %v", err)
+			}
+			if !slices.EqualFunc(h.floors, test.floors, time.Time.Equal) {
+				t.Errorf("The settle waits had the floors %v, want %v.", h.floors, test.floors)
+			}
+		})
+	}
+}
+
 func TestRunGivesADeletionUntilItsDeadline(t *testing.T) {
 	h := newFakeHarness()
 	h.finalizerStays = true
@@ -1466,19 +1543,15 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 	for _, test := range []struct {
 		name string
 		// fault is the fault op's window, placed from the deletion.
-		fault   func(deleted time.Time) proxy.FaultWindow
-		found   []Violation
-		want    string
-		says    string
-		wantErr string
+		fault func(deleted time.Time) proxy.FaultWindow
+		found []Violation
+		want  string
+		says  string
 	}{
 		{name: "a check reports it", found: []Violation{{ID: "G3"}}, want: "G3"},
 		{name: "a fault reached into its deletion", fault: func(deleted time.Time) proxy.FaultWindow {
 			return proxy.FaultWindow{First: deleted.Add(time.Second), Retired: deleted.Add(2 * time.Second)}
 		}, want: "G4", says: fmt.Sprintf("(timeouts.delete is %s)", testTimeouts.Delete)},
-		{name: "a fault is still active", fault: func(deleted time.Time) proxy.FaultWindow {
-			return proxy.FaultWindow{First: deleted.Add(time.Second)}
-		}, wantErr: "op 2 (recreate): the CR widget was still there"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			h := newFakeHarness()
@@ -1499,13 +1572,10 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 			result, err := runFake(t, h, check, sequence)
 
 			ended := time.Now()
-			if test.wantErr == "" && err != nil {
+			if err != nil {
 				t.Fatalf("The run failed: %v", err)
 			}
-			if test.wantErr != "" && (err == nil || !strings.Contains(err.Error(), test.wantErr)) {
-				t.Fatalf("The run returned %v, want %q.", err, test.wantErr)
-			}
-			if got := result.Violation; test.want != "" && (got == nil || got.ID != test.want || !strings.Contains(got.Statement, test.says)) {
+			if got := result.Violation; got == nil || got.ID != test.want || !strings.Contains(got.Statement, test.says) {
 				t.Errorf("The run reported %v, want %s saying %q.", got, test.want, test.says)
 			}
 			if got, want := checkpointsAt(result.Timeline), []int{1, 2}; !slices.Equal(got, want) {
@@ -1526,6 +1596,58 @@ func TestRunJudgesARecreateWhoseCRStayed(t *testing.T) {
 				t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
 			}
 		})
+	}
+}
+
+// The op cannot create its CR while a fault keeps the old one, so the run
+// goes on to the teardown, which judges the target once the fault is cleared.
+func TestARecreateWhoseOldCRAFaultKeptStopsTheRun(t *testing.T) {
+	h := newFakeHarness()
+	h.crStays = true
+	h.faulting = true
+	sequence := sequenceOf(
+		Op{Type: OpFault, Fault: &Fault{Action: Action{Error: 500}}},
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpRecreate, Obj: widget("widget")},
+		Op{Type: OpUpdate, Patch: map[string]any{"spec": map[string]any{"count": float64(5)}}},
+	)
+
+	result, err := runFake(t, h, nil, sequence)
+
+	if err != nil || result.Violation != nil {
+		t.Fatalf("The run returned %v and reported %v, want neither: a fault kept the CR.", err, result.Violation)
+	}
+	const stopped = "op 2 (recreate) stopped the run: the CR widget was still there"
+	if !slices.ContainsFunc(result.Notes, func(note string) bool { return strings.HasPrefix(note, stopped) }) {
+		t.Errorf("The run noted %q, want one beginning %q.", result.Notes, stopped)
+	}
+	want := []string{"addFault 0", "createCR widget", "settle", "supervise", "deleteCR widget", "awaitCRGone widget"}
+	if got := h.opCalls(); !slices.Equal(got, want) {
+		t.Errorf("The run did\n\t%v\nwant\n\t%v", got, want)
+	}
+	if result.Timeline.Recovery == nil {
+		t.Error("The teardown gave the target no recovery from the fault that kept the CR.")
+	}
+	if got, want := checkpointsAt(result.Timeline), []int{1, 2, Recovery, Teardown}; !slices.Equal(got, want) {
+		t.Errorf("The run checkpointed at %v, want %v.", got, want)
+	}
+}
+
+// The checks excuse a CR past its G3 deadline only for G3 to report it, so
+// one that no check reports means they disagree.
+func TestARecreateWhoseCRStaysUnexcusedIsAHarnessError(t *testing.T) {
+	h := newFakeHarness()
+	h.crStays = true
+	h.recordDeletingCR("widget", "11", time.Now().Add(-testTimeouts.Delete-time.Second))
+	sequence := sequenceOf(
+		Op{Type: OpCreate, Obj: widget("widget")},
+		Op{Type: OpRecreate, Obj: widget("widget")},
+	)
+
+	_, err := runFake(t, h, nil, sequence)
+
+	if want := "op 1 (recreate): the CR widget was still there"; err == nil || !strings.Contains(err.Error(), want) {
+		t.Errorf("The run returned %v, want %q.", err, want)
 	}
 }
 
@@ -2503,6 +2625,45 @@ func TestRunNotesEachOwnerTheCollectorCouldNotResolve(t *testing.T) {
 	}
 	if !slices.Equal(result.Notes, want) {
 		t.Errorf("The run carried the notes\n\t%q\nwant\n\t%q", result.Notes, want)
+	}
+}
+
+func TestRunNotesWhatTheAPIServerForbadeTheTarget(t *testing.T) {
+	h := newFakeHarness()
+	h.logged = []proxy.Request{
+		{Verb: "patch", Resource: "widgets", Subresource: "status", Status: 403},
+		{Verb: "update", Resource: "widgets", Subresource: "status", Status: 403},
+		{Verb: "patch", Resource: "widgets", Subresource: "status", Status: 403}, // duplicate
+		{Verb: "get", Resource: "configmaps", Status: 200},                       // not forbidden
+		{Verb: "list", Resource: "widgets", Status: 403, Fault: "error(403)"},    // injected fault
+	}
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	want := "the API server forbade the target: patch widgets/status, update widgets/status"
+	if !slices.Contains(result.Notes, want) {
+		t.Errorf("The run noted %q, want %q.", result.Notes, want)
+	}
+}
+
+func TestRunDoesNotNoteForbiddenWhenNoneOccurred(t *testing.T) {
+	h := newFakeHarness()
+	h.logged = []proxy.Request{
+		{Verb: "get", Resource: "configmaps", Status: 200},
+	}
+
+	result, err := runFake(t, h, nil, sequenceOf(Op{Type: OpCreate, Obj: widget("widget")}))
+
+	if err != nil {
+		t.Fatalf("The run failed: %v", err)
+	}
+	for _, note := range result.Notes {
+		if strings.Contains(note, "forbade") {
+			t.Errorf("The run noted %q, want no forbidden note.", note)
+		}
 	}
 }
 

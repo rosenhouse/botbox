@@ -651,6 +651,256 @@ func botboxBudget(t *testing.T, s step) (runs int, deadline time.Duration) {
 	return runs, deadline
 }
 
+// T1: every nightly step that files an issue runs only after failure.
+func TestNightlyReportStepsRunOnlyAfterFailure(t *testing.T) {
+	nightly := readWorkflow(t, ".github/workflows/nightly.yml")
+	for name, job := range nightly.Jobs {
+		// The step that runs make or botbox, whose conclusion the report checks.
+		var runID string
+		for _, s := range job.Steps {
+			if s.ID != "" && strings.Contains(s.Run, "make ") {
+				runID = s.ID
+			}
+		}
+		for _, s := range job.Steps {
+			if !strings.Contains(s.Run, "gh issue") {
+				continue
+			}
+			if !strings.HasPrefix(s.If, "failure() && ") {
+				t.Errorf("job %s, step %q: if: %q does not start with failure()", name, s.ID, s.If)
+			}
+			if runID != "" && !strings.Contains(s.If, "steps."+runID+".conclusion") {
+				t.Errorf("job %s, step %q: if: %q does not name the conclusion of the step that runs make (%s)", name, s.ID, s.If, runID)
+			}
+		}
+	}
+}
+
+// T2: the nightly files a find only where a drawn seed failed a check.
+func TestNightlyReportStepDistinguishesAFindFromAnError(t *testing.T) {
+	nightly := readWorkflow(t, ".github/workflows/nightly.yml")
+	for name, job := range nightly.Jobs {
+		for _, s := range job.Steps {
+			if !strings.Contains(s.Run, "gh issue") {
+				continue
+			}
+			if !strings.Contains(s.Run, "summary.json") {
+				t.Errorf("job %s: the report step does not read summary.json to distinguish a find from an error", name)
+			}
+			// The step's env must carry both a find and an error label.
+			hasFind := false
+			hasError := false
+			for k, v := range s.Env {
+				if strings.Contains(k, "FIND") && strings.Contains(v, "nightly-find-") {
+					hasFind = true
+				}
+				if strings.Contains(k, "ERROR") && strings.Contains(v, "nightly-error-") {
+					hasError = true
+				}
+			}
+			if !hasFind || !hasError {
+				t.Errorf("job %s: the report step's env needs both a nightly-find and a nightly-error label", name)
+			}
+		}
+	}
+}
+
+func TestNightlyReportStepFilesAFindForAViolationAndAnErrorOtherwise(t *testing.T) {
+	nightly := readWorkflow(t, ".github/workflows/nightly.yml")
+	for name, job := range nightly.Jobs {
+		for _, s := range job.Steps {
+			if !strings.Contains(s.Run, "gh issue") {
+				continue
+			}
+
+			for _, tc := range []struct {
+				name    string
+				outcome string // summary.json outcome, or "" for no file
+				label   string // expected label substring
+			}{
+				{"violation", "violation", "nightly-find-"},
+				{"error", "error", "nightly-error-"},
+				{"no output", "", "nightly-error-"},
+				{"existing issue", "violation", "nightly-find-"},
+			} {
+				t.Run(fmt.Sprintf("%s/%s", name, tc.name), func(t *testing.T) {
+					workspace := t.TempDir()
+					if tc.outcome != "" {
+						invocation := filepath.Join(workspace, "botbox-out", "20260101T000000Z-1")
+						writeFile(t, filepath.Join(invocation, "summary.json"),
+							fmt.Sprintf(`{"outcome":%q,"exitCode":1}`, tc.outcome))
+					}
+
+					ghScript := `echo "$*"`
+					if tc.name == "existing issue" {
+						ghScript = `case "$2" in list) echo 42 ;; *) echo "$*" ;; esac`
+					}
+					// jq stub: the nightly script calls jq -r '.outcome // empty' FILE.
+					// $1=-r, $2=expression, $3=FILE.
+					jqStub := `eval file=\$$#; grep -o '"outcome":"[^"]*"' "$file" 2>/dev/null | head -1 | sed 's/.*"outcome":"\([^"]*\)".*/\1/' || true`
+					ran := runStep(t, s, workspace, map[string]string{
+						"gh":   ghScript,
+						"jq":   jqStub,
+						"date": `echo 2026-01-01`,
+					})
+					got := string(ran.output)
+					if !strings.Contains(got, tc.label) {
+						t.Errorf("expected %s label, got:\n%s", tc.label, got)
+					}
+					if tc.name == "existing issue" && !strings.Contains(got, "comment") {
+						t.Errorf("expected gh issue comment for existing issue, got:\n%s", got)
+					}
+				})
+			}
+		}
+	}
+}
+
+// T3: make test-kind-runs exits as botbox did.
+func TestMakeTestKindRunsExitsAsBotboxDid(t *testing.T) {
+	makefile := readFile(t, "Makefile")
+	// The test-kind-runs target should use must-pass for its botbox invocations.
+	if !strings.Contains(makefile, "must-pass") {
+		t.Error("the Makefile does not define a must-pass macro")
+	}
+}
+
+// T4: botbox invocations inside tier recipes (apart from negative controls) use
+// must-pass so make exits with botbox's own exit code.
+func TestTierBotboxInvocationsUseMustPass(t *testing.T) {
+	makefile := readFile(t, "Makefile")
+	// Extract recipe blocks for the tier targets.
+	tiers := []string{
+		"test-example:", "test-example-nightly:",
+		"test-example-external-secrets:", "test-example-external-secrets-nightly:",
+		"test-kind-runs:",
+	}
+	for _, tier := range tiers {
+		idx := strings.Index(makefile, tier)
+		if idx < 0 {
+			t.Errorf("Makefile has no %s target", tier)
+			continue
+		}
+		// Read the recipe (tab-indented lines after the target).
+		rest := makefile[idx:]
+		lines := strings.SplitAfter(rest, "\n")
+		for i, line := range lines {
+			if i == 0 {
+				continue // target line
+			}
+			if line == "" || (!strings.HasPrefix(line, "\t") && strings.TrimSpace(line) != "") {
+				break // next target
+			}
+			trimmed := strings.TrimLeft(line, "\t @")
+			isQuickstart := strings.Contains(trimmed, "quickstart.sh")
+			isBotbox := strings.Contains(trimmed, "./bin/botbox run") || strings.Contains(trimmed, "$(KIND_BOTBOX)")
+			if !isQuickstart && !isBotbox {
+				continue
+			}
+			// Negative controls use the negative-control macro.
+			if strings.Contains(line, "negative-control") {
+				continue
+			}
+			// The invocation should be inside a must-pass call.
+			if !strings.Contains(line, "must-pass") {
+				t.Errorf("%s botbox invocation does not use must-pass: %s", tier, strings.TrimSpace(line))
+			}
+		}
+	}
+}
+
+// T5: quickstarts exit 2 when they can't test.
+func TestQuickstartsExitTwoWhenTheyCantTest(t *testing.T) {
+	for _, qs := range []struct {
+		path  string
+		stubs map[string]string
+	}{
+		{
+			"examples/cert-manager/quickstart.sh",
+			map[string]string{
+				"go":   "exit 1",
+				"make": "exit 0",
+				"lsof": "exit 1",
+			},
+		},
+		{
+			"examples/external-secrets/quickstart.sh",
+			map[string]string{
+				"go":   "exit 1",
+				"make": "exit 0",
+			},
+		},
+	} {
+		t.Run(qs.path, func(t *testing.T) {
+			script := readFile(t, qs.path)
+			workspace := t.TempDir()
+			dir := t.TempDir()
+			for command, stub := range qs.stubs {
+				if err := os.WriteFile(filepath.Join(dir, command), []byte("#!/bin/sh\n"+stub+"\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			scriptFile := filepath.Join(dir, "quickstart.sh")
+			if err := os.WriteFile(scriptFile, []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("sh", scriptFile)
+			cmd.Dir = workspace
+			cmd.Env = []string{
+				"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
+				"HOME=" + workspace,
+			}
+			output, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("expected failure, got success: %s", output)
+			}
+			exitErr, ok := err.(*exec.ExitError)
+			if !ok {
+				t.Fatalf("expected ExitError, got %T: %v", err, err)
+			}
+			if exitErr.ExitCode() != 2 {
+				t.Errorf("expected exit 2, got exit %d: %s", exitErr.ExitCode(), output)
+			}
+		})
+	}
+}
+
+func TestCertManagerQuickstartExitsTwoWhenPortIsBound(t *testing.T) {
+	script := readFile(t, "examples/cert-manager/quickstart.sh")
+	workspace := t.TempDir()
+	dir := t.TempDir()
+	for command, stub := range map[string]string{
+		"go":   "exit 0",
+		"make": "exit 0",
+		"lsof": "exit 0", // port is bound
+	} {
+		if err := os.WriteFile(filepath.Join(dir, command), []byte("#!/bin/sh\n"+stub+"\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	scriptFile := filepath.Join(dir, "quickstart.sh")
+	if err := os.WriteFile(scriptFile, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("sh", scriptFile)
+	cmd.Dir = workspace
+	cmd.Env = []string{
+		"PATH=" + dir + string(os.PathListSeparator) + os.Getenv("PATH"),
+		"HOME=" + workspace,
+	}
+	output, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected failure, got success: %s", output)
+	}
+	exitErr, ok := err.(*exec.ExitError)
+	if !ok {
+		t.Fatalf("expected ExitError, got %T: %v", err, err)
+	}
+	if exitErr.ExitCode() != 2 {
+		t.Errorf("expected exit 2 when port 9403 is bound, got exit %d: %s", exitErr.ExitCode(), output)
+	}
+}
+
 func TestNightlyFindsSayHowToRestoreTheirEvidence(t *testing.T) {
 	reports := 0
 	for name, job := range readWorkflow(t, ".github/workflows/nightly.yml").Jobs {

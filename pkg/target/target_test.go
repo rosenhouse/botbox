@@ -28,7 +28,7 @@ func TestWatchedKindsHoldThePrimaryOnce(t *testing.T) {
 	}
 }
 
-func TestCheckScopesNamesEveryClusterScopedKind(t *testing.T) {
+func TestCheckScopesRefusesPrimaryAndManagedButAcceptsFixtures(t *testing.T) {
 	widget := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
 	clusterRole := schema.GroupVersionKind{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole"}
 	webhook := schema.GroupVersionKind{Group: "admissionregistration.k8s.io", Version: "v1", Kind: "ValidatingWebhookConfiguration"}
@@ -50,15 +50,14 @@ func TestCheckScopesNamesEveryClusterScopedKind(t *testing.T) {
 	}).CheckScopes(mapper)
 
 	if err == nil {
-		t.Fatal("CheckScopes accepted cluster-scoped kinds.")
+		t.Fatal("CheckScopes accepted cluster-scoped primary and managed kinds.")
 	}
-	for _, want := range []string{"managed rbac.authorization.k8s.io/v1/ClusterRole", "managed v1/Namespace",
-		"fixture admissionregistration.k8s.io/v1/ValidatingWebhookConfiguration widget-validator"} {
+	for _, want := range []string{"managed rbac.authorization.k8s.io/v1/ClusterRole", "managed v1/Namespace"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("CheckScopes returned %q, which does not name %q.", err, want)
 		}
 	}
-	for _, other := range []string{"Widget", "Unserved"} {
+	for _, other := range []string{"Widget", "Unserved", "fixture", "ValidatingWebhookConfiguration", "widget-validator"} {
 		if strings.Contains(err.Error(), other) {
 			t.Errorf("CheckScopes returned %q, which names %s.", err, other)
 		}
@@ -66,9 +65,13 @@ func TestCheckScopesNamesEveryClusterScopedKind(t *testing.T) {
 	if err := (&target.Target{Primary: widget}).CheckScopes(mapper); err != nil {
 		t.Errorf("CheckScopes refused a namespaced primary: %v", err)
 	}
+	// A cluster-scoped fixture is accepted.
+	if err := (&target.Target{Primary: widget, Fixtures: []*unstructured.Unstructured{fixture}}).CheckScopes(mapper); err != nil {
+		t.Errorf("CheckScopes refused a cluster-scoped fixture: %v", err)
+	}
 }
 
-func TestCheckScopesJudgesTheScopeOfEveryFixtureBeforeItsNamespace(t *testing.T) {
+func TestCheckScopesJudgesFixtureScopesAndNamespaces(t *testing.T) {
 	widget := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Widget"}
 	secret := schema.GroupVersionKind{Version: "v1", Kind: "Secret"}
 	gadget := schema.GroupVersionKind{Group: "toy.botbox", Version: "v1", Kind: "Gadget"}
@@ -90,9 +93,12 @@ func TestCheckScopesJudgesTheScopeOfEveryFixtureBeforeItsNamespace(t *testing.T)
 		want     string
 	}{
 		{fixtures: []*unstructured.Unstructured{fixture(unserved, "elsewhere", "default")}},
+		// A cluster-scoped fixture without a namespace is accepted.
+		{fixtures: []*unstructured.Unstructured{fixture(gadget, "shared", "")}},
+		// A cluster-scoped fixture with a namespace is refused.
 		{
-			fixtures: []*unstructured.Unstructured{fixture(secret, "ca", "default"), fixture(gadget, "shared", "default")},
-			want:     "cluster-scoped kinds: the fixture toy.botbox/v1/Gadget shared",
+			fixtures: []*unstructured.Unstructured{fixture(gadget, "shared", "default")},
+			want:     "Gadget has no namespace; drop it",
 		},
 		{
 			fixtures: []*unstructured.Unstructured{fixture(secret, "settings", ""), fixture(secret, "ca", "default"), fixture(secret, "token", "")},
@@ -103,7 +109,7 @@ func TestCheckScopesJudgesTheScopeOfEveryFixtureBeforeItsNamespace(t *testing.T)
 
 		switch {
 		case test.want == "" && err != nil:
-			t.Errorf("CheckScopes refused a fixture whose kind the cluster does not serve: %v", err)
+			t.Errorf("CheckScopes refused fixtures %v: %v", test.fixtures, err)
 		case test.want != "" && (err == nil || !strings.Contains(err.Error(), test.want)):
 			t.Errorf("CheckScopes returned %v, want %q.", err, test.want)
 		}

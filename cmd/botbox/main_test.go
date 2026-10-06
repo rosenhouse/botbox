@@ -42,6 +42,8 @@ type untilInterrupted struct{}
 
 func (untilInterrupted) vet(*target.Target) error { return nil }
 
+func (untilInterrupted) prepare(context.Context, *target.Target) error { return nil }
+
 func (untilInterrupted) execute(ctx context.Context, _ *target.Target, _ run.Sequence, dir string, _ run.Checker) (run.Result, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return run.Result{}, err

@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/rosenhouse/botbox/pkg/cluster"
@@ -90,6 +91,8 @@ func newCLI(stdout, stderr io.Writer) *cli {
 type session interface {
 	// vet refuses a target the cluster cannot run, before any run starts.
 	vet(t *target.Target) error
+	// prepare creates the cluster-scoped fixtures that all runs share.
+	prepare(ctx context.Context, t *target.Target) error
 	execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error)
 	close() error
 }
@@ -210,6 +213,9 @@ func (c *cli) save(record *summary, opts options, dir string) error {
 func (c *cli) runAll(ctx context.Context, opts options, s session, t *target.Target,
 	runs []planned, out *run.Output, record *summary) int {
 	if err := s.vet(t); err != nil {
+		return c.stop(record, err)
+	}
+	if err := s.prepare(ctx, t); err != nil {
 		return c.stop(record, err)
 	}
 	sequences := make([]run.Sequence, len(runs))
@@ -852,6 +858,8 @@ type clusterSession struct {
 	// controllerManager says the cluster runs kube-controller-manager, which
 	// envtest does not.
 	controllerManager bool
+	mapper            meta.RESTMapper
+	invocation        *run.Invocation
 }
 
 // envtestStatic are the kinds that run Pods, and the claims Pods mount. Only
@@ -921,7 +929,17 @@ func (s *clusterSession) vet(t *target.Target) error {
 	if err != nil {
 		return err
 	}
+	s.mapper = mapper
 	return t.CheckScopes(mapper)
+}
+
+func (s *clusterSession) prepare(ctx context.Context, t *target.Target) error {
+	inv, err := run.NewInvocation(s.Config(), t)
+	if err != nil {
+		return err
+	}
+	s.invocation = inv // set before Prepare so close() cleans up partial creates
+	return inv.Prepare(ctx, t, s.mapper)
 }
 
 func (s *clusterSession) execute(ctx context.Context, t *target.Target, sequence run.Sequence, dir string, check run.Checker) (run.Result, error) {
@@ -933,7 +951,15 @@ func (s *clusterSession) execute(ctx context.Context, t *target.Target, sequence
 	})
 }
 
-func (s *clusterSession) close() error { return s.Stop() }
+func (s *clusterSession) close() error {
+	if s.invocation != nil {
+		// Use a fresh context; the run's may have been cancelled.
+		if err := s.invocation.Close(context.Background()); err != nil {
+			return errors.Join(err, s.Stop())
+		}
+	}
+	return s.Stop()
+}
 
 func version() string {
 	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "" {

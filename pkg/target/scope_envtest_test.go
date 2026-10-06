@@ -19,7 +19,7 @@ func TestLoadKnowsTheScopeOfEveryKindABareAPIServerServes(t *testing.T) {
 	}
 
 	for _, kind := range clusterScoped {
-		if err := loadFixtureInDefault(t, kind); err == nil || !strings.HasSuffix(err.Error(), "the fixture "+kind.String()+" x") {
+		if err := loadFixtureInDefault(t, kind); err == nil || !strings.Contains(err.Error(), "has no namespace; drop it") {
 			t.Errorf("Load returned %v for a fixture of the cluster-scoped %s.", err, kind)
 		}
 	}

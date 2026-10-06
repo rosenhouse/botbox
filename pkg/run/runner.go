@@ -281,8 +281,9 @@ type harness interface {
 	namespace() string
 	now() time.Time
 	// settle waits for the target to converge, past timeouts.settle while
-	// owed returns a later instant.
-	settle(ctx context.Context, owed func() time.Time) (bool, error)
+	// owed returns a later instant. It converges no sooner than floor, and
+	// gives up no sooner than timeouts.stable past it.
+	settle(ctx context.Context, owed func() time.Time, floor time.Time) (bool, error)
 	sleep(ctx context.Context, d time.Duration) error
 	restart(ctx context.Context) error
 	// addFault has the proxy apply the fault after those it holds.
@@ -352,6 +353,9 @@ type runner struct {
 	// botbox did to the run namespace itself.
 	skipped []string
 	failed  bool
+	// stopped is whether an op ended the run early with no finding, as a
+	// recreate does whose old CR a fault keeps.
+	stopped bool
 	// converged is where the last settle wait that converged ended. The first
 	// shows the target works, so botbox supervises it from there on.
 	converged time.Time
@@ -402,7 +406,7 @@ func runSequence(ctx context.Context, t *target.Target, sequence Sequence, opts 
 	teardown := r.teardown(ctx)
 	r.readExits()
 	// The run's own notes come before the last checkpoint's.
-	notes := slices.Concat(r.exitNotes(), r.skipped, r.notes)
+	notes := slices.Concat(r.exitNotes(), r.forbiddenNotes(), r.skipped, r.notes)
 	result := Result{Timeline: r.timeline, Violation: r.violation, Notes: notes, Recorded: r.input()}
 	return result, errors.Join(failure, teardown)
 }
@@ -428,10 +432,11 @@ func refusal(op Op, err error) error {
 	return err
 }
 
-// applyOps applies the sequence in order and stops at the first violation.
+// applyOps applies the sequence in order and stops at the first violation,
+// or where an op stopped the run.
 func (r *runner) applyOps(ctx context.Context) error {
 	for _, op := range r.sequence.Ops {
-		if r.violation != nil {
+		if r.violation != nil || r.stopped {
 			return nil
 		}
 		if err := r.applyOp(ctx, op); err != nil {
@@ -527,6 +532,9 @@ func (r *runner) applyToFixture(ctx context.Context, op Op) error {
 		return fmt.Errorf("the target declares no fixture %s %s", op.Kind, op.Name)
 	}
 	gvk := fixture.GroupVersionKind()
+	if slices.Contains(r.target.ClusterFixtures, gvk) {
+		return fmt.Errorf("the fixture %s %s is cluster-scoped, and a sequence cannot mutate what every run shares", observe.KindName(gvk), op.Name)
+	}
 	if op.Type == OpDeleteFixture {
 		r.deleted = append(r.deleted, op)
 		return r.h.deleteFixture(ctx, gvk, op.Name)
@@ -570,7 +578,7 @@ func (r *runner) create(ctx context.Context, op Op) error {
 // recreate deletes the CR, waits for it to go and creates the op's object. The
 // wait lasts timeouts.delete, or longer while the run is owed time or the
 // proxy holds a request, as a settle wait does. A CR still there where the
-// wait ends is judged there.
+// wait ends is judged there, and the op creates nothing.
 func (r *runner) recreate(ctx context.Context, op Op, cr string) error {
 	due := r.now().Add(r.target.Timeouts.Delete)
 	if err := r.h.deleteCR(ctx, cr); err != nil {
@@ -605,15 +613,23 @@ func (s *crStayed) Error() string {
 	return fmt.Sprintf("the CR %s was still there %v after its delete", s.cr, s.wait.Window.End.Sub(s.wait.Window.Start).Round(time.Second))
 }
 
-// judgeStayed checkpoints where a recreate's wait for its CR ended. A CR that
-// no check reports there is a harness error, since the op cannot go on.
+// judgeStayed checkpoints where a recreate's wait for its CR ended. The op
+// cannot go on. Where a fault excuses the target, the run stops, and the
+// teardown judges the target once it has cleared the fault. A CR that no
+// check reports there otherwise is a harness error.
 func (r *runner) judgeStayed(ctx context.Context, op Op, stayed *crStayed) error {
 	checkpoint := stayed.wait.checkpoint(op.Index)
 	checkpoint.Stayed = true
 	if err := r.judge(ctx, checkpoint, invariant.Input.Excused); err != nil || r.violation != nil {
 		return err
 	}
-	return stayed
+	if !r.asOf(checkpoint.At).Recovering(checkpoint.At) {
+		return stayed
+	}
+	r.stopped = true
+	r.skipped = append(r.skipped, fmt.Sprintf("op %d (%s) stopped the run: %v, and a fault excused the target, so the op could not create its CR",
+		op.Index, op.Type, stayed))
+	return nil
 }
 
 // applyDeleteManaged resolves the op's index against the managed objects and
@@ -646,8 +662,15 @@ func (r *runner) applyDeleteManaged(ctx context.Context, op Op) (string, error) 
 }
 
 // settle waits for the target's reaction and checkpoints where the wait ends.
+// Nothing shows what a deleteManaged changed, so the wait after one that
+// deleted an object converges no sooner than the target must have recreated
+// it.
 func (r *runner) settle(ctx context.Context, op Op) error {
-	wait, err := r.wait(ctx)
+	var floor time.Time
+	if applied := r.timeline.Ops[len(r.timeline.Ops)-1]; applied.Deleted != "" {
+		floor = r.asOf(r.now()).RecreateOwed(applied.At)
+	}
+	wait, err := r.wait(ctx, floor)
 	if err != nil {
 		return err
 	}
@@ -657,9 +680,10 @@ func (r *runner) settle(ctx context.Context, op Op) error {
 
 // wait waits up to timeouts.settle for the target to converge, or longer
 // while it is owed time to recover from the faults or to finish a deletion.
-func (r *runner) wait(ctx context.Context) (Wait, error) {
+// It converges no sooner than floor.
+func (r *runner) wait(ctx context.Context, floor time.Time) (Wait, error) {
 	wait := Wait{Window: Window{Start: r.now()}}
-	converged, err := r.h.settle(ctx, r.owed)
+	converged, err := r.h.settle(ctx, r.owed, floor)
 	wait.Window.End, wait.Converged = r.now(), converged
 	if converged {
 		if r.converged.IsZero() {
@@ -941,7 +965,7 @@ func (r *runner) awaitRecovery(ctx context.Context) error {
 	if now := r.now(); r.violation != nil || r.failed || !r.asOf(now).Recovering(now) {
 		return nil
 	}
-	wait, err := r.wait(ctx)
+	wait, err := r.wait(ctx, time.Time{})
 	if err == nil {
 		r.timeline.Recovery = &wait
 		// The faults are cleared, and the wait ran until the time they left
@@ -1026,6 +1050,36 @@ func (r *runner) exitNotes() []string {
 		notes[i] = fmt.Sprintf("the target exited during %s with %v", r.during(exit.At), exit)
 	}
 	return notes
+}
+
+// forbiddenNotes returns a note naming each distinct verb+resource the API
+// server forbade the target, excluding faults the proxy injected.
+func (r *runner) forbiddenNotes() []string {
+	type pair struct{ verb, resource string }
+	seen := map[pair]bool{}
+	var pairs []pair
+	for _, req := range r.h.requests() {
+		if !req.Forbidden() {
+			continue
+		}
+		resource := req.Resource
+		if req.Subresource != "" {
+			resource += "/" + req.Subresource
+		}
+		p := pair{req.Verb, resource}
+		if !seen[p] {
+			seen[p] = true
+			pairs = append(pairs, p)
+		}
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	parts := make([]string, len(pairs))
+	for i, p := range pairs {
+		parts[i] = p.verb + " " + p.resource
+	}
+	return []string{"the API server forbade the target: " + strings.Join(parts, ", ")}
 }
 
 // during names what the run was doing at t: the op it had applied last, or the

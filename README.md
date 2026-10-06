@@ -29,11 +29,6 @@ such as a Service, it runs only the [sequences you write](docs/targets.md#sequen
   child in another namespace, and it cannot supply an object your controller reads from
   another namespace
   ([#38](https://github.com/rosenhouse/botbox/issues/38)).
-- botbox does not test your controller's RBAC. Its proxy sends your controller's requests with
-  botbox's own credentials, which are admin on envtest, so a rule your Role lacks goes
-  unnoticed ([#45](https://github.com/rosenhouse/botbox/issues/45)).
-- The sequences botbox generates inject no faults. Only a sequence you write carries one
-  ([#47](https://github.com/rosenhouse/botbox/issues/47)).
 
 ## Install
 
@@ -75,9 +70,10 @@ botbox run --target targets/toy-widget/target.yaml --seed 1 --runs 3
 ```
 
 ```
-the deadline is 11m16s: these 3 runs can take 7m16s at the target's timeouts, and minimizing a failure gets the rest, at least 4m0s. --deadline sets another.
+the deadline is 1h30m1s: these 3 runs can take 1h26m1s at the target's timeouts, and minimizing a failure gets the rest, at least 4m0s. --deadline sets another.
 run 1: seed 1, generated
 run 2: seed 2, generated
+run 2: the proxy applied the fault of op 6 to no request
 run 3: seed 3, generated
 every run passed.
 ```
@@ -127,6 +123,8 @@ primary: toy.botbox/v1/Widget      # botbox creates, changes and deletes CRs of 
 sample: widget.yaml                # Each drawn sequence creates a variant of this CR first.
 manages:                           # The controller creates objects of these kinds.
   - v1/ConfigMap
+rbac:
+  - rbac/role.yaml
 launch:
   binary: bin/toy-widget
   args:
@@ -205,10 +203,11 @@ botbox run --target target.yaml --runs 5
 ```
 
 Each run draws a sequence of ops from `create`, `update`, `delete`, `recreate`, `settle`,
-`restart` and `deleteManaged`, and from the [fixture ops](docs/targets.md#fixtures) where
-`generate.fixtures` names a fixture. A drawn `create` adds a second or a third CR beside your
-sample. Without `--seed`, botbox draws a seed and prints it. `--seed` draws the same sequences
-again.
+`restart`, `deleteManaged` and `fault`, and from the [fixture ops](docs/targets.md#fixtures)
+where `generate.fixtures` names a fixture. A drawn `create` adds a second or a third CR beside
+your sample. A drawn `fault` injects an API error or delay on the primary or a managed kind's
+requests for a span of the sequence. Without `--seed`, botbox draws a seed and prints it.
+`--seed` draws the same sequences again.
 
 ### Pin sequences
 
@@ -370,10 +369,12 @@ and turn setup-go's cache on.
 
 A pull request runs fixed seeds, so its runs repeat from one commit to the next. The nightly run
 draws fresh seeds. GitHub tells only whoever last edited the schedule when a nightly run fails.
-botbox's own [nightly.yml](.github/workflows/nightly.yml) also files an issue. A seed names a
-sequence only for one build of botbox and one `target.yaml`, so upgrading botbox, or editing
-your CRD or `target.yaml`, can draw other sequences. To tell whether a failure comes from the
-change under review, replay its `sequence.json` against the base branch's controller.
+botbox's own [nightly.yml](.github/workflows/nightly.yml) reads `summary.json` to tell a find
+(a check failed, exit 1) from an error (exit 2 or no output) and files an issue under the
+matching label. A seed names a sequence only for one build of botbox and one `target.yaml`, so
+upgrading botbox, or editing your CRD or `target.yaml`, can draw other sequences. To tell
+whether a failure comes from the change under review, replay its `sequence.json` against the
+base branch's controller.
 
 Add a step that runs your pinned sequences, such as
 `exec botbox run --target target.yaml --deadline 10m --out botbox-out sequences/*.json`.
@@ -484,7 +485,7 @@ Seven generic invariants apply to every target. [DESIGN.md](DESIGN.md#6-generic-
 | ID | Name | Checks |
 |---|---|---|
 | G1 | Bounded reconciliation | Under an unchanged spec, one quiet window holds no more requests than `thresholds.quiet` allows, zero by default. |
-| G2 | No churn | Once converged, the managed objects and their resourceVersions stop changing. |
+| G2 | No churn | Once converged, the target stops changing the CRs and the objects it manages. |
 | G3 | Clean deletion | Deleting a CR removes everything it manages and clears its finalizers. |
 | G4 | Convergence | `ready` holds on every CR within `timeouts.settle` of every spec change, `updateFixture` or return of a deleted fixture, and again once a fault stops or the controller is back from a `restart`. A controller waiting to restart, or not yet back, has not converged. |
 | G5 | Restart-stable | Restarting the target does not change converged state. |

@@ -72,10 +72,12 @@ binds a free one, such as `127.0.0.1:0`, so that two invocations do not collide.
 
 Without `rbac`, your controller runs as admin. With it, reconciler-fuzzer runs your controller as a
 ServiceAccount bound to the Roles in the run's namespace and to the ClusterRoles cluster-wide.
-The run notes each verb and resource the API server forbade, as in
-`the API server forbade the target: update widgets/status`. Add that verb to a Role or
-ClusterRole. Your controller's retries of the 403 then usually fail
-[G6](checks.md#g6-no-error-loop), or [G4](checks.md#g4-convergence) names the request.
+
+A missing permission usually fails [G6](checks.md#g6-no-error-loop), or
+[G4](checks.md#g4-convergence) names the forbidden request. The run notes each verb and
+resource the API server forbade, as in `the API server forbade the target: update
+widgets/status`. Add the verb to a Role, or to a ClusterRole for a cluster-scoped resource or a
+watch across namespaces.
 
 ## Garbage collection
 

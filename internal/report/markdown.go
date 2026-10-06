@@ -27,7 +27,7 @@ func (d document) markdown() []byte {
 		fmt.Fprintf(&md, "\n%s\n", d.Check.Evidence)
 	}
 	fmt.Fprintf(&md, "\n```sh\n%s\n```\n", d.Replay)
-	fmt.Fprintf(&md, "\n[docs/checks.md](%s) says what %s requires.\n", CheckSection(d.Check.ID), d.Check.ID)
+	fmt.Fprintf(&md, "\n[docs/checks.md](%s) says how to read a %s failure.\n", CheckSection(d.Check.ID), d.Check.ID)
 	fmt.Fprintf(&md, "\n%s %s\n", d.provenance(), d.recordings())
 	if len(d.Notes) > 0 {
 		md.WriteString("\n## Notes\n\n")

@@ -453,7 +453,7 @@ func TestTheChecksPageGivesEveryGenericInvariant(t *testing.T) {
 // source in internal/invariant spells them.
 var checkMessages = map[string][]string{
 	"G1":         {"where thresholds.quiet allows"},
-	"G2":         {"where a converged target changes nothing"},
+	"G2":         {"where a converged target changes nothing", "status write"},
 	"G3":         {"was still there", "still carried the finalizers"},
 	"G4":         {"expired with no fault active", "was not ready"},
 	"G5":         {"the Restart at"},
@@ -488,6 +488,8 @@ func TestTheChecksPageQuotesWhatEachCheckPrints(t *testing.T) {
 var runNotes = []string{
 	"the API server forbade the target",
 	"the teardown force-removed the finalizers of",
+	"the target exited during",
+	"reconciler-fuzzer's garbage collector never deletes",
 }
 
 // A reader who searches the pages for a note a run printed finds it.

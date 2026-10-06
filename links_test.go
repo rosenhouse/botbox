@@ -85,8 +85,12 @@ func TestAnchorsFollowGitHub(t *testing.T) {
 
 // A report links the section of the checks page that its check has.
 func TestReportsLinkTheirChecksSection(t *testing.T) {
+	page := anchors(readFile(t, checksPage))
+	if !slices.Contains(page, "properties") {
+		t.Errorf("%s has no Properties section for a property's report to link.", checksPage)
+	}
 	sections := map[string]string{"P1": "properties"}
-	for _, anchor := range anchors(readFile(t, checksPage)) {
+	for _, anchor := range page {
 		if id, _, found := strings.Cut(anchor, "-"); found && checkName.MatchString(strings.ToUpper(id)) {
 			sections[strings.ToUpper(id)] = anchor
 		}

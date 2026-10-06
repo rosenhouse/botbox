@@ -15,7 +15,7 @@ launch:
   args:
     - --kubeconfig=$KUBECONFIG     # botbox writes a kubeconfig for its proxy.
     - --label-from=widget-config
-    - --bug=0                      # A later --bug wins, so --launch-arg --bug=3 seeds B3.
+    - --bug=0                      # A later --bug wins, so --launch-arg --bug=3 switches on B3.
   env:
     WATCH_NAMESPACE: $NAMESPACE    # botbox replaces $NAMESPACE with each run's namespace.
 fixtures:                          # The controller reads these objects and owns none.

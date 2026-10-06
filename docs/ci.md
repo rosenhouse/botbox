@@ -1,13 +1,12 @@
 # Running botbox in CI
 
-The [README](../README.md#running-in-ci) gives the short version. This page holds a workflow to
-copy, and two other ways to run a pinned botbox.
+This page holds a workflow to copy, and two other ways to run a pinned botbox.
 
 ## A GitHub Actions workflow
 
 Copy this workflow into `.github/workflows/`, and replace its build and `target.yaml` with your
-own. Set `BOTBOX_VERSION` to a commit of main. botbox's steps need no go.mod, no cluster and no
-registry.
+own. Set `BOTBOX_VERSION` to a commit of main. botbox's own steps need no go.mod, no cluster
+and no registry.
 
 <!-- embed: examples/ci/github-actions.yml -->
 ```yaml
@@ -59,7 +58,7 @@ jobs:
             bin/envtest
           key: ${{ steps.tools.outputs.cache-primary-key }}
       - run: go build -o bin/controller ./cmd/controller   # Build what launch.binary names.
-      # exec lets a cancel's signal reach botbox, which bash does not pass on.
+      # exec hands a cancelled job's signal to botbox. bash would not pass it on.
       - if: github.event_name == 'pull_request'
         run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-out
       - if: github.event_name == 'schedule'
@@ -76,19 +75,19 @@ jobs:
 ```
 
 The job caches botbox and setup-envtest in `~/go/bin`, and the control plane in `bin/envtest`,
-under a key of their versions. A Go repository can instead read Go's version from its go.mod
-and turn on setup-go's cache.
+under a key of their versions. If your repository has a go.sum, set `go-version-file: go.mod`
+and `cache: true` instead.
 
 Add a step that runs your pinned sequences, such as
 `exec botbox run --target target.yaml --deadline 10m --out botbox-out sequences/*.json`.
 
 ## Seeds
 
-A pull request runs fixed seeds. Its runs repeat until a change upgrades botbox or edits your
-CRDs or `target.yaml`, which can draw other sequences. To tell whether a failure comes from the
+A pull request runs fixed seeds. Its runs repeat until you upgrade botbox or edit your CRDs or
+`target.yaml`. To tell whether a failure comes from the
 change under review, replay its `sequence.json` against the base branch's controller.
 
-The nightly run draws fresh seeds. When a scheduled run fails, GitHub tells only the person who
+The nightly run draws fresh seeds. When a scheduled run fails, GitHub notifies only the person who
 last edited the schedule. botbox's own [nightly.yml](../.github/workflows/nightly.yml) reads
 `summary.json` to tell a failed check (exit 1) from an error (exit 2 or no output), and files an
 issue under the matching label.
@@ -96,19 +95,18 @@ issue under the matching label.
 ## Deadlines
 
 `--deadline` caps each botbox invocation, and botbox stops within seconds of it. If the
-deadline ends a run, or stops botbox before its last run, botbox exits 2. If it ends
-minimizing, botbox still exits 1 and reports the smallest failing sequence it found.
+deadline ends a run, or stops botbox before its last run, botbox exits 2. If it cuts
+minimizing short, botbox still exits 1 and reports the smallest failing sequence it found.
 
-Without `--deadline`, botbox derives one from the longest that the runs' waits can take at
-your target's timeouts, plus 4m to minimize a failure. A fast controller finishes far sooner.
+Without `--deadline`, botbox assumes every wait runs to its timeout, and adds 4m to minimize a
+failure. A fast controller finishes far sooner.
 To size a deadline, time the pull request's command once and add at least 4m. Or shorten
 `timeouts`, as the toy does.
 
 ## Evidence
 
 The job uploads `botbox-out/`, which holds each run's sequence and a failing run's evidence.
-Anyone who can read the repository can download it, and botbox hides only the values in a
-Secret's `data` and annotations. Download it with the command in the workflow's last comment,
+Download it with the command in the workflow's last comment,
 and build your controller. The replay command in `report.md` then runs as written from the
 repository root.
 
@@ -144,18 +142,21 @@ bin/botbox version
 `tools/botbox/go.mod` then pins botbox. Your own go.mod and go.work, and any package of yours
 in `tools/`, stay as they were.
 
-`go mod edit -go` comes first, so that a `go` before 1.24, which lacks `-tool`, switches to a
-newer Go. `GOWORK=off` stops `go get` from raising the go line of your go.work. Under
+Keep `go mod edit -go` first, because a `go` before 1.24 lacks `-tool`. Keep `GOWORK=off`, or
+`go get` raises the go line of your go.work. Under
 `GOTOOLCHAIN=local`, a `go` before 1.24 stops this recipe with
 `flag provided but not defined: -tool`.
 
 Run `bin/botbox` as the last line does, not `go -C tools/botbox tool botbox`, which runs botbox
 in `tools/botbox/`, where your `launch.binary` does not resolve.
 
-In the workflow, build `bin/botbox` with the recipe's `go -C tools/botbox build` line, in a
-step after checkout. Install only setup-envtest in the cached step, drop `BOTBOX_VERSION` from
-the workflow and its cache key, and run `bin/botbox`. setup-go's cache, with `cache: true` and
-`cache-dependency-path: tools/botbox/go.sum`, keeps that build's downloads.
+To use it in the workflow:
+
+- After checkout, add a step that runs the recipe's `go -C tools/botbox build` line.
+- Install only setup-envtest in the cached step.
+- Drop `BOTBOX_VERSION` from the workflow and its cache key, and run `bin/botbox`.
+- Set setup-go's `cache: true` and `cache-dependency-path: tools/botbox/go.sum` to keep the
+  build's downloads.
 
 ## From go test
 
@@ -196,7 +197,7 @@ func TestBotbox(t *testing.T) {
 Build `bin/botbox` with the [tools module](#keep-botbox-out-of-your-gomod), build your
 controller and set `KUBEBUILDER_ASSETS`. Then run `go test -count=1 -tags botbox ./...`.
 `go test` cannot see a change to your controller or `target.yaml`, so `-count=1` stops it from
-reusing a cached pass. The build tag keeps the test out of a plain `go test ./...`. For more
-runs, raise `go test`'s `-timeout`, because the test stops botbox before it.
+reusing a cached pass. The build tag keeps the test out of a plain `go test ./...`. The test
+stops botbox 30s before `go test`'s `-timeout`, so raise `-timeout` for more runs.
 
 botbox has no Go API to call instead.

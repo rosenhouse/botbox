@@ -25,6 +25,7 @@ var limits = []limit{
 	{"no admission or conversion webhook of yours runs", 0, "No admission or conversion webhooks."},
 	{"on the version your CRD stores", 0, "A kubeconfig cluster keeps the webhook."},
 	{"generates sequences only for custom resources", 0, "botbox draws no sequence for a built-in primary kind"},
+	{"envtest runs no Pod", 0, "no pods run, and no workload's status changes"},
 	{"tests namespaced kinds only", 38, "every managed kind and every fixture must be namespaced"},
 	{"misses a child your controller leaks into another namespace", 38, "it does not see a child the target creates in another"},
 	{"cannot supply an object your controller reads from another namespace", 38, "A fixture sets no `metadata.namespace`"},

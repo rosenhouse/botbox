@@ -2,16 +2,16 @@
 
 botbox finds bugs in Kubernetes controllers. It runs your controller on your machine, against
 a real kube-apiserver and etcd from envtest, and records every request your controller makes.
-Then it:
+Each run applies a random sequence of ops, drawn from a seed. The ops:
 
-- creates, updates and deletes your custom resources (CRs),
-- restarts your controller,
-- deletes objects your controller manages,
-- and injects API errors and delays.
+- create, update and delete your custom resources (CRs)
+- restart your controller
+- delete objects your controller manages
+- inject API errors and delays
 
-botbox checks that your controller converges, stops writing, cleans up and recreates what it
-lost. It also checks properties you declare. When a check fails, botbox shrinks the sequence of
-ops to the ops the failure needs, and writes a report.
+botbox checks that your controller converges, goes quiet, cleans up after a deleted CR, and
+recreates the objects that botbox deletes. It also checks properties you declare. When a check
+fails, botbox minimizes the failing sequence and writes a report.
 
 You write no test code. One `target.yaml` describes your controller.
 
@@ -19,8 +19,11 @@ You write no test code. One `target.yaml` describes your controller.
 
 Your controller runs on your machine, not in a Pod. It cannot reach a Pod or a Service, and no
 admission or conversion webhook of yours runs. So keep your controller and your CRs on the
-version your CRD stores. botbox generates sequences only for custom resources. For a built-in
-kind, such as a Service, [write the sequences](docs/targets.md#sequences-you-write) yourself.
+version your CRD stores. botbox generates sequences only for custom resources. If your
+controller reconciles a built-in kind, such as a Service,
+[write the sequences](docs/targets.md#sequences-you-write) yourself. envtest runs no Pod, so a
+Deployment, a Job or a PersistentVolumeClaim never becomes ready. If your controller waits on
+one, run botbox [against a cluster](docs/targets.md#against-a-cluster), such as kind.
 
 - botbox tests namespaced kinds only, in one namespace per run. It misses a child your
   controller leaks into another namespace, and it cannot supply an object your controller
@@ -39,16 +42,17 @@ export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"
 `setup-envtest` downloads etcd and kube-apiserver. Run the last three lines again in each new
 shell. botbox has no release yet, so `@latest` installs the tip of main.
 
-Building botbox takes Go 1.26.0 or later. A `go` from Go 1.21 on fetches that Go itself, unless
-`GOTOOLCHAIN=local` is set, as many CI images do. Then `go install` fails with
+Building botbox takes Go 1.26.0 or later. Releases from Go 1.21 on download it for you. Many CI
+images set `GOTOOLCHAIN=local`, which stops the download, and `go install` fails with
 `requires go >= 1.26.0`. Install a newer Go, or run the commands with `GOTOOLCHAIN=auto`.
 
 `botbox --help` lists the commands, and `botbox run --help` lists the flags.
 
 ## Quick start
 
-This repository holds a toy controller, with bugs you can switch on. Run this in a clone of
-the repository. The first build takes a minute or two, and the runs take about half a minute:
+This repository holds a toy controller with bugs you can switch on. Clone it with
+`git clone https://github.com/rosenhouse/botbox`, and run this in the clone. The build takes a
+minute or two the first time, and the runs about half a minute:
 
 ```sh
 go build -o bin/toy-widget ./targets/toy-widget
@@ -63,11 +67,12 @@ run 3: seed 3, generated
 every run passed.
 ```
 
-Each run starts the toy in a new namespace, and applies a sequence of ops that its seed draws.
-Run 2 drew a fault that no request matched. The toy is correct, so every run passes.
+Each run starts the toy in a new namespace and applies a sequence of ops, drawn from the run's
+seed. Run 2 drew a fault that no request matched. The toy is correct, so every run passes.
 
 Now switch on bug B3, which leaves a ConfigMap without an ownerReference. `--launch-arg` passes
-an extra flag to the controller. This replays a sequence that creates a Widget and deletes it:
+an extra flag to the controller. `replay` runs a sequence file rather than a drawn sequence.
+This one creates a Widget and deletes it:
 
 ```sh
 botbox replay --target targets/toy-widget/target.yaml --launch-arg --bug=3 targets/toy-widget/sequences/b3.json
@@ -82,10 +87,13 @@ run 1: G3 the v1/ConfigMap widget-0 was still there 10s (timeouts.delete) after 
 
 botbox exits 1, and `report.md` in the evidence directory says what failed. All looks well
 until the Widget is deleted and its ConfigMap stays. envtest has no garbage collector, so an
-envtest suite misses this bug unless it checks each ownerReference. botbox emulates the
-collector, and checks every object your controller manages, in every run.
+envtest suite misses this bug unless it checks each ownerReference. botbox emulates the garbage
+collector and checks every object your controller manages in every run.
 
 ## Your own controller
+
+[docs/examples.md](docs/examples.md) runs botbox on two real controllers, cert-manager and
+external-secrets.
 
 ### Write target.yaml
 
@@ -110,7 +118,7 @@ launch:
   args:
     - --kubeconfig=$KUBECONFIG     # botbox writes a kubeconfig for its proxy.
     - --label-from=widget-config
-    - --bug=0                      # A later --bug wins, so --launch-arg --bug=3 seeds B3.
+    - --bug=0                      # A later --bug wins, so --launch-arg --bug=3 switches on B3.
   env:
     WATCH_NAMESPACE: $NAMESPACE    # botbox replaces $NAMESPACE with each run's namespace.
 fixtures:                          # The controller reads these objects and owns none.
@@ -133,19 +141,15 @@ thresholds:
   errloop: 5
 ```
 
-Get these keys right:
+Beyond what its comments say:
 
-- `manages` lists every kind your controller creates, as `group/version/Kind`, or `v1/Kind`
-  for the core group. botbox checks only objects of these kinds.
-- `sample` is one valid CR. botbox creates it with drawn values in some spec fields.
-- `launch` starts your controller. botbox replaces `$KUBECONFIG` and `$NAMESPACE` in its
-  `args` and `env`. Turn leader election off, and bind each port to a free one, such as
-  `127.0.0.1:0`.
-- `ready` is CEL over the CR's `metadata`, `spec` and `status`, and holds once your controller
-  has converged. The default compares `status.observedGeneration` with `metadata.generation`.
-- `properties` are optional checks of your own. `managed` holds the objects that the CR owns,
-  and those that no CR owns. A property also runs after the last CR is deleted, so guard what
-  it reads with `has()`, as P1 does.
+- `manages` names each kind as `group/version/Kind`, or `v1/Kind` for the core group. botbox
+  checks only objects of these kinds.
+- botbox replaces `$KUBECONFIG` and `$NAMESPACE` in `launch.args` and `launch.env`. Turn off
+  leader election, and bind each listener to a free port, such as `127.0.0.1:0`.
+- `ready` is CEL over the CR's `metadata`, `spec` and `status`. The default compares
+  `status.observedGeneration` with `metadata.generation`.
+- A property's `managed` holds the objects that the CR owns, and those that no CR owns.
 
 For a CR whose `Ready` condition carries `observedGeneration`, use this `ready`:
 
@@ -160,21 +164,17 @@ ready: >-
 [docs/targets.md](docs/targets.md) says how to choose the values, such as `timeouts` for a slow
 controller.
 
-envtest runs no Pod, so a Deployment, a Job or a PersistentVolumeClaim never becomes ready. If
-your controller waits on one, run botbox [against a cluster](docs/targets.md#against-a-cluster),
-such as kind.
-
 ### Run it
 
-Run botbox from the directory that `launch.binary` is relative to, such as your repository
+botbox resolves `launch.binary` from the directory it runs in, so run it from your repository
 root:
 
 ```sh
 botbox run --target target.yaml --runs 5
 ```
 
-botbox prints each run's seed. `--seed` draws the same sequences again while botbox, your CRDs
-and `target.yaml` stay the same.
+botbox prints each run's seed. `--seed` draws the same sequences again, as long as botbox, your
+CRDs and `target.yaml` are unchanged.
 
 ### Pin sequences
 
@@ -199,17 +199,14 @@ This sequence does both for the toy:
 `botbox run --target target.yaml sequences/*.json` runs your sequences.
 [docs/targets.md](docs/targets.md#sequences-you-write) says how to write them.
 
-[docs/examples.md](docs/examples.md) runs botbox on two real controllers, cert-manager and
-external-secrets.
-
 ## Reading a failure
 
 botbox exits 0 when every run passes, 1 when a check fails, and 2 when it could not test your
 controller. On exit 2, the message says why, and
 [docs/failures.md](docs/failures.md#when-botbox-exits-2) lists the usual causes.
 
-When a run fails, botbox prints the check that failed. Then it minimizes a drawn sequence,
-which can take minutes, and prints the run's evidence directory. Start with `report.md` there. It
+When a run fails, botbox prints the check that failed. It then minimizes the sequence, which can
+take minutes, and prints the run's evidence directory. Start with `report.md` there. It
 says what failed, quotes what the check read, and gives the command that replays it.
 
 | Check | Fails when | Usual cause |
@@ -217,8 +214,8 @@ says what failed, quotes what the check read, and gives the command that replays
 | G1 | Your controller keeps making requests after it converged. | A resync timer. |
 | G2 | Your controller keeps changing an object after it converged. | A timestamp in a status. |
 | G3 | A deleted CR leaves objects or a finalizer behind. | A child lacks an ownerReference to its CR. |
-| G4 | A CR is not `ready` within `timeouts.settle`. | A slow controller, one that never stops writing, or one that waits on a Pod, which [envtest never runs](docs/targets.md#against-a-cluster). Or `ready` reads a field the CR lacks. |
-| G5 | A restart changes converged state. | A field stamped at startup, or a change missed until then. |
+| G4 | A CR is not `ready` within `timeouts.settle`. | A slow controller, one that never stops writing, a wait on a Pod, which [envtest never runs](docs/targets.md#against-a-cluster), or a `ready` that reads a missing field. |
+| G5 | A restart changes converged state. | A field set at startup, or a change the controller sees only on restart. |
 | G6 | Your controller repeats one failing request more than `thresholds.errloop` times. | A retry of an error that never clears. |
 | G7 | An object that `deleteManaged` deleted does not come back. | A missing `Owns()`, or no controller ownerReference for `Owns()` to follow. |
 
@@ -227,9 +224,8 @@ says what each file and message means.
 
 ## Running in CI
 
-In CI, install botbox at a commit of main rather than `@latest`, which tracks main. Install it
-with `go install`, and keep it out of your go.mod, which botbox would raise to its Go and
-Kubernetes versions.
+In CI, `go install` botbox at a commit of main, not `@latest`. Keep it out of your go.mod,
+because requiring botbox raises your Go and Kubernetes versions to its own.
 
 Run fixed seeds on a pull request, and fresh seeds nightly:
 
@@ -240,12 +236,11 @@ botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-o
 botbox run --target target.yaml --runs 20 --deadline 30m --out botbox-out
 ```
 
-A fixed seed draws the same runs until a change upgrades botbox or edits your CRDs or
-`target.yaml`. The default deadline assumes every wait takes its full timeout. Set
-`--deadline` to the command's usual time plus 4m to minimize a failure.
+The default `--deadline` assumes every wait times out, so it is long. Set it to the command's
+usual time plus 4m, which leaves botbox time to minimize a failure.
 
 Upload `botbox-out/`, so that you can replay a failure. Anyone who can read the repository can
-then read it, and botbox hides only the values in a Secret's `data` and annotations.
+then read it, and botbox redacts only the values of a Secret's `data` and annotations.
 
 [docs/ci.md](docs/ci.md) holds a GitHub Actions workflow to copy. It also says how to pin
 botbox in a tools module, and how to run botbox from `go test`.

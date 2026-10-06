@@ -2,7 +2,7 @@
 
 The [README](../README.md#reading-a-failure) shows how to read a failure, and
 [checks.md](checks.md) says what each check's message means. This page says what each file
-holds.
+holds, and what to change when reconciler-fuzzer exits 2.
 
 ## The summary
 
@@ -68,10 +68,6 @@ looked at. It says how many it looked at, and names the file that holds them all
 your controller managed where it failed, over the kinds your target declares. That table has
 its own bound of twenty, and gives each object's metadata only. `objects.jsonl` holds each
 version whole.
-
-A [G4](checks.md#g4-convergence) also quotes your `ready`, the error evaluating it, and your
-CR's status where it failed. The status holds whatever your controller wrote, so the report
-cuts it: twenty conditions, 200 bytes of each field and 1000 bytes of the rest.
 
 ## Restarts and crash loops
 

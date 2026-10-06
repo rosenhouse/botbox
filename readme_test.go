@@ -22,7 +22,7 @@ const limitsHeading = "## Limitations"
 // change that lifts a limit deletes its rows and both statements.
 var limits = []limit{
 	{"cannot reach a Pod or a Service", 0, "It runs on reconciler-fuzzer's host, which routes to no Pod"},
-	{"admission or conversion webhook of yours runs", 0, "No admission or conversion webhooks."},
+	{"No admission or conversion webhook of yours runs", 0, "No admission or conversion webhooks."},
 	{"on the version your CRD stores", 0, "A kubeconfig cluster keeps the webhook."},
 	{"generates sequences only for a custom resource whose CRD your target lists", 0, "reconciler-fuzzer draws no sequence for a built-in primary kind"},
 	{"envtest runs no Pod", 0, "no pods run, and no workload's status changes"},
@@ -449,6 +449,47 @@ func TestTheChecksPageGivesEveryGenericInvariant(t *testing.T) {
 	}
 }
 
+// checkMessages are words each check's violation prints, as its source in
+// internal/invariant spells them.
+var checkMessages = map[string]string{
+	"G1": "where thresholds.quiet allows",
+	"G2": "where a converged target changes nothing",
+	"G3": "(timeouts.delete) after",
+	"G4": "expired with no fault active",
+	"G5": "the Restart at",
+	"G6": "repeated the failing request",
+	"G7": "deleted never came back",
+}
+
+// A reader who searches the checks page for what a failure printed finds it.
+func TestTheChecksPageQuotesWhatEachCheckPrints(t *testing.T) {
+	paths, err := filepath.Glob("internal/invariant/*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := ""
+	for _, path := range paths {
+		if !strings.HasSuffix(path, "_test.go") {
+			source += readFile(t, path)
+		}
+	}
+	page := readFile(t, checksPage)
+	for _, check := range firstGroups(`(?m)^## (G[0-9]+) `, page) {
+		says, found := checkMessages[check]
+		if !found {
+			t.Errorf("checkMessages has no words for %s.", check)
+			continue
+		}
+		if !strings.Contains(source, says) {
+			t.Errorf("internal/invariant never prints %q, which checkMessages gives for %s.", says, check)
+		}
+		heading := regexp.MustCompile(`(?m)^## ` + check + ` .*$`).FindString(page)
+		if !strings.Contains(oneLine(section(t, page, heading)), says) {
+			t.Errorf("%s's %s section does not quote %q.", checksPage, check, says)
+		}
+	}
+}
+
 var (
 	checkName = regexp.MustCompile(`\bG[0-9]+\b`)
 	checkLink = regexp.MustCompile(`\[(G[0-9]+)\]\((?:[^)#\s]*/)?(?:checks\.md)?#(g[0-9]+)-[^)\s]*\)`)
@@ -463,7 +504,6 @@ func TestThePagesLinkEachCheckTheyName(t *testing.T) {
 			if strings.HasPrefix(line, "#") {
 				continue
 			}
-			line = codeSpan.ReplaceAllString(line, "")
 			linked := checkLink.FindAllStringSubmatchIndex(line, -1)
 			for _, name := range checkName.FindAllStringIndex(line, -1) {
 				named++
@@ -480,7 +520,8 @@ func TestThePagesLinkEachCheckTheyName(t *testing.T) {
 	}
 }
 
-// proseLines are a page's lines, with those of fenced blocks left empty.
+// proseLines are a page's lines, with those of fenced blocks left empty and
+// code spans removed.
 func proseLines(page string) []string {
 	lines := strings.Split(page, "\n")
 	fenced := false
@@ -493,7 +534,10 @@ func proseLines(page string) []string {
 			lines[i] = ""
 		}
 	}
-	return lines
+	page = codeSpan.ReplaceAllStringFunc(strings.Join(lines, "\n"), func(span string) string {
+		return strings.Repeat("\n", strings.Count(span, "\n"))
+	})
+	return strings.Split(page, "\n")
 }
 
 // An invocation's directory ends in the seed of its first run.

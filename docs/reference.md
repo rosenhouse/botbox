@@ -136,9 +136,9 @@ or holds `: ` or ` #`. reconciler-fuzzer refuses a list index such as `[0]`, and
 annotation key that the dots split. A key names nothing inside a list, so a run notes a path
 such as `status.conditions.lastHeartbeatTime` and says where the `[*]` goes.
 
-[G5](checks.md#g5-restart-stable) always skips `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`,
-`metadata.generation`, `metadata.managedFields`, `status.conditions[*].lastTransitionTime`,
-and each ownerReference whose owner is gone.
+[G5](checks.md#g5-restart-stable) always skips `metadata.resourceVersion`, `metadata.uid`,
+`metadata.creationTimestamp`, `metadata.generation`, `metadata.managedFields`,
+`status.conditions[*].lastTransitionTime`, and each ownerReference whose owner is gone.
 
 ## Sequences
 

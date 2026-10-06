@@ -55,16 +55,16 @@ Ready.
 - **It works.** cert-manager needs no webhook, no leader election and no cluster-scoped
   namespace to issue self-signed certificates under envtest. Convergence is fast enough
   that the §6 defaults (`T_settle` 30 s) leave a wide margin.
-- **No garbage collection, no namespace finalization.** envtest has no
-  kube-controller-manager. Objects with ownerReferences outlive their owner, and namespaces
-  never leave `Terminating`. [G3](../checks.md#g3-clean-deletion) and the namespace-per-run cleanup in the first design draft
-  could not work as written. Hence GC emulation and self-cleanup (D5).
+- **No garbage collection, no namespace finalization.** envtest has no kube-controller-manager.
+  Objects with ownerReferences outlive their owner, and namespaces never leave `Terminating`.
+  [G3](../checks.md#g3-clean-deletion) and the namespace-per-run cleanup in the first design
+  draft could not work as written. Hence GC emulation and self-cleanup (D5).
 - **Readiness needs CEL.** The Certificate has no top-level `status.observedGeneration`;
   the field lives inside each condition. The predicate is
   `status.conditions.exists(c, c.type == "Ready" && c.status == "True" && c.observedGeneration == metadata.generation)` (D3).
 - **The negative control is real.** With the owner-ref flag off the Secret is retained by
-  design. Declaring Secrets as managed makes that a [G3](../checks.md#g3-clean-deletion) finding, which gives CI a failure
-  to assert on (D17).
+  design. Declaring Secrets as managed makes that a [G3](../checks.md#g3-clean-deletion)
+  finding, which gives CI a failure to assert on (D17).
 - **Fixtures are required.** A Certificate cannot be created without an Issuer to point
   at, and no schema can invent a valid `issuerRef` (D8).
 

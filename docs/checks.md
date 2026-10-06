@@ -1,10 +1,7 @@
 # Checks
 
-A failing run names the check that failed: [G1](#g1-bounded-reconciliation) to
-[G7](#g7-self-healing), which every run applies, or the ID of one of your
-[properties](#properties), such as P1. This page says what each check requires, what usually
-fails it, and what its message means. [failures.md](failures.md) says what each file of the
-evidence holds.
+Every run applies [G1](#g1-bounded-reconciliation) to [G7](#g7-self-healing) and your
+[properties](#properties).
 
 ## G1 Bounded reconciliation
 
@@ -30,8 +27,11 @@ wrote status more often than `thresholds.quiet` allows, even where the writes ch
 A deleted CR goes within `timeouts.delete`, with its finalizers and every object it owns.
 Nothing your controller manages remains once no CR does. A child that lacks an ownerReference
 to its CR usually fails it, since [the garbage collector](targets.md#garbage-collection)
-deletes only what names an owner. Where the CR itself stays, the failure names the finalizers
-still on it.
+deletes only what names an owner.
+
+`the … was still there … (timeouts.delete) after … was deleted` names an object left behind,
+and says whether it is orphaned. `the CR … still carried the finalizers … (timeouts.delete)
+after its deletion` names the finalizers still on a CR that did not go.
 
 Where a fault reached into the deletion, the run notes the deletion rather than judging it.
 The settle wait's [G4](#g4-convergence) then says `the CR … was still being deleted, held by
@@ -43,8 +43,10 @@ does not go.
 
 ## G4 Convergence
 
-Each [settle wait](targets.md#timeouts) that runs out with no fault active fails it. What
-follows `expired with no fault active` says why:
+Within `timeouts.settle` of each change, `ready` holds on every CR and nothing changes for
+`timeouts.stable`. A fault, a restart or a CR's deletion gives your controller longer, as
+[Timeouts](targets.md#timeouts) and [Faults](targets.md#faults) say. A settle wait that runs
+out otherwise fails, and what follows `expired with no fault active` says why:
 
 - `ready never held: evaluating ready "…": no such key: …` means your `ready` reads a field the
   CR does not have. Check the spelling, and guard an optional field with `has()`.
@@ -74,17 +76,21 @@ A controller that converges, only more slowly than `timeouts.settle` allows, nee
 `ready` that yields something other than a bool is a configuration error, and
 reconciler-fuzzer exits 2 naming it.
 
+The report quotes your `ready`, the error evaluating it, and your CR's status where it failed.
+The status holds whatever your controller wrote, so the report cuts it: twenty conditions, 200
+bytes of each field and 1000 bytes of the rest.
+
 ## G5 Restart-stable
 
 What your controller manages after a `restart` op equals what it managed before, compared
-where the settle waits on either side end. A field set at startup usually fails it, or a change
-the controller sees only on restart, such as one to a [fixture](targets.md#fixtures) it does
-not watch.
+where the settle waits on either side converge. A field set at startup usually fails it. So
+does a change the controller sees only on restart, such as one to a
+[fixture](targets.md#fixtures) it does not watch.
 
-The report lists each field the restart changed, with its value before and after, and the line
-reconciler-fuzzer prints names the first. If your controller stamps one of those fields at
-startup, paste its path into [`equalIgnore`](targets.md#equalignore) as written. A Secret's
-values appear there as markers.
+`… the Restart at op …` names the first object that changed, appeared or went. The report lists
+each field the restart changed, with its value before and after. If your controller stamps one
+of those fields at startup, paste its path into [`equalIgnore`](targets.md#equalignore) as
+written. A Secret's values appear there as markers.
 
 ## G6 No error loop
 
@@ -118,10 +124,9 @@ evaluates it wherever a settle wait ends and at the end of the teardown, which d
 A property also runs where no CR exists, so guard it with `has()`, or begin it with
 `!has(metadata.name) ||`. [CEL and hooks](reference.md#cel-and-hooks) says what it binds.
 
-A `checkpoint` or `end` property skips a checkpoint where the proxy
-[held a request](targets.md#faults), where your controller was
-[still starting](failures.md#restarts-and-crash-loops), or where a [fault](targets.md#faults)
-was active or your controller was still owed time to recover from one. The run notes each.
+A `checkpoint` or `end` property skips a checkpoint your controller may not have caught up to:
+under a [fault or a held request](targets.md#faults), or while your controller is
+[still starting](failures.md#restarts-and-crash-loops). The run notes each.
 
 The report quotes the property's description, the versions of the CR it failed on, and the
 managed objects' metadata. Read the values the property judged from `objects.jsonl`. From the

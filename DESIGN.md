@@ -1413,21 +1413,23 @@ the proxy; the `Image` launcher. Separate design addendum.
   run it, a `ready` for a CR that reports a Ready condition, which `make test` evaluates,
   and a sequence to pin per managed kind and per property, which the envtest tier runs;
   reading a failure, with links to `docs/checks.md` and to what to change when
-  reconciler-fuzzer exits 2; running in CI, in brief; a closing "Development
-  and internals" section that links to this document, its §6, and `docs/bug-matrix.md`.
+  reconciler-fuzzer exits 2; running in CI, in brief; a closing "Development and internals"
+  section that links to this document, its §6, and `docs/bug-matrix.md`.
   Detail lives in pages the README links (D83, D95): `docs/reference.md` lists every key
   and field, `docs/targets.md` says how to write a target, `docs/checks.md` gives each
   check of §6 a section that says what it requires, what usually fails it and what its
-  message means, `docs/failures.md` says what each file of a failure holds, `docs/examples.md` runs the adopted examples
-  and their negative controls, and `docs/ci.md` holds the CI recipe, embedded from
+  message means, `docs/failures.md` says what each file of a failure holds and what to
+  change when reconciler-fuzzer exits 2, `docs/examples.md` runs the adopted examples and
+  their negative controls, and `docs/ci.md` holds the CI recipe, embedded from
   `examples/ci/github-actions.yml`, a tools module that keeps reconciler-fuzzer out of an operator's
   go.mod, embedded from `examples/tools-module.sh`, which the envtest tier runs (D80), and
   a test that runs reconciler-fuzzer from `go test`, embedded from `targets/toy-widget/reconciler_fuzzer_test.go`,
   which the envtest tier runs (D81). Only the README's closing section links here, or
   cites a section, a decision or a symbol of this document. The guide pages cite none.
   None of them names a milestone. Every sequence they show loads, every link among them
-  and `docs/reference.md` lands on a file and a heading, and each check they name outside
-  code links its section of `docs/checks.md`. `make test` enforces these rules. The limits
+  and `docs/reference.md` lands on a file and a heading. Each check that they or
+  `docs/reference.md` name outside code and headings links its section of `docs/checks.md`,
+  and each section quotes words its violation prints. `make test` enforces these rules. The limits
   section is a list of `- ` bullets, one per limit, with their other lines indented two
   spaces, and nothing follows the list. A bullet for a limit an issue tracks links the
   issue. Each line's text begins with a letter, `[` or `(`. The section holds no HTML,
@@ -1465,8 +1467,8 @@ the proxy; the `Image` launcher. Separate design addendum.
   and it may run the code: start a cluster, drive the binary, mutate a function and check
   that a test dies. It flags any import of controller-runtime outside the two places §11
   allows, a README embed block that differs from its file, a limit the README still states
-  though the PR lifts it or its issue is closed, a limit the README's opening states that
-  the test does not list, a post whose first line is not `🤖 Created by Claude 🤖`, and a
+  though the PR lifts it or its issue is closed, a README bullet that states a limit the
+  test does not list, a post whose first line is not `🤖 Created by Claude 🤖`, and a
   PR description that lacks the milestone, the IDs, or the "Design change" section when
   this document changed. Reviewers never merge.
 - **Journal:** `docs/journal.md`, one entry per milestone, recording what the agents
@@ -2609,5 +2611,6 @@ built from source and run as a black-box binary.
   to `docs/failures.md`. The limits stay before Install, so that a team learns whether its
   controller fits before it installs anything.
 - **D96 `docs/checks.md` gives each check a section.** The README's table of checks moved
-  there, with what `docs/failures.md` said of each check's message, so that every page
-  can link a check it names. The README's limits became one list.
+  there, with what `docs/failures.md` said of each check's message and the `jq` recipe for
+  a property, so that every page can link a check it names. The README's limits became
+  one list.

@@ -109,9 +109,9 @@ fell inside the window.
   the GC emulation of §5.8 has nothing to resolve, and the Secret survives the
   ExternalSecret. A rename under `Orphan` leaves the old Secret behind too, so that run
   ended with two.
-- **`deletionPolicy` is not a negative control.** `Retain` is the CRD's own default, and
-  under it the controller leaves the Secret alone. The Secret still carries an
-  ownerReference, so the GC emulation removes it and [G3](../checks.md#g3-clean-deletion) passes.
+- **`deletionPolicy` is not a negative control.** `Retain` is the CRD's own default, and under
+  it the controller leaves the Secret alone. The Secret still carries an ownerReference, so the
+  GC emulation removes it and [G3](../checks.md#g3-clean-deletion) passes.
 
 ## Gotchas for the implementer
 
@@ -133,9 +133,9 @@ fell inside the window.
 - The controller posts Events into the run namespace and leaves them there. `manages` must
   not name `v1/Event`, or [G3](../checks.md#g3-clean-deletion) fails on every run.
 - The SecretStore fixture is re-validated on every controller start and every
-  `--store-requeue-interval` (default 5 m), which writes a no-op status patch and two
-  Events. [G1](../checks.md#g1-bounded-reconciliation) counts those requests, so the interval belongs in `launch.args` set longer
-  than a run.
+  `--store-requeue-interval` (default 5 m), which writes a no-op status patch and two Events.
+  [G1](../checks.md#g1-bounded-reconciliation) counts those requests, so the interval belongs
+  in `launch.args` set longer than a run.
 - envtest takes 4.1 s to 5.0 s to install the 25 CRDs, against 3.2 s for cert-manager's
   six in the 2026-09-20 spike.
 

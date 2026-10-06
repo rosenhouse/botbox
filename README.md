@@ -209,13 +209,13 @@ reconciler-fuzzer exits 0 when every run passes, 1 when a check fails, and 2 whe
 controller. On exit 2, the message says why, and
 [docs/failures.md](docs/failures.md#when-reconciler-fuzzer-exits-2) lists the usual causes.
 
-When a run fails, reconciler-fuzzer prints the check that failed: [G1](docs/checks.md#g1-bounded-reconciliation)
-to [G7](docs/checks.md#g7-self-healing), or a property's ID, such as P1.
-[docs/checks.md](docs/checks.md) says what each check requires, what usually fails it, and
-what its message means. reconciler-fuzzer then minimizes a drawn sequence, which can take
-minutes, and prints the run's evidence directory. Start with `report.md` there. It says what
-failed, quotes what the check read, and gives the command that replays it.
-[docs/failures.md](docs/failures.md) says what each file holds.
+When a run fails, reconciler-fuzzer prints the check that failed:
+[G1](docs/checks.md#g1-bounded-reconciliation) to [G7](docs/checks.md#g7-self-healing), or a
+property's ID, such as P1. [docs/checks.md](docs/checks.md) says what each check requires, what
+usually fails it, and what its message means. reconciler-fuzzer then minimizes a drawn
+sequence, which can take minutes, and prints the run's evidence directory. Start with
+`report.md` there. It says what failed, quotes what the check read, and gives the command that
+replays it. [docs/failures.md](docs/failures.md) says what each file holds.
 
 ## Running in CI
 

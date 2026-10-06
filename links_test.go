@@ -3,6 +3,7 @@ package reconcilerfuzzer_test
 import (
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -15,7 +16,11 @@ import (
 func TestThePagesLinksLand(t *testing.T) {
 	link := regexp.MustCompile(`\]\(([^)#\s]*)(?:#([^)\s]+))?\)`)
 	checked := 0
-	for _, page := range append(slices.Clone(userPages), "docs/reference.md") {
+	spikes, err := filepath.Glob("docs/spikes/*.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, page := range append(append(slices.Clone(userPages), "docs/reference.md"), spikes...) {
 		for _, m := range link.FindAllStringSubmatch(readFile(t, page), -1) {
 			target, anchor := m[1], m[2]
 			if strings.Contains(target, "://") {

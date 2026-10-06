@@ -37,9 +37,9 @@ Keep `quiet` as low as your timer allows, since [G1](checks.md#g1-bounded-reconc
 a slow loop of that many requests through.
 
 [G6](checks.md#g6-no-error-loop) fails a controller that repeats one failing request more than
-`thresholds.errloop` times within `settle`. controller-runtime's default backoff repeats a request 11 times in its first
-5.1s, which the default of 10 catches. A 5s `settle` holds only 10 of those, so it needs
-`errloop: 9` or less.
+`thresholds.errloop` times within `settle`. controller-runtime's default backoff repeats a
+request 11 times in its first 5.1s, which the default of 10 catches. A 5s `settle` holds only
+10 of those, so it needs `errloop: 9` or less.
 
 ## Launch
 
@@ -128,11 +128,12 @@ webhook or a status rule might, reconciler-fuzzer exits 2 and names the `sequenc
 ## Deleted objects
 
 A `deleteManaged` deletes one managed object behind your controller's back.
-[G7](checks.md#g7-self-healing) then requires your controller to recreate an object of that kind and name before the run settles. Where your
-`ready` still holds without the object, the run settles once nothing has changed for `stable`.
-Your controller then has `stable` to recreate it, however wide `settle` is. After a fault, the
-run settles no sooner than as long past the fault's end as the fault lasted, plus `settle`,
-because an informer may still be backing off.
+[G7](checks.md#g7-self-healing) then requires your controller to recreate an object of that
+kind and name before the run settles. Where your `ready` still holds without the object, the
+run settles once nothing has changed for `stable`. Your controller then has `stable` to
+recreate it, however wide `settle` is. After a fault, the run settles no sooner than as long
+past the fault's end as the fault lasted, plus `settle`, because an informer may still be
+backing off.
 
 If your controller leaves a kind deleted by design, or recreates it under a new name, list the
 kind under `notRecreated`. cert-manager lists CertificateRequest, because a Ready Certificate
@@ -168,7 +169,8 @@ Generation then also draws two ops:
 
 A controller that reads a fixture without watching it misses a change until something else
 reconciles its CR. [G5](checks.md#g5-restart-stable) then reports what a restart changes.
-[G7](checks.md#g7-self-healing) never asks your controller to recreate a fixture. Without `generate.fixtures`, generation leaves every fixture alone.
+[G7](checks.md#g7-self-healing) never asks your controller to recreate a fixture. Without
+`generate.fixtures`, generation leaves every fixture alone.
 
 ## equalIgnore
 

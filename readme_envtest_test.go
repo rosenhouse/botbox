@@ -14,13 +14,13 @@ import (
 )
 
 // A reader who followed Install has botbox on PATH and KUBEBUILDER_ASSETS
-// set. Each command of the first run and the first find then prints what the
-// README shows, up to the instants and directory names a run stamps.
-func TestTheREADMEsFirstRunAndFirstFindRunAsShown(t *testing.T) {
+// set. Each command of the quick start then prints what the README shows, from
+// its first run on, up to the instants and directory names a run stamps.
+func TestTheREADMEsQuickStartRunsAsShown(t *testing.T) {
 	if _, err := exec.LookPath("make"); err != nil {
 		t.Skipf("The test installs the control plane with make: %v", err)
 	}
-	blocks := fencedBlocks(section(t, readFile(t, "README.md"), "## A first run and a first find"))
+	blocks := fencedBlocks(section(t, readFile(t, "README.md"), "## Quick start"))
 	if len(blocks) != 4 {
 		t.Fatalf("The section holds %d fenced blocks, not two commands, each with what it prints.", len(blocks))
 	}
@@ -53,7 +53,7 @@ func TestTheREADMEsFirstRunAndFirstFindRunAsShown(t *testing.T) {
 		if code != want {
 			t.Errorf("%q exited %d, and the output the README shows exits %d:\n%s", command, code, want, output)
 		}
-		if printed := fromLine(unstamped(string(output)), "the deadline is "); printed != unstamped(shown) {
+		if printed := fromLine(unstamped(string(output)), "run 1: "); printed != unstamped(shown) {
 			t.Errorf("%q printed\n%s\nand the README shows\n%s", command, printed, shown)
 		}
 	}

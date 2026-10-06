@@ -46,7 +46,7 @@ jobs:
             bin/envtest
           key: ${{ steps.tools.outputs.cache-primary-key }}
       - run: go build -o bin/controller ./cmd/controller   # Build what launch.binary names.
-      # exec lets a cancel's signal reach botbox, which bash does not pass on.
+      # exec hands a cancelled job's signal to botbox. bash would not pass it on.
       - if: github.event_name == 'pull_request'
         run: exec botbox run --target target.yaml --seed 23 --runs 5 --deadline 10m --out botbox-out
       - if: github.event_name == 'schedule'

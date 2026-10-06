@@ -1032,6 +1032,29 @@ func runText(steps []step) string {
 	return strings.Join(commands, "\n")
 }
 
+// The README shows the recipe's botbox commands, without the exec a step needs.
+func TestTheREADMEsCICommandsAreTheRecipes(t *testing.T) {
+	var recipe []string
+	for _, line := range strings.Split(runText(recipeSteps(t)), "\n") {
+		recipe = append(recipe, strings.TrimSpace(line))
+	}
+	shown := 0
+	for _, block := range fencedBlocks(section(t, readFile(t, "README.md"), "## Running in CI")) {
+		for _, line := range strings.Split(block, "\n") {
+			if !strings.HasPrefix(line, "botbox ") {
+				continue
+			}
+			shown++
+			if !slices.Contains(recipe, "exec "+line) {
+				t.Errorf("README.md runs %q, and %s runs no such command.", line, ciRecipe)
+			}
+		}
+	}
+	if shown == 0 {
+		t.Fatal("README.md's Running in CI section runs no botbox command, so this test checks nothing.")
+	}
+}
+
 func TestTheCIRecipeNeedsNoGoMod(t *testing.T) {
 	setupGo := stepUsing(t, recipeSteps(t), "actions/setup-go")
 	if file, ok := setupGo.With["go-version-file"]; ok {

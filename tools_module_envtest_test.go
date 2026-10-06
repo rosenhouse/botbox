@@ -14,21 +14,20 @@ import (
 	"testing"
 )
 
-// The README's recipe pins botbox in a module of its own. This runs it in a
+// docs/ci.md's recipe pins botbox in a module of its own. This runs it in a
 // fresh operator module, on the oldest go that the README says fetches a newer
 // one, and on the go before it.
 func TestTheToolsModuleRecipe(t *testing.T) {
-	readme := readFile(t, "README.md")
-	install := section(t, readme, "## Install")
+	install := section(t, readFile(t, "README.md"), "## Install")
 	oldest := regexp.MustCompile(`from Go (1\.\d+) on`).FindStringSubmatch(install)
 	remedy := regexp.MustCompile("run the commands with\\s+`GOTOOLCHAIN=(\\w+)`").FindStringSubmatch(install)
 	if oldest == nil || remedy == nil {
 		t.Fatalf("README.md's Install section names no oldest go, or no GOTOOLCHAIN to run the commands with:\n%s", install)
 	}
-	keep := section(t, readme, "### Keep botbox out of your go.mod")
+	keep := section(t, readFile(t, ciPage), "## Keep botbox out of your go.mod")
 	stopped := regexp.MustCompile("Under\\s+`GOTOOLCHAIN=local`, a\\s+`go`\\s+before\\s+[\\d.]+\\s+stops\\s+this\\s+recipe\\s+with\\s+`([^`]+)`").FindStringSubmatch(keep)
 	if stopped == nil {
-		t.Fatalf("README.md's tools module section names no error that stops the recipe under GOTOOLCHAIN=local:\n%s", keep)
+		t.Fatalf("%s's tools module section names no error that stops the recipe under GOTOOLCHAIN=local:\n%s", ciPage, keep)
 	}
 	checkout, err := os.Getwd()
 	if err != nil {
@@ -87,7 +86,7 @@ func TestTheToolsModuleRecipe(t *testing.T) {
 		}
 	})
 
-	t.Run("fails under GOTOOLCHAIN=local as the README says", func(t *testing.T) {
+	t.Run("fails under GOTOOLCHAIN=local as docs/ci.md says", func(t *testing.T) {
 		_, out, err := run(newOperator(t), goroot, "local")
 		if err == nil || !strings.Contains(out, stopped[1]) {
 			t.Errorf("The recipe returned %v, and must fail with %q:\n%s", err, stopped[1], out)

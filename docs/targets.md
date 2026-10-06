@@ -7,34 +7,37 @@ the keys, and how to choose their values.
 ## Timeouts
 
 A settle wait follows each op that [settles](reference.md#ops). It ends once `ready` holds on
-every CR and nothing has changed for `timeouts.stable`, or once `timeouts.settle` runs out. G4
-fails a wait that runs out with no fault active.
+every CR and nothing has changed for `timeouts.stable`, or once `timeouts.settle` runs out.
+[G4](checks.md#g4-convergence) fails a wait that runs out with no fault active.
 
 - A slow controller needs a wider `settle`. The quiet window sits inside `settle`, so your
   controller has `settle - stable` to stop writing.
 - reconciler-fuzzer refuses to load a target whose `stable` is at least as wide as `settle`, since no
   wait could then converge.
-- A narrower `stable` also shortens the windows that G1 and G2 judge.
+- A narrower `stable` also shortens the windows that [G1](checks.md#g1-bounded-reconciliation)
+  and [G2](checks.md#g2-no-churn) judge.
 - After a `delete`, the run waits up to `timeouts.delete` for the CR to go, and then up to
   `settle` for the rest to settle. A slow cleanup needs a wider `delete`, not a wider
   `settle`.
 
 ## Thresholds
 
-A controller that resyncs on a timer makes requests after it has converged, and G1 fails it by
-default. `thresholds.quiet` is how many requests one `stable` window may hold. A timer with
+A controller that resyncs on a timer makes requests after it has converged, and
+[G1](checks.md#g1-bounded-reconciliation) fails it by default. `thresholds.quiet` is how many
+requests one `stable` window may hold. A timer with
 interval `i` ticks at most `floor(stable / i) + 1` times in a window. Multiply that by the
 requests one tick makes, and add up every timer your controller runs, such as one per CR. A 15s
 resync that makes one request needs `quiet: 1` under the default `stable` of 10s.
 
-`quiet` also bounds the status writes that change nothing, which G2 counts. A write that
-changes something fails G2 whatever `quiet` is. If the timer that makes it fires more often
-than once per `stable`, your controller fails G4 instead, because the settle wait never sees
-`stable` of quiet. Keep `quiet` as low as your timer allows, since G1 lets a slow loop of
-that many requests through.
+`quiet` also bounds the status writes that change nothing, which [G2](checks.md#g2-no-churn)
+counts. A write that changes something fails [G2](checks.md#g2-no-churn) whatever `quiet` is.
+If the timer that makes it fires more often than once per `stable`, your controller fails
+[G4](checks.md#g4-convergence) instead, because the settle wait never sees `stable` of quiet.
+Keep `quiet` as low as your timer allows, since [G1](checks.md#g1-bounded-reconciliation) lets
+a slow loop of that many requests through.
 
-G6 fails a controller that repeats one failing request more than `thresholds.errloop` times
-within `settle`. controller-runtime's default backoff repeats a request 11 times in its first
+[G6](checks.md#g6-no-error-loop) fails a controller that repeats one failing request more than
+`thresholds.errloop` times within `settle`. controller-runtime's default backoff repeats a request 11 times in its first
 5.1s, which the default of 10 catches. A 5s `settle` holds only 10 of those, so it needs
 `errloop: 9` or less.
 
@@ -94,8 +97,7 @@ your sample's value there. Otherwise two CRs name one child, and reconciler-fuzz
 follows as your controller's.
 
 Deleting a CR must remove the objects whose ownerReferences name it. An object that names no
-CR may belong to any CR, so it may stay until the last CR goes. A property's `managed` holds the
-objects that name the CR it judges, and those that name no CR.
+CR may belong to any CR, so it may stay until the last CR goes.
 
 ## Generated values
 
@@ -125,8 +127,8 @@ webhook or a status rule might, reconciler-fuzzer exits 2 and names the `sequenc
 
 ## Deleted objects
 
-A `deleteManaged` deletes one managed object behind your controller's back. G7 then requires
-your controller to recreate an object of that kind and name before the run settles. Where your
+A `deleteManaged` deletes one managed object behind your controller's back.
+[G7](checks.md#g7-self-healing) then requires your controller to recreate an object of that kind and name before the run settles. Where your
 `ready` still holds without the object, the run settles once nothing has changed for `stable`.
 Your controller then has `stable` to recreate it, however wide `settle` is. After a fault, the
 run settles no sooner than as long past the fault's end as the fault lasted, plus `settle`,
@@ -165,27 +167,21 @@ Generation then also draws two ops:
   settle wait runs then.
 
 A controller that reads a fixture without watching it misses a change until something else
-reconciles its CR. G5 then reports what a restart changes. G7 never asks your controller to
-recreate a fixture. Without `generate.fixtures`, generation leaves every fixture alone.
+reconciles its CR. [G5](checks.md#g5-restart-stable) then reports what a restart changes.
+[G7](checks.md#g7-self-healing) never asks your controller to recreate a fixture. Without `generate.fixtures`, generation leaves every fixture alone.
 
 ## equalIgnore
 
-G5 compares what your controller manages before and after a restart. It already skips what
-every restart moves, such as `metadata.resourceVersion`. If your controller stamps a field of
-its own at startup, name it in `equalIgnore`:
+[G5](checks.md#g5-restart-stable) compares what your controller manages before and after a
+restart. It [already skips](reference.md#equalignore-paths) what every restart moves, such as
+`metadata.resourceVersion`. If your controller stamps a field of its own at startup, name it in
+`equalIgnore`, as [equalIgnore paths](reference.md#equalignore-paths) writes a path:
 
 ```yaml
 equalIgnore:
   - metadata.annotations["example.com/started-at"]
   - status.conditions[*].lastHeartbeatTime
 ```
-
-Quote a key that holds a dot or a slash, and write `[*]` for every item of a list. Keep the
-list in block style, because YAML claims the brackets inside a one-line `[...]` list. reconciler-fuzzer
-refuses a list index such as `[0]`, and a label or annotation key that the dots split. A key
-names nothing inside a list, so a run notes a path such as
-`status.conditions.lastHeartbeatTime` and says where the `[*]` goes. A G5 report gives each
-path that changed in the form `equalIgnore` takes.
 
 ## Sequences you write
 
@@ -216,11 +212,11 @@ before it runs it:
 - A `deleteFixture` names the op before which reconciler-fuzzer creates the fixture again, as in
   `{"i": 2, "t": "deleteFixture", "kind": "v1/Secret", "name": "token", "until": {"op": 3}}`.
 
-Put a `settle` op after a `restart`, and one before it unless the op before it settles. G5
-compares the states your controller settled in on either side. It notes, rather than judges,
-what another op may have changed in between. The `settle` after a `restart` also waits for your
-controller to [come back](failures.md#restarts-and-crash-loops). G7 notes, rather than judges, a
-`deleteManaged` that comes before your controller is back.
+Put a `settle` op after a `restart`, and one before it unless the op before it settles.
+[G5](checks.md#g5-restart-stable) compares the states your controller settled in on either
+side. It notes, rather than judges, what another op may have changed in between. The `settle`
+after a `restart` also waits for your controller to
+[come back](failures.md#restarts-and-crash-loops).
 
 ## Faults
 
@@ -291,7 +287,7 @@ kind delete cluster --kubeconfig kind.kubeconfig
 - The cluster may add more objects later. If they are of a kind your target manages, label
   your own objects and declare a `selector`, such as
   `selector: app.kubernetes.io/managed-by=my-controller`. reconciler-fuzzer then counts only those.
-- G2 counts a change only where one of your controller's own writes explains it, so a delete
-  by the cluster's garbage collector is not churn.
+- [G2](checks.md#g2-no-churn) counts a change only where one of your controller's own writes
+  explains it, so a delete by the cluster's garbage collector is not churn.
 
 `make test-kind` runs the toy controller this way.

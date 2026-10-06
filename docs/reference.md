@@ -9,7 +9,7 @@ how to choose their values.
 reconciler-fuzzer reads `crds`, `sample` and `fixtures` relative to target.yaml, and `launch.binary`
 relative to the directory it runs in. A key it does not take is an error. A duration is a Go
 duration, such as `30s` or `1m30s`. reconciler-fuzzer refuses a cluster-scoped `primary`, kind under
-`manages` or fixture, because a run [owns one namespace](../README.md#what-reconciler-fuzzer-cannot-test-yet).
+`manages` or fixture, because a run [owns one namespace](../README.md#limitations).
 
 This example sets every key but `equal`:
 
@@ -83,12 +83,12 @@ thresholds:
 | `sample` | required | It names a file that holds one CR of the primary kind, with a `metadata.name`. Every sequence reconciler-fuzzer draws creates it first, and changes copies of it. |
 | `fixtures` | none | It lists files of objects that reconciler-fuzzer creates in each run's namespace before op 0, such as a Secret your controller reads. A fixture sets no `metadata.namespace`. reconciler-fuzzer never counts a fixture as your controller's. |
 | `manages` | none | It lists the kinds your controller creates, as `group/version/Kind`, or `v1/Kind` for the core group. reconciler-fuzzer watches them and judges your controller by them. |
-| `notRecreated` | none | It lists the managed kinds your controller leaves deleted, or recreates under another name. G7 does not require them back. Each is also under `manages`. |
+| `notRecreated` | none | It lists the managed kinds your controller leaves deleted, or recreates under another name. [G7](checks.md#g7-self-healing) does not require them back. Each is also under `manages`. |
 | `rbac` | none | It lists files of Role and ClusterRole YAML. reconciler-fuzzer creates a ServiceAccount with these permissions for each run instead of running the target as admin. |
 | `selector` | every object | Only the managed objects this label selector matches count as your controller's. |
-| `ready` | `has(status.observedGeneration) && status.observedGeneration == metadata.generation` | It is CEL that says whether a CR is ready, or `go:<name>`. G4 requires it of every CR. |
-| `equal` | none | It names a `go:<name>` hook that replaces G5's comparison of the states on either side of a restart. It takes no `equalIgnore`. |
-| `equalIgnore` | none | It lists paths that G5 does not compare. |
+| `ready` | `has(status.observedGeneration) && status.observedGeneration == metadata.generation` | It is CEL that says whether a CR is ready, or `go:<name>`. [G4](checks.md#g4-convergence) requires it of every CR. |
+| `equal` | none | It names a `go:<name>` hook that replaces [G5](checks.md#g5-restart-stable)'s comparison of the states on either side of a restart. It takes no `equalIgnore`. |
+| `equalIgnore` | none | It lists paths that [G5](checks.md#g5-restart-stable) does not compare. |
 | `properties` | none | It lists checks of your own. Each must hold on every CR. |
 | `properties[*].id` | required | It names the property in output, such as `P1`. No two properties share one. |
 | `properties[*].description` | none | It says what the property means. Reports print it. |
@@ -105,10 +105,10 @@ thresholds:
 | `launch.args` | none | It lists your controller's arguments. reconciler-fuzzer replaces `$KUBECONFIG` with the path of the kubeconfig it writes, and `$NAMESPACE` with the run's namespace. `--launch-arg` appends more. |
 | `launch.env` | none | It maps variables that reconciler-fuzzer sets over those your controller inherits, with the same replacements. reconciler-fuzzer sets `KUBECONFIG` itself. Quote a name or value that YAML would change, such as `0022` or `yes`. |
 | `timeouts.settle` | `30s` | It says how long a settle wait gives your controller to converge after a change. |
-| `timeouts.stable` | `10s` | It says how long nothing may change before a settle wait converges. G1 and G2 judge a window this long. It is shorter than `settle`. |
+| `timeouts.stable` | `10s` | It says how long nothing may change before a settle wait converges. [G1](checks.md#g1-bounded-reconciliation) and [G2](checks.md#g2-no-churn) judge a window this long. It is shorter than `settle`. |
 | `timeouts.delete` | `60s` | It says how long a deleted CR has to go, with everything it manages. A `recreate` and a `deleteFixture` wait as long for their object to go. |
-| `thresholds.errloop` | `10` | G6 fails a failing request repeated more than this many times within `settle`. It is positive. |
-| `thresholds.quiet` | `0` | It bounds the requests one quiet window may hold for G1, and the status writes that change nothing for G2. It is not negative. |
+| `thresholds.errloop` | `10` | [G6](checks.md#g6-no-error-loop) fails a failing request repeated more than this many times within `settle`. It is positive. |
+| `thresholds.quiet` | `0` | It bounds the requests one quiet window may hold for [G1](checks.md#g1-bounded-reconciliation), and the status writes that change nothing for [G2](checks.md#g2-no-churn). It is not negative. |
 
 DESIGN.md writes `settle`, `stable`, `delete`, `errloop` and `quiet` as `T_settle`,
 `T_stable`, `T_delete`, `N_errloop` and `N_quiet`.
@@ -130,11 +130,13 @@ Only a reconciler-fuzzer binary built with that function can load the target.
 
 A path joins keys with `.`, and `[*]` names every item of a list or value of a map. A key
 that holds `.`, `[`, `]`, `"`, `*`, `/`, `:` or whitespace goes in brackets as a JSON string,
-as in `metadata.annotations["example.com/started-at"]`. Write the list in block style, and
-quote a path that starts with `[` or holds `: ` or ` #`. reconciler-fuzzer refuses a list index such as
-`[0]`.
+as in `metadata.annotations["example.com/started-at"]`. Write the list in block style, because
+YAML claims the brackets inside a one-line `[...]` list, and quote a path that starts with `[`
+or holds `: ` or ` #`. reconciler-fuzzer refuses a list index such as `[0]`, and a label or
+annotation key that the dots split. A key names nothing inside a list, so a run notes a path
+such as `status.conditions.lastHeartbeatTime` and says where the `[*]` goes.
 
-G5 always skips `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`,
+[G5](checks.md#g5-restart-stable) always skips `metadata.resourceVersion`, `metadata.uid`, `metadata.creationTimestamp`,
 `metadata.generation`, `metadata.managedFields`, `status.conditions[*].lastTransitionTime`,
 and each ownerReference whose owner is gone.
 
@@ -218,15 +220,14 @@ fault before the `recreate` with `until.op` to test the ops after it.
 | `settle` | none | none | yes | It waits for your controller to converge. |
 | `restart` | none | none | no | It kills your controller and starts it again. |
 | `fault` | `spec` | none | no | It adds a fault the proxy applies to your controller's requests. |
-| `deleteManaged` | `kind`, `index` | none | yes | It deletes a managed object behind your controller's back. G7 requires an object of its kind and name once the wait ends, unless `notRecreated` lists the kind. After a fault, the wait runs at least as long past the fault's end as the fault lasted, plus `settle`. |
+| `deleteManaged` | `kind`, `index` | none | yes | It deletes a managed object behind your controller's back. [G7](checks.md#g7-self-healing) requires an object of its kind and name once the wait ends, unless `notRecreated` lists the kind. After a fault, the wait runs at least as long past the fault's end as the fault lasted, plus `settle`. |
 | `updateFixture` | `kind`, `name`, `patch` | none | yes | It applies `patch` to a fixture as a JSON merge patch. |
 | `deleteFixture` | `kind`, `name`, `until.op` | none | no | It deletes a fixture, waits up to `timeouts.delete` for it to go, and creates it again before op `until.op` acts. |
 
 - End a sequence with an op that settles.
 - An `update` or a `delete` acts on a live CR, and a `recreate` on a CR an op before it
   created.
-- Put a `settle` after a `restart`, and one before it unless the op before it settles. G5
-  compares the states those waits end in.
+- Put a `settle` after a `restart`, and one before it unless the op before it settles.
 - Put a `settle` between a `noSettle` op and a `deleteManaged`.
 - Put a `settle` between a `noSettle` `delete` and a `create` of its CR, or use a `recreate`,
   which waits for the old CR to go.
@@ -250,12 +251,8 @@ fault before the `recreate` with `until.op` to test the ops after it.
 ### Fault fields
 
 A fault sets exactly one action. It ends at the first of its `until` triggers, or at the end
-of the run where it sets none. The proxy tries faults in op order, and the first that
-applies to a request wins. The checks do not judge a window a fault applied in or held a
-request in, and they give your controller as long as the faults lasted, plus
-`timeouts.settle`, to recover.
-reconciler-fuzzer clears a fault still active at the end, and waits for your controller to recover. A
-fault that applies to no request tests nothing, and the run notes it.
+of the run where it sets none. [Faults](targets.md#faults) says how the proxy applies faults
+and how the checks treat them.
 
 | Field | Default | Meaning |
 |---|---|---|

@@ -54,15 +54,14 @@ run 5: seed 27, generated
 every run passed.
 ```
 
-reconciler-fuzzer derives the deadline from the `timeouts` your target declares, or their defaults. It
-allows the longest the runs' waits can take, and at least 4 minutes to minimize a failure. A
-correct controller finishes well inside it.
+reconciler-fuzzer [derives the deadline](ci.md#deadlines) from the `timeouts` your target
+declares, and a correct controller finishes well inside it.
 
 ### The negative control
 
 With `--enable-certificate-owner-ref=false`, which `--launch-arg` appends to `launch.args`,
 cert-manager leaves the issued Secret behind, as upstream documents. The target declares
-`v1/Secret` as managed, so G3 has to report it:
+`v1/Secret` as managed, so [G3](checks.md#g3-clean-deletion) has to report it:
 
 ```sh
 examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 5m --launch-arg --enable-certificate-owner-ref=false
@@ -76,13 +75,11 @@ run 1: G3 the v1/Secret example-tls was still there 1m0s (timeouts.delete) after
   the sequence is 1 op, in reconciler-fuzzer-out/20260921T055744Z-23/run-1/sequence.json
 ```
 
-Seed 23 draws a single op, so there is nothing to minimize. reconciler-fuzzer cuts a longer sequence to the
-ops the failure needs before it reports. Each removal it tries replays a whole run. A derived
-deadline gives minimizing at least 4 minutes, and a longer `--deadline` gives it more.
+Seed 23 draws a single op, so there is nothing to [minimize](failures.md#the-evidence).
 
 `make test-example` runs this control. It fails unless the default configuration passes, the
-control fails on G3 naming that Secret, and the control's evidence hides the Secret's private
-key. It also runs each `examples/cert-manager/sequences/*.json` as written, so none can rot.
+control fails on [G3](checks.md#g3-clean-deletion) naming that Secret, and the control's
+evidence hides the Secret's private key. It also runs each `examples/cert-manager/sequences/*.json` as written, so none can rot.
 Drawn sequences set `spec.privateKey.rotationPolicy` only to `Always`, because under `Never`
 cert-manager waits for a user once a later op changes the algorithm. `rotation-never.json` runs
 `Never` instead. A nightly workflow draws its own seeds.
@@ -108,7 +105,8 @@ It shows three things cert-manager does not.
   the Secret it manages, but `spec.target.creationPolicy: Orphan` in the CR does.
 
 `make test-example-external-secrets` runs the drawn sequences, then the pinned ones, then that
-control. It fails unless the control reports G3 and its evidence hides the Secret's value:
+control. It fails unless the control reports [G3](checks.md#g3-clean-deletion) and its evidence
+hides the Secret's value:
 
 ```
 run 1: seed 20260922, sequence examples/external-secrets/sequences/orphan.json

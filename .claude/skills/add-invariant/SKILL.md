@@ -17,14 +17,17 @@ in DESIGN.md §6 and implemented in `internal/invariant`. Follow this procedure.
    the Proxy request log, the Observer state history, and the target declaration
    (§5.6). Give it a per-target configurable window with a sensible default.
 
-3. **Add fixture tests.** Write unit-tier tests (no API server) from recorded
+3. **Document it for users.** Give it a section in `docs/checks.md`: what it requires,
+   what usually fails it, and what its message means. `make test` fails until it has one.
+
+4. **Add fixture tests.** Write unit-tier tests (no API server) from recorded
    `requests.jsonl` and `objects.jsonl` fixtures. Include at least one fixture that
    passes and one that fails the invariant.
 
-4. **Add or reuse a seeded bug.** Check whether an existing bug in
+5. **Add or reuse a seeded bug.** Check whether an existing bug in
    `targets/toy-widget` (§9.1) already trips the new invariant. If none does, add one:
    a new row in the §9.1 bug catalog, a new case behind the `--bug` flag, and a
    regenerated `docs/bug-matrix.md` with a non-empty row for the new ID and no `✓` in
    its "No bug" cell (§9.1, the M3/M6 acceptance criteria).
 
-5. **Never retry or sleep to make it pass.** Tune the window instead (§5.6, §11).
+6. **Never retry or sleep to make it pass.** Tune the window instead (§5.6, §11).

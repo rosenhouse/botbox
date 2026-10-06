@@ -15,16 +15,16 @@ import (
 	"github.com/rosenhouse/reconciler-fuzzer/internal/target"
 )
 
-const limitsHeading = "## What reconciler-fuzzer cannot test yet"
+const limitsHeading = "## Limitations"
 
 // limits are what reconciler-fuzzer cannot test yet: words the README says of
 // each, the issue that tracks it, or 0, and words DESIGN.md says of it. A
 // change that lifts a limit deletes its rows and both statements.
 var limits = []limit{
 	{"cannot reach a Pod or a Service", 0, "It runs on reconciler-fuzzer's host, which routes to no Pod"},
-	{"no admission or conversion webhook of yours runs", 0, "No admission or conversion webhooks."},
+	{"admission or conversion webhook of yours runs", 0, "No admission or conversion webhooks."},
 	{"on the version your CRD stores", 0, "A kubeconfig cluster keeps the webhook."},
-	{"generates sequences only for a custom resource whose CRD your `target.yaml` lists", 0, "reconciler-fuzzer draws no sequence for a built-in primary kind"},
+	{"generates sequences only for a custom resource whose CRD your target lists", 0, "reconciler-fuzzer draws no sequence for a built-in primary kind"},
 	{"envtest runs no Pod", 0, "no pods run, and no workload's status changes"},
 	{"tests namespaced kinds only", 38, "every managed kind and every fixture must be namespaced"},
 	{"misses a child your controller leaks into another namespace", 38, "it does not see a child the target creates in another"},
@@ -48,7 +48,7 @@ func TestTheReadmeSaysWhatReconcilerFuzzerCannotTestRightAfterWhatItDoes(t *test
 		t.Errorf("README.md does not say what reconciler-fuzzer cannot test right after what it does")
 	}
 	section, _, _ := strings.Cut(rest, "\n## ")
-	opening, bullets, err := limitParts(section)
+	bullets, err := limitBullets(section)
 	if err != nil {
 		t.Fatalf("README.md: %v", err)
 	}
@@ -61,14 +61,8 @@ func TestTheReadmeSaysWhatReconcilerFuzzerCannotTestRightAfterWhatItDoes(t *test
 		if !strings.Contains(design, l.design) {
 			t.Errorf("DESIGN.md does not say %q of the limit the README states with %q", l.design, l.says)
 		}
-		if l.issue == 0 {
-			if !strings.Contains(opening, l.says) {
-				t.Errorf("README.md does not open %q with %q", limitsHeading, l.says)
-			}
-			continue
-		}
 		if !slices.ContainsFunc(bullets, l.isIn) {
-			t.Errorf("README.md lists no limit that says %q and links #%d", l.says, l.issue)
+			t.Errorf("README.md lists no limit that says %q and links issue %d", l.says, l.issue)
 		}
 	}
 }
@@ -76,69 +70,61 @@ func TestTheReadmeSaysWhatReconcilerFuzzerCannotTestRightAfterWhatItDoes(t *test
 // Each line of the limits section begins its text with a letter, a link or a
 // parenthesis, which opens no block that could hide a limit.
 var (
-	openingLine = regexp.MustCompile(`^[A-Za-z\[(]`)
-	bulletLine  = regexp.MustCompile(`^- [A-Za-z\[(]`)
-	bulletMore  = regexp.MustCompile(`^  [A-Za-z\[(]`)
+	bulletLine = regexp.MustCompile(`^- [A-Za-z\[(]`)
+	bulletMore = regexp.MustCompile(`^  [A-Za-z\[(]`)
 )
 
 // HTML, a footnote or a link definition can hide text or move it out of the
-// section. In a bullet, code or a backslash can also turn a link into text.
-var (
-	hides         = regexp.MustCompile(`<|\[\^|\]:`)
-	hidesInBullet = regexp.MustCompile("[`\\\\]")
-)
+// section. Code or a backslash can also turn a link into text.
+var hides = regexp.MustCompile("<|\\[\\^|\\]:|[`\\\\]")
 
-// limitParts splits the limits section into its opening paragraphs and its
-// "- " bullets, and refuses any other line.
-func limitParts(section string) (opening string, bullets []string, err error) {
+// limitBullets splits the limits section into its "- " bullets, and refuses
+// any other line.
+func limitBullets(section string) (bullets []string, err error) {
 	for _, line := range strings.Split(section, "\n") {
 		switch {
 		case strings.TrimSpace(line) == "":
-		case hides.MatchString(line) || (bullets != nil || bulletLine.MatchString(line)) && hidesInBullet.MatchString(line):
-			return "", nil, fmt.Errorf("the limits section holds no HTML, footnote or link definition, and a bullet holds no code or backslash: %q", line)
+		case hides.MatchString(line):
+			return nil, fmt.Errorf("the limits section holds no HTML, footnote, link definition, code or backslash: %q", line)
 		case bulletLine.MatchString(line):
 			bullets = append(bullets, strings.TrimPrefix(line, "- "))
-		case bullets == nil && openingLine.MatchString(line):
-			opening += " " + line
 		case bullets != nil && bulletMore.MatchString(line):
 			bullets[len(bullets)-1] += " " + line
 		default:
-			return "", nil, fmt.Errorf("the limits section is paragraphs, then \"- \" bullets whose other lines are indented two spaces, "+
+			return nil, fmt.Errorf("the limits section is \"- \" bullets whose other lines are indented two spaces, "+
 				"and nothing follows the list. Each line's text begins with a letter, a link or a parenthesis. This line does not fit: %q", line)
 		}
 	}
 	for i, bullet := range bullets {
 		bullets[i] = oneLine(bullet)
 	}
-	return oneLine(opening), bullets, nil
+	return bullets, nil
 }
 
-func TestLimitPartsSplitsTheOpeningAndTheBullets(t *testing.T) {
-	opening, bullets, err := limitParts("\nOpening `one`.\n[Link](u) two.\n   \n(Three.)\n\n- First\n  bullet.\n\n  First's paragraph.\n- [Second](u)\n  (#1).\n- (Third)\n  [#2](u).\n")
+func TestLimitBulletsSplitsTheBullets(t *testing.T) {
+	bullets, err := limitBullets("\n- First\n  bullet.\n\n  First's paragraph.\n- [Second](u)\n  (#1).\n- (Third)\n  [#2](u).\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "Opening `one`. [Link](u) two. (Three.)"; opening != want {
-		t.Errorf("limitParts gave the opening %q, want %q.", opening, want)
-	}
 	if want := []string{"First bullet. First's paragraph.", "[Second](u) (#1).", "(Third) [#2](u)."}; !slices.Equal(bullets, want) {
-		t.Errorf("limitParts gave the bullets %q, want %q.", bullets, want)
+		t.Errorf("limitBullets gave %q, want %q.", bullets, want)
 	}
 }
 
 // Each refused line could open a block that hides a limit, or puts one outside
 // the bullets.
-func TestLimitPartsRefusesAnyOtherShape(t *testing.T) {
+func TestLimitBulletsRefusesAnyOtherShape(t *testing.T) {
 	for _, section := range []string{
+		"\nOpening.\n- Item.\n", "\n(Opening.)\n", "\n[Opening](u).\n",
 		"\n<!--\n- Item.\n", "\n```\n- Item.\n", "\n~~~\n", "\n> Quote.\n", "\n# Heading\n", "\n| Table |\n", "\n**Bold**.\n", "\n1. Other.\n",
 		"\n Indented.\n", "\n  Indented.\n", "\n\tIndented.\n", "\n-  Item.\n", "\n- \n\n  Item.\n", "\n- - -\n", "\n- `Code`.\n", "\n* Other.\n",
 		"\n- Item.\nLazy.\n", "\n- Item.\n\nAfter.\n", "\n- Item.\n Inside.\n", "\n- Item.\n   Inside.\n", "\n- Item.\n\tInside.\n",
 		"\n- Item.\n  <!-- Comment -->\n", "\n- Item.\n  ```\n", "\n- Item.\n  ~~~\n", "\n-\tItem.\n", "\n+ Other.\n",
-		"\nOpening <!-- hidden --> text.\n", "\n- Item <!-- ([#1](u)) -->.\n", "\n- Item <span hidden>([#1](u))</span>.\n", "\nOpening.[^1]\n", "\n[pod]: u \"Hidden.\"\n",
+		"\n- Item <!-- ([#1](u)) -->.\n", "\n- Item <span hidden>([#1](u))</span>.\n", "\n- Item.[^1]\n", "\n[pod]: u \"Hidden.\"\n",
 		"\n- Item `([#1](u))`.\n", "\n- Item \\([#1](u)).\n", "\n- Item\n  more `([#1](u))`.\n",
 	} {
-		if _, _, err := limitParts(section); err == nil {
-			t.Errorf("limitParts accepted %q.", section)
+		if _, err := limitBullets(section); err == nil {
+			t.Errorf("limitBullets accepted %q.", section)
 		}
 	}
 }
@@ -154,11 +140,14 @@ func TestABulletSaysALimitWithItsWordsAndItsLink(t *testing.T) {
 			t.Errorf("isIn finds %q in %q.", l.says, bullet)
 		}
 	}
+	if untracked := (limit{says: "reconciler-fuzzer cannot"}); !untracked.isIn("reconciler-fuzzer cannot.") {
+		t.Errorf("isIn misses a limit no issue tracks.")
+	}
 }
 
 func (l limit) isIn(bullet string) bool {
 	link := fmt.Sprintf("](https://github.com/rosenhouse/reconciler-fuzzer/issues/%d)", l.issue)
-	return strings.Contains(bullet, l.says) && strings.Contains(bullet, link)
+	return strings.Contains(bullet, l.says) && (l.issue == 0 || strings.Contains(bullet, link))
 }
 
 func oneLine(text string) string {
@@ -167,7 +156,7 @@ func oneLine(text string) string {
 
 // readmeOrder pairs each README section with the words DESIGN.md orders it by.
 var readmeOrder = []struct{ heading, design string }{
-	{"What reconciler-fuzzer cannot test yet", "what it cannot test yet"},
+	{"Limitations", "its limitations"},
 	{"Install", "install"},
 	{"Quick start", "a quick start"},
 	{"Your own controller", "writing `target.yaml` for your own controller"},
@@ -185,9 +174,12 @@ func TestTheReadmeOpensWithTheAPIServerReconcilerFuzzerRuns(t *testing.T) {
 }
 
 // userPages are the README and the pages it sends a reader to for detail.
-var userPages = []string{"README.md", "docs/targets.md", "docs/failures.md", "docs/examples.md", ciPage}
+var userPages = []string{"README.md", "docs/targets.md", checksPage, "docs/failures.md", "docs/examples.md", ciPage}
 
-const ciPage = "docs/ci.md"
+const (
+	ciPage     = "docs/ci.md"
+	checksPage = "docs/checks.md"
+)
 
 // A reader who copies a sequence from a page gets one reconciler-fuzzer runs.
 func TestEverySequenceAPageShowsLoads(t *testing.T) {
@@ -442,17 +434,6 @@ func TestTheReadmesReadyConditionExampleHoldsOnlyOnACurrentReadyCondition(t *tes
 	}
 }
 
-// reconciler-fuzzer --help sends a reader to docs/failures.md for what each
-// failure means. readmeChecks are the checks of the README's table, in order.
-func readmeChecks(t *testing.T) []string {
-	t.Helper()
-	checks := firstGroups(`(?m)^\| (G[0-9]+) \|`, section(t, readFile(t, "README.md"), "## Reading a failure"))
-	if len(checks) == 0 {
-		t.Fatal("README.md's Reading a failure section lists no check, so this test checks nothing.")
-	}
-	return checks
-}
-
 func firstGroups(pattern, text string) []string {
 	var groups []string
 	for _, m := range regexp.MustCompile(pattern).FindAllStringSubmatch(text, -1) {
@@ -461,21 +442,58 @@ func firstGroups(pattern, text string) []string {
 	return groups
 }
 
-func TestTheREADMEsTableGivesEveryGenericInvariant(t *testing.T) {
+func TestTheChecksPageGivesEveryGenericInvariant(t *testing.T) {
 	invariants := firstGroups(`(?m)^\| \*\*(G[0-9]+)\*\* \|`, readFile(t, "DESIGN.md"))
-	if checks := readmeChecks(t); !slices.Equal(checks, invariants) {
-		t.Errorf("README.md's table gives %v, and DESIGN.md's generic invariants are %v.", checks, invariants)
+	if checks := firstGroups(`(?m)^## (G[0-9]+) `, readFile(t, checksPage)); !slices.Equal(checks, invariants) {
+		t.Errorf("%s gives the checks %v, and DESIGN.md's generic invariants are %v.", checksPage, checks, invariants)
 	}
 }
 
-func TestTheFailuresPageNamesEveryCheck(t *testing.T) {
-	// A heading that names a check says nothing of what its failure means.
-	text := regexp.MustCompile(`(?m)^#.*$`).ReplaceAllString(readFile(t, "docs/failures.md"), "")
-	for _, check := range readmeChecks(t) {
-		if !regexp.MustCompile(`\b` + check + `\b`).MatchString(text) {
-			t.Errorf("docs/failures.md does not say what a %s failure means.", check)
+var (
+	checkName = regexp.MustCompile(`\bG[0-9]+\b`)
+	checkLink = regexp.MustCompile(`\[(G[0-9]+)\]\((?:[^)#\s]*/)?(?:checks\.md)?#(g[0-9]+)-[^)\s]*\)`)
+	codeSpan  = regexp.MustCompile("`[^`]*`")
+)
+
+// A reader who meets a check by name can follow it to what the check requires.
+func TestThePagesLinkEachCheckTheyName(t *testing.T) {
+	named := 0
+	for _, page := range append(slices.Clone(userPages), "docs/reference.md") {
+		for i, line := range proseLines(readFile(t, page)) {
+			if strings.HasPrefix(line, "#") {
+				continue
+			}
+			line = codeSpan.ReplaceAllString(line, "")
+			linked := checkLink.FindAllStringSubmatchIndex(line, -1)
+			for _, name := range checkName.FindAllStringIndex(line, -1) {
+				named++
+				if !slices.ContainsFunc(linked, func(m []int) bool {
+					return m[2] == name[0] && strings.EqualFold(line[m[2]:m[3]], line[m[4]:m[5]])
+				}) {
+					t.Errorf("%s:%d names %s without linking its section of %s: %s", page, i+1, line[name[0]:name[1]], checksPage, line)
+				}
+			}
 		}
 	}
+	if named == 0 {
+		t.Fatal("The pages name no check, so this test checks nothing.")
+	}
+}
+
+// proseLines are a page's lines, with those of fenced blocks left empty.
+func proseLines(page string) []string {
+	lines := strings.Split(page, "\n")
+	fenced := false
+	for i, line := range lines {
+		if strings.HasPrefix(line, "```") {
+			fenced = !fenced
+			lines[i] = ""
+		}
+		if fenced {
+			lines[i] = ""
+		}
+	}
+	return lines
 }
 
 // An invocation's directory ends in the seed of its first run.

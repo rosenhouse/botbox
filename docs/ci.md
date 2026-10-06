@@ -98,8 +98,8 @@ issue under the matching label.
 deadline ends a run, or stops reconciler-fuzzer before its last run, reconciler-fuzzer exits 2. If it cuts
 minimizing short, reconciler-fuzzer still exits 1 and reports the smallest failing sequence it found.
 
-Without `--deadline`, reconciler-fuzzer assumes every wait runs to its timeout, and adds 4m to minimize a
-failure. A fast controller finishes far sooner.
+Without `--deadline`, reconciler-fuzzer assumes every wait runs to its timeout, and leaves at
+least 4m to minimize a failure. A fast controller finishes far sooner.
 To size a deadline, time the pull request's command once and add at least 4m. Or shorten
 `timeouts`, as the toy does.
 

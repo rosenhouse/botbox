@@ -1,7 +1,7 @@
 # Reading a failure
 
-The [README](../README.md#reading-a-failure) shows how to read a failure. This page says what
-each file holds, and what each message means.
+[checks.md](checks.md) says what each check's message means. This page says what each file
+holds, and what to change when reconciler-fuzzer exits 2.
 
 ## The summary
 
@@ -62,106 +62,11 @@ and your controller's log as they are. Keep credentials out of them before you s
 ## What a report quotes
 
 A report quotes the last twenty requests and the last twenty object versions that the check
-looked at. It says how many it looked at, and names the file that holds them all. A G4 or a
-property also quotes the objects your controller managed where it failed, over the kinds your
-target declares. That table has its own bound of twenty, and gives each object's metadata
-only. `objects.jsonl` holds each version whole.
-
-A G4 also quotes your `ready`, the error evaluating it, and your CR's status where it failed.
-The status holds whatever your controller wrote, so the report cuts it: twenty conditions, 200
-bytes of each field and 1000 bytes of the rest.
-
-A G5 lists each field the restart changed, with its value before and after, and the line reconciler-fuzzer
-prints names the first. If your controller stamps one of those fields at startup, paste its
-path into `equalIgnore` as written. A Secret's values appear there as markers too.
-
-## When a property fails
-
-Each run ends with a teardown, which deletes every CR and checks once more. A property runs
-where its `when` says, once for each CR. Its default `when`, `checkpoint`, runs it wherever a
-settle wait ends and at the end of the teardown. It binds that CR's `metadata`, `spec` and
-`status`, and `managed`: the objects whose ownerReferences name that CR, and those that name no
-CR. Where no CR exists, it runs once with empty `metadata`, `spec` and `status` over every
-managed object, and the report says that no CR existed. So every property can run where no CR
-exists, and one whose `when` is `checkpoint` or `end` does so at the teardown unless it skips
-that checkpoint. Guard it with `has()`, or begin it with `!has(metadata.name) ||`, which holds
-there.
-
-A `checkpoint` or `end` property skips a checkpoint where the proxy
-[held a request](targets.md#faults), where your controller was
-[still starting](#restarts-and-crash-loops), or where a [fault](targets.md#faults) was active
-or your controller was still owed time to recover from one. The run notes each.
-
-The report quotes the property's description, the versions of the CR it failed on, and the
-managed objects' metadata. Read the values the property judged from `objects.jsonl`. From the
-evidence directory, this prints each version of the ConfigMap `widget-0`'s data:
-
-```sh
-jq -c 'select(.name == "widget-0") | .object.data' objects.jsonl
-```
-
-## When a settle wait fails G4
-
-A settle wait expired. What follows `expired with no fault active` says why:
-
-- `ready never held: evaluating ready "…": no such key: …` means your `ready` reads a field the
-  CR does not have. Check the spelling, and guard an optional field with `has()`.
-- `ready never held: it evaluated to false` means your controller never reached the state your
-  `ready` describes. The report's Ready predicate section shows the CR's conditions and status,
-  where a reason such as `0/10 replicas available` appears. Compare that status with your
-  `ready`: a misspelled field under `has()` also evaluates to false. envtest runs no Deployment,
-  ReplicaSet or Pod controller, so a CR that waits on a Deployment's replicas never becomes
-  ready there. Run such a target [against a cluster](targets.md#against-a-cluster).
-- `ready held from … on, but the namespace never held still for 2s (timeouts.stable)` means
-  your controller converged and kept writing. The Object versions table lists the writes. A
-  status field rewritten on every reconcile, such as a timestamp, does this.
-- `ready held until …` means `ready` held and then stopped holding.
-- `but the target was waiting to restart`, or `but the target restarted in the last 2s
-  (timeouts.stable)`, means your controller exited. The line counts the exits since it last
-  converged, and quotes the last.
-- `but the target had requested no resource outside leader election since …`, or `but the
-  target had won no lease since …` for a controller that elects a leader, means your
-  controller had not come back from a restart, or had not started, when the wait gave up.
-  `until the last 2s (timeouts.stable)` means it came back too late to run for `stable` before
-  then. A controller slow to start needs a wider `settle`.
-- `no CR was left to be ready, but the namespace never held still …` means something kept
-  writing after the CR was gone.
-
-A controller that converges, only more slowly than `timeouts.settle` allows, needs a wider
-`settle`. Where your controller repeated a failing request, the line names it and its count.
-An error loop that backs off can repeat too rarely for G6 to count it. A `ready` that yields
-something other than a bool is a configuration error, and reconciler-fuzzer exits 2 naming it.
-
-## When a CR does not go
-
-After a `delete`, the run waits up to `timeouts.delete` for the CR to go, and then up to
-`settle` for the rest to settle. A `recreate` waits as long for the old CR to go before it
-creates the new one. A CR still there `timeouts.delete` after its deletion fails G3, which names
-the finalizers still on it.
-
-Where a fault reached into the deletion, G3 cannot judge it. The settle wait's G4 then says
-`the CR … was still being deleted, held by the finalizers …`. Where the CR's deletion deadline
-held the wait open past `settle`, the line gives `timeouts.delete is …` in place of
-`timeouts.settle is …`. A `recreate` whose old CR a fault keeps past the wait stops the run, and
-the run notes it. reconciler-fuzzer then clears the fault, and the settle wait after the last fault stopped
-says that line where the CR still does not go.
-
-## When G1, G2, G6 or G7 fails
-
-- G1's `the target made … API requests in …, where thresholds.quiet allows …` counts the
-  requests your controller made while reconciler-fuzzer expected it to be quiet. A controller that
-  resyncs on a timer needs a `quiet` that [fits the timer](targets.md#thresholds).
-- G2's `the target changed … objects in …, where a converged target changes nothing` means your
-  controller kept rewriting what it manages, such as a timestamp in a status. Its
-  `the target made … status writes in …` counts every status write, even one that changed
-  nothing.
-- G6's `the target repeated the failing request … times within … (timeouts.settle), where
-  thresholds.errloop allows …` names the request your controller kept retrying.
-  [Thresholds](targets.md#thresholds) says how `errloop` relates to `settle`.
-- G7's `the … that op … (deleteManaged) deleted never came back …` means your controller did
-  not recreate the object. Check that it watches the kind, and that the object carries the
-  controller ownerReference that `Owns()` follows. List a kind your controller leaves deleted
-  by design under [`notRecreated`](targets.md#deleted-objects).
+looked at. It says how many it looked at, and names the file that holds them all. A
+[G4](checks.md#g4-convergence) or a [property](checks.md#properties) also quotes the objects
+your controller managed where it failed, over the kinds your target declares. That table has
+its own bound of twenty, and gives each object's metadata only. `objects.jsonl` holds each
+version whole.
 
 ## Restarts and crash loops
 
@@ -178,22 +83,17 @@ leader, and counts it back only once it wins its lease. reconciler-fuzzer has no
 - After a `restart` op, your controller has `settle` to come back, and `settle` past its return
   to converge.
 - A controller that crashes again within `stable` of each return never converges, even where it
-  wrote its converged state first. G4 reports it and quotes the last exit.
+  wrote its converged state first. [G4](checks.md#g4-convergence) reports it and quotes the
+  last exit.
 - After an exit during a fault, or while your controller recovers from one, reconciler-fuzzer restarts
   your controller and gives it `settle` past its return to converge.
 - While a fault is active, only the first exit during each op gets `settle` past its return. A
   later exit during the op gets it only where the next op lands before your controller has had
   `settle` past its return. Otherwise the wait can end before your controller restarts. A wait
   can also end before a restarted controller has won its lease back.
-- reconciler-fuzzer does not check a `checkpoint` or `end` property where a wait ends, or the teardown
-  checks, before your controller could have converged: while it waits to restart, or before it
-  has been back for `stable` since it last started. The run notes it.
 - reconciler-fuzzer applies no op while your controller waits to restart after an exit during a fault. A
-  controller that keeps crashing under a fault therefore fails G4 once the fault stops, or once
-  the teardown clears it.
-- G7 notes, rather than judges, a `deleteManaged` that comes before your controller is back
-  from a restart. It also notes one where your controller exited, or waited to restart, during
-  the op or its settle wait.
+  controller that keeps crashing under a fault therefore fails [G4](checks.md#g4-convergence)
+  once the fault stops, or once the teardown clears it.
 
 `--launch-arg --bug=12` makes the toy divide by its Widget's count once it has written its
 status. `targets/toy-widget/sequences/b12.json` sets a count of 0, and the toy crashes after
@@ -237,6 +137,7 @@ usual causes and what to change.
   the CR may have crashed it. The message then names the run's `sequence.json` for
   `reconciler-fuzzer replay`.
 - A controller that binds a fixed port, such as a health probe on `:8081`, collides with a
-  second invocation of itself. Give it a free port in `launch.args`, or with `--launch-arg`.
-- reconciler-fuzzer exits 2, rather than reporting a find, when the deadline ends a run or stops reconciler-fuzzer
-  before its last run.
+  second invocation of itself. Give it a [free port](targets.md#launch) in `launch.args`, or
+  with `--launch-arg`.
+- reconciler-fuzzer exits 2, rather than reporting a find, when [the deadline](ci.md#deadlines)
+  ends a run or stops reconciler-fuzzer before its last run.

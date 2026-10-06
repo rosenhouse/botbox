@@ -135,7 +135,8 @@ func help(name string) string {
 		return intro + "\n" + usage("") + runExits + environment +
 			"\nThe README at https://github.com/rosenhouse/reconciler-fuzzer shows a first run.\n" +
 			"docs/reference.md there lists every key of target.yaml and every op.\n" +
-			"docs/failures.md there says what each file and message of a failure means.\n"
+			"docs/checks.md there says what each check requires and what its failure says.\n" +
+			"docs/failures.md there says what each file of a failure holds.\n"
 	}
 	var b strings.Builder
 	fmt.Fprintf(&b, "Usage:\n  %s\n\n%s\n", c.synopsis(), c.about)

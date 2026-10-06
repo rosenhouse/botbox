@@ -15,18 +15,19 @@ fails, reconciler-fuzzer minimizes a drawn sequence to the ops the failure needs
 
 You write no test code. One `target.yaml` describes your controller.
 
-## What reconciler-fuzzer cannot test yet
+## Limitations
 
-Your controller runs on your machine, not in a Pod. It cannot reach a Pod or a Service, and no
-admission or conversion webhook of yours runs. So keep your controller and your CRs on the
-version your CRD stores, and keep drawn CRs
-[within what your webhooks admit](docs/targets.md#generated-values). reconciler-fuzzer generates sequences
-only for a custom resource whose CRD your `target.yaml` lists. If your controller reconciles a
-built-in kind, such as a Service, [write the sequences](docs/targets.md#sequences-you-write)
-yourself. envtest runs no Pod, so a Deployment, a Job or a PersistentVolumeClaim never becomes
-ready. If your controller waits on one, run reconciler-fuzzer
-[against a cluster](docs/targets.md#against-a-cluster), such as kind.
-
+- Your controller runs on your machine, not in a Pod, even against a cluster. It cannot reach a
+  Pod or a Service.
+- No admission or conversion webhook of yours runs. Keep your controller and your CRs on the
+  version your CRD stores, and keep drawn CRs
+  [within what your webhooks admit](docs/targets.md#generated-values).
+- reconciler-fuzzer generates sequences only for a custom resource whose CRD your target lists.
+  If your controller reconciles a built-in kind, such as a Service,
+  [write the sequences](docs/targets.md#sequences-you-write) yourself.
+- envtest runs no Pod, so a Deployment, a Job or a PersistentVolumeClaim never becomes ready.
+  If your controller waits on one, run reconciler-fuzzer
+  [against a cluster](docs/targets.md#against-a-cluster), such as kind.
 - reconciler-fuzzer tests namespaced kinds only, in one namespace per run. It misses a child your
   controller leaks into another namespace, and it cannot supply an object your controller
   reads from another namespace ([#38](https://github.com/rosenhouse/reconciler-fuzzer/issues/38)).
@@ -199,27 +200,18 @@ reconciler-fuzzer exits 0 when every run passes, 1 when a check fails, and 2 whe
 controller. On exit 2, the message says why, and
 [docs/failures.md](docs/failures.md#when-reconciler-fuzzer-exits-2) lists the usual causes.
 
-When a run fails, reconciler-fuzzer prints the check that failed. It then minimizes a drawn sequence, which
-can take minutes, and prints the run's evidence directory. Start with `report.md` there. It
-says what failed, quotes what the check read, and gives the command that replays it.
-
-| Check | Fails when | Usual cause |
-|---|---|---|
-| G1 | Your controller keeps making requests after it converged. | A resync timer. |
-| G2 | Your controller keeps changing an object after it converged. | A timestamp in a status. |
-| G3 | A deleted CR leaves objects or a finalizer behind. | A child lacks an ownerReference to its CR. |
-| G4 | A CR is not `ready` within `timeouts.settle`. | A slow controller, one that never stops writing, a wait on a Pod, which [envtest never runs](docs/targets.md#against-a-cluster), or a `ready` that reads a missing field. |
-| G5 | A restart changes converged state. | A field set at startup, or a change the controller sees only on restart. |
-| G6 | Your controller repeats one failing request more than `thresholds.errloop` times. | A retry of an error that never clears. |
-| G7 | An object that `deleteManaged` deleted does not come back. | A missing `Owns()`, or no controller ownerReference for `Owns()` to follow. |
-
-A property's ID, such as P1, names a check of your own. [docs/failures.md](docs/failures.md)
-says what each file and message means.
+When a run fails, reconciler-fuzzer prints the check that failed:
+[G1](docs/checks.md#g1-bounded-reconciliation) to [G7](docs/checks.md#g7-self-healing), or a
+property's ID, such as P1. [docs/checks.md](docs/checks.md) says what each check requires, what
+usually fails it, and what its message means. reconciler-fuzzer then minimizes a drawn
+sequence, which can take minutes, and prints the run's evidence directory. Start with
+`report.md` there. It says what failed, quotes what the check read, and gives the command that
+replays it. [docs/failures.md](docs/failures.md) says what each file holds.
 
 ## Running in CI
 
-In CI, `go install` reconciler-fuzzer at a commit of main, not `@latest`. Keep it out of your go.mod,
-because requiring reconciler-fuzzer raises your Go and Kubernetes versions to its own.
+In CI, `go install` reconciler-fuzzer at a commit of main, not `@latest`, and keep it
+[out of your go.mod](docs/ci.md#keep-reconciler-fuzzer-out-of-your-gomod).
 
 Run fixed seeds on a pull request, and fresh seeds nightly:
 
@@ -230,11 +222,10 @@ reconciler-fuzzer run --target target.yaml --seed 23 --runs 5 --deadline 10m --o
 reconciler-fuzzer run --target target.yaml --runs 20 --deadline 30m --out reconciler-fuzzer-out
 ```
 
-The default `--deadline` assumes every wait times out, so it is long. Set it to the command's
-usual time plus 4m, which leaves reconciler-fuzzer time to minimize a failure.
-
-Upload `reconciler-fuzzer-out/`, so that you can replay a failure. Anyone who can read the repository can
-then read it, and reconciler-fuzzer redacts only the values of a Secret's `data` and annotations.
+[Size `--deadline`](docs/ci.md#deadlines) to your controller. Upload `reconciler-fuzzer-out/`,
+so that you can replay a failure. Anyone who can read the repository can then read it, and
+reconciler-fuzzer [redacts only](docs/failures.md#the-evidence) the values of a Secret's
+`data` and annotations.
 
 [docs/ci.md](docs/ci.md) holds a GitHub Actions workflow to copy. It also says how to pin
 reconciler-fuzzer in a tools module, and how to run reconciler-fuzzer from `go test`.

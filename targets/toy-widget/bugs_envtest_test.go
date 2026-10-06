@@ -21,7 +21,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
-	"github.com/rosenhouse/botbox/pkg/cluster"
+	"github.com/rosenhouse/botbox/internal/cluster"
 	toyv1 "github.com/rosenhouse/botbox/targets/toy-widget/api/v1"
 	"github.com/rosenhouse/botbox/targets/toy-widget/controller"
 )

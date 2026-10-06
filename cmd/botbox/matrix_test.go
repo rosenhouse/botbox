@@ -17,9 +17,9 @@ import (
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 
-	"github.com/rosenhouse/botbox/pkg/proxy"
-	"github.com/rosenhouse/botbox/pkg/run"
-	"github.com/rosenhouse/botbox/pkg/target"
+	"github.com/rosenhouse/botbox/internal/proxy"
+	"github.com/rosenhouse/botbox/internal/run"
+	"github.com/rosenhouse/botbox/internal/target"
 )
 
 // bugSequences writes one sequence per bug id into a new directory.

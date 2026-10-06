@@ -295,8 +295,8 @@ Reasoning about a value's shape from one of its two producers is what broke the 
 `Violation.Statement` reaches the shrinker from the Runner and from the Engine, and only
 the Runner's form matched the assumption.
 
-`pkg/run` cannot import `pkg/generate`, because the generator produces a `run.Sequence` and
-the dependency runs the other way, so the M5 acceptance test lives in `pkg/run`'s external
+`internal/run` cannot import `internal/generate`, because the generator produces a `run.Sequence` and
+the dependency runs the other way, so the M5 acceptance test lives in `internal/run`'s external
 test package.
 
 The example keeps its two hand-written sequences and gains generated runs. The fixed seeds
@@ -390,7 +390,7 @@ and mutating the code found the unpinned bound and the report quoting the wrong 
 evidence. The reviewer driving the binary found the fault op that silences the invariants.
 Neither would have found the other's.
 
-Nine mutations of the M6 code outside `pkg/report` survived the first draft. The sharpest
+Nine mutations of the M6 code outside `internal/report` survived the first draft. The sharpest
 was §10 M6's own acceptance: nothing tied a report to the minimized sequence, so the
 report could have carried the sequence botbox drew and every test would have passed.
 A milestone's acceptance sentence deserves a test that reads like it.
@@ -430,7 +430,7 @@ v1/Secret example-secret was still there 1m0s after the CR was deleted, orphaned
 The negative control's match was `G3 .*Secret example-secret`, which the renamed Secret
 `example-secret-renamed` also satisfies. The control never renames, so nothing passed that
 should not have. cert-manager's control carried the same loose match, and both now quote
-the clause `pkg/invariant/g3.go` writes.
+the clause `internal/invariant/g3.go` writes.
 
 Both `verify-*-pin` targets checked the declared version and the asset digest and never
 the commit, and the tag check lived in the build rule alone, which a warm CI cache skips.

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosenhouse/botbox/pkg/run"
+	"github.com/rosenhouse/botbox/internal/run"
 )
 
 // junitTimestamp is the form JUnit's schema gives a timestamp. botbox writes

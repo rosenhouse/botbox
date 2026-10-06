@@ -433,7 +433,7 @@ botbox owns the API server a run executes against.
 
 - **envtest** (default). botbox starts `kube-apiserver` and `etcd` from
   `KUBEBUILDER_ASSETS` (installed by `setup-envtest`) using
-  `sigs.k8s.io/controller-runtime/pkg/envtest` inside `pkg/cluster`. This is the one
+  `sigs.k8s.io/controller-runtime/pkg/envtest` inside `internal/cluster`. This is the one
   harness package allowed to import controller-runtime (§11). It starts its own control
   plane even where `USE_EXISTING_CLUSTER` is set. Before it starts them, botbox looks for
   both binaries where envtest does: `TEST_ASSET_ETCD` and `TEST_ASSET_KUBE_APISERVER`,
@@ -1015,8 +1015,8 @@ server does take a supported flag, and the ephemeral port above keeps it out of 
 
 ### 8.2 Go form
 
-`pkg/target` loads the YAML into a `Target`, and everything downstream consumes it.
-`go doc github.com/rosenhouse/botbox/pkg/target Target` lists its fields, so this document
+`internal/target` loads the YAML into a `Target`, and everything downstream consumes it.
+`go doc github.com/rosenhouse/botbox/internal/target Target` lists its fields, so this document
 gives only the intent. `Ready` returns an error beside its verdict, and an error means not
 ready (§8.4). A property's error is a configuration error. A nil `Equal` means the §6
 default with the `equalIgnore` paths. An `equal` hook replaces the default and takes no
@@ -1069,7 +1069,7 @@ persists past `T_settle`. The finding quotes the CEL error, and the report quote
 expression and the CR's status beside it (§5.7). An evaluation error in a property is a
 configuration error.
 
-A Go hook is a function registered under a name in `pkg/target` and referenced as
+A Go hook is a function registered under a name in `internal/target` and referenced as
 `ready: go:<name>` or `equal: go:<name>`. Hooks exist for in-repo targets only. No Go
 function runs botbox end to end, and its packages make no compatibility promise (D81).
 
@@ -1170,7 +1170,7 @@ span several PRs.
 - `LICENSE` (Apache-2.0).
 - `Makefile` with `setup`, `test`, `test-envtest`, `fmt`, `vet`.
 - `setup-envtest` pinned through `ENVTEST_K8S_VERSION` and `ENVTEST_INDEX_URL`.
-- `pkg/cluster` starting and stopping an envtest control plane, with a unit test and an
+- `internal/cluster` starting and stopping an envtest control plane, with a unit test and an
   envtest-tagged smoke test that reads the server version, so the envtest tier is not
   empty.
 - CI on PR running the unit and envtest tiers.
@@ -1189,7 +1189,7 @@ reachable.
 
 **M2 — Proxy, Observer, Binary launcher.** Reverse proxy with request log and streaming
 watches; Observer with version history; `Binary` launcher; `target.yaml` loader with CEL
-`ready` and properties; `pkg/cluster` extended with garbage-collector emulation.
+`ready` and properties; `internal/cluster` extended with garbage-collector emulation.
 Acceptance: an envtest test starts the cluster, the proxy and the toy binary, creates a
 Widget from its sample, and asserts that the request log shows the reconcile and the
 Observer shows the ConfigMaps.
@@ -1266,11 +1266,11 @@ the proxy; the `Image` launcher. Separate design addendum.
   `make test` holds each copy to its source. Each `--deadline` in the
   recipe gives a run at least the time that the Makefile's example tiers give one. Bumps
   are their own PRs, never mixed with features.
-- **controller-runtime boundary.** Only `targets/toy-widget/` and `pkg/cluster` may
+- **controller-runtime boundary.** Only `targets/toy-widget/` and `internal/cluster` may
   import it. The rule covers the root module; the spike modules under `docs/spikes/` are
   separate and exempt. Everything else uses client-go and apimachinery.
-- **Layout.** `cmd/botbox/`, `pkg/cluster`, `pkg/proxy`, `pkg/observe`,
-  `pkg/invariant`, `pkg/generate`, `pkg/run`, `pkg/report`, `pkg/target`,
+- **Layout.** `cmd/botbox/`, `internal/cluster`, `internal/proxy`, `internal/observe`,
+  `internal/invariant`, `internal/generate`, `internal/run`, `internal/report`, `internal/target`,
   `targets/toy-widget/`, `examples/cert-manager/`, `examples/external-secrets/`,
   `examples/ci/`, `docs/`, `internal/reference` for the tests that read
   `docs/reference.md`, and `bin/` for git-ignored build output.
@@ -1558,7 +1558,7 @@ built from source and run as a black-box binary.
 - **D3 CEL for `ready` and for properties.** cert-manager's Certificate carries
   `observedGeneration` only inside conditions, so readiness needs a cross-field comparison
   JSONPath cannot express.
-- **D4 envtest is the default test cluster and botbox owns it.** `pkg/cluster` may
+- **D4 envtest is the default test cluster and botbox owns it.** `internal/cluster` may
   import `controller-runtime/pkg/envtest`; re-implementing envtest would be waste.
 - **D5 Garbage-collector emulation and self-cleanup on envtest.** Spike: 10 s after a
   Certificate was deleted, its Secret and CertificateRequest were still present despite
@@ -1720,7 +1720,7 @@ built from source and run as a black-box binary.
   §5.7 asks a report to quote the request log and the version timeline and does not say
   how much. A run makes thousands of requests, and a report nobody reads is worth
   nothing. The checks already bound what they quote, at the twenty entries nearest the
-  violation (`pkg/invariant`), which are the ones that explain it; the report quotes what
+  violation (`internal/invariant`), which are the ones that explain it; the report quotes what
   it is given and names the file that holds the rest. A violation the Runner raises itself
   quotes the same way, from the request log and the CR history it has in hand. The
   report's own bound is a backstop against a caller that bounds nothing. A violation also
@@ -1928,7 +1928,7 @@ built from source and run as a black-box binary.
   `Example(seed)`, which rapid documents as fit only for examples and which promises nothing
   across versions. A draw also depends on the CRD schema, the sample, `generate` and
   `manages`. The Makefile, the README and the envtest tier rely on what particular seeds
-  draw. `pkg/generate` records the draws of those seeds for the toy, the toy with a label
+  draw. `internal/generate` records the draws of those seeds for the toy, the toy with a label
   fixture, cert-manager and external-secrets. It takes the example and kind tiers' seeds
   from the Makefile, and the fixture envtest fails unless it draws what the record holds. A
   change to generation or to rapid that moves a draw fails until the test is rerun with
@@ -2474,7 +2474,7 @@ built from source and run as a black-box binary.
   once it writes a lease, and fails G4 where it never does. G4 and the property read only
   the requests made by the checkpoint, as the wait did. Keeping the sign of D60 and D69
   and stating the limit was rejected, because the wait itself converged too early.
-- **D86 The envtest tier's CI budget is ten minutes.** On CI, `pkg/run` alone took 309 s,
+- **D86 The envtest tier's CI budget is ten minutes.** On CI, `internal/run` alone took 309 s,
   past the five minutes the tier had. The maintainer chose a larger budget over shorter
   tests or a tier split across jobs.
 - **D87 The cert-manager example draws `rotationPolicy` only as `Always`.** The example

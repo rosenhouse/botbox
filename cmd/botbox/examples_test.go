@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rosenhouse/botbox/pkg/run"
+	"github.com/rosenhouse/botbox/internal/run"
 )
 
 // quickstartRun is a page's first cert-manager quickstart command and the

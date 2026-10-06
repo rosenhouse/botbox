@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/rosenhouse/botbox/pkg/run"
-	"github.com/rosenhouse/botbox/pkg/target"
+	"github.com/rosenhouse/botbox/internal/run"
+	"github.com/rosenhouse/botbox/internal/target"
 )
 
 // asBotbox has the test binary run as botbox, over a session that runs until

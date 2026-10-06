@@ -20,11 +20,11 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
-	"github.com/rosenhouse/botbox/pkg/cluster"
-	"github.com/rosenhouse/botbox/pkg/generate"
-	"github.com/rosenhouse/botbox/pkg/report"
-	"github.com/rosenhouse/botbox/pkg/run"
-	"github.com/rosenhouse/botbox/pkg/target"
+	"github.com/rosenhouse/botbox/internal/cluster"
+	"github.com/rosenhouse/botbox/internal/generate"
+	"github.com/rosenhouse/botbox/internal/report"
+	"github.com/rosenhouse/botbox/internal/run"
+	"github.com/rosenhouse/botbox/internal/target"
 )
 
 // botbox exits with one of these codes.

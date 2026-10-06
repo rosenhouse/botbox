@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rosenhouse/botbox/pkg/run"
+	"github.com/rosenhouse/botbox/internal/run"
 )
 
 // summaryMarkdownFile is summary.json for a person, such as a CI job's page.

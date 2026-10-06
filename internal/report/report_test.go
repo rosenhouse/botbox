@@ -247,7 +247,7 @@ func TestReportNamesWhatRanWhereNoVersionIsDeclared(t *testing.T) {
 	}
 }
 
-// No seed draws the baseline, so a report of it names no seed.
+// No seed draws the baseline, so its report names the baseline instead.
 func TestAReportOfTheBaselineSaysSo(t *testing.T) {
 	failure := failingRun()
 	failure.Seed, failure.Baseline = 0, true

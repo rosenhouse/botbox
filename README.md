@@ -186,8 +186,8 @@ CRDs and `target.yaml` are unchanged.
 Few drawn sequences delete a managed object, or update a CR that has settled. So after the
 drawn runs, reconciler-fuzzer runs the baseline. It creates your sample, and deletes the first
 object of each managed kind, which your controller must recreate. It then changes each field
-that generation may change, one at a time. Every invocation thus catches a controller that
-does not watch a kind it manages, or that ignores a spec change. `--no-baseline` leaves it out.
+that generation may change, one at a time, and your controller must settle after each change.
+`--no-baseline` leaves the baseline out.
 
 To test what generation does not draw, write a sequence.
 `reconciler-fuzzer run --target target.yaml sequences/*.json` runs your sequences.

@@ -362,7 +362,7 @@ func (c *cli) plan(opts options, t *target.Target, paths []string) ([]planned, e
 	return append(runs, planned{sequence: sequence, baseline: true}), nil
 }
 
-// reportFailure minimizes a sequence reconciler-fuzzer drew and leaves it in
+// reportFailure minimizes a sequence reconciler-fuzzer generated and leaves it in
 // the run directory with the evidence of a run of it. A sequence the caller
 // wrote is reported as it was written. It calls rerunning before it runs the
 // minimized sequence, and returns the violation and notes the report carries.
@@ -397,13 +397,13 @@ func (c *cli) reportFailure(ctx context.Context, opts options, s session, t *tar
 		c.warn(fmt.Errorf("%s ended the shrink pass with %s, left unrun in %s",
 			ended(ctx), ops(shrunk), filepath.Join(dir, shrunkFile)))
 		result.Notes = append(result.Notes, fmt.Sprintf(
-			"%s ended minimization with %s, left unrun in %s: this is the sequence reconciler-fuzzer drew",
+			"%s ended minimization with %s, left unrun in %s: this is the sequence reconciler-fuzzer generated",
 			ended(ctx), ops(shrunk), shrunkFile))
 	case ctx.Err() != nil:
 		// A reader takes a report's sequence for the minimized one, and the
 		// pass never got to a smaller one.
 		result.Notes = append(result.Notes, ended(ctx)+
-			" ended minimization before it found a smaller sequence: this is the sequence reconciler-fuzzer drew")
+			" ended minimization before it found a smaller sequence: this is the sequence reconciler-fuzzer generated")
 	case simplified:
 		rerunning()
 		again, err := c.rerun(ctx, opts, s, t, shrunk, dir)
@@ -851,7 +851,7 @@ func (o *options) flags() *flag.FlagSet {
 		flags.Int64Var(&o.seed, "seed", 0,
 			"Draw the first sequence from seed `n`, and each later one from the next seed. Without it, reconciler-fuzzer picks a seed and prints it.")
 		flags.BoolVar(&o.noBaseline, "no-baseline", false,
-			"Run only the drawn sequences. Without it, reconciler-fuzzer then runs the baseline: it creates the sample, deletes the first object of each managed kind, and changes each field generation may change.")
+			"Leave out the baseline, which runs after the drawn sequences.")
 	}
 	return flags
 }

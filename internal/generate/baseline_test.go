@@ -31,12 +31,16 @@ func TestTheBaselineCreatesTheSampleThenDeletesTheFirstObjectOfEachManagedKind(t
 			}
 			var deleted []string
 			for _, op := range ops[1:] {
-				if op.Type == run.OpDeleteManaged {
-					if *op.Nth != 0 {
-						t.Errorf("Op %d deletes the managed object %d, want the first.", op.Index, *op.Nth)
-					}
-					deleted = append(deleted, op.Kind)
+				if op.Type != run.OpDeleteManaged {
+					continue
 				}
+				if *op.Nth != 0 {
+					t.Errorf("Op %d deletes the managed object %d, want the first.", op.Index, *op.Nth)
+				}
+				if op.Index != len(deleted)+1 {
+					t.Errorf("Op %d deletes a managed object after an update.", op.Index)
+				}
+				deleted = append(deleted, op.Kind)
 			}
 			if !slices.Equal(deleted, testCase.managed) {
 				t.Errorf("The baseline deletes managed objects of the kinds %v, want one of each of %v.", deleted, testCase.managed)
@@ -120,5 +124,34 @@ func TestTheBaselineLeavesOutAFieldNoDrawChanges(t *testing.T) {
 	}
 	if draws != updateDraws {
 		t.Errorf("The baseline drew %d counts, want %d.", draws, updateDraws)
+	}
+}
+
+func TestTheBaselineLeavesOutAnUpdateTheCRDRefuses(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, rulesTarget), Options{})
+	draws := 0
+	// No count reaches minCount's default.
+	g.fields = []field{countField(0, &draws)}
+
+	for _, op := range baseline(t, g).Ops {
+		if op.Type == run.OpUpdate {
+			t.Errorf("The baseline updates %v, which the CRD refuses.", op.Patch)
+		}
+	}
+}
+
+func TestTheBaselineChangesAFieldFromWhatAnEarlierUpdateSet(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, toyTarget), Options{})
+	draws := 0
+	g.fields = []field{countField(5, &draws), countField(5, &draws)}
+
+	var updates int
+	for _, op := range baseline(t, g).Ops {
+		if op.Type == run.OpUpdate {
+			updates++
+		}
+	}
+	if updates != 1 {
+		t.Errorf("The baseline sets count to 5 in %d updates, want 1: the second finds it already 5.", updates)
 	}
 }

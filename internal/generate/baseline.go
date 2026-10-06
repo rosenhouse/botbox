@@ -10,9 +10,8 @@ import (
 	"github.com/rosenhouse/reconciler-fuzzer/internal/run"
 )
 
-// Baseline is the sequence that runs whatever the seeds draw. It creates the
-// sample, deletes the first object of each managed kind, and then changes
-// each mutable field of the settled CR. Few drawn sequences do either.
+// Baseline creates the sample, deletes the first object of each managed kind,
+// and then changes each mutable field once. Few drawn sequences do either.
 func (g *Generator) Baseline() (sequence run.Sequence, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {

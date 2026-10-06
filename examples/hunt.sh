@@ -54,12 +54,13 @@ all() {
     [ -e "$family" ] || continue
     hunt "$(basename "$family" .json)" "$family" || return 0
   done
-  # The first seed's invocation also runs the baseline, which every seed shares.
+  # Every seed shares the baseline, so seeds leave it out once one invocation
+  # passed it.
   i=0
   baseline=
   while [ "$i" -lt "$HUNT_RUNS" ]; do
     hunt "seed-$((HUNT_SEED + i))" --seed "$((HUNT_SEED + i))" --runs 1 $baseline || return 0
-    baseline=--no-baseline
+    [ "$status" -ne 0 ] || baseline=--no-baseline
     i=$((i + 1))
   done
 }

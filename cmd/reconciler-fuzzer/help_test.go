@@ -125,8 +125,8 @@ func TestWrapFillsEachLineUpToEightyColumns(t *testing.T) {
 func TestRunAndReplaySayWhichSequencesTheyRunAndMinimize(t *testing.T) {
 	for name, says := range map[string][]string{
 		"run": {
-			"reconciler-fuzzer run draws --runs sequences of ops on the target's custom resources and runs each against a fresh namespace.",
-			"It stops at the first sequence that fails a check, minimizes it, and writes a report.",
+			"reconciler-fuzzer run draws --runs sequences of ops on the target's custom resources and runs each against a fresh namespace, then runs the baseline.",
+			"reconciler-fuzzer stops at the first sequence that fails a check, minimizes it, and writes a report.",
 			"Sequence files given as arguments run as written instead, and reconciler-fuzzer does not minimize them.",
 		},
 		"replay": {"reconciler-fuzzer replay runs one sequence file as written, such as the sequence.json of a failing run, and writes a report if it fails."},

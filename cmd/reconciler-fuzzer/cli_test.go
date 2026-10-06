@@ -336,6 +336,14 @@ type withBaseline struct {
 
 func (g withBaseline) Baseline() (run.Sequence, error) { return g.baseline, nil }
 
+// failingBaseline is a Generator whose baseline fails with the error given.
+type failingBaseline struct {
+	drawing
+	err error
+}
+
+func (g failingBaseline) Baseline() (run.Sequence, error) { return run.Sequence{}, g.err }
+
 func TestAFailingBaselineIsMinimizedAndReportedAsTheBaseline(t *testing.T) {
 	g4 := run.Violation{ID: "G4", Statement: "the target converges"}
 	session := &fakeSession{fails: func(candidate run.Sequence, _ string) *run.Violation {
@@ -1280,6 +1288,13 @@ func TestAGeneratorThatFailsExitsTwo(t *testing.T) {
 			name: "drawing a sequence",
 			newGenerator: func(*target.Target) (Generator, error) {
 				return drawing(func(int64) (run.Sequence, error) { return run.Sequence{}, broken }), nil
+			},
+		},
+		{
+			name: "building the baseline",
+			newGenerator: func(t *target.Target) (Generator, error) {
+				drawn, _ := countingGenerator(nil)(t)
+				return failingBaseline{drawn.(drawing), broken}, nil
 			},
 		},
 	} {

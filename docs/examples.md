@@ -36,9 +36,10 @@ KUBEBUILDER_ASSETS="$(make --no-print-directory assets-path)" ./bin/reconciler-f
 ```
 
 The first invocation installs `setup-envtest`, downloads the control plane and builds
-cert-manager, which takes a few minutes. The five runs then take about three minutes together.
-Each applies the Issuer fixture to a fresh namespace, launches the controller behind the proxy,
-and runs one drawn sequence. A fixed seed draws the same five sequences every time:
+cert-manager, which takes a few minutes. The five drawn runs and the baseline then take about
+five minutes together. Each applies the Issuer fixture to a fresh namespace, launches the
+controller behind the proxy, and runs one sequence. A fixed seed draws the same five sequences
+every time:
 
 ```sh
 examples/cert-manager/quickstart.sh --seed 23

@@ -495,7 +495,7 @@ func TestTheSummaryCarriesTheReportsViolationAndNotes(t *testing.T) {
 				return s
 			},
 			args:      []string{"--runs", "1", "--seed", "1"},
-			violation: drawn, notes: []string{"an interrupt ended minimization before it found a smaller sequence: this is the sequence reconciler-fuzzer drew"}},
+			violation: drawn, notes: []string{"an interrupt ended minimization before it found a smaller sequence: this is the sequence reconciler-fuzzer generated"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx, cancel := context.WithCancelCause(t.Context())

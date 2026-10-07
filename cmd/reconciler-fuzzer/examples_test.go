@@ -26,9 +26,15 @@ func TestTheExamplesPageShowsWhatReconcilerFuzzerPrintsInTheCertManagerQuickstar
 	if code != exitOK {
 		t.Fatalf("reconciler-fuzzer %s exited %d: %s", strings.Join(args, " "), code, stderr)
 	}
-	if stdout != shown {
+	if shown := withoutNotes(shown); stdout != shown {
 		t.Errorf("docs/examples.md shows\n%s\nand reconciler-fuzzer %s printed\n%s", shown, strings.Join(args, " "), stdout)
 	}
+}
+
+// withoutNotes drops the checks a real run notes it did not evaluate, which the
+// fake session cannot.
+func withoutNotes(shown string) string {
+	return regexp.MustCompile(`(?m)^run \d+: \S+ is not evaluated at .*\n`).ReplaceAllString(shown, "")
 }
 
 // docs/failures.md quotes the line a drawn run of twelve ops prints once it fails.

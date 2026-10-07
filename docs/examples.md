@@ -37,7 +37,7 @@ KUBEBUILDER_ASSETS="$(make --no-print-directory assets-path)" ./bin/reconciler-f
 
 The first invocation installs `setup-envtest`, downloads the control plane and builds
 cert-manager, which takes a few minutes. The five drawn runs and the baseline then take about
-five minutes together. Each applies the Issuer fixture to a fresh namespace, launches the
+six minutes together. Each applies the Issuer fixture to a fresh namespace, launches the
 controller behind the proxy, and runs one sequence. A fixed seed draws the same five sequences
 every time:
 
@@ -46,11 +46,12 @@ examples/cert-manager/quickstart.sh --seed 23
 ```
 
 ```
-the deadline is 2h2m10s: these 6 runs can take 1h58m10s at the target's timeouts, and minimizing a failure gets the rest, at least 4m0s. --deadline sets another.
+the deadline is 2h8m25s: these 6 runs can take 2h4m25s at the target's timeouts, and minimizing a failure gets the rest, at least 4m0s. --deadline sets another.
 run 1: seed 23, generated
 run 2: seed 24, generated
 run 3: seed 25, generated
 run 4: seed 26, generated
+run 4: P1 is not evaluated at the checkpoint after op 2 (create): a fault was active there, or the target was still owed time to recover from one, so it may not yet have repaired what P1 reads
 run 5: seed 27, generated
 run 6: baseline
 every run passed.
@@ -66,22 +67,22 @@ cert-manager leaves the issued Secret behind, as upstream documents. The target 
 `v1/Secret` as managed, so [G3](checks.md#g3-clean-deletion) has to report it:
 
 ```sh
-examples/cert-manager/quickstart.sh --seed 23 --runs 1 --deadline 7m --launch-arg --enable-certificate-owner-ref=false
+reconciler-fuzzer replay --target examples/cert-manager/target.yaml --launch-arg --enable-certificate-owner-ref=false examples/cert-manager/sequences/create.json
 ```
 
 ```
-run 1: seed 23, generated
+run 1: seed 20261006, sequence examples/cert-manager/sequences/create.json
 run 1: G3 the v1/Secret example-tls was still there 1m0s (timeouts.delete) after example, the last CR it may belong to, was deleted, orphaned: it carries no ownerReference to the CR
-  at 2026-09-21T05:59:08.980624165Z; 1 version, the first v1/Secret example-tls
-  the evidence is in reconciler-fuzzer-out/20260921T055744Z-23/run-1
-  the sequence is 1 op, in reconciler-fuzzer-out/20260921T055744Z-23/run-1/sequence.json
+  at 2026-10-07T00:02:11.783974082Z; 1 version, the first v1/Secret example-tls
+  the evidence is in reconciler-fuzzer-out/20261007T000043Z-20261006/run-1
 ```
 
-Seed 23 draws a single op, so there is nothing to [minimize](failures.md#the-evidence).
+`create.json` creates the Certificate and nothing more, so there is nothing to
+[minimize](failures.md#the-evidence).
 
 `make test-example` runs this control. It fails unless the default configuration passes, the
 control fails on [G3](checks.md#g3-clean-deletion) naming that Secret, and the control's
-evidence hides the Secret's private key. It also runs each
+evidence hides the Secret's private key. It also runs every other
 `examples/cert-manager/sequences/*.json` as written, so none can rot. Drawn sequences set
 `spec.privateKey.rotationPolicy` only to `Always`, because under `Never` cert-manager waits for
 a user once a later op changes the algorithm. `rotation-never.json` runs `Never` instead. A

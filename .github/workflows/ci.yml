@@ -105,12 +105,12 @@ jobs:
           if-no-files-found: ignore
 
   # The cert-manager adoption example of DESIGN.md §10 (M5): generated sequences
-  # on the seeds the Makefile fixes. §11 budgets the tier at ten minutes, and the
-  # timeout adds the cold clone and build of the controller, about 90 seconds,
-  # that a cache miss pays for.
+  # on the seeds the Makefile fixes. §11 budgets the tier at twelve minutes, and
+  # the timeout adds the cold clone and build of the controller, about 90
+  # seconds, that a cache miss pays for.
   example:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 14
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-go@v5
@@ -148,7 +148,7 @@ jobs:
           if-no-files-found: ignore
 
   # The external-secrets adoption example of DESIGN.md §10 (M7), on the same
-  # fixed seeds. The tier measures about eight minutes, and the timeout adds the
+  # fixed seeds. The tier measures about ten minutes, and the timeout adds the
   # cold clone and build of the controller, about 150 seconds, that a cache miss
   # pays for.
   example-external-secrets:

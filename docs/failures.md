@@ -127,8 +127,8 @@ usual causes and what to change.
   the [README](../README.md#install) shows, or point `--kubeconfig` at a cluster.
 - A key target.yaml does not take fails with its line, as in `line 6: timeouts.setle is not a
   key; did you mean settle?`.
-- `launch.binary` is relative to the directory you run reconciler-fuzzer in. `crds`, `sample` and
-  `fixtures` are relative to target.yaml.
+- `launch.binary` is relative to the directory you run reconciler-fuzzer in. `crds`, `sample`,
+  `fixtures` and `rbac` are relative to target.yaml.
 - A controller that stops before its first settle wait converges ends the invocation, whether a
   flag, a taken port or the first CR stopped it. reconciler-fuzzer quotes the line it wrote that says why:
   the line a panic opens with, the line above a flag's usage text, or the last line above any

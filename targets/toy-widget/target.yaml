@@ -1,4 +1,4 @@
-# reconciler-fuzzer reads crds, sample and fixtures relative to this file, and
+# reconciler-fuzzer reads crds, sample, fixtures and rbac relative to this file, and
 # launch.binary relative to the directory it runs in.
 name: toy-widget
 version: dev                       # Reports print it.

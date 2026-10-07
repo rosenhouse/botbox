@@ -6,7 +6,7 @@ how to choose their values.
 
 ## target.yaml
 
-reconciler-fuzzer reads `crds`, `sample` and `fixtures` relative to target.yaml, and `launch.binary`
+reconciler-fuzzer reads `crds`, `sample`, `fixtures` and `rbac` relative to target.yaml, and `launch.binary`
 relative to the directory it runs in. A key it does not take is an error. A duration is a Go
 duration, such as `30s` or `1m30s`. reconciler-fuzzer refuses a cluster-scoped `primary`, kind under
 `manages` or fixture, because a run [owns one namespace](../README.md#limitations).

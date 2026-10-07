@@ -121,7 +121,8 @@ that reads status can still refuse a draw.
 A schema that says only `type: string` yields a random word. No webhook of yours runs, so
 narrow what generation draws to what your controller and your webhooks accept:
 
-- Write in your `sample` what your webhooks would add.
+- Write in your `sample` what your webhooks would add. A drawn CR may leave out an optional
+  field, so make such a field required with `generate.overlay`.
 - `generate.mutate` lists the only spec paths a sequence changes. Without it, `reconciler-fuzzer run`
   prints each spec path it leaves alone, and why.
 - `generate.overlay` tightens one path's schema, as `examples/cert-manager/target.yaml` does.

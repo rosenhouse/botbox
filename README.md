@@ -100,13 +100,27 @@ collector and checks every object your controller manages in every run.
 [docs/examples.md](docs/examples.md) runs reconciler-fuzzer on two real controllers, cert-manager and
 external-secrets.
 
+### With Claude Code
+
+For a kubebuilder project, the [adopt-reconciler-fuzzer](skills/adopt-reconciler-fuzzer/SKILL.md)
+skill writes `target.yaml` and runs reconciler-fuzzer until it tests your controller. After the
+install, copy the skill into your repository:
+
+```sh
+mkdir -p .claude/skills
+cp -r "$(go env GOMODCACHE)/github.com/rosenhouse/reconciler-fuzzer@$(reconciler-fuzzer version | cut -d' ' -f2)/skills/adopt-reconciler-fuzzer" .claude/skills/
+chmod -R u+w .claude/skills/adopt-reconciler-fuzzer
+```
+
+Then ask Claude Code to set up reconciler-fuzzer, or run `/adopt-reconciler-fuzzer`.
+
 ### Write target.yaml
 
 A target is one YAML file. This is the toy's:
 
 <!-- embed: targets/toy-widget/target.yaml -->
 ```yaml
-# reconciler-fuzzer reads crds, sample and fixtures relative to this file, and
+# reconciler-fuzzer reads crds, sample, fixtures and rbac relative to this file, and
 # launch.binary relative to the directory it runs in.
 name: toy-widget
 version: dev                       # Reports print it.

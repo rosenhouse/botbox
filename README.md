@@ -65,15 +65,13 @@ reconciler-fuzzer run --target targets/toy-widget/target.yaml --seed 1 --runs 3
 ```
 run 1: seed 1, generated
 run 2: seed 2, generated
-run 2: the proxy applied the fault of op 6 to no request
 run 3: seed 3, generated
 run 4: baseline
 every run passed.
 ```
 
 Each run starts the toy in a new namespace and applies a sequence of ops, drawn from the run's
-seed. Run 2 drew a fault that no request matched. Run 4 is [the baseline](#the-baseline). The
-toy is correct, so every run passes.
+seed. Run 4 is [the baseline](#the-baseline). The toy is correct, so every run passes.
 
 Now switch on bug B3, which leaves a ConfigMap without an ownerReference. `--launch-arg` passes
 an extra flag to the controller. `replay` runs a sequence file rather than a drawn sequence.

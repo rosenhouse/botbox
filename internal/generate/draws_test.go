@@ -181,7 +181,6 @@ func TestCertManagersExampleSeedsDrawWhatTheMakefileSays(t *testing.T) {
 }
 
 func TestCertManagersPinnedSequencesRecreateTheCertificate(t *testing.T) {
-	// The example seeds draw no recreate.
 	for _, path := range glob(t, certManagerSequences) {
 		sequence, err := run.ReadSequence(path)
 		if err != nil {

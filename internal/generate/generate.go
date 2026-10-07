@@ -207,8 +207,8 @@ func sampled[E any](t *rapid.T, slice []E, label string) E {
 // checkpointed inserts the settle waits that leave the drawn ops judged. A
 // restart is wrapped in them: G5 compares the converged state either side of
 // a restart, less what another op in between may have changed. A
-// deleteManaged follows one, since G7 judges it only once the run has
-// converged, and the managed objects are then there to delete. The last op
+// deleteManaged follows one too: G7 judges it only once the run has converged,
+// and the managed objects are then there to delete. The last op
 // takes one because nothing else judges the state the run ends in. A noSettle
 // elsewhere is left alone. A deleted fixture comes back before the next op
 // that settles, since the target may rightly not be ready without it.

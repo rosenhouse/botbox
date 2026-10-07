@@ -779,8 +779,6 @@ func TestDeleteManagedIsLegalWhileACRIsLive(t *testing.T) {
 	}
 }
 
-// G7 judges a deleteManaged only once the run has converged since
-// reconciler-fuzzer last changed something.
 func TestASettleWaitPrecedesADeleteManagedThatFollowsAnOpThatDoesNotSettle(t *testing.T) {
 	deleteManaged := run.Op{Type: run.OpDeleteManaged, Kind: "v1/ConfigMap", Nth: new(int)}
 	for _, testCase := range []struct {
@@ -794,6 +792,8 @@ func TestASettleWaitPrecedesADeleteManagedThatFollowsAnOpThatDoesNotSettle(t *te
 			[]run.OpType{run.OpCreate, run.OpSettle, run.OpDeleteManaged}},
 		{"a deleteFixture", []run.Op{{Type: run.OpCreate}, {Type: run.OpDeleteFixture}, deleteManaged},
 			[]run.OpType{run.OpCreate, run.OpDeleteFixture, run.OpSettle, run.OpDeleteManaged}},
+		{"a restart", []run.Op{{Type: run.OpCreate}, {Type: run.OpRestart}, deleteManaged},
+			[]run.OpType{run.OpCreate, run.OpRestart, run.OpSettle, run.OpDeleteManaged}},
 	} {
 		t.Run(testCase.name, func(t *testing.T) {
 			if got := opTypes(checkpointed(testCase.drawn)); !slices.Equal(got, testCase.want) {

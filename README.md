@@ -196,7 +196,7 @@ CRDs and `target.yaml` are unchanged.
 
 ### The baseline
 
-Few drawn sequences delete a managed object, or update a CR that has settled. So after the
+Drawn sequences may miss a managed kind, or never update a CR that has settled. So after the
 drawn runs, reconciler-fuzzer runs the baseline. It creates your sample, and deletes the first
 object of each managed kind, which your controller must recreate. It then changes each field
 that generation may change, one at a time, and your controller must settle after each change.

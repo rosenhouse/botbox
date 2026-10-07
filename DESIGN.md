@@ -2662,8 +2662,7 @@ built from source and run as a black-box binary.
   CR ops a draw makes skip their settle, so a `deleteManaged` that waited for an op that
   settles was drawn half as often as the other ops. Generation now puts a settle wait
   before a `deleteManaged` that follows an op that does not settle, as it does before a
-  `restart`. G7 then judges it, and the managed objects are there to delete. Over seeds 1
+  `restart`. G7 can then judge it, and the managed objects are there to delete. Over seeds 1
   to 1,000, the seeds that draw a `deleteManaged` went from 18–20% to 32–34% for the toy
   and each example, against 34–38% for a delete and 38–40% for a recreate. Cert-manager's
-  example seeds now draw a delete and a `deleteManaged` but no recreate, which
-  `rotation-never.json` runs.
+  example seeds no longer draw a recreate, which `rotation-never.json` runs.

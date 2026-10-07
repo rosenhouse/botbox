@@ -2652,6 +2652,4 @@ built from source and run as a black-box binary.
   but settles after the create went from 24–28% to 4%. `deleteManaged` is legal only after
   an op that settles, so it is still drawn about half as often as the other ops. No seed
   now draws a lone create, so cert-manager's negative control runs
-  `sequences/create.json`, as external-secrets' runs a file (D41). Longer draws took the
-  cert-manager tier to 10m37s on CI, past §11's ten minutes, so `EXAMPLE_RUNS` went from 5
-  to 4.
+  `sequences/create.json`, as external-secrets' runs a file (D41).

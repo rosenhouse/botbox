@@ -38,7 +38,7 @@ endef
 # deletes its managed objects. The pinned sequences delete the Certificate, and
 # run the rotationPolicy Never that draws leave out.
 EXAMPLE_SEED ?= 23
-EXAMPLE_RUNS ?= 4
+EXAMPLE_RUNS ?= 5
 EXAMPLE_DEADLINE ?= 7m
 NIGHTLY_RUNS ?= 20
 NIGHTLY_DEADLINE ?= 30m

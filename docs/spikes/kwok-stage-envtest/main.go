@@ -197,7 +197,7 @@ func startStages(ctx context.Context, dyn dynamic.Interface, mapper meta.RESTMap
 	if err != nil {
 		return fmt.Errorf("building the lifecycle: %w", err)
 	}
-	barInformer := informer.NewInformer[*unstructured.Unstructured, *unstructured.UnstructuredList](dyn.Resource(gvr))
+	barInformer := informer.NewInformer[*unstructured.Unstructured, *unstructured.UnstructuredList](dyn.Resource(gvr).Namespace("spike"))
 	events := make(chan informer.Event[*unstructured.Unstructured], 1)
 	if err := barInformer.Watch(ctx, informer.Option{}, events); err != nil {
 		return fmt.Errorf("watching bars: %w", err)

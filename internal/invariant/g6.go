@@ -11,8 +11,8 @@ import (
 	"github.com/rosenhouse/reconciler-fuzzer/internal/proxy"
 )
 
-// NoErrorLoop is G6: the target does not make the same failing request, same
-// verb, resource, namespace and name, more than thresholds.errloop times
+// NoErrorLoop is G6: the target does not make the same failing request (verb,
+// resource, namespace, name and subresource) more than thresholds.errloop times
 // within timeouts.settle under an unchanged spec and fixtures, with no faults.
 func NoErrorLoop(in Input) (Result, error) {
 	threshold := in.errLoop()
@@ -31,21 +31,25 @@ func NoErrorLoop(in Input) (Result, error) {
 	return out, nil
 }
 
-// failure is the failing requests of one verb, resource, namespace and name in
-// one stretch of unchanged spec and fixtures.
+// failure is the failing requests of one verb, resource, namespace, name and
+// subresource in one stretch of unchanged spec and fixtures.
 type failure struct {
 	key      requestKey
 	requests []proxy.Request
 }
 
-type requestKey struct{ verb, group, resource, namespace, name string }
+type requestKey struct{ verb, group, resource, namespace, name, subresource string }
 
 func (k requestKey) String() string {
 	resource := k.resource
 	if k.group != "" {
 		resource = k.group + "/" + resource
 	}
-	return fmt.Sprintf("%s %s/%s", k.verb, resource, k.name)
+	path := fmt.Sprintf("%s %s/%s", k.verb, resource, k.name)
+	if k.subresource != "" {
+		path += "/" + k.subresource
+	}
+	return path
 }
 
 // repeatedFailures groups the failing requests by what the target asked for,
@@ -81,7 +85,7 @@ func (in Input) repeatedFailures() []failure {
 }
 
 func keyOf(r proxy.Request) requestKey {
-	return requestKey{verb: r.Verb, group: r.Group, resource: r.Resource, namespace: r.Namespace, name: r.Name}
+	return requestKey{verb: r.Verb, group: r.Group, resource: r.Resource, namespace: r.Namespace, name: r.Name, subresource: r.Subresource}
 }
 
 // failed reports whether the API server refused the target, rather than the

@@ -216,5 +216,6 @@ Tell the user:
 - Say which files you wrote, and give the command that runs them.
 - Say how the last invocation ended, and give each finding.
 - Say what you assumed, such as the `ready` you chose and the values in the sample.
-- Suggest pinning sequences, as `<module>/README.md#pin-sequences` says, and running in CI, as
+- Suggest writing sequences for what generation does not draw, as
+  `<module>/docs/targets.md#sequences-you-write` says, and running in CI, as
   `<module>/docs/ci.md` says.

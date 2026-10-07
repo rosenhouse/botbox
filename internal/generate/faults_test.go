@@ -64,7 +64,7 @@ func TestADrawnFaultEndsAtASettleInsertedAfterTheOpsItCovers(t *testing.T) {
 	}
 }
 
-// G7 only notes a deleteManaged that a fault is active during.
+// G7 does not judge a deleteManaged under a fault.
 func TestNoDrawnFaultIsActiveDuringADeleteManaged(t *testing.T) {
 	for _, testCase := range targets {
 		t.Run(testCase.path, func(t *testing.T) {
@@ -75,7 +75,7 @@ func TestNoDrawnFaultIsActiveDuringADeleteManaged(t *testing.T) {
 					if op.Type != run.OpFault {
 						continue
 					}
-					for _, active := range ops[i+1 : *op.Fault.Until.Op+1] {
+					for _, active := range ops[i+1 : *op.Fault.Until.Op] {
 						if active.Type == run.OpDeleteManaged {
 							rt.Fatalf("The fault of op %d is active during op %d, a deleteManaged.", i, active.Index)
 						}

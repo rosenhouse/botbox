@@ -7,6 +7,7 @@ package generate
 
 import (
 	"fmt"
+	"math/bits"
 	"reflect"
 	"slices"
 	"strings"
@@ -159,12 +160,48 @@ func (g *Generator) sequence(t *rapid.T) run.Sequence {
 	create := run.Op{Index: 0, Type: run.OpCreate, Obj: g.cr(t, 0, &at), NoSettle: rapid.Bool().Draw(t, "noSettle")}
 	ops := []run.Op{create}
 	at.advance(create, 0)
-	for range rapid.IntRange(0, g.maxOps-1).Draw(t, "ops") {
+	for range g.opsAfterCreate(t) {
 		ops = append(ops, g.op(t, len(ops), &at))
 	}
 	judged := checkpointed(ops)
 	judged = g.faulted(t, judged)
 	return run.Sequence{Target: g.target.Name, Ops: judged}
+}
+
+// opsAfterCreate draws how many ops follow the create: at least one, unless
+// MaxOps is 1.
+func (g *Generator) opsAfterCreate(t *rapid.T) int {
+	if g.maxOps == 1 {
+		return 0
+	}
+	return 1 + uniform(t, g.maxOps-1, "ops")
+}
+
+// uniform draws a number below n, each with equal chance. rapid's own integers
+// favor small numbers, which suits shrinking by rapid, but run.Shrink
+// shrinks a sequence without it.
+func uniform(t *rapid.T, n int, label string) int {
+	if n < 1 {
+		panic(fmt.Sprintf("drawing %s from none", label))
+	}
+	width := bits.Len(uint(n - 1))
+	for {
+		i := 0
+		for range width {
+			i <<= 1
+			if rapid.Bool().Draw(t, label) {
+				i |= 1
+			}
+		}
+		if i < n {
+			return i
+		}
+	}
+}
+
+// sampled draws an element of the slice, each with equal chance.
+func sampled[E any](t *rapid.T, slice []E, label string) E {
+	return slice[uniform(t, len(slice), label)]
 }
 
 // checkpointed inserts the settle waits that leave the drawn ops judged. A
@@ -275,7 +312,7 @@ const updateDraws = 8
 // CRD refused every one drawn or each gave the CR another's distinct value.
 func (g *Generator) patch(t *rapid.T, n int, at *state) map[string]any {
 	for range updateDraws {
-		mutable := rapid.SampledFrom(g.fields).Draw(t, "field")
+		mutable := sampled(t, g.fields, "field")
 		value, _ := mutable.draw(t)
 		// A merge patch removes the field where the draw left it absent
 		// (RFC 7386).
@@ -361,34 +398,34 @@ func (g *Generator) collides(at *state, n int, cr map[string]any) bool {
 
 // op draws the next op, and the CR it acts on.
 func (g *Generator) op(t *rapid.T, index int, at *state) run.Op {
-	op := run.Op{Index: index, Type: rapid.SampledFrom(g.legal(at)).Draw(t, "op")}
+	op := run.Op{Index: index, Type: sampled(t, g.legal(at), "op")}
 	n := 0
 	switch op.Type {
 	case run.OpCreate:
 		n = len(at.crs)
 		op.Obj = g.cr(t, n, at)
 	case run.OpUpdate:
-		n = rapid.SampledFrom(at.live()).Draw(t, "cr")
+		n = sampled(t, at.live(), "cr")
 		if op.Patch = g.patch(t, n, at); op.Patch == nil {
 			op.Type = run.OpSettle
 		}
 	case run.OpDelete:
-		n = rapid.SampledFrom(at.live()).Draw(t, "cr")
+		n = sampled(t, at.live(), "cr")
 	case run.OpRecreate:
-		n = rapid.IntRange(0, len(at.crs)-1).Draw(t, "cr")
+		n = uniform(t, len(at.crs), "cr")
 		op.Obj = g.cr(t, n, at)
 	case run.OpDeleteManaged:
-		op.Kind = rapid.SampledFrom(g.managed).Draw(t, "kind")
+		op.Kind = sampled(t, g.managed, "kind")
 		// The first managed object of its kind: generation cannot know how many
 		// the run will hold, and a later index would often resolve to nothing
 		// and be skipped.
 		op.Nth = new(int)
 	case run.OpUpdateFixture:
-		fixture := rapid.SampledFrom(g.updatable).Draw(t, "fixture")
+		fixture := sampled(t, g.updatable, "fixture")
 		op.Kind, op.Name = observe.KindName(fixture.GVK), fixture.Name
-		op.Patch = nest(rapid.SampledFrom(fixture.Mutate).Draw(t, "path").Keys(), fixtureWords.Draw(t, "value"))
+		op.Patch = nest(sampled(t, fixture.Mutate, "path").Keys(), fixtureWords.Draw(t, "value"))
 	case run.OpDeleteFixture:
-		fixture := rapid.SampledFrom(g.present(at)).Draw(t, "fixture")
+		fixture := sampled(t, g.present(at), "fixture")
 		op.Kind, op.Name = observe.KindName(fixture.GVK), fixture.Name
 	}
 	if op.Type.OnCR() {
@@ -401,8 +438,7 @@ func (g *Generator) op(t *rapid.T, index int, at *state) run.Op {
 	return op
 }
 
-// legal are the ops the state allows, simplest first, so that shrinking
-// prefers the simplest.
+// legal are the ops the state allows.
 func (g *Generator) legal(at *state) []run.OpType {
 	legal := []run.OpType{run.OpSettle, run.OpRestart}
 	live := len(at.live()) > 0

@@ -214,6 +214,9 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   restores a deleted fixture before the next op that settles, because a target may rightly
   not be ready while a fixture is gone, and every settle wait judges G4. A target that
   names no fixture draws no fixture op.
+- **Op choice.** After the create, a draw makes one to `MaxOps`−1 more ops, five at most
+  by default, each count with equal chance. Each op is drawn with equal chance from those
+  the state allows, and so is the CR, kind, field or fixture it acts on (D98).
 - **Fault injection.** After the drawn ops are checkpointed, the generator inserts at most
   one `Fault` op per sequence, drawn with probability 0.5. The fault matches one resource
   (the primary's plural or a managed kind's, looked up from the CRD or the built-in table)
@@ -2638,3 +2641,15 @@ built from source and run as a black-box binary.
   each seed in an invocation of its own, so seeds leave the baseline out once one
   invocation has passed it. cert-manager's `heal.json` only deleted the objects the
   baseline deletes, so it went.
+- **D98 A draw picks each legal op with equal chance, and makes at least one after the
+  create.** rapid's `SampledFrom` and `IntRange` favor low indices and small numbers,
+  which suits rapid's own shrinking. reconciler-fuzzer shrinks with its own pass (§5.5),
+  so the lean only skewed the mix. The ops listed first came up about twice as often as
+  the sixth, and about a quarter of draws made no op after the create. Generation now
+  draws each op, and what it acts on, from rapid's unbiased bits. Over 1,000 seeds per
+  example, the seeds that draw a `deleteManaged` went from 13–14% to 18–20%. Those that
+  update a CR right after an op that settles went from 16–19% to 21–23%. Those with no op
+  but settles after the create went from 24–28% to 4%. `deleteManaged` is legal only after
+  an op that settles, so it is still drawn about half as often as the other ops. No seed
+  now draws a lone create, so cert-manager's negative control runs
+  `sequences/create.json`, as external-secrets' runs a file (D41).

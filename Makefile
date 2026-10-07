@@ -34,10 +34,9 @@ endef
 # the seeds, so that a failing tier means the change under review and not a new
 # draw, and so a tier stays inside the ten minutes §11 budgets. The nightly
 # workflow draws its own seeds. Against cert-manager, these seeds draw a second
-# Certificate, a recreate and a restart between them, and the baseline deletes
-# its managed objects. The pinned sequences delete the Certificate, and run the
-# rotationPolicy Never that draws leave out. Its negative control fails on the
-# first seed, which draws a single op and so costs no replay to minimize.
+# Certificate, a recreate, a restart and a fault between them, and the baseline
+# deletes its managed objects. The pinned sequences delete the Certificate, and
+# run the rotationPolicy Never that draws leave out.
 EXAMPLE_SEED ?= 23
 EXAMPLE_RUNS ?= 5
 EXAMPLE_DEADLINE ?= 7m
@@ -68,8 +67,10 @@ EXTERNAL_SECRETS_SRC := $(LOCALBIN)/external-secrets-src
 EXTERNAL_SECRETS := $(LOCALBIN)/external-secrets
 EXTERNAL_SECRETS_STAMP := $(LOCALBIN)/external-secrets-$(EXTERNAL_SECRETS_VERSION).built
 EXTERNAL_SECRETS_CRDS := examples/external-secrets/crds/external-secrets.yaml
-# The negative control lives beside the sequences that must pass, so the tier
-# runs everything else in the directory and it alone.
+# Each negative control lives beside the sequences that must pass, so each tier
+# runs the rest of its directory, then the control alone.
+CERT_MANAGER_CONTROL_SEQUENCE := examples/cert-manager/sequences/create.json
+CERT_MANAGER_SEQUENCES := $(filter-out $(CERT_MANAGER_CONTROL_SEQUENCE),$(wildcard examples/cert-manager/sequences/*.json))
 EXTERNAL_SECRETS_CONTROL_SEQUENCE := examples/external-secrets/sequences/orphan.json
 EXTERNAL_SECRETS_SEQUENCES := $(filter-out $(EXTERNAL_SECRETS_CONTROL_SEQUENCE),$(wildcard examples/external-secrets/sequences/*.json))
 # The directory carries the pin, so bumping KIND_VERSION reinstalls.
@@ -314,7 +315,7 @@ define hides-the-secret
 endef
 
 CERT_MANAGER_CONTROL_OUT = reconciler-fuzzer-out/cert-manager-control
-CERT_MANAGER_CONTROL = examples/cert-manager/quickstart.sh --seed $(EXAMPLE_SEED) --runs 1 --deadline $(EXAMPLE_DEADLINE) --out $(CERT_MANAGER_CONTROL_OUT) --launch-arg --enable-certificate-owner-ref=false
+CERT_MANAGER_CONTROL = KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/reconciler-fuzzer run --target examples/cert-manager/target.yaml --deadline $(EXAMPLE_DEADLINE) --out $(CERT_MANAGER_CONTROL_OUT) --launch-arg --enable-certificate-owner-ref=false $(CERT_MANAGER_CONTROL_SEQUENCE)
 CERT_MANAGER_CONTROL_CLAUSE = G3 the v1/Secret example-tls was still there
 EXTERNAL_SECRETS_CONTROL_OUT = reconciler-fuzzer-out/external-secrets-control
 EXTERNAL_SECRETS_CONTROL = KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/reconciler-fuzzer run --target examples/external-secrets/target.yaml --deadline $(EXAMPLE_DEADLINE) --out $(EXTERNAL_SECRETS_CONTROL_OUT) $(EXTERNAL_SECRETS_CONTROL_SEQUENCE)
@@ -349,7 +350,7 @@ test-example: verify-cert-manager-pin setup build
 	@echo "==> the pinned sequences, which must pass as written"
 	$(call must-pass,KUBEBUILDER_ASSETS="$$($(ENVTEST_USE))" ./bin/reconciler-fuzzer run \
 		--target examples/cert-manager/target.yaml --deadline $(EXAMPLE_DEADLINE) \
-		examples/cert-manager/sequences/*.json)
+		$(CERT_MANAGER_SEQUENCES))
 	$(call cert-manager-control,test-example)
 
 # test-example-nightly is the nightly tier of DESIGN.md §10 (M5).
@@ -359,7 +360,7 @@ test-example: verify-cert-manager-pin setup build
 # only ever passes cannot tell a quiet night from a harness that stopped
 # judging.
 .PHONY: test-example-nightly
-test-example-nightly: verify-cert-manager-pin
+test-example-nightly: verify-cert-manager-pin setup build
 	@echo "==> drawn seeds, which must pass"
 	$(call must-pass,examples/cert-manager/quickstart.sh --runs $(NIGHTLY_RUNS) --deadline $(NIGHTLY_DEADLINE))
 	$(call cert-manager-control,test-example-nightly)

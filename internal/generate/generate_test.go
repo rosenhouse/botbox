@@ -721,3 +721,53 @@ func TestAnOverlayThatRequiresAFieldKeepsItInEveryDraw(t *testing.T) {
 		}
 	}
 }
+
+func TestEachLegalOpIsDrawnWithEqualChance(t *testing.T) {
+	g := newGenerator(t, toyWithALabelFixture(t), Options{})
+	settled := func() *state {
+		at := &state{}
+		at.advance(run.Op{Type: run.OpCreate, Obj: g.base(0)}, 0)
+		return at
+	}
+	legal := g.legal(settled())
+	const each = 300
+	drawn := map[run.OpType]int{}
+	ops := rapid.Custom(func(t *rapid.T) run.OpType { return g.op(t, 1, settled()).Type })
+	for seed := range each * len(legal) {
+		drawn[ops.Example(seed)]++
+	}
+	for _, op := range legal {
+		if drawn[op] < each*4/5 || drawn[op] > each*6/5 {
+			t.Errorf("Of %d draws, %d are a %s, want about %d.", each*len(legal), drawn[op], op, each)
+		}
+	}
+}
+
+func TestEachLengthIsDrawnWithEqualChance(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, toyTarget), Options{MaxOps: 6})
+	const each = 2000
+	drawn := map[int]int{}
+	lengths := rapid.Custom(g.opsAfterCreate)
+	for seed := range each * 5 {
+		drawn[lengths.Example(seed)]++
+	}
+	for length := 1; length <= 5; length++ {
+		if drawn[length] < each*9/10 || drawn[length] > each*11/10 {
+			t.Errorf("Of %d draws, %d draw %d ops after the create, want about %d.", each*5, drawn[length], length, each)
+		}
+	}
+	if drawn[0] > 0 {
+		t.Errorf("%d draws hold only the create.", drawn[0])
+	}
+}
+
+func TestOneOpDrawsOnlyTheCreate(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, toyTarget), Options{MaxOps: 1})
+	rapid.Check(t, func(rt *rapid.T) {
+		for _, op := range g.sequence(rt).Ops[1:] {
+			if op.Type != run.OpSettle && op.Type != run.OpFault {
+				rt.Fatalf("With MaxOps 1, op %d is a %s.", op.Index, op.Type)
+			}
+		}
+	})
+}

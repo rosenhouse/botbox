@@ -150,13 +150,15 @@ func keys[V any](a, b map[string]V) []string {
 	return slices.Compact(union)
 }
 
-func TestCertManagersFirstExampleSeedDrawsOneCreate(t *testing.T) {
-	// The Makefile's negative control runs it alone, since one op costs no
-	// replay to minimize.
-	seed := makefileSeeds(t, "EXAMPLE")[0]
-	ops := drawOps(t, file(certManagerTarget), seed)
-	if len(ops) != 1 || ops[0].Type != run.OpCreate {
-		t.Errorf("Seed %d draws %v, want a single create.", seed, opTypes(ops))
+func TestCertManagersNegativeControlIsASingleCreate(t *testing.T) {
+	// One op costs no replay to minimize.
+	const control = "../../examples/cert-manager/sequences/create.json"
+	sequence, err := run.ReadSequence(control)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ops := sequence.Ops; len(ops) != 1 || ops[0].Type != run.OpCreate {
+		t.Errorf("%s holds %v, want a single create.", control, opTypes(ops))
 	}
 }
 
@@ -171,7 +173,7 @@ func TestCertManagersExampleSeedsDrawWhatTheMakefileSays(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"a second Certificate", string(run.OpRecreate), string(run.OpRestart)} {
+	for _, want := range []string{"a second Certificate", string(run.OpRecreate), string(run.OpRestart), string(run.OpFault)} {
 		if !drawn[want] {
 			t.Errorf("Seeds %v draw no %s, and the Makefile says they do.", seeds, want)
 		}
@@ -510,10 +512,10 @@ func TestTheToysSeed2DrawsMoreThanTheShrunkB2Reproducer(t *testing.T) {
 	}
 }
 
-func TestTheToyWithALabelFixtureDrawsB14sReproducerAtSeed19(t *testing.T) {
+func TestTheToyWithALabelFixtureDrawsB14sReproducerAtSeed41(t *testing.T) {
 	// TestGeneratedFixtureOps finds B14 with it.
-	if ops := drawOps(t, toyWithALabelFixture, 19); !revealsB14(ops) {
-		t.Errorf("Seed 19 draws %v, want an updateFixture under a settled Widget, then only settles, then a restart.", opTypes(ops))
+	if ops := drawOps(t, toyWithALabelFixture, 41); !revealsB14(ops) {
+		t.Errorf("Seed 41 draws %v, want an updateFixture under a settled Widget, then only settles, then a restart.", opTypes(ops))
 	}
 }
 

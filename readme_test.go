@@ -272,9 +272,6 @@ func TestTheExamplesPagesQuickstartsRunTheMakefilesExampleSeed(t *testing.T) {
 			t.Errorf("%s runs %q, and the Makefile's EXAMPLE_SEED is %s.", examplesPage, run[0], seed)
 		}
 	}
-	if want := "Seed " + seed + " draws a single op"; !strings.Contains(page, want) {
-		t.Errorf("%s does not say %q.", examplesPage, want)
-	}
 }
 
 func TestTheExamplesPageShowsRunsOfTheMakefilesExampleSeeds(t *testing.T) {

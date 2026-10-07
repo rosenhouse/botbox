@@ -19,7 +19,7 @@ import (
 const lastFixtureSeed = 60
 
 // seedThatFindsB14 draws an updateFixture and then a restart.
-const seedThatFindsB14 = 19
+const seedThatFindsB14 = 41
 
 // The unit tier pins what this test draws under goldenFixtureTarget in
 // goldenDraws.

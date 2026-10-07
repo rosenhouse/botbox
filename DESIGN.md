@@ -1379,7 +1379,7 @@ the proxy; the `Image` launcher. Separate design addendum.
   the run. CI uploads that directory.
 - **Test tiers.** `make test` = unit, no API server. `make test-envtest` = envtest, under
   10 minutes on CI. `make test-example` and `make test-example-external-secrets` = the two
-  adopted examples under envtest, each under 10 minutes on CI including obtaining the
+  adopted examples under envtest, each under 12 minutes on CI including obtaining the
   binary (cached). All four run on every PR. The `-nightly` target beside each example
   runs it on seeds reconciler-fuzzer draws, with the negative control. `make test-kind` = the toy
   through `--kubeconfig` against a kind cluster it creates and deletes, on demand. It
@@ -2652,4 +2652,7 @@ built from source and run as a black-box binary.
   but settles after the create went from 24–28% to 4%. `deleteManaged` is legal only after
   an op that settles, so it is still drawn about half as often as the other ops. No seed
   now draws a lone create, so cert-manager's negative control runs
-  `sequences/create.json`, as external-secrets' runs a file (D41).
+  `sequences/create.json`, as external-secrets' runs a file (D41). Longer draws took the
+  example tiers from 8m42s and 7m36s on CI to 10m37s and 10m04s. Running four seeds saved
+  under 30 s, so §11's budget for them went from ten minutes to twelve, and cert-manager's
+  job timeout from 12 to 14 minutes.

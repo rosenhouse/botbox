@@ -32,7 +32,7 @@ endef
 
 # Each example draws its own sequences (DESIGN.md §10, M5). A pull request fixes
 # the seeds, so that a failing tier means the change under review and not a new
-# draw, and so a tier stays inside the ten minutes §11 budgets. The nightly
+# draw, and so a tier stays inside the twelve minutes §11 budgets. The nightly
 # workflow draws its own seeds. Against cert-manager, these seeds draw a second
 # Certificate, a recreate, a restart and a fault between them, and the baseline
 # deletes its managed objects. The pinned sequences delete the Certificate, and

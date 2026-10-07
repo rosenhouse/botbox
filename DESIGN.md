@@ -216,7 +216,9 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   names no fixture draws no fixture op.
 - **Op choice.** After the create, a draw makes one to `MaxOps`−1 more ops, five at most
   by default, each count with equal chance. Each op is drawn with equal chance from those
-  the state allows, and so is the CR, kind, field or fixture it acts on (D98).
+  the state allows, and so is the CR, kind, field or fixture it acts on (D98). A
+  `deleteManaged` is allowed while a CR is live, and generation puts a settle wait before
+  it unless the op before it settles (D99).
 - **Fault injection.** After the drawn ops are checkpointed, the generator inserts at most
   one `Fault` op per sequence, drawn with probability 0.5. The fault matches one resource
   (the primary's plural or a managed kind's, looked up from the CRD or the built-in table)
@@ -2649,10 +2651,19 @@ built from source and run as a black-box binary.
   draws each op, and what it acts on, from rapid's unbiased bits. Over 1,000 seeds per
   example, the seeds that draw a `deleteManaged` went from 13–14% to 18–20%. Those that
   update a CR right after an op that settles went from 16–19% to 21–23%. Those with no op
-  but settles after the create went from 24–28% to 4%. `deleteManaged` is legal only after
-  an op that settles, so it is still drawn about half as often as the other ops. No seed
-  now draws a lone create, so cert-manager's negative control runs
+  but settles after the create went from 24–28% to 4%. `deleteManaged` was legal only
+  after an op that settles, so it was still drawn about half as often as the other ops
+  (D99). No seed now draws a lone create, so cert-manager's negative control runs
   `sequences/create.json`, as external-secrets' runs a file (D41). Longer draws took the
   example tiers from 8m42s and 7m36s on CI to 10m37s and 10m04s. Running four seeds saved
   under 30 s, so §11's budget for them went from ten minutes to twelve, and cert-manager's
   job timeout from 12 to 14 minutes.
+- **D99 A draw may make a `deleteManaged` after any op while a CR is live.** Half of the
+  CR ops a draw makes skip their settle, so a `deleteManaged` that waited for an op that
+  settles was drawn half as often as the other ops. Generation now puts a settle wait
+  before a `deleteManaged` that follows an op that does not settle, as it does before a
+  `restart`. G7 then judges it, and the managed objects are there to delete. Over seeds 1
+  to 1,000, the seeds that draw a `deleteManaged` went from 18–20% to 32–34% for the toy
+  and each example, against 34–38% for a delete and 38–40% for a recreate. Cert-manager's
+  example seeds now draw a delete and a `deleteManaged` but no recreate, which
+  `rotation-never.json` runs.

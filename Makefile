@@ -34,9 +34,9 @@ endef
 # the seeds, so that a failing tier means the change under review and not a new
 # draw, and so a tier stays inside the twelve minutes §11 budgets. The nightly
 # workflow draws its own seeds. Against cert-manager, these seeds draw a second
-# Certificate, a recreate, a restart and a fault between them, and the baseline
-# deletes its managed objects. The pinned sequences delete the Certificate, and
-# run the rotationPolicy Never that draws leave out.
+# Certificate, a restart, a fault, a delete and a deleteManaged between them.
+# The pinned sequences recreate the Certificate, and run the rotationPolicy
+# Never that draws leave out.
 EXAMPLE_SEED ?= 23
 EXAMPLE_RUNS ?= 5
 EXAMPLE_DEADLINE ?= 7m

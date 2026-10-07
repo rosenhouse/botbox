@@ -36,7 +36,7 @@ You write no test code. One `target.yaml` describes your controller.
 
 ```sh
 go install github.com/rosenhouse/reconciler-fuzzer/cmd/reconciler-fuzzer@latest
-go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.1
+go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2
 export PATH="$(go env GOPATH)/bin:$PATH"
 index=https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
 export KUBEBUILDER_ASSETS="$(setup-envtest use 1.37.0 --index $index -p path)"

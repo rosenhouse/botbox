@@ -2,7 +2,7 @@
 # variable each; bumping one is its own pull request.
 
 ENVTEST_K8S_VERSION ?= 1.37.0
-SETUP_ENVTEST_VERSION ?= v0.25.1
+SETUP_ENVTEST_VERSION ?= v0.25.2
 CONTROLLER_GEN_VERSION ?= v0.22.0
 CERT_MANAGER_VERSION ?= v1.21.2
 # The commit that tag names, and the sha256 of its CRD release asset. A tag can

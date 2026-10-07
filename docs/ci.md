@@ -19,7 +19,7 @@ on:
 
 env:
   RECONCILER_FUZZER_VERSION: <commit>   # Set this to a commit of main.
-  SETUP_ENVTEST_VERSION: v0.25.1
+  SETUP_ENVTEST_VERSION: v0.25.2
   ENVTEST_K8S_VERSION: 1.37.0
   ENVTEST_INDEX_URL: https://raw.githubusercontent.com/kubernetes-sigs/controller-tools/v0.22.0/envtest-releases.yaml
 

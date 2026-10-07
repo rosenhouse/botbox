@@ -465,60 +465,6 @@
         }
       ]
     },
-    "27": {
-      "seed": 27,
-      "target": "cert-manager",
-      "ops": [
-        {
-          "i": 0,
-          "t": "create",
-          "obj": {
-            "apiVersion": "cert-manager.io/v1",
-            "kind": "Certificate",
-            "metadata": {
-              "name": "example"
-            },
-            "spec": {
-              "commonName": "example.test",
-              "issuerRef": {
-                "kind": "Issuer",
-                "name": "selfsigned"
-              },
-              "privateKey": {
-                "rotationPolicy": "Always"
-              },
-              "secretName": "example-tls"
-            }
-          }
-        },
-        {
-          "i": 1,
-          "t": "update",
-          "patch": {
-            "spec": {
-              "privateKey": {
-                "algorithm": null
-              }
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 2,
-          "t": "update",
-          "patch": {
-            "spec": {
-              "duration": null
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 3,
-          "t": "settle"
-        }
-      ]
-    },
     "3": {
       "seed": 3,
       "target": "cert-manager",
@@ -1346,72 +1292,6 @@
         },
         {
           "i": 6,
-          "t": "settle"
-        }
-      ]
-    },
-    "27": {
-      "seed": 27,
-      "target": "external-secrets",
-      "ops": [
-        {
-          "i": 0,
-          "t": "create",
-          "obj": {
-            "apiVersion": "external-secrets.io/v1",
-            "kind": "ExternalSecret",
-            "metadata": {
-              "name": "example"
-            },
-            "spec": {
-              "data": [
-                {
-                  "remoteRef": {
-                    "key": "/token"
-                  },
-                  "secretKey": "token"
-                }
-              ],
-              "refreshPolicy": "OnChange",
-              "secretStoreRef": {
-                "kind": "SecretStore",
-                "name": "fake"
-              },
-              "target": {
-                "name": "example-secret"
-              }
-            }
-          }
-        },
-        {
-          "i": 1,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "patch",
-              "resource": "secrets"
-            },
-            "action": {
-              "delay": "5s"
-            },
-            "until": {
-              "op": 3
-            }
-          }
-        },
-        {
-          "i": 2,
-          "t": "update",
-          "patch": {
-            "spec": {
-              "target": {
-                "name": "example-secret-11u9oe"
-              }
-            }
-          }
-        },
-        {
-          "i": 3,
           "t": "settle"
         }
       ]

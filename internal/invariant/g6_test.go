@@ -44,6 +44,16 @@ func TestG6FiresPastTheThreshold(t *testing.T) {
 	}
 }
 
+func TestG6NamesTheSubresource(t *testing.T) {
+	in := loop(errLoop+1, failedStatusUpdate(403)).through(8 * time.Second)
+
+	violation := fired(t, invariant.NoErrorLoop, in)
+
+	if want := "the failing request update toy.reconciler-fuzzer/widgets/w/status 6 times"; !strings.Contains(violation.Statement, want) {
+		t.Errorf("The statement is %q, want it to contain %q.", violation.Statement, want)
+	}
+}
+
 // A loop every T_settle/N_errloop puts a failure at each end of T_settle, and
 // both count.
 func TestG6CountsFailuresAtBothEndsOfTheWindow(t *testing.T) {
@@ -122,6 +132,16 @@ func TestG6CountsOneRequestAtATime(t *testing.T) {
 			silent(t, invariant.NoErrorLoop, in)
 		})
 	}
+}
+
+func TestG6CountsTheMainResourceAndASubresourceApart(t *testing.T) {
+	onWidget := failedStatusUpdate(403)
+	onWidget.Subresource = ""
+	in := loop(errLoop, onWidget).
+		requests(1200*time.Millisecond, 500*time.Millisecond, errLoop, failedStatusUpdate(403)).
+		through(8 * time.Second)
+
+	silent(t, invariant.NoErrorLoop, in)
 }
 
 // A run keeps its first violation, so G6 reports the loop that began first.

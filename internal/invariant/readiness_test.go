@@ -671,6 +671,30 @@ func TestAVerdictNamesAFailingRequestTheTargetRepeated(t *testing.T) {
 	}
 }
 
+func TestAVerdictNamesTheSubresource(t *testing.T) {
+	in := unreadyCreate(0, 1).
+		requests(1100*time.Millisecond, 100*time.Millisecond, 2, failedStatusUpdate(http.StatusForbidden)).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	requireStatement(t, violation, "; the target repeated the failing request update toy.reconciler-fuzzer/widgets/w/status 2 times, the last answered 403")
+}
+
+func TestAVerdictCountsTheMainResourceAndASubresourceApart(t *testing.T) {
+	onWidget := failedStatusUpdate(http.StatusForbidden)
+	onWidget.Subresource = ""
+	in := unreadyCreate(0, 1).
+		request(1100*time.Millisecond, onWidget).
+		request(1200*time.Millisecond, failedStatusUpdate(http.StatusForbidden)).
+		request(1300*time.Millisecond, failedStatusUpdate(http.StatusForbidden)).
+		through(8 * time.Second)
+
+	violation := fired(t, invariant.Convergence, in)
+
+	requireStatement(t, violation, "; the target repeated the failing request update toy.reconciler-fuzzer/widgets/w/status 2 times")
+}
+
 func TestAVerdictNamesTheRequestThatFirstFailedMostOften(t *testing.T) {
 	in := unreadyCreate(0, 1).
 		request(1100*time.Millisecond, failedGet("w-0", http.StatusNotFound)).

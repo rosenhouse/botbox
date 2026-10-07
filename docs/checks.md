@@ -118,8 +118,9 @@ Your controller repeats one failing request no more than `thresholds.errloop` ti
 that never clears usually fails it.
 
 `the target repeated the failing request … times within … (timeouts.settle), where
-thresholds.errloop allows …` names the request your controller kept retrying. A 403 usually
-means your [`rbac`](targets.md#rbac) lacks a permission.
+thresholds.errloop allows …` names the request your controller kept retrying, such as
+`update toy.reconciler-fuzzer/widgets/widget/status` for the `status` subresource of the
+Widget `widget`. A 403 usually means your [`rbac`](targets.md#rbac) lacks a permission.
 [Thresholds](targets.md#thresholds) says how `errloop` relates to `settle`. An error loop that
 backs off can repeat too rarely for this check to count it.
 

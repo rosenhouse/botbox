@@ -2665,4 +2665,5 @@ built from source and run as a black-box binary.
   `restart`. G7 can then judge it, and the managed objects are there to delete. Over seeds 1
   to 1,000, the seeds that draw a `deleteManaged` went from 18–20% to 32–34% for the toy
   and each example, against 34–38% for a delete and 38–40% for a recreate. Cert-manager's
-  example seeds no longer draw a recreate, which `rotation-never.json` runs.
+  example seeds no longer draw a recreate, which `rotation-never.json` runs. The example
+  tiers took 11m03s and 10m23s on CI, inside §11's twelve minutes.

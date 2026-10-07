@@ -151,7 +151,7 @@ If your controller leaves a kind deleted by design, or recreates it under a new 
 kind under `notRecreated`. cert-manager lists CertificateRequest, because a Ready Certificate
 does not replace a deleted request.
 
-Drawn sequences hold few `deleteManaged` ops, so
+Drawn sequences may miss a managed kind, so
 [the baseline](../README.md#the-baseline) deletes an object of each managed kind.
 
 ## Fixtures

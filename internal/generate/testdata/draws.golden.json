@@ -130,33 +130,7 @@
         },
         {
           "i": 1,
-          "t": "create",
-          "obj": {
-            "apiVersion": "cert-manager.io/v1",
-            "kind": "Certificate",
-            "metadata": {
-              "name": "example-2"
-            },
-            "spec": {
-              "commonName": "example.test",
-              "dnsNames": [
-                "example.test"
-              ],
-              "issuerRef": {
-                "kind": "Issuer",
-                "name": "selfsigned"
-              },
-              "privateKey": {
-                "algorithm": "Ed25519"
-              },
-              "secretName": "example-tls-2"
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 2,
-          "t": "settle"
+          "t": "delete"
         }
       ]
     },
@@ -189,30 +163,31 @@
         },
         {
           "i": 1,
-          "t": "delete",
-          "noSettle": true
-        },
-        {
-          "i": 2,
-          "t": "create",
+          "t": "recreate",
           "obj": {
             "apiVersion": "cert-manager.io/v1",
             "kind": "Certificate",
             "metadata": {
-              "name": "example-2"
+              "name": "example"
             },
             "spec": {
               "commonName": "example.test",
-              "dnsNames": [
-                "example.test"
-              ],
+              "duration": "24h",
               "issuerRef": {
                 "kind": "Issuer",
                 "name": "selfsigned"
               },
-              "secretName": "example-tls-2"
+              "privateKey": {
+                "algorithm": "RSA"
+              },
+              "secretName": "example-tls"
             }
-          }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "settle"
         }
       ]
     },
@@ -367,30 +342,9 @@
         },
         {
           "i": 4,
-          "t": "recreate",
-          "obj": {
-            "apiVersion": "cert-manager.io/v1",
-            "kind": "Certificate",
-            "metadata": {
-              "name": "example"
-            },
-            "spec": {
-              "commonName": "example.test",
-              "dnsNames": [
-                "example.test"
-              ],
-              "issuerRef": {
-                "kind": "Issuer",
-                "name": "selfsigned"
-              },
-              "secretName": "example-tls"
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 5,
-          "t": "settle"
+          "t": "deleteManaged",
+          "kind": "v1/Secret",
+          "index": 0
         }
       ]
     },
@@ -664,56 +618,11 @@
         },
         {
           "i": 1,
-          "t": "create",
-          "obj": {
-            "apiVersion": "cert-manager.io/v1",
-            "kind": "Certificate",
-            "metadata": {
-              "name": "example-2"
-            },
-            "spec": {
-              "commonName": "example.test",
-              "dnsNames": [
-                "zf2.example.test"
-              ],
-              "issuerRef": {
-                "kind": "Issuer",
-                "name": "selfsigned"
-              },
-              "privateKey": {
-                "algorithm": "ECDSA"
-              },
-              "secretName": "example-tls-2"
-            }
-          },
+          "t": "delete",
           "noSettle": true
         },
         {
           "i": 2,
-          "t": "recreate",
-          "cr": "example-2",
-          "obj": {
-            "apiVersion": "cert-manager.io/v1",
-            "kind": "Certificate",
-            "metadata": {
-              "name": "example-2"
-            },
-            "spec": {
-              "commonName": "example.test",
-              "issuerRef": {
-                "kind": "Issuer",
-                "name": "selfsigned"
-              },
-              "privateKey": {
-                "rotationPolicy": "Always"
-              },
-              "secretName": "example-tls-2"
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 3,
           "t": "settle"
         }
       ]
@@ -744,44 +653,6 @@
         },
         {
           "i": 1,
-          "t": "update",
-          "patch": {
-            "spec": {
-              "dnsNames": [
-                "11a.example.test",
-                "9.example.test"
-              ]
-            }
-          }
-        },
-        {
-          "i": 2,
-          "t": "update",
-          "patch": {
-            "spec": {
-              "dnsNames": null
-            }
-          }
-        },
-        {
-          "i": 3,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "create",
-              "resource": "certificaterequests",
-              "fraction": 0.5
-            },
-            "action": {
-              "error": 500
-            },
-            "until": {
-              "op": 5
-            }
-          }
-        },
-        {
-          "i": 4,
           "t": "create",
           "obj": {
             "apiVersion": "cert-manager.io/v1",
@@ -794,49 +665,32 @@
               "dnsNames": [
                 "example.test"
               ],
+              "duration": "1h",
               "issuerRef": {
                 "kind": "Issuer",
                 "name": "selfsigned"
-              },
-              "privateKey": {
-                "rotationPolicy": "Always"
               },
               "secretName": "example-tls-2"
-            }
-          }
-        },
-        {
-          "i": 5,
-          "t": "settle"
-        },
-        {
-          "i": 6,
-          "t": "create",
-          "obj": {
-            "apiVersion": "cert-manager.io/v1",
-            "kind": "Certificate",
-            "metadata": {
-              "name": "example-3"
-            },
-            "spec": {
-              "commonName": "example.test",
-              "dnsNames": [
-                "example.test"
-              ],
-              "issuerRef": {
-                "kind": "Issuer",
-                "name": "selfsigned"
-              },
-              "privateKey": {
-                "algorithm": "ECDSA"
-              },
-              "secretName": "example-tls-3"
             }
           },
           "noSettle": true
         },
         {
-          "i": 7,
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "deleteManaged",
+          "kind": "v1/Secret",
+          "index": 0
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
           "t": "settle"
         }
       ]
@@ -909,24 +763,26 @@
         },
         {
           "i": 1,
-          "t": "recreate",
+          "t": "create",
           "obj": {
             "apiVersion": "cert-manager.io/v1",
             "kind": "Certificate",
             "metadata": {
-              "name": "example"
+              "name": "example-2"
             },
             "spec": {
               "commonName": "example.test",
               "dnsNames": [
-                "f.example.test"
+                "example.test"
               ],
-              "duration": "1h",
               "issuerRef": {
                 "kind": "Issuer",
                 "name": "selfsigned"
               },
-              "secretName": "example-tls"
+              "privateKey": {
+                "algorithm": "RSA"
+              },
+              "secretName": "example-tls-2"
             }
           },
           "noSettle": true
@@ -970,30 +826,7 @@
         },
         {
           "i": 1,
-          "t": "create",
-          "obj": {
-            "apiVersion": "cert-manager.io/v1",
-            "kind": "Certificate",
-            "metadata": {
-              "name": "example-2"
-            },
-            "spec": {
-              "commonName": "example.test",
-              "dnsNames": [
-                "example.test"
-              ],
-              "issuerRef": {
-                "kind": "Issuer",
-                "name": "selfsigned"
-              },
-              "secretName": "example-tls-2"
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 2,
-          "t": "settle"
+          "t": "delete"
         }
       ]
     },
@@ -1551,11 +1384,6 @@
         },
         {
           "i": 1,
-          "t": "delete",
-          "noSettle": true
-        },
-        {
-          "i": 2,
           "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -1564,24 +1392,61 @@
               "name": "widget-2"
             },
             "spec": {
-              "count": 0
+              "count": 9
             }
           },
           "noSettle": true
         },
         {
+          "i": 2,
+          "t": "settle"
+        },
+        {
           "i": 3,
-          "t": "recreate",
+          "t": "restart"
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "patch",
+              "resource": "widgets"
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 8
+            }
+          }
+        },
+        {
+          "i": 6,
+          "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
             "kind": "Widget",
             "metadata": {
-              "name": "widget"
+              "name": "widget-3"
             },
             "spec": {
               "count": 3
             }
-          }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 7,
+          "t": "settle"
+        },
+        {
+          "i": 8,
+          "t": "settle"
         }
       ]
     },
@@ -1647,6 +1512,23 @@
         },
         {
           "i": 1,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "create",
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 6
+            }
+          }
+        },
+        {
+          "i": 2,
           "t": "update",
           "patch": {
             "spec": {
@@ -1654,10 +1536,6 @@
             }
           },
           "noSettle": true
-        },
-        {
-          "i": 2,
-          "t": "delete"
         },
         {
           "i": 3,
@@ -1669,13 +1547,27 @@
               "name": "widget"
             },
             "spec": {
-              "count": 0
+              "count": 3
             }
           },
           "noSettle": true
         },
         {
           "i": 4,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 8
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        },
+        {
+          "i": 6,
           "t": "settle"
         }
       ]
@@ -1704,21 +1596,6 @@
         },
         {
           "i": 2,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "resource": "widgets"
-            },
-            "action": {
-              "error": 503
-            },
-            "until": {
-              "op": 4
-            }
-          }
-        },
-        {
-          "i": 3,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -1732,11 +1609,7 @@
           }
         },
         {
-          "i": 4,
-          "t": "settle"
-        },
-        {
-          "i": 5,
+          "i": 3,
           "t": "update",
           "patch": {
             "spec": {
@@ -1746,8 +1619,18 @@
           "noSettle": true
         },
         {
-          "i": 6,
-          "t": "settle"
+          "i": 4,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 4
+            }
+          }
         }
       ]
     },
@@ -1814,27 +1697,11 @@
         },
         {
           "i": 1,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "update",
-              "resource": "widgets"
-            },
-            "action": {
-              "error": 503
-            },
-            "until": {
-              "op": 6
-            }
-          }
-        },
-        {
-          "i": 2,
           "t": "delete",
           "noSettle": true
         },
         {
-          "i": 3,
+          "i": 2,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -1849,7 +1716,17 @@
           "noSettle": true
         },
         {
+          "i": 3,
+          "t": "settle"
+        },
+        {
           "i": 4,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        },
+        {
+          "i": 5,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -1858,31 +1735,19 @@
               "name": "widget"
             },
             "spec": {
-              "count": 2
+              "count": 3
             }
           },
           "noSettle": true
         },
         {
-          "i": 5,
+          "i": 6,
           "t": "update",
           "patch": {
             "spec": {
               "count": 3
             }
           }
-        },
-        {
-          "i": 6,
-          "t": "settle"
-        },
-        {
-          "i": 7,
-          "t": "restart"
-        },
-        {
-          "i": 8,
-          "t": "settle"
         }
       ]
     },
@@ -1917,27 +1782,6 @@
         },
         {
           "i": 2,
-          "t": "settle"
-        },
-        {
-          "i": 3,
-          "t": "restart"
-        },
-        {
-          "i": 4,
-          "t": "settle"
-        },
-        {
-          "i": 5,
-          "t": "update",
-          "patch": {
-            "spec": {
-              "count": 5
-            }
-          }
-        },
-        {
-          "i": 6,
           "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -1948,11 +1792,29 @@
             "spec": {
               "count": 3
             }
+          }
+        },
+        {
+          "i": 3,
+          "t": "delete"
+        },
+        {
+          "i": 4,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-3"
+            },
+            "spec": {
+              "count": 10
+            }
           },
           "noSettle": true
         },
         {
-          "i": 7,
+          "i": 5,
           "t": "settle"
         }
       ]
@@ -2000,44 +1862,31 @@
         },
         {
           "i": 4,
-          "t": "delete",
-          "noSettle": true
-        },
-        {
-          "i": 5,
-          "t": "create",
+          "t": "recreate",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
             "kind": "Widget",
             "metadata": {
-              "name": "widget-2"
+              "name": "widget"
             },
             "spec": {
-              "count": 3
+              "count": 0
             }
-          }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 5,
+          "t": "delete",
+          "noSettle": true
         },
         {
           "i": 6,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "patch",
-              "resource": "configmaps"
-            },
-            "action": {
-              "error": 503
-            },
-            "until": {
-              "op": 8
-            }
-          }
+          "t": "settle"
         },
         {
           "i": 7,
-          "t": "deleteManaged",
-          "kind": "v1/ConfigMap",
-          "index": 0
+          "t": "restart"
         },
         {
           "i": 8,
@@ -2256,55 +2105,52 @@
         },
         {
           "i": 1,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-3"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 3,
           "t": "deleteFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
           "until": {
-            "op": 2
-          }
-        },
-        {
-          "i": 2,
-          "t": "updateFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "patch": {
-            "data": {
-              "label": "ew6abdr8bdlc"
-            }
-          }
-        },
-        {
-          "i": 3,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "create",
-              "resource": "configmaps"
-            },
-            "action": {
-              "delay": "500ms"
-            },
-            "until": {
-              "op": 5
-            }
+            "op": 5
           }
         },
         {
           "i": 4,
-          "t": "deleteManaged",
-          "kind": "v1/ConfigMap",
-          "index": 0
+          "t": "delete",
+          "cr": "widget-2",
+          "noSettle": true
         },
         {
           "i": 5,
           "t": "settle"
-        },
-        {
-          "i": 6,
-          "t": "deleteManaged",
-          "kind": "v1/ConfigMap",
-          "index": 0
         }
       ]
     },
@@ -2328,23 +2174,6 @@
         },
         {
           "i": 1,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "patch",
-              "resource": "widgets",
-              "fraction": 0.5
-            },
-            "action": {
-              "error": 503
-            },
-            "until": {
-              "op": 5
-            }
-          }
-        },
-        {
-          "i": 2,
           "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -2359,13 +2188,30 @@
           "noSettle": true
         },
         {
+          "i": 2,
+          "t": "settle"
+        },
+        {
           "i": 3,
-          "t": "delete",
-          "noSettle": true
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "get",
+              "resource": "configmaps"
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 5
+            }
+          }
         },
         {
           "i": 4,
-          "t": "settle"
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
         },
         {
           "i": 5,
@@ -2633,15 +2479,12 @@
         },
         {
           "i": 1,
-          "t": "settle"
-        },
-        {
-          "i": 2,
-          "t": "restart"
-        },
-        {
-          "i": 3,
-          "t": "settle"
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 9
+            }
+          }
         }
       ]
     },
@@ -2666,31 +2509,25 @@
         },
         {
           "i": 1,
-          "t": "create",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
-            "spec": {
-              "count": 3
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 2,
-          "t": "deleteFixture",
+          "t": "updateFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
-          "until": {
-            "op": 3
+          "patch": {
+            "data": {
+              "label": "hcst"
+            }
           }
         },
         {
-          "i": 3,
-          "t": "settle"
+          "i": 2,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "cnai6vab"
+            }
+          }
         }
       ]
     },
@@ -2715,16 +2552,42 @@
         },
         {
           "i": 1,
-          "t": "delete",
-          "noSettle": true
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "dbo2cbfxmcad"
+            }
+          }
         },
         {
           "i": 2,
-          "t": "settle"
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "create",
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 4
+            }
+          }
         },
         {
           "i": 3,
-          "t": "restart"
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "2oza8o4p"
+            }
+          }
         },
         {
           "i": 4,
@@ -2732,36 +2595,15 @@
         },
         {
           "i": 5,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "delete",
-              "resource": "widgets"
-            },
-            "action": {
-              "error": 500
-            },
-            "until": {
-              "op": 7
-            }
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 6
           }
         },
         {
           "i": 6,
-          "t": "recreate",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget"
-            },
-            "spec": {
-              "count": 4
-            }
-          }
-        },
-        {
-          "i": 7,
           "t": "settle"
         }
       ]
@@ -2787,20 +2629,6 @@
         },
         {
           "i": 1,
-          "t": "deleteFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "until": {
-            "op": 3
-          }
-        },
-        {
-          "i": 2,
-          "t": "delete",
-          "noSettle": true
-        },
-        {
-          "i": 3,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -2809,28 +2637,69 @@
               "name": "widget"
             },
             "spec": {
-              "count": 3
+              "count": 2
+            }
+          }
+        },
+        {
+          "i": 2,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "patch",
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 4
+            }
+          }
+        },
+        {
+          "i": 3,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 7
             }
           }
         },
         {
           "i": 4,
-          "t": "restart"
-        },
-        {
-          "i": 5,
           "t": "settle"
         },
         {
-          "i": 6,
+          "i": 5,
           "t": "updateFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
           "patch": {
             "data": {
-              "label": "bacb"
+              "label": "bavn63wa"
             }
           }
+        },
+        {
+          "i": 6,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        },
+        {
+          "i": 7,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 8
+          }
+        },
+        {
+          "i": 8,
+          "t": "settle"
         }
       ]
     },
@@ -2855,30 +2724,22 @@
         },
         {
           "i": 1,
-          "t": "deleteFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "until": {
-            "op": 3
-          }
+          "t": "settle"
         },
         {
           "i": 2,
-          "t": "recreate",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget"
-            },
-            "spec": {
-              "count": 3
-            }
-          },
-          "noSettle": true
+          "t": "restart"
         },
         {
           "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
+          "t": "restart"
+        },
+        {
+          "i": 5,
           "t": "settle"
         }
       ]
@@ -2903,32 +2764,12 @@
         },
         {
           "i": 1,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "patch",
-              "resource": "configmaps"
-            },
-            "action": {
-              "delay": "1s"
-            },
-            "until": {
-              "op": 3
-            }
-          }
-        },
-        {
-          "i": 2,
           "t": "deleteManaged",
           "kind": "v1/ConfigMap",
           "index": 0
         },
         {
-          "i": 3,
-          "t": "settle"
-        },
-        {
-          "i": 4,
+          "i": 2,
           "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -2943,18 +2784,32 @@
           "noSettle": true
         },
         {
+          "i": 3,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 6
+            }
+          }
+        },
+        {
+          "i": 4,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "update",
+              "resource": "widgets"
+            },
+            "action": {
+              "delay": "1s"
+            },
+            "until": {
+              "op": 7
+            }
+          }
+        },
+        {
           "i": 5,
-          "t": "delete",
-          "cr": "widget-2"
-        },
-        {
-          "i": 6,
-          "t": "deleteManaged",
-          "kind": "v1/ConfigMap",
-          "index": 0
-        },
-        {
-          "i": 7,
           "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -2963,9 +2818,25 @@
               "name": "widget-3"
             },
             "spec": {
-              "count": 3
+              "count": 2
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 6,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "vwf1"
             }
           }
+        },
+        {
+          "i": 7,
+          "t": "settle"
         }
       ]
     },
@@ -3039,34 +2910,8 @@
         },
         {
           "i": 1,
-          "t": "settle"
-        },
-        {
-          "i": 2,
-          "t": "restart"
-        },
-        {
-          "i": 3,
-          "t": "settle"
-        },
-        {
-          "i": 4,
           "t": "update",
           "patch": {
-            "spec": {
-              "count": 1
-            }
-          }
-        },
-        {
-          "i": 5,
-          "t": "create",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
             "spec": {
               "count": 3
             }
@@ -3074,7 +2919,46 @@
           "noSettle": true
         },
         {
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "restart"
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 7
+            }
+          }
+        },
+        {
           "i": 6,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "c6hc7xv8"
+            }
+          }
+        },
+        {
+          "i": 7,
           "t": "settle"
         }
       ]
@@ -3202,13 +3086,31 @@
         },
         {
           "i": 2,
-          "t": "deleteManaged",
-          "kind": "v1/ConfigMap",
-          "index": 0
+          "t": "restart"
         },
         {
           "i": 3,
           "t": "settle"
+        },
+        {
+          "i": 4,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 5
+          }
+        },
+        {
+          "i": 5,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "b4jy"
+            }
+          }
         }
       ]
     },
@@ -3233,6 +3135,14 @@
         },
         {
           "i": 1,
+          "t": "settle"
+        },
+        {
+          "i": 2,
+          "t": "restart"
+        },
+        {
+          "i": 3,
           "t": "settle"
         }
       ]
@@ -3329,24 +3239,25 @@
         },
         {
           "i": 1,
-          "t": "settle"
-        },
-        {
-          "i": 2,
-          "t": "restart"
-        },
-        {
-          "i": 3,
-          "t": "settle"
-        },
-        {
-          "i": 4,
           "t": "update",
           "patch": {
             "spec": {
-              "count": 0
+              "count": 6
             }
-          }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 2,
+          "t": "settle"
+        },
+        {
+          "i": 3,
+          "t": "restart"
+        },
+        {
+          "i": 4,
+          "t": "settle"
         }
       ]
     },
@@ -3438,73 +3349,61 @@
         },
         {
           "i": 2,
-          "t": "create",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
-            "spec": {
-              "count": 4
-            }
-          },
-          "noSettle": true
+          "t": "restart"
         },
         {
           "i": 3,
-          "t": "recreate",
-          "cr": "widget-2",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
-            "spec": {
-              "count": 10
-            }
-          }
-        },
-        {
-          "i": 4,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "create",
-              "resource": "widgets",
-              "fraction": 0.5
-            },
-            "action": {
-              "error": 503
-            },
-            "until": {
-              "op": 7
-            }
-          }
-        },
-        {
-          "i": 5,
-          "t": "recreate",
-          "cr": "widget-2",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
-            "spec": {
-              "count": 0
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 6,
           "t": "settle"
         },
         {
+          "i": 4,
+          "t": "restart"
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        },
+        {
+          "i": 6,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "get",
+              "resource": "widgets"
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 9
+            }
+          }
+        },
+        {
           "i": 7,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 8
+          }
+        },
+        {
+          "i": 8,
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 5
+            }
+          }
+        },
+        {
+          "i": 9,
           "t": "settle"
         }
       ]
@@ -3702,51 +3601,50 @@
         },
         {
           "i": 1,
-          "t": "create",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
-            "spec": {
-              "count": 3
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 2,
-          "t": "update",
-          "patch": {
-            "spec": {
-              "count": 9
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 3,
           "t": "updateFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
           "patch": {
             "data": {
-              "label": "bnqb"
+              "label": "9bnqbak9"
             }
           }
         },
         {
-          "i": 4,
-          "t": "deleteManaged",
+          "i": 2,
+          "t": "updateFixture",
           "kind": "v1/ConfigMap",
-          "index": 0
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "8c6bh6vb"
+            }
+          }
+        },
+        {
+          "i": 3,
+          "t": "delete"
+        },
+        {
+          "i": 4,
+          "t": "restart"
         },
         {
           "i": 5,
-          "t": "deleteManaged",
+          "t": "settle"
+        },
+        {
+          "i": 6,
+          "t": "deleteFixture",
           "kind": "v1/ConfigMap",
-          "index": 0
+          "name": "widget-config",
+          "until": {
+            "op": 7
+          }
+        },
+        {
+          "i": 7,
+          "t": "settle"
         }
       ]
     },
@@ -3771,11 +3669,28 @@
         },
         {
           "i": 1,
-          "t": "settle"
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "apsj"
+            }
+          }
         },
         {
           "i": 2,
-          "t": "restart"
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 2
+            }
+          }
         },
         {
           "i": 3,
@@ -3798,25 +3713,6 @@
         },
         {
           "i": 5,
-          "t": "delete"
-        },
-        {
-          "i": 6,
-          "t": "create",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
-            "spec": {
-              "count": 7
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 7,
           "t": "settle"
         }
       ]
@@ -3938,33 +3834,24 @@
         },
         {
           "i": 1,
-          "t": "deleteFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "until": {
-            "op": 2
-          }
+          "t": "settle"
         },
         {
           "i": 2,
-          "t": "settle"
-        },
-        {
-          "i": 3,
           "t": "restart"
         },
         {
-          "i": 4,
+          "i": 3,
           "t": "settle"
         },
         {
-          "i": 5,
-          "t": "create",
+          "i": 4,
+          "t": "recreate",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
             "kind": "Widget",
             "metadata": {
-              "name": "widget-2"
+              "name": "widget"
             },
             "spec": {
               "count": 3
@@ -3972,10 +3859,8 @@
           }
         },
         {
-          "i": 6,
-          "t": "deleteManaged",
-          "kind": "v1/ConfigMap",
-          "index": 0
+          "i": 5,
+          "t": "delete"
         }
       ]
     },
@@ -4224,6 +4109,15 @@
         },
         {
           "i": 1,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 2
+          }
+        },
+        {
+          "i": 2,
           "t": "update",
           "patch": {
             "spec": {
@@ -4232,7 +4126,7 @@
           }
         },
         {
-          "i": 2,
+          "i": 3,
           "t": "update",
           "patch": {
             "spec": {
@@ -4241,7 +4135,23 @@
           }
         },
         {
-          "i": 3,
+          "i": 4,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "delete",
+              "resource": "widgets"
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 6
+            }
+          }
+        },
+        {
+          "i": 5,
           "t": "updateFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
@@ -4252,18 +4162,14 @@
           }
         },
         {
-          "i": 4,
+          "i": 6,
+          "t": "settle"
+        },
+        {
+          "i": 7,
           "t": "deleteManaged",
           "kind": "v1/ConfigMap",
           "index": 0
-        },
-        {
-          "i": 5,
-          "t": "restart"
-        },
-        {
-          "i": 6,
-          "t": "settle"
         }
       ]
     },
@@ -4288,17 +4194,7 @@
         },
         {
           "i": 1,
-          "t": "create",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
-            "spec": {
-              "count": 0
-            }
-          }
+          "t": "settle"
         },
         {
           "i": 2,
@@ -4311,25 +4207,23 @@
           "t": "fault",
           "spec": {
             "match": {
-              "verb": "get",
-              "resource": "configmaps"
+              "verb": "create",
+              "resource": "widgets",
+              "fraction": 0.5
             },
             "action": {
-              "delay": "2s"
+              "error": 429
             },
             "until": {
-              "op": 6
+              "op": 5
             }
           }
         },
         {
           "i": 4,
-          "t": "deleteFixture",
+          "t": "deleteManaged",
           "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "until": {
-            "op": 5
-          }
+          "index": 0
         },
         {
           "i": 5,
@@ -4337,6 +4231,15 @@
         },
         {
           "i": 6,
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 7
+          }
+        },
+        {
+          "i": 7,
           "t": "settle"
         }
       ]
@@ -4362,16 +4265,19 @@
         },
         {
           "i": 1,
-          "t": "deleteFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "until": {
-            "op": 2
-          }
+          "t": "settle"
         },
         {
           "i": 2,
-          "t": "delete"
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        },
+        {
+          "i": 3,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
         }
       ]
     },
@@ -4395,11 +4301,27 @@
         },
         {
           "i": 1,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "delete",
+              "resource": "configmaps"
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 5
+            }
+          }
+        },
+        {
+          "i": 2,
           "t": "delete",
           "noSettle": true
         },
         {
-          "i": 2,
+          "i": 3,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -4414,59 +4336,32 @@
           "noSettle": true
         },
         {
-          "i": 3,
-          "t": "create",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
-            "spec": {
-              "count": 3
-            }
-          }
-        },
-        {
           "i": 4,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "update",
-              "resource": "configmaps",
-              "fraction": 0.5
-            },
-            "action": {
-              "delay": "1s"
-            },
-            "until": {
-              "op": 8
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 1
             }
           }
         },
         {
           "i": 5,
+          "t": "settle"
+        },
+        {
+          "i": 6,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        },
+        {
+          "i": 7,
           "t": "deleteFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
           "until": {
-            "op": 7
+            "op": 8
           }
-        },
-        {
-          "i": 6,
-          "t": "update",
-          "cr": "widget-2",
-          "patch": {
-            "spec": {
-              "count": 2
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 7,
-          "t": "settle"
         },
         {
           "i": 8,
@@ -4495,33 +4390,17 @@
         },
         {
           "i": 1,
-          "t": "create",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
+          "t": "update",
+          "patch": {
             "spec": {
-              "count": 10
+              "count": 0
             }
           },
           "noSettle": true
         },
         {
           "i": 2,
-          "t": "recreate",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget"
-            },
-            "spec": {
-              "count": 2
-            }
-          },
-          "noSettle": true
+          "t": "delete"
         },
         {
           "i": 3,
@@ -4530,13 +4409,12 @@
             "apiVersion": "toy.reconciler-fuzzer/v1",
             "kind": "Widget",
             "metadata": {
-              "name": "widget-3"
+              "name": "widget-2"
             },
             "spec": {
               "count": 3
             }
-          },
-          "noSettle": true
+          }
         },
         {
           "i": 4,
@@ -4544,23 +4422,27 @@
         },
         {
           "i": 5,
-          "t": "restart"
-        },
-        {
-          "i": 6,
-          "t": "settle"
-        },
-        {
-          "i": 7,
-          "t": "deleteFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "until": {
-            "op": 8
+          "t": "fault",
+          "spec": {
+            "match": {
+              "resource": "widgets",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 7
+            }
           }
         },
         {
-          "i": 8,
+          "i": 6,
+          "t": "delete",
+          "cr": "widget-2"
+        },
+        {
+          "i": 7,
           "t": "settle"
         }
       ]
@@ -4611,6 +4493,22 @@
         },
         {
           "i": 1,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "update",
+              "resource": "widgets"
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 5
+            }
+          }
+        },
+        {
+          "i": 2,
           "t": "update",
           "patch": {
             "spec": {
@@ -4620,26 +4518,36 @@
           "noSettle": true
         },
         {
-          "i": 2,
-          "t": "delete",
-          "noSettle": true
-        },
-        {
           "i": 3,
-          "t": "recreate",
+          "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
             "kind": "Widget",
             "metadata": {
-              "name": "widget"
+              "name": "widget-2"
             },
             "spec": {
               "count": 3
             }
-          }
+          },
+          "noSettle": true
         },
         {
           "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        },
+        {
+          "i": 6,
+          "t": "delete",
+          "cr": "widget-2",
+          "noSettle": true
+        },
+        {
+          "i": 7,
           "t": "settle"
         }
       ]
@@ -4672,7 +4580,7 @@
           "kind": "v1/ConfigMap",
           "name": "widget-config",
           "until": {
-            "op": 4
+            "op": 6
           }
         },
         {
@@ -4687,7 +4595,18 @@
         },
         {
           "i": 4,
-          "t": "delete"
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
         },
         {
           "i": 5,
@@ -4731,44 +4650,40 @@
         },
         {
           "i": 1,
-          "t": "updateFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "patch": {
-            "data": {
-              "label": "gdvgdm0cnawu"
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
             }
-          }
+          },
+          "noSettle": true
         },
         {
           "i": 2,
-          "t": "updateFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "patch": {
-            "data": {
-              "label": "250aa9bm"
-            }
-          }
+          "t": "settle"
         },
         {
           "i": 3,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "update",
-              "resource": "configmaps"
-            },
-            "action": {
-              "delay": "1s"
-            },
-            "until": {
-              "op": 5
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        },
+        {
+          "i": 4,
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 4
             }
           }
         },
         {
-          "i": 4,
+          "i": 5,
           "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -4777,23 +4692,9 @@
               "name": "widget-2"
             },
             "spec": {
-              "count": 3
+              "count": 10
             }
           }
-        },
-        {
-          "i": 5,
-          "t": "settle"
-        },
-        {
-          "i": 6,
-          "t": "delete",
-          "cr": "widget-2",
-          "noSettle": true
-        },
-        {
-          "i": 7,
-          "t": "settle"
         }
       ]
     },
@@ -4881,12 +4782,15 @@
         },
         {
           "i": 1,
-          "t": "updateFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "patch": {
-            "data": {
-              "label": "ghkt"
+          "t": "recreate",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget"
+            },
+            "spec": {
+              "count": 3
             }
           }
         }
@@ -4913,8 +4817,14 @@
         },
         {
           "i": 1,
-          "t": "delete",
-          "noSettle": true
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "20ea4buu"
+            }
+          }
         },
         {
           "i": 2,
@@ -4926,23 +4836,23 @@
               "name": "widget-2"
             },
             "spec": {
-              "count": 8
+              "count": 3
             }
-          }
+          },
+          "noSettle": true
         },
         {
           "i": 3,
-          "t": "create",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-3"
-            },
-            "spec": {
-              "count": 3
-            }
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 4
           }
+        },
+        {
+          "i": 4,
+          "t": "settle"
         }
       ]
     },
@@ -4967,57 +4877,6 @@
         },
         {
           "i": 1,
-          "t": "deleteFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "until": {
-            "op": 2
-          }
-        },
-        {
-          "i": 2,
-          "t": "updateFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "patch": {
-            "data": {
-              "label": "wfx36yc5bgib"
-            }
-          }
-        },
-        {
-          "i": 3,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "resource": "configmaps",
-              "fraction": 0.5
-            },
-            "action": {
-              "delay": "2s"
-            },
-            "until": {
-              "op": 7
-            }
-          }
-        },
-        {
-          "i": 4,
-          "t": "recreate",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget"
-            },
-            "spec": {
-              "count": 0
-            }
-          },
-          "noSettle": true
-        },
-        {
-          "i": 5,
           "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -5026,18 +4885,75 @@
               "name": "widget-2"
             },
             "spec": {
-              "count": 1
+              "count": 7
             }
           },
           "noSettle": true
         },
         {
-          "i": 6,
+          "i": 2,
           "t": "settle"
         },
         {
-          "i": 7,
+          "i": 3,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "create",
+              "resource": "widgets"
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 5
+            }
+          }
+        },
+        {
+          "i": 4,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        },
+        {
+          "i": 5,
           "t": "settle"
+        },
+        {
+          "i": 6,
+          "t": "recreate",
+          "cr": "widget-2",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          },
+          "noSettle": true
+        },
+        {
+          "i": 7,
+          "t": "delete",
+          "cr": "widget-2"
+        },
+        {
+          "i": 8,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-3"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
         }
       ]
     },
@@ -5062,21 +4978,32 @@
         },
         {
           "i": 1,
-          "t": "create",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
-            "spec": {
-              "count": 0
-            }
-          },
-          "noSettle": true
+          "t": "settle"
         },
         {
           "i": 2,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "get",
+              "resource": "configmaps"
+            },
+            "action": {
+              "delay": "2s"
+            },
+            "until": {
+              "op": 4
+            }
+          }
+        },
+        {
+          "i": 3,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        },
+        {
+          "i": 4,
           "t": "settle"
         }
       ]
@@ -5156,6 +5083,22 @@
         },
         {
           "i": 1,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "update",
+              "resource": "widgets"
+            },
+            "action": {
+              "delay": "2s"
+            },
+            "until": {
+              "op": 4
+            }
+          }
+        },
+        {
+          "i": 2,
           "t": "recreate",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -5170,12 +5113,13 @@
           "noSettle": true
         },
         {
-          "i": 2,
-          "t": "settle"
-        },
-        {
           "i": 3,
-          "t": "restart"
+          "t": "update",
+          "patch": {
+            "spec": {
+              "count": 0
+            }
+          }
         },
         {
           "i": 4,
@@ -5183,10 +5127,6 @@
         },
         {
           "i": 5,
-          "t": "restart"
-        },
-        {
-          "i": 6,
           "t": "settle"
         }
       ]
@@ -5216,32 +5156,35 @@
         },
         {
           "i": 2,
-          "t": "settle"
+          "t": "restart"
         },
         {
           "i": 3,
+          "t": "settle"
+        },
+        {
+          "i": 4,
           "t": "fault",
           "spec": {
             "match": {
-              "resource": "widgets",
-              "fraction": 0.5
+              "resource": "configmaps"
             },
             "action": {
               "error": 500
             },
             "until": {
-              "op": 5
+              "op": 6
             }
           }
         },
         {
-          "i": 4,
-          "t": "recreate",
+          "i": 5,
+          "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
             "kind": "Widget",
             "metadata": {
-              "name": "widget"
+              "name": "widget-2"
             },
             "spec": {
               "count": 3
@@ -5249,8 +5192,19 @@
           }
         },
         {
-          "i": 5,
+          "i": 6,
           "t": "settle"
+        },
+        {
+          "i": 7,
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "dzgc"
+            }
+          }
         }
       ]
     },
@@ -5275,66 +5229,41 @@
         },
         {
           "i": 1,
-          "t": "recreate",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget"
-            },
-            "spec": {
-              "count": 3
-            }
-          },
-          "noSettle": true
+          "t": "settle"
         },
         {
           "i": 2,
-          "t": "settle"
-        },
-        {
-          "i": 3,
-          "t": "restart"
-        },
-        {
-          "i": 4,
-          "t": "settle"
-        },
-        {
-          "i": 5,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "get",
-              "resource": "configmaps"
-            },
-            "action": {
-              "error": 503
-            },
-            "until": {
-              "op": 8
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "6hcn1byn"
             }
           }
         },
         {
-          "i": 6,
-          "t": "delete",
-          "noSettle": true
+          "i": 3,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
         },
         {
-          "i": 7,
-          "t": "settle"
+          "i": 4,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
         },
         {
-          "i": 8,
-          "t": "settle"
-        },
-        {
-          "i": 9,
-          "t": "restart"
-        },
-        {
-          "i": 10,
+          "i": 5,
           "t": "settle"
         }
       ]
@@ -5422,31 +5351,56 @@
         },
         {
           "i": 1,
-          "t": "update",
-          "patch": {
-            "spec": {
-              "count": 5
-            }
-          },
-          "noSettle": true
+          "t": "settle"
         },
         {
           "i": 2,
-          "t": "delete"
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
         },
         {
           "i": 3,
-          "t": "updateFixture",
-          "kind": "v1/ConfigMap",
-          "name": "widget-config",
-          "patch": {
-            "data": {
-              "label": "90jn"
+          "t": "delete",
+          "noSettle": true
+        },
+        {
+          "i": 4,
+          "t": "settle"
+        },
+        {
+          "i": 5,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "create",
+              "resource": "configmaps",
+              "fraction": 0.5
+            },
+            "action": {
+              "error": 503
+            },
+            "until": {
+              "op": 7
             }
           }
         },
         {
-          "i": 4,
+          "i": 6,
+          "t": "create",
+          "obj": {
+            "apiVersion": "toy.reconciler-fuzzer/v1",
+            "kind": "Widget",
+            "metadata": {
+              "name": "widget-2"
+            },
+            "spec": {
+              "count": 3
+            }
+          }
+        },
+        {
+          "i": 7,
           "t": "settle"
         }
       ]
@@ -5497,34 +5451,53 @@
         },
         {
           "i": 3,
-          "t": "create",
-          "obj": {
-            "apiVersion": "toy.reconciler-fuzzer/v1",
-            "kind": "Widget",
-            "metadata": {
-              "name": "widget-2"
-            },
+          "t": "update",
+          "patch": {
             "spec": {
-              "count": 3
+              "count": 0
             }
-          },
-          "noSettle": true
+          }
         },
         {
           "i": 4,
-          "t": "settle"
+          "t": "updateFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "patch": {
+            "data": {
+              "label": "aulbjvcddcob"
+            }
+          }
         },
         {
           "i": 5,
-          "t": "restart"
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "create",
+              "resource": "configmaps",
+              "fraction": 0.5
+            },
+            "action": {
+              "delay": "500ms"
+            },
+            "until": {
+              "op": 8
+            }
+          }
         },
         {
           "i": 6,
-          "t": "settle"
+          "t": "deleteFixture",
+          "kind": "v1/ConfigMap",
+          "name": "widget-config",
+          "until": {
+            "op": 7
+          }
         },
         {
           "i": 7,
-          "t": "restart"
+          "t": "settle"
         },
         {
           "i": 8,

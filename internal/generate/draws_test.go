@@ -173,11 +173,24 @@ func TestCertManagersExampleSeedsDrawWhatTheMakefileSays(t *testing.T) {
 			}
 		}
 	}
-	for _, want := range []string{"a second Certificate", string(run.OpRecreate), string(run.OpRestart), string(run.OpFault)} {
+	for _, want := range []string{"a second Certificate", string(run.OpRestart), string(run.OpFault), string(run.OpDelete), string(run.OpDeleteManaged)} {
 		if !drawn[want] {
 			t.Errorf("Seeds %v draw no %s, and the Makefile says they do.", seeds, want)
 		}
 	}
+}
+
+func TestCertManagersPinnedSequencesRecreateTheCertificate(t *testing.T) {
+	for _, path := range glob(t, certManagerSequences) {
+		sequence, err := run.ReadSequence(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if slices.ContainsFunc(sequence.Ops, func(op run.Op) bool { return op.Type == run.OpRecreate }) {
+			return
+		}
+	}
+	t.Errorf("No sequence in %s recreates the Certificate, and the Makefile says one does.", certManagerSequences)
 }
 
 const (

@@ -146,18 +146,13 @@ func TestADeletedFixtureComesBackBeforeTheNextOpThatSettles(t *testing.T) {
 	})
 }
 
-// G7 notes a deleteManaged that follows a change of reconciler-fuzzer's before
-// the run converged, so generation waits for the target's reaction first.
 func TestADeletedFixtureIsBackForTheNextDrawOnceAnOpSettles(t *testing.T) {
 	loaded := loadTarget(t, fixturesTarget)
 	g := newGenerator(t, loaded, Options{})
-	at := state{crs: []drawnCR{{object: loaded.Sample.Object, live: true}}, settled: true}
+	at := state{crs: []drawnCR{{object: loaded.Sample.Object, live: true}}}
 	token := run.Op{Type: run.OpDeleteFixture, Kind: "v1/Secret", Name: "token"}
 
 	at.advance(token, 0)
-	if legal := g.legal(&at); slices.Contains(legal, run.OpDeleteManaged) {
-		t.Errorf("Right after a deleteFixture, generation may draw %v.", legal)
-	}
 	if present := g.present(&at); len(present) != 2 || slices.ContainsFunc(present, func(fixture target.MutableFixture) bool {
 		return fixture.Name == "token"
 	}) {
@@ -770,4 +765,40 @@ func TestOneOpDrawsOnlyTheCreate(t *testing.T) {
 			}
 		}
 	})
+}
+
+func TestDeleteManagedIsLegalWhileACRIsLive(t *testing.T) {
+	g := newGenerator(t, loadTarget(t, toyTarget), Options{})
+	at := &state{}
+	if slices.Contains(g.legal(at), run.OpDeleteManaged) {
+		t.Errorf("With no CR, generation may draw %v.", g.legal(at))
+	}
+	at.advance(run.Op{Type: run.OpCreate, Obj: g.base(0), NoSettle: true}, 0)
+	if !slices.Contains(g.legal(at), run.OpDeleteManaged) {
+		t.Errorf("Right after a noSettle create, generation may draw only %v.", g.legal(at))
+	}
+}
+
+func TestASettleWaitPrecedesADeleteManagedThatFollowsAnOpThatDoesNotSettle(t *testing.T) {
+	deleteManaged := run.Op{Type: run.OpDeleteManaged, Kind: "v1/ConfigMap", Nth: new(int)}
+	for _, testCase := range []struct {
+		name  string
+		drawn []run.Op
+		want  []run.OpType
+	}{
+		{"a settled create", []run.Op{{Type: run.OpCreate}, deleteManaged},
+			[]run.OpType{run.OpCreate, run.OpDeleteManaged}},
+		{"a noSettle create", []run.Op{{Type: run.OpCreate, NoSettle: true}, deleteManaged},
+			[]run.OpType{run.OpCreate, run.OpSettle, run.OpDeleteManaged}},
+		{"a deleteFixture", []run.Op{{Type: run.OpCreate}, {Type: run.OpDeleteFixture}, deleteManaged},
+			[]run.OpType{run.OpCreate, run.OpDeleteFixture, run.OpSettle, run.OpDeleteManaged}},
+		{"a restart", []run.Op{{Type: run.OpCreate}, {Type: run.OpRestart}, deleteManaged},
+			[]run.OpType{run.OpCreate, run.OpRestart, run.OpSettle, run.OpDeleteManaged}},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := opTypes(checkpointed(testCase.drawn)); !slices.Equal(got, testCase.want) {
+				t.Errorf("checkpointed gives %v, want %v.", got, testCase.want)
+			}
+		})
+	}
 }

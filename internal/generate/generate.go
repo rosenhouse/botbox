@@ -206,7 +206,9 @@ func sampled[E any](t *rapid.T, slice []E, label string) E {
 
 // checkpointed inserts the settle waits that leave the drawn ops judged. A
 // restart is wrapped in them: G5 compares the converged state either side of
-// a restart, less what another op in between may have changed. The last op
+// a restart, less what another op in between may have changed. A
+// deleteManaged follows one too: G7 judges it only once the run has converged,
+// and the managed objects are then there to delete. The last op
 // takes one because nothing else judges the state the run ends in. A noSettle
 // elsewhere is left alone. A deleted fixture comes back before the next op
 // that settles, since the target may rightly not be ready without it.
@@ -219,7 +221,7 @@ func checkpointed(ops []run.Op) []run.Op {
 		settled = op.Settles()
 	}
 	for i, op := range ops {
-		if op.Type == run.OpRestart && !settled {
+		if (op.Type == run.OpRestart || op.Type == run.OpDeleteManaged) && !settled {
 			emit(run.Op{Type: run.OpSettle})
 		}
 		emit(op)
@@ -345,9 +347,6 @@ func (f field) draw(t *rapid.T) (any, bool) {
 type state struct {
 	// crs are the CRs the sequence created, in order.
 	crs []drawnCR
-	// settled says the Runner has waited for the target's reaction since the
-	// last change, so the objects the target manages are there to be deleted.
-	settled bool
 	// gone are the fixtures deleted since the last op that settles.
 	gone []string
 }
@@ -448,7 +447,7 @@ func (g *Generator) legal(at *state) []run.OpType {
 	if len(g.updatable) > 0 {
 		legal = append(legal, run.OpUpdateFixture)
 	}
-	if live && at.settled && len(g.managed) > 0 {
+	if live && len(g.managed) > 0 {
 		legal = append(legal, run.OpDeleteManaged)
 	}
 	if len(g.present(at)) > 0 {
@@ -492,12 +491,8 @@ func (at *state) advance(op run.Op, n int) {
 	case run.OpDeleteFixture:
 		at.gone = append(at.gone, op.Kind+" "+op.Name)
 	}
-	// Only a CR op that skips its settle and a deleteFixture change the run
-	// without waiting for the target's reaction.
 	if op.Settles() {
-		at.settled, at.gone = true, nil
-	} else if op.Type.OnCR() || op.Type == run.OpDeleteFixture {
-		at.settled = false
+		at.gone = nil
 	}
 }
 

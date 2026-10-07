@@ -11,7 +11,8 @@ import (
 )
 
 // Baseline creates the sample, deletes the first object of each managed kind,
-// and then changes each mutable field once. Few drawn sequences do either.
+// and then changes each mutable field once. Drawn sequences may miss a kind or
+// a field.
 func (g *Generator) Baseline() (sequence run.Sequence, err error) {
 	defer func() {
 		if recovered := recover(); recovered != nil {

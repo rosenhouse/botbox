@@ -2174,6 +2174,22 @@
         },
         {
           "i": 1,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "get",
+              "resource": "configmaps"
+            },
+            "action": {
+              "error": 500
+            },
+            "until": {
+              "op": 4
+            }
+          }
+        },
+        {
+          "i": 2,
           "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -2188,34 +2204,18 @@
           "noSettle": true
         },
         {
-          "i": 2,
-          "t": "settle"
-        },
-        {
           "i": 3,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "get",
-              "resource": "configmaps"
-            },
-            "action": {
-              "error": 500
-            },
-            "until": {
-              "op": 5
-            }
-          }
+          "t": "settle"
         },
         {
           "i": 4,
-          "t": "deleteManaged",
-          "kind": "v1/ConfigMap",
-          "index": 0
+          "t": "settle"
         },
         {
           "i": 5,
-          "t": "settle"
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
         }
       ]
     },
@@ -2797,11 +2797,11 @@
           "t": "fault",
           "spec": {
             "match": {
-              "verb": "update",
-              "resource": "widgets"
+              "resource": "configmaps",
+              "fraction": 0.5
             },
             "action": {
-              "delay": "1s"
+              "error": 503
             },
             "until": {
               "op": 7
@@ -3519,32 +3519,12 @@
         },
         {
           "i": 1,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "get",
-              "resource": "configmaps"
-            },
-            "action": {
-              "delay": "500ms"
-            },
-            "until": {
-              "op": 3
-            }
-          }
-        },
-        {
-          "i": 2,
           "t": "deleteManaged",
           "kind": "v1/ConfigMap",
           "index": 0
         },
         {
-          "i": 3,
-          "t": "settle"
-        },
-        {
-          "i": 4,
+          "i": 2,
           "t": "settle"
         }
       ]
@@ -3983,7 +3963,7 @@
           "spec": {
             "match": {
               "verb": "delete",
-              "resource": "widgets",
+              "resource": "configmaps",
               "fraction": 0.5
             },
             "action": {
@@ -4204,39 +4184,38 @@
         },
         {
           "i": 3,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "create",
-              "resource": "widgets",
-              "fraction": 0.5
-            },
-            "action": {
-              "error": 429
-            },
-            "until": {
-              "op": 5
-            }
-          }
-        },
-        {
-          "i": 4,
           "t": "deleteManaged",
           "kind": "v1/ConfigMap",
           "index": 0
         },
         {
-          "i": 5,
-          "t": "settle"
+          "i": 4,
+          "t": "fault",
+          "spec": {
+            "match": {
+              "verb": "get",
+              "resource": "configmaps"
+            },
+            "action": {
+              "delay": "2s"
+            },
+            "until": {
+              "op": 7
+            }
+          }
         },
         {
-          "i": 6,
+          "i": 5,
           "t": "deleteFixture",
           "kind": "v1/ConfigMap",
           "name": "widget-config",
           "until": {
-            "op": 7
+            "op": 6
           }
+        },
+        {
+          "i": 6,
+          "t": "settle"
         },
         {
           "i": 7,
@@ -4726,37 +4705,16 @@
         },
         {
           "i": 3,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "update",
-              "resource": "configmaps",
-              "fraction": 0.5
-            },
-            "action": {
-              "delay": "1s"
-            },
-            "until": {
-              "op": 5
-            }
-          }
-        },
-        {
-          "i": 4,
           "t": "deleteManaged",
           "kind": "v1/ConfigMap",
           "index": 0
         },
         {
-          "i": 5,
-          "t": "settle"
-        },
-        {
-          "i": 6,
+          "i": 4,
           "t": "restart"
         },
         {
-          "i": 7,
+          "i": 5,
           "t": "settle"
         }
       ]
@@ -4896,6 +4854,12 @@
         },
         {
           "i": 3,
+          "t": "deleteManaged",
+          "kind": "v1/ConfigMap",
+          "index": 0
+        },
+        {
+          "i": 4,
           "t": "fault",
           "spec": {
             "match": {
@@ -4906,22 +4870,12 @@
               "error": 503
             },
             "until": {
-              "op": 5
+              "op": 7
             }
           }
         },
         {
-          "i": 4,
-          "t": "deleteManaged",
-          "kind": "v1/ConfigMap",
-          "index": 0
-        },
-        {
           "i": 5,
-          "t": "settle"
-        },
-        {
-          "i": 6,
           "t": "recreate",
           "cr": "widget-2",
           "obj": {
@@ -4937,9 +4891,13 @@
           "noSettle": true
         },
         {
-          "i": 7,
+          "i": 6,
           "t": "delete",
           "cr": "widget-2"
+        },
+        {
+          "i": 7,
+          "t": "settle"
         },
         {
           "i": 8,
@@ -4982,29 +4940,9 @@
         },
         {
           "i": 2,
-          "t": "fault",
-          "spec": {
-            "match": {
-              "verb": "get",
-              "resource": "configmaps"
-            },
-            "action": {
-              "delay": "2s"
-            },
-            "until": {
-              "op": 4
-            }
-          }
-        },
-        {
-          "i": 3,
           "t": "deleteManaged",
           "kind": "v1/ConfigMap",
           "index": 0
-        },
-        {
-          "i": 4,
-          "t": "settle"
         }
       ]
     },
@@ -5361,15 +5299,6 @@
         },
         {
           "i": 3,
-          "t": "delete",
-          "noSettle": true
-        },
-        {
-          "i": 4,
-          "t": "settle"
-        },
-        {
-          "i": 5,
           "t": "fault",
           "spec": {
             "match": {
@@ -5381,12 +5310,25 @@
               "error": 503
             },
             "until": {
-              "op": 7
+              "op": 6
             }
           }
         },
         {
+          "i": 4,
+          "t": "delete",
+          "noSettle": true
+        },
+        {
+          "i": 5,
+          "t": "settle"
+        },
+        {
           "i": 6,
+          "t": "settle"
+        },
+        {
+          "i": 7,
           "t": "create",
           "obj": {
             "apiVersion": "toy.reconciler-fuzzer/v1",
@@ -5398,10 +5340,6 @@
               "count": 3
             }
           }
-        },
-        {
-          "i": 7,
-          "t": "settle"
         }
       ]
     },

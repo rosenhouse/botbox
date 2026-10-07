@@ -224,7 +224,8 @@ The generator is built on `pgregory.net/rapid` and produces a `Sequence`:
   (the primary's plural or a managed kind's, looked up from the CRD or the built-in table)
   and optionally one verb. Its action is an error code (500, 503 or 429) or a delay scaled
   to the target's `timeouts.stable`. The fault starts before an eligible op (one preceded
-  by a settle) and ends at a settle the generator inserts after the span it covers.
+  by a settle, and neither a `restart` nor a `deleteManaged`) and ends at a settle the
+  generator inserts after the span it covers (D100).
   `generate.faults: false` disables fault generation for a target.
 - **Baseline.** After the drawn sequences, `reconciler-fuzzer run` runs the baseline,
   unless `--no-baseline` is given. It creates the sample, deletes the first object of
@@ -2667,3 +2668,8 @@ built from source and run as a black-box binary.
   and each example, against 34–38% for a delete and 38–40% for a recreate. Cert-manager's
   example seeds no longer draw a recreate, which `rotation-never.json` runs. The example
   tiers took 11m03s and 10m23s on CI, inside §11's twelve minutes.
+- **D100 No drawn fault is active during a `deleteManaged`.** G7 only notes a
+  `deleteManaged` while a fault is active, and about 30% of drawn `deleteManaged` ops had a
+  fault that started at them. A fault no longer starts at one. One that starts earlier ends
+  at the settle before it (D99), and D90 gives the target its time after that fault. Over
+  seeds 1 to 1,000, the seeds that draw a fault went from 38–41% to 34–37%.

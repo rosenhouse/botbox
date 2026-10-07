@@ -2,6 +2,7 @@ package generate
 
 import (
 	"math"
+	"slices"
 	"time"
 
 	"pgregory.net/rapid"
@@ -115,11 +116,12 @@ func (g *Generator) faulted(t *rapid.T, ops []run.Op) []run.Op {
 }
 
 // eligibleStarts are the indices where a fault may start: s >= 1 where
-// ops[s-1] settles and ops[s] acts (neither settle nor restart).
+// ops[s-1] settles and ops[s] acts. A fault never starts at a restart, nor at
+// a deleteManaged, which G7 only notes while a fault is active.
 func eligibleStarts(ops []run.Op) []int {
 	var starts []int
 	for s := 1; s < len(ops); s++ {
-		if ops[s-1].Settles() && ops[s].Type != run.OpSettle && ops[s].Type != run.OpRestart {
+		if ops[s-1].Settles() && !slices.Contains([]run.OpType{run.OpSettle, run.OpRestart, run.OpDeleteManaged}, ops[s].Type) {
 			starts = append(starts, s)
 		}
 	}
